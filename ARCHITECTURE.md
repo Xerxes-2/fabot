@@ -298,8 +298,14 @@ controller; the stock past the reserve upgrades. A structure lost within a creep
 life at its pace is mended before a builder's sites; below the reserve a home
 road at risk still casts the floor's first worker, which draws the reserve
 like the deadline's, to mend only. A home road's pace counts the wear of the
-dig carried home over it (v1's road upkeep); an outpost's keeps its timer,
-since pricing its haul sent young homes' workers out to mend it.
+dig carried home over it (v1's road upkeep), an outpost's the wear of its own
+dig. A home's worker still mends an outpost road at its timer alone, since
+pricing that haul sent young homes' workers out to mend it; a colony with a
+storage instead casts a two-WORK worker posted to the outpost while a road
+there is at risk (Hivemind's mine builder), which mends and builds there only.
+It is cast after the home's floor, since casting it ahead of the far haul cost
+the fight casts, and only a body its size takes its slot: a home's worker
+taking it cost a young neighbour the help it was building with.
 
 **The objective is long-run growth, by simple rules first.** A slower start
 that ends higher is the better economy; an early regression is accepted when

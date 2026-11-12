@@ -585,9 +585,11 @@ impl<'a> Jobs<'a> {
             return Some(t.clone());
         }
         let near = |pos: &Pos| (pos.room != slot.room, self.distance(&body.pos, pos));
+        // A home's worker mends an outpost road at its timer: its wear is the outpost's mender's.
         let haul = |g: &Ground| {
             let gi = derived.grounds.iter().position(|x| x.room == g.room);
-            gi.map_or(0, |gi| self.hauls[gi])
+            gi.filter(|_| g.room == slot.room)
+                .map_or(0, |gi| self.hauls[gi])
         };
         let repair = |fits: &dyn Fn(&super::derived::RepairFact, i32) -> bool| {
             (grounds.iter())

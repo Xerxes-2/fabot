@@ -323,14 +323,11 @@ pub struct Derived {
 }
 
 impl Derived {
-    /// An outpost's roads keep their timer: their haul sent young homes' workers out.
     pub fn haul(&self, owners: &[Option<usize>], gi: usize) -> i32 {
-        if gi >= self.colonies.len() {
-            return 0;
-        }
-        (self.grounds.iter().zip(owners))
-            .filter(|(_, o)| **o == Some(gi))
-            .flat_map(|(g, _)| &g.sources)
+        let home = gi < self.colonies.len();
+        (self.grounds.iter().zip(owners).enumerate())
+            .filter(|(gj, (_, o))| if home { **o == Some(gi) } else { *gj == gi })
+            .flat_map(|(_, (g, _))| &g.sources)
             .filter(|s| s.container.is_some() && s.link.is_none())
             .map(|s| s.dug)
             .sum()

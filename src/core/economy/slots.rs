@@ -331,13 +331,13 @@ impl Plan<'_> {
                 );
             }
             if inside_deadline(&colony.controller) {
-                self.worker(ci, colony.room, 0, false, FLOOR);
+                self.worker(ci, colony.room, 0, false, FLOOR, MOST);
             }
             return;
         }
 
         let mut fixed = 0.0;
-        let worker = bodies::sized(Pattern::Worker, engine::MAX_BODY_PARTS as i32, capacity);
+        let worker = bodies::sized(Pattern::Worker, MOST, capacity);
         let mut dug = 0.0;
         let mut far_dug = 0.0;
         let mut owed = 0;
@@ -372,13 +372,18 @@ impl Plan<'_> {
             }
             repairs |= !g.repairs.is_empty();
             let haul = derived.haul(owners, gi);
-            mends |= own && g.repairs.iter().any(|r| r.rebuild > 0 && r.at_risk(haul));
+            let at_risk = g.repairs.iter().any(|r| r.rebuild > 0 && r.at_risk(haul));
+            mends |= own && at_risk;
             if raised {
                 // A claim without its spawn is raised by workers sent from here.
                 for k in 0..PIONEERS {
-                    self.worker(ci, g.room, k, true, PIONEER);
+                    self.worker(ci, g.room, k, true, PIONEER, MOST);
                 }
                 continue;
+            }
+            // Hivemind's mine builder.
+            if !own && at_risk && storage.is_some() {
+                self.worker(ci, g.room, 0, false, MENDER, MENDER_WORK);
             }
             for s in &g.sources {
                 let body = if own {
@@ -482,7 +487,7 @@ impl Plan<'_> {
 
         for cj in (0..sponsors.len()).filter(|cj| sponsors[*cj] == Some(ci)) {
             for k in 0..PIONEERS {
-                self.worker(ci, derived.colonies[cj].room, k, false, PIONEER);
+                self.worker(ci, derived.colonies[cj].room, k, false, PIONEER, MOST);
             }
         }
 
@@ -626,7 +631,11 @@ impl Plan<'_> {
         let mended: f64 = (derived.grounds.iter().enumerate())
             .filter(|(gi, _)| owners[*gi] == Some(ci))
             .flat_map(|(gi, g)| {
-                let haul = derived.haul(owners, gi);
+                let haul = if gi == ci {
+                    derived.haul(owners, gi)
+                } else {
+                    0
+                };
                 (g.repairs.iter())
                     .map(move |r| r.loss(haul) + f64::from(r.hits_max - r.hits) / life)
             })
@@ -698,7 +707,7 @@ impl Plan<'_> {
                 _ => SPEND,
             };
             let builds = (all_build || k < builders) && rank != DEADLINE;
-            self.worker(ci, colony.room, k as usize, builds, rank);
+            self.worker(ci, colony.room, k as usize, builds, rank, MOST);
         }
 
         // The dig, the ring's upkeep, the controller's drink and the ore, each
@@ -769,10 +778,9 @@ impl Plan<'_> {
         }
     }
 
-    fn worker(&mut self, ci: usize, room: RoomName, k: usize, builds: bool, rank: i32) {
+    fn worker(&mut self, ci: usize, room: RoomName, k: usize, builds: bool, rank: i32, work: i32) {
         let capacity = self.derived.colonies[ci].bank_capacity;
-        let Some(body) = bodies::sized(Pattern::Worker, engine::MAX_BODY_PARTS as i32, capacity)
-        else {
+        let Some(body) = bodies::sized(Pattern::Worker, work, capacity) else {
             return;
         };
         let seat = (self.derived.grounds.iter())
@@ -913,6 +921,11 @@ const MINE: i32 = 3;
 /// Upgraders while the stock stands past the reserve (§5).
 const STOCKED: i32 = 4;
 const OUTPOST_HAUL: i32 = 5;
+const MOST: i32 = engine::MAX_BODY_PARTS as i32;
+/// A load mends two plain roads whole.
+const MENDER_WORK: i32 = 2;
+/// After the home's floor: casting it ahead of the far haul cost the fight casts.
+const MENDER: i32 = 7;
 const FLOOR: i32 = 6;
 const CREW: i32 = 8;
 const PIONEER: i32 = 9;
@@ -1022,8 +1035,11 @@ pub fn assign<'a>(
             }
             continue;
         }
+        // A mender is a body of its own size: a home's loose worker taking it
+        // left that home's work, and a young one's.
         let near = |open: bool| {
             (slots.iter().enumerate())
+                .filter(|(_, s)| s.rank != MENDER || b.size == s.body.len() as i32)
                 .filter(|(_, s)| s.job.pattern() == b.pattern && !outgrown(derived, b, s))
                 .filter(|(i, s)| {
                     let taken = holders.get(s.id.as_str()).is_some_and(|h| {

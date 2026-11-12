@@ -1,0 +1,7 @@
+{
+  "why": "an outpost road is mended before its haul wears it away, by a body of the outpost's own: once a road there is at risk at its decay plus its dig's wear, a two-WORK worker posted there mends it (main 8a134f7d loses 15 E27S8 roads by t50000, its first at t46500, #835)",
+  "modules": ["economy"],
+  "start": { "world": "scripts/xxscreeps/worlds/season-outpost-ring.json", "room": "E27S9", "seed": 1, "ended": true },
+  "ticks": 50000,
+  "assert": [{ "measure": "roadsLost", "room": "E27S8", "max": 0 }]
+}
