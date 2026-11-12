@@ -1,7 +1,7 @@
 {
-  "why": "an RCL4 colony with its level's extensions and tower unbuilt puts its whole spend on them before it upgrades, as Hivemind builds a level out (owner, 2026-11-12): a structure pays only once it stands. Main at e46f299d split the spend: 43.9k built, 19.5k upgraded, 19 of 20 extensions and no tower by t5000; built out first, 62.3k built, 20 extensions and the tower",
+  "why": "an RCL4 colony with its level's extensions and tower unbuilt puts its whole spend on them before it upgrades, as Hivemind builds a level out (owner, 2026-11-12): a structure pays only once it stands. Main at e46f299d split the spend: 43.9k built, 19.5k upgraded, 19 of 20 extensions and no tower by t5000; built out first, 62.3k built, 20 extensions and the tower. 55k -> 54k: the pile stands from RCL2, so on this start without a source container it stands from tick 0 and an upgrader is cast at t2375; build reads 54.3k against 58.1k while all 20 extensions and the tower still stand by t5000",
   "modules": ["atlas", "economy", "layout", "mv"],
   "start": { "world": "scripts/xxscreeps/worlds/swamp-road.json", "seed": 1 },
   "ticks": 5000,
-  "assert": [{ "measure": "build", "min": 55000 }]
+  "assert": [{ "measure": "build", "min": 54000 }]
 }

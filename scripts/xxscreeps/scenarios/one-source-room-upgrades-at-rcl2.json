@@ -1,0 +1,7 @@
+{
+  "why": "a one-source colony banks its remotes' haul on the pile from RCL2 and upgrades at 550 capacity with a standing upgrader, so it reaches RCL3 (45k upgraded) by t11000 (main 752e28cc: pile only once its source container stands, t7.4k behind the extensions, and no standing upgrader below 600 capacity; 17.4k upgraded by t11000, RCL3 t14.8k; the fix 45.3k, RCL3 t10.4k)",
+  "modules": ["strategy", "economy"],
+  "start": { "world": "scripts/xxscreeps/worlds/season-outpost-ring.json", "room": "E23S9", "seed": 1, "ended": true },
+  "ticks": 11000,
+  "assert": [{ "measure": "upgrade", "room": "E23S9", "to": 11000, "min": 40000 }]
+}

@@ -257,9 +257,10 @@ nearest colony with a bank: its storage, or before one stands the **pile**
 (`ColonyPlan.pile`), energy dropped on the centre of the hub Layout plans
 round the storage's tile. It is Hivemind's storage location: a paved tile
 no structure takes, so the pile blocks no site and the storage takes it
-over. It stands from when a home source's container does; before it the
-workers dig and spend where the energy falls. The pile is a store like the
-storage, but keeps no reserve: one on the ground pays its decay every tick,
+over. It stands from RCL2, where remotes start: a one-source room digs
+half its source until its extensions stand, so its RCL2 runs on remotes.
+The pile is a store like the storage, but keeps no reserve: one on the
+ground pays its decay every tick,
 at RCL3's quiet 10k half a source's dig. A stood-down outpost keeps its
 slots and its bodies wait at home. While its stock stands past the reserve
 (a pile: while its draw outruns its decay), a colony's upgraders are cast

@@ -5,7 +5,6 @@ use super::intents::Intent;
 use super::state::State;
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::atlas::Atlas;
 use super::engine;
 use super::fight::shape::{Cast, Engagement};
 use super::layout::Standing;
@@ -120,12 +119,8 @@ pub fn plan(
             );
             let (rampart_hits, outheals) =
                 wall(&world.rules, threat.unwrap_or(level), level, threatened);
-            // Banked once its own dig is carried: before a container stands,
-            // the workers dig and spend it where it falls.
-            let carried = (room.sources.iter())
-                .any(|s| matches!(Atlas::post_of(room, &s.pos), Some((_, Some(_)))));
             let stored = (room.structures.iter()).any(|s| s.kind.is_storage() && s.owner.is_ours());
-            let pile = (carried && !stored)
+            let pile = (level >= 2 && !stored)
                 .then(|| layout.get(&room.name)?.plan.as_ref()?.pile())
                 .flatten();
             Some(ColonyPlan {

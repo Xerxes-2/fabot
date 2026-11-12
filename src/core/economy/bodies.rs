@@ -102,10 +102,11 @@ pub fn pattern_of_name(name: &str) -> Option<Pattern> {
     ALL_PATTERNS.into_iter().find(|p| name_of(*p) == prefix)
 }
 
-/// Under one CARRY to four WORK a delivery is a commute for its WORK. The
-/// upgrader row casts only a standing body, or it is a worker by another name.
+/// At most one CARRY to four WORK, a delivery is a commute for its WORK;
+/// RCL2's 550 energy affords four. The upgrader row casts only a standing body, or it is
+/// a worker by another name.
 pub fn standing(work: i32, carry: i32) -> bool {
-    carry * 4 < work
+    carry * 4 <= work
 }
 
 pub fn pattern_of_parts(work: i32, carry: i32, movement: i32, claim: i32) -> Pattern {
