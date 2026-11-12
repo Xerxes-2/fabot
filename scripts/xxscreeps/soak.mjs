@@ -23,7 +23,9 @@
 //            E2 is N5 with the first of them declared a claim (`claims`),
 //            C2 with both, G2 E2 with no GCL level spare for it;
 //            L5 is N5 with H, O and U stocked and its labs the cluster (`labs`);
-//            N6 and N7 are RCL7 and RCL8 with their bodies standing
+//            N6 and N7 are RCL7 and RCL8 with their bodies standing; R8 is
+//            RCL8 on RCL7's plan, roads on the extension tiles RCL8 adds, and
+//            R8 and A7 (N7) avoid every room in reach
 //   --invaders  room:every[:first][,…]: an Invader wave (`engine/waves`) in
 //            room at t = first, first + every, … (first defaults to every);
 //            E1's default: its outposts every 4000, from 1000 and 2500
@@ -89,7 +91,7 @@ import { patchRuntimeCache } from "./runtime-cache.mjs";
 // Where the run's wall time went, written to timing.json (`scenario.mjs` sums them).
 const began = Date.now();
 const marks = { node26: 0, node26Calls: 0 };
-const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|T3|N4|T4|N5|R6|T7|N6|N7|E0|E1|E2|C2|G2|L5] [--invaders room:every[:first],…] [--wave role[:size],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--world <capture.json>] [--follow room,…] [--unsafe] [--ended] [--keep] [--fetch] [--watch [--tick-ms N] [--port N]]";
+const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|T3|N4|T4|N5|R6|T7|N6|N7|R8|A7|E0|E1|E2|C2|G2|L5] [--invaders room:every[:first],…] [--wave role[:size],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--world <capture.json>] [--follow room,…] [--unsafe] [--ended] [--keep] [--fetch] [--watch [--tick-ms N] [--port N]]";
 const fail = (message) => {
   console.error(message);
   process.exit(1);
@@ -164,6 +166,12 @@ const NODES = {
   // its outposts' bodies aside), so the run starts working, not casting.
   N6: { level: 7, stored: 300000, without: ["rampart"], modern: true, bodies: LATE_BODIES },
   N7: { level: 8, stored: 500000, without: ["rampart"], modern: true, bodies: LATE_BODIES },
+  // RCL8 as a from-zero run reaches it: RCL7's plan standing, the stock at
+  // its RCL7 level, and the roads its outposts laid on RCL8's extension tiles;
+  // every room in reach avoided, so the home's dig alone pays (outposts lost).
+  R8: { level: 8, built: 7, stored: 50000, without: ["rampart"], modern: true, bodies: LATE_BODIES, buried: true, alone: true },
+  // N7 with every room in reach avoided.
+  A7: { level: 8, stored: 500000, without: ["rampart"], modern: true, bodies: LATE_BODIES, alone: true },
 };
 const node = flags["--node"] === undefined ? undefined : NODES[flags["--node"]];
 if (flags["--node"] !== undefined && !node) fail(`--node: one of ${Object.keys(NODES).join(", ")}`);
@@ -368,12 +376,17 @@ if (node && node.level > 1) {
     if (res.status !== 0) fail("the plan tool did not build");
   }
   const ground = node26([XXSCREEPS, script("node.mjs"), "ground", colony.room], world, true).trim().split("\n").at(-1);
-  const res = spawnSync(join(REPO, "target/release/plan"), {
-    input: JSON.stringify({ ...JSON.parse(ground), level: node.level }),
-    encoding: "utf8",
-  });
-  if (res.status !== 0) fail(`the plan tool failed: ${res.stderr}`);
-  built = JSON.parse(res.stdout).filter((s) => !node.without.includes(s.kind));
+  const planned = (level) => {
+    const res = spawnSync(join(REPO, "target/release/plan"), { input: JSON.stringify({ ...JSON.parse(ground), level }), encoding: "utf8" });
+    if (res.status !== 0) fail(`the plan tool failed: ${res.stderr}`);
+    return JSON.parse(res.stdout);
+  };
+  built = planned(node.built ?? node.level).filter((s) => !node.without.includes(s.kind));
+  if (node.buried) {
+    const held = new Set(built.map((s) => s.y * 50 + s.x));
+    const next = planned(node.level).filter((s) => s.kind === "extension" && !held.has(s.y * 50 + s.x));
+    built.push(...next.map(({ x, y }) => ({ kind: "road", x, y })));
+  }
   if (node.moved) {
     const { terrain, sources, controller } = JSON.parse(ground);
     const range = (a, [x, y]) => Math.max(Math.abs(a.x - x), Math.abs(a.y - y));
@@ -434,10 +447,16 @@ if (flags["--ended"]) node26([XXSCREEPS, script("node.mjs"), "ended", colony.roo
 else if ((opponents.length && !seated) || flags["--unsafe"]) node26([XXSCREEPS, script("node.mjs"), "unsafe", colony.room], world);
 if ((node?.outposts || node?.claims) && colony.outposts.length === 0) fail(`${colony.room}: no neighbour fits an outpost`);
 const allies = opponents.filter((o) => o.ally).map((o) => o.name);
-if (node?.outposts || node?.claims || node?.labs || (allies.length && !seated && !from)) {
+const near = (room, hops) => {
+  const [, we, x, ns, y] = /^([WE])(\d+)([NS])(\d+)$/.exec(room);
+  const [cx, cy] = [we === "E" ? +x : -x - 1, ns === "S" ? +y : -y - 1];
+  const name = (i, j) => `${i < 0 ? `W${-i - 1}` : `E${i}`}${j < 0 ? `N${-j - 1}` : `S${j}`}`;
+  return Array.from({ length: (2 * hops + 1) ** 2 }, (_, k) => name(cx + (k % (2 * hops + 1)) - hops, cy + Math.floor(k / (2 * hops + 1)) - hops)).filter((r) => r !== room);
+};
+if (node?.outposts || node?.claims || node?.labs || node?.alone || (allies.length && !seated && !from)) {
   const claims = colony.outposts.slice(0, node?.claims ?? 0);
   const labs = node?.labs ? { labs: { home: colony.room, targets: node.labs } } : {};
-  writeFileSync(join(world, "declarations.json"), JSON.stringify({ outposts: node?.outposts ? colony.outposts : [], claims, allies, ...labs }));
+  writeFileSync(join(world, "declarations.json"), JSON.stringify({ outposts: node?.outposts ? colony.outposts : [], claims, allies, ...labs, ...(node?.alone ? { avoid: near(colony.room, 3) } : {}) }));
   node26([XXSCREEPS, script("node.mjs"), "declare", colony.room, OUR_NAME, "declarations.json", ...(node?.short ? ["short"] : [])], world);
 }
 if (node?.outposts && !flags["--invaders"]) waves.push(...colony.outposts.map((o, i) => `${o.room}:4000:${1000 + 1500 * i}`));

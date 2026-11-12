@@ -500,6 +500,7 @@ function sample(t, time, room) {
     sites: 0,
     queued: {},
     oldestPaying: 0,
+    upgradeWork: 0,
     built: {},
     cpu: null,
     bodies: [],
@@ -537,6 +538,7 @@ function sample(t, time, room) {
         // Where each body stands, what it carries and what it did this tick (the
         // processor stamps an action with the tick it leads to).
         const acts = (o["#actionLog"] ?? []).filter((a) => a.time === time).map((a) => a.type);
+        if (acts.includes("upgradeController")) row.upgradeWork += o.body.filter((p) => p.type === "work" && p.hits > 0).length;
         row.bodies.push(`${o.name}@${o.pos.x},${o.pos.y} ${o.body.map((p) => p.type[0]).join("")} e${energyIn(o)} ${acts.join("+") || "-"}`);
       } else {
         row.hostiles++;
@@ -548,6 +550,11 @@ function sample(t, time, room) {
   const atSource = (c) => objects.some((s) => s["#lookType"] === "source" && near(s.pos, c.pos, 1));
   const sourceContainers = objects.filter((o) => o.structureType === "container" && o["#lookType"] !== "constructionSite" && atSource(o));
   row.sourceContainers = sourceContainers.length;
+  const roads = objects.filter((o) => o.structureType === "road" && o["#lookType"] !== "constructionSite");
+  const solid = objects.filter((o) => o["#lookType"] === "structure" && o["#user"] === ours && !["road", "container", "rampart", "controller"].includes(o.structureType));
+  row.buried = roads.filter((r) => solid.some((o) => o.pos.x === r.pos.x && o.pos.y === r.pos.y)).length;
+  // A bay's extension is its harvester's, filled from the container beside it.
+  row.unroaded = solid.filter((o) => o.structureType === "extension" && !sourceContainers.some((c) => near(c.pos, o.pos, 1)) && !roads.some((r) => near(r.pos, o.pos, 1) && !solid.some((s) => s.pos.x === r.pos.x && s.pos.y === r.pos.y))).length;
   row.postedLinks = objects.filter((o) => o.structureType === "link" && o["#lookType"] !== "constructionSite" && sourceContainers.some((c) => near(c.pos, o.pos, 1))).length;
   // The buffer as `Atlas.buffer` picks it: the controller's nearest link off a source, else its container off a rock.
   const controller = objects.find((o) => o.structureType === "controller");

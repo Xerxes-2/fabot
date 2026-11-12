@@ -387,6 +387,13 @@ const measures = {
   postedLinksAtEnd: (samples, a) => at(samples, a.to ?? Infinity).postedLinks,
   builtAtEnd: (samples, a) => at(samples, a.to ?? Infinity).built[a.kind] ?? 0,
   sitesAtEnd: (samples, a) => at(samples, a.to ?? Infinity).queued?.[a.kind] ?? 0,
+  buriedAtEnd: (samples, a) => at(samples, a.to ?? Infinity).buried ?? Infinity,
+  unroadedAtEnd: (samples, a) => at(samples, a.to ?? Infinity).unroaded ?? Infinity,
+  overUpgrade: (samples, a) => {
+    const CONTROLLER_MAX_UPGRADE_PER_TICK = 15;
+    const seen = within(samples, a).filter((s) => s.rcl === 8);
+    return Math.round((100 * seen.filter((s) => (s.upgradeWork ?? Infinity) > CONTROLLER_MAX_UPGRADE_PER_TICK).length) / Math.max(1, seen.length));
+  },
   oldestPayingSite: (samples, a) => Math.max(0, ...within(samples, a).map((s) => s.oldestPaying ?? 0)),
   // A share: the amount alone tracks how much is upgraded.
   handFedShare: (samples, a) => {

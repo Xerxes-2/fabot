@@ -28,6 +28,10 @@ pub fn decide_over(rules: &Rules, colonies: &[derive::Colony], budget: i32) -> V
             }
         }
 
+        intents.extend(
+            (colony.buried.iter())
+                .map(|id| Intent::Room(colony.room, RoomAct::Destroy(id.clone()))),
+        );
         intents.extend(towers::fire(
             &colony.towers,
             &colony.hostiles,

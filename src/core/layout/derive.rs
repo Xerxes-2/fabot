@@ -22,6 +22,7 @@ pub struct Colony {
     pub struck: Vec<Pos>,
     pub ours: Vec<Creep>,
     pub ramparts: Vec<Structure>,
+    pub buried: Vec<String>,
 }
 
 fn spawns_in(world: &World, room: RoomName) -> Vec<Tile> {
@@ -125,6 +126,14 @@ pub fn colonies(
             ramparts: (room.structures.iter())
                 .filter(|s| s.kind.is_rampart() && s.owner.is_ours())
                 .cloned()
+                .collect(),
+            buried: (room.structures.iter())
+                .filter(|r| r.kind.is_road())
+                .filter(|r| {
+                    (room.structures.iter())
+                        .any(|s| s.pos == r.pos && s.owner.is_ours() && !s.walkable)
+                })
+                .map(|r| r.id.clone())
                 .collect(),
         });
     }

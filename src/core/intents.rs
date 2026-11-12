@@ -76,6 +76,7 @@ pub enum SpawnAct {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RoomAct {
     CreateSite(i32, i32, Kind),
+    Destroy(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

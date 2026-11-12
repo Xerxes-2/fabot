@@ -150,6 +150,13 @@ fn act(intent: &Intent) -> (String, i32) {
                 },
             }
         }
+        Intent::Room(_, RoomAct::Destroy(id)) => match world::object_by_id(id) {
+            None => ("destroy".to_string(), NOT_FOUND),
+            Some(s) => match call(&s, "destroy", &[]) {
+                Ok(code) => ("destroy".to_string(), code),
+                Err(()) => ("threw".to_string(), THREW),
+            },
+        },
         Intent::Tower(id, act) => match world::object_by_id(id) {
             None => ("tower".to_string(), NOT_FOUND),
             Some(tower) => match act {
