@@ -1,0 +1,9 @@
+{
+  "why": "an RCL8 colony keeps working outposts: its controller takes 15 of a 2-source home's 20 a tick, so without them it banks nothing for boosts, labs or ramparts (owner, 2026-11-13). Main 9b8d0756 digs nothing outside E25S8 over t4000-8000; the fix digs 518k",
+  "modules": ["strategy", "economy"],
+  "start": { "world": "scripts/xxscreeps/worlds/season-outpost-ring.json", "room": "E25S8", "seed": 1, "node": "N7", "ended": true },
+  "ticks": 8000,
+  "assert": [
+    { "measure": "outpostDug", "from": 4000, "to": 8000, "min": 250000 }
+  ]
+}

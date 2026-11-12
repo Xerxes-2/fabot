@@ -709,9 +709,9 @@ source.
 Each tick, once `Derived` is built and before any module runs, Strategy writes a `ColonyPlan` for every room we
 own (today: `Exploit` built to its controller's level) and the outposts
 `strategy::outposts::chosen` picks off intel (kept fresh by the threat
-radius's scout) and Atlas's crossings for each colony from RCL2 below
-RCL8 (an RCL8 colony's remotes raised its task churn tenfold and cost its
-sweeps a third of their catches, #811): the operator's rows first, then the rooms that stand
+radius's scout) and Atlas's crossings for each colony from RCL2 up
+(an RCL8 one's controller takes 15 of a two-source home's 20 a tick, so
+without outposts it banks nothing for boosts, labs or ramparts; owner): the operator's rows first, then the rooms that stand
 (intel saw a container at every source), then the most net energy a spawn
 tick (dig less the bodies' upkeep, a room another player works paying its
 bodies twice, an ally's never) while each home's spawns' half (all of it

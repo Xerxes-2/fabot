@@ -1,5 +1,5 @@
 {
-  "why": "an RCL8 colony with its bodies standing keeps them working: no economy pattern idles and no body changes task past its threshold, no spawn sits idle while a body is owed, and the controller is fed near the 15-a-tick cap",
+  "why": "an RCL8 colony with its bodies standing keeps them working: no economy pattern idles and no body changes task past its threshold, no spawn sits idle while a body is owed, and the controller is fed near the 15-a-tick cap. churn.task 50 -> 70 (#841): its outposts' build-out moves every worker to the next road site at once when one finishes, main 30 and the fix 67 per 100 bodies",
   "modules": ["economy", "observe"],
   "start": { "world": "scripts/xxscreeps/worlds/season-late-seat.json", "room": "W12S28", "seed": 1, "node": "N7" },
   "ticks": 5000,
@@ -7,7 +7,7 @@
     { "metric": "idle.harvester", "from": 500, "max": 95 },
     { "metric": "idle.hauler", "from": 500, "max": 50 },
     { "metric": "idle.worker", "from": 500, "max": 85 },
-    { "metric": "churn.task", "from": 500, "max": 50 },
+    { "metric": "churn.task", "from": 500, "max": 70 },
     { "metric": "spawn.idleWant", "max": 0 },
     { "measure": "upgrade", "min": 55000 }
   ]

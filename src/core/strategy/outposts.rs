@@ -175,7 +175,7 @@ pub fn survey(
         let level = room.controller.as_ref().map_or(0, |c| c.level);
         let banks = (room.structures.iter()).any(|s| s.kind.is_storage() && s.owner.is_ours())
             || plans.iter().any(|p| p.room == *home && p.pile.is_some());
-        let picks = banks && (2..engine::CONTROLLER_MAX_LEVEL).contains(&level);
+        let picks = banks && level >= 2;
         let walk = |hops: i32, outpost: &Outpost| {
             let to = |s: &crate::core::tick::Declared| tiles::seam_range(&spawn.pos, &s.pos);
             let ranges: Vec<i32> = outpost.sources.iter().filter_map(to).collect();
