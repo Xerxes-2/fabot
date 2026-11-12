@@ -1019,7 +1019,8 @@ everything v1 used its self-written arena for, and more:
   fetched the same way, holds the declared-room world against a siege and
   a sweep, both the offence target and so nightly: `--nightly` runs them,
   and they join the daily library once they pass. `siege-outlasts-safe-mode`,
-  30,000 ticks, is nightly for its length alone. The library fails to
+  30,000 ticks, is nightly for its length alone. The International is
+  built from source in the cache (`soak.mjs`'s `fetch.json` `build`). The library fails to
   load while a fight kind (`siege-`, `sweep-`, `defend-`) meets no
   open-source bot. ❓ Both fail: reinforcements walk into Hivemind's towers
   alone, and three keep sieges hold their bounds only while its towers

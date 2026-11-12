@@ -268,7 +268,7 @@ const measures = {
   claimSafeMode: (samples, a) => (within(samples, a).some((s) => Object.values(s.claimed ?? {}).some((c) => c.safe)) ? 1 : 0),
   claimLevelOf: (samples, a) => at(samples, a.to ?? Infinity).claimed?.[a.room]?.level ?? 0,
   // A home's level at the window's end.
-  homeLevel: (samples, a) => { const s = at(samples, a.to ?? Infinity); return s.homes?.[a.room]?.rcl ?? s.rcl; },
+  homeLevel: (samples, a) => { const s = sideOf(a)(at(samples, a.to ?? Infinity)); return s.homes?.[a.room]?.rcl ?? s.rcl; },
   claimsOwned: (samples, a) => Object.values(at(samples, a.to ?? Infinity).claimed ?? {}).filter((c) => c.level > 0).length,
   claimLevel: (samples, a) => Math.min(...Object.values(at(samples, a.to ?? Infinity).claimed ?? {}).map((c) => c.level)),
   claimCharged: (samples) => firstClaimed(samples, (c) => c.fire >= 1000),

@@ -1,0 +1,14 @@
+{
+  "nightly": true,
+  "why": "The International, seated from a bare spawn with our colony sitting out, runs its economy to RCL2: the rival a ramp baseline is read against works under the harness",
+  "modules": ["economy"],
+  "start": {
+    "world": "scripts/xxscreeps/worlds/season-outpost-ring.json",
+    "seed": 1,
+    "late": 10000000,
+    "ended": true,
+    "opponents": [{ "name": "international", "bot": "scripts/xxscreeps/engine/international", "room": "E23S9" }]
+  },
+  "ticks": 2000,
+  "assert": [{ "measure": "homeLevel", "who": "international", "min": 2 }]
+}
