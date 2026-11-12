@@ -18,6 +18,14 @@ fn standable(kind: &Kind) -> bool {
     kind.is_road() || kind.is_container() || kind.is_rampart()
 }
 
+/// What grows the economy: a road, a rampart or a late kind waits on it.
+fn pays(kind: &Kind) -> bool {
+    matches!(
+        kind,
+        Kind::Spawn | Kind::Extension | Kind::Container | Kind::Storage | Kind::Link | Kind::Tower
+    )
+}
+
 fn kinds() -> i32 {
     Kind::Other(String::new()).ordinal() + 1
 }
@@ -56,6 +64,7 @@ pub struct Census {
     pub held: Vec<i32>,
     /// One under a creep is not counted, so it never holds back the rest.
     pub pending: i32,
+    pub paying: i32,
 }
 
 pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
@@ -96,6 +105,7 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
     }
 
     let mut pending = 0;
+    let mut paying = 0;
 
     for s in &room.sites {
         let t = tiles::of_pos(&s.pos);
@@ -108,6 +118,7 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
 
         if s.owner.is_ours() && (standable(&s.kind) || occupied[t] == 0) {
             pending += 1;
+            paying += i32::from(pays(&s.kind));
         }
     }
 
@@ -219,6 +230,7 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
         seat,
         held,
         pending,
+        paying,
     }
 }
 
@@ -273,8 +285,8 @@ pub fn place(
     plan: &Plan,
     budget: i32,
 ) -> Vec<Placement> {
-    let room = budget.min(SITES_IN_FLIGHT - census.pending);
     let mut placed: Vec<Placement> = Vec::new();
+    let mut paid = census.paying;
     let mut added = vec![0i32; kinds() as usize];
     let added_of = |added: &Vec<i32>, kind: &Kind| -> i32 { added[kind.ordinal() as usize] };
 
@@ -361,7 +373,12 @@ pub fn place(
     for item in plan.items.iter().filter(|i| i.level <= level) {
         match tile_of(item) {
             Some(t)
-                if (placed.len() as i32) < room
+                if (placed.len() as i32) < budget
+                    && if pays(&item.kind) {
+                        paid
+                    } else {
+                        census.pending + placed.len() as i32
+                    } < SITES_IN_FLIGHT
                     && census.site[t] == 0
                     && (if item.kind.is_rampart() {
                         (census.solid[t] > 0 || under[t] == 0) && census.rampart[t] == 0
@@ -376,6 +393,7 @@ pub fn place(
                         < rules.allowed(&item.kind.name(), level) =>
             {
                 taken.insert(t);
+                paid += i32::from(pays(&item.kind));
                 added[item.kind.ordinal() as usize] = added_of(&added, &item.kind) + 1;
 
                 placed.push(Placement {
@@ -530,7 +548,11 @@ mod tests {
 
             let tiles_placed: Vec<Tile> = placed.iter().map(|p| tiles::index(p.x, p.y)).collect();
 
-            let cap = 0.max(case.budget.min(SITES_IN_FLIGHT - room.sites.len() as i32));
+            let paid =
+                |kinds: &mut dyn Iterator<Item = &Kind>| kinds.filter(|k| pays(k)).count() as i32;
+            let paying = paid(&mut room.sites.iter().map(|s| &s.kind));
+            let paying_after = paying + paid(&mut placed.iter().map(|p| &p.kind));
+            let after = room.sites.len() as i32 + placed.len() as i32;
 
             let solid = |s: &Structure| !s.kind.is_road() && !s.kind.is_rampart();
 
@@ -572,8 +594,16 @@ mod tests {
             };
 
             assert!(may_place(&rules, &counted, case.level) || placed.is_empty());
-            assert!((placed.len() as i32) <= cap);
-            assert!((placed.len() as i32) == cap || !plan.items.iter().any(admitted));
+            let full = |i: &Item| {
+                (placed.len() as i32) >= case.budget
+                    || if pays(&i.kind) { paying_after } else { after } >= SITES_IN_FLIGHT
+            };
+            assert!((placed.len() as i32) <= case.budget.max(0));
+            assert!(paying_after <= SITES_IN_FLIGHT.max(paying));
+            assert!((placed.iter().enumerate()).all(|(i, p)| {
+                pays(&p.kind) || room.sites.len() + i < SITES_IN_FLIGHT as usize
+            }));
+            assert!(plan.items.iter().all(|i| !admitted(i) || full(i)));
             assert_eq!(fx::distinct(&tiles_placed), tiles_placed);
 
             for p in &placed {

@@ -379,7 +379,9 @@ const measures = {
   sourceContainersAtEnd: (samples, a) => at(samples, a.to ?? Infinity).sourceContainers,
   // Links standing beside a source's container.
   postedLinksAtEnd: (samples, a) => at(samples, a.to ?? Infinity).postedLinks,
-  linksAtEnd: (samples, a) => at(samples, a.to ?? Infinity).built.link ?? 0,
+  builtAtEnd: (samples, a) => at(samples, a.to ?? Infinity).built[a.kind] ?? 0,
+  sitesAtEnd: (samples, a) => at(samples, a.to ?? Infinity).queued?.[a.kind] ?? 0,
+  oldestPayingSite: (samples, a) => Math.max(0, ...within(samples, a).map((s) => s.oldestPaying ?? 0)),
   // A share: the amount alone tracks how much is upgraded.
   handFedShare: (samples, a) => {
     const [to, from] = [at(samples, a.to ?? Infinity).ledger, at(samples, a.from ?? 0).ledger];

@@ -1,7 +1,8 @@
-//! Repair is economy work and not here.
+//! Repair is economy work, but for a rampart about to decay away: a colony
+//! may hold no worker for a life.
 use crate::core::engine;
 use crate::core::intents::{Intent, TowerAct};
-use crate::core::vocabulary::BodyPart;
+use crate::core::vocabulary::{BodyPart, Resource};
 use crate::core::world::{self, Creep, Pos, Structure};
 
 fn power(creep: &Creep, part: BodyPart) -> i32 {
@@ -71,6 +72,7 @@ pub fn fire(
     hostiles: &[Creep],
     ours: &[Creep],
     struck: &[Pos],
+    ramparts: &[Structure],
 ) -> Vec<Intent> {
     let mut targets: Vec<(&Creep, bool, i32, i32, i32)> = hostiles
         .iter()
@@ -123,6 +125,16 @@ pub fn fire(
             free.iter()
                 .map(|t| Intent::Tower(t.id.clone(), TowerAct::Heal(wounded.id.clone()))),
         );
+    } else if let Some(dying) = (ramparts.iter())
+        .filter(|r| r.hits <= 2 * engine::RAMPART_DECAY_AMOUNT)
+        .min_by_key(|r| (r.hits, &r.id))
+        && let Some(tower) = (free.iter())
+            .find(|t| t.store.amount_of(&Resource::Energy) >= engine::TOWER_CAPACITY / 2)
+    {
+        acts.push(Intent::Tower(
+            tower.id.clone(),
+            TowerAct::Repair(dying.id.clone()),
+        ));
     }
 
     acts

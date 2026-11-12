@@ -476,7 +476,7 @@ fn spent<'w>(
             let s = world.spawns.iter().find(|s| &s.id == id)?;
             Some((s.pos.room, SPAWN, engine::body_cost(body)))
         }
-        Intent::Tower(id, TowerAct::Attack(_) | TowerAct::Heal(_)) => {
+        Intent::Tower(id, TowerAct::Attack(_) | TowerAct::Heal(_) | TowerAct::Repair(_)) => {
             let r = (world.rooms.iter()).find(|r| r.structures.iter().any(|s| &s.id == id))?;
             Some((r.name, TOWER, engine::TOWER_ENERGY_COST))
         }
@@ -493,6 +493,7 @@ fn verb(intent: &Intent) -> Option<(&str, &'static str)> {
         Intent::Spawn(id, SpawnAct::SpawnCreep(..)) => (id, "spawn"),
         Intent::Tower(id, TowerAct::Attack(_)) => (id, "attack"),
         Intent::Tower(id, TowerAct::Heal(_)) => (id, "heal"),
+        Intent::Tower(id, TowerAct::Repair(_)) => (id, "repair"),
         _ => return None,
     })
 }

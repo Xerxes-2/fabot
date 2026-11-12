@@ -16,7 +16,7 @@ pub fn decide_over(rules: &Rules, colonies: &[derive::Colony], budget: i32) -> V
     for colony in colonies {
         if let Some(plan) = &colony.plan
             && budget > 0
-            && colony.census.pending < sites::SITES_IN_FLIGHT
+            && colony.census.paying < sites::SITES_IN_FLIGHT
             && sites::may_place(rules, &colony.census, colony.target)
         {
             for p in sites::place(rules, &colony.census, colony.target, plan, budget) {
@@ -33,6 +33,7 @@ pub fn decide_over(rules: &Rules, colonies: &[derive::Colony], budget: i32) -> V
             &colony.hostiles,
             &colony.ours,
             &colony.struck,
+            &colony.ramparts,
         ));
     }
 

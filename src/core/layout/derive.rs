@@ -21,6 +21,7 @@ pub struct Colony {
     /// Not a road or a container: anything walking by stands beside one.
     pub struck: Vec<Pos>,
     pub ours: Vec<Creep>,
+    pub ramparts: Vec<Structure>,
 }
 
 fn spawns_in(world: &World, room: RoomName) -> Vec<Tile> {
@@ -121,6 +122,10 @@ pub fn colonies(
                 .copied()
                 .collect(),
             ours,
+            ramparts: (room.structures.iter())
+                .filter(|s| s.kind.is_rampart() && s.owner.is_ours())
+                .cloned()
+                .collect(),
         });
     }
 

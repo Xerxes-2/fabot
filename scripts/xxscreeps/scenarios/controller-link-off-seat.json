@@ -3,5 +3,5 @@
   "modules": ["atlas", "economy", "layout", "mv"],
   "start": { "world": "scripts/xxscreeps/worlds/upgrader-on-link-seat.json", "seed": 1 },
   "ticks": 5000,
-  "assert": [{ "measure": "linksAtEnd", "min": 3 }]
+  "assert": [{ "measure": "builtAtEnd", "kind": "link", "min": 3 }]
 }

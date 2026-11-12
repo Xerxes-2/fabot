@@ -106,6 +106,7 @@ pub enum ControllerAct {
 pub enum TowerAct {
     Attack(String),
     Heal(String),
+    Repair(String),
 }
 
 /// Where an ask stands in its room's queue: a floor is never displaced,

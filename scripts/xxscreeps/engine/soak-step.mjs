@@ -478,6 +478,9 @@ function ledgerRow() {
   return { ...flows, stock, residual: flows.dug + flows.regen - spent - flows.decayed - flows.linked - (stock - stock0) };
 }
 
+// A site that pays back, by id: the tick a sample first saw it.
+const PAYING = ["spawn", "extension", "container", "storage", "link", "tower"];
+const placedAt = new Map();
 function sample(t, time, room) {
   const row = {
     t,
@@ -495,6 +498,8 @@ function sample(t, time, room) {
     stored: 0,
     dropped: 0,
     sites: 0,
+    queued: {},
+    oldestPaying: 0,
     built: {},
     cpu: null,
     bodies: [],
@@ -508,7 +513,14 @@ function sample(t, time, room) {
       row.built[o.structureType] = (row.built[o.structureType] ?? 0) + 1;
     // A site carries its structure's type and no store: read it first.
     if (o["#lookType"] === "constructionSite") {
-      if (mine) row.sites++;
+      if (mine) {
+        row.sites++;
+        row.queued[o.structureType] = (row.queued[o.structureType] ?? 0) + 1;
+        if (PAYING.includes(o.structureType)) {
+          if (!placedAt.has(o.id)) placedAt.set(o.id, t);
+          row.oldestPaying = Math.max(row.oldestPaying, t - placedAt.get(o.id));
+        }
+      }
     } else if (o.structureType === "controller") row.progress = o["#progress"] ?? 0;
     else if (o.structureType === "spawn" || o.structureType === "extension") {
       if (!mine) continue;

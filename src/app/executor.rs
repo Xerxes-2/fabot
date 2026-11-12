@@ -159,6 +159,9 @@ fn act(intent: &Intent) -> (String, i32) {
                 TowerAct::Heal(target) => on("heal", target, |t| {
                     call(&tower, "heal", std::slice::from_ref(t))
                 }),
+                TowerAct::Repair(target) => on("repair", target, |t| {
+                    call(&tower, "repair", std::slice::from_ref(t))
+                }),
             },
         },
         Intent::Controller(id, ControllerAct::ActivateSafeMode) => match world::object_by_id(id) {

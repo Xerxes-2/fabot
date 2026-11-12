@@ -575,13 +575,6 @@ impl<'a> Jobs<'a> {
         {
             return Some(t.clone());
         }
-        if let Some(c) = controller.filter(|_| !builds) {
-            return Some(Task::Upgrade(c.id.clone()));
-        }
-        let life = f64::from(engine::CREEP_LIFETIME);
-        let at_risk = |r: &&super::derived::RepairFact| {
-            f64::from(r.hits) < r.decay * life || r.kind == Kind::Rampart && r.hits <= RAMPART_SAFE
-        };
         let near = |pos: &Pos| (pos.room != slot.room, self.distance(&body.pos, pos));
         let repair = |fits: &dyn Fn(&&super::derived::RepairFact) -> bool| {
             (grounds.iter())
@@ -590,7 +583,15 @@ impl<'a> Jobs<'a> {
                 .min_by_key(|r| near(&r.pos))
                 .map(|r| Task::Repair(r.id.clone()))
         };
-        if let Some(t) = repair(&at_risk) {
+        // Built at 1 hit, a rampart is gone at its first decay.
+        if let Some(t) = repair(&|r| r.kind == Kind::Rampart && r.hits <= RAMPART_SAFE) {
+            return Some(t);
+        }
+        if let Some(c) = controller.filter(|_| !builds) {
+            return Some(Task::Upgrade(c.id.clone()));
+        }
+        let life = f64::from(engine::CREEP_LIFETIME);
+        if let Some(t) = repair(&|r| f64::from(r.hits) < r.decay * life) {
             return Some(t);
         }
         // The links feed the controller: they go up with the extensions. The
