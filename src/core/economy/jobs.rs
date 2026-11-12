@@ -361,9 +361,13 @@ impl<'a> Jobs<'a> {
             })
             .collect();
         let mut carried = vec![false; derived.colonies.len()];
+        let mut digging: HashMap<String, i32> = HashMap::default();
         for (si, _, _) in held {
-            if slots[*si].job == Job::Fill {
-                carried[slots[*si].colony] = true;
+            let s = &slots[*si];
+            match &s.job {
+                Job::Fill => carried[s.colony] = true,
+                Job::Dig(id) => *digging.entry(id.clone()).or_default() += 1,
+                _ => {}
             }
         }
         Jobs {
@@ -371,7 +375,7 @@ impl<'a> Jobs<'a> {
             derived,
             sinks,
             takes,
-            digging: HashMap::default(),
+            digging,
             carried,
             hauls: (0..derived.grounds.len())
                 .map(|gi| derived.haul(owners, gi))
@@ -665,7 +669,14 @@ impl<'a> Jobs<'a> {
 
     fn fuel(&mut self, slot: &Slot, body: &Body, kept: Option<&Task>) -> Option<Task> {
         let g = self.derived.grounds.iter().find(|g| g.room == slot.room)?;
-        if let Some(t) = kept.filter(|t| t.is_intake() && self.can_take(slot, t)) {
+        let seated = |id: &String| {
+            (g.sources.iter()).any(|s| {
+                &s.id == id && self.digging.get(id).copied().unwrap_or(0) < s.seats.unwrap_or(0)
+            })
+        };
+        if let Some(t) = kept.filter(|t| t.is_intake() && self.can_take(slot, t))
+            && !matches!(t, Task::Harvest(id) if !seated(id))
+        {
             if let Task::Harvest(id) = t {
                 *self.digging.entry(id.clone()).or_default() += 1;
             }
@@ -737,10 +748,7 @@ impl<'a> Jobs<'a> {
         }
         let open = (g.sources.iter())
             .filter(|s| s.energy > 0)
-            .filter(|s| {
-                let seats = s.seats.unwrap_or(0) - i32::from(s.post.is_some());
-                self.digging.get(&s.id).copied().unwrap_or(0) < seats
-            })
+            .filter(|s| seated(&s.id))
             .min_by_key(|s| self.distance(&body.pos, &s.pos))?;
         *self.digging.entry(open.id.clone()).or_default() += 1;
         Some(Task::Harvest(open.id.clone()))

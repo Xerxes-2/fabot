@@ -1,0 +1,7 @@
+{
+  "why": "a worker with nothing to draw digs a source seat no harvester holds (main keeps a posted source's post for its harvester before one is cast, so from zero E23S9's one-seat rock leaves the first worker empty: dug 0 by t300)",
+  "modules": ["economy"],
+  "start": { "world": "scripts/xxscreeps/worlds/season-outpost-ring.json", "room": "E23S9", "seed": 1, "ended": true },
+  "ticks": 300,
+  "assert": [{ "measure": "dug", "room": "E23S9", "to": 300, "min": 300 }]
+}

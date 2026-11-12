@@ -58,7 +58,8 @@ globalThis.__fabotRead = (() => {
 
   const controller = (c) => {
     s(c.id), pos(c.pos), owner(c);
-    n(c.level), n(c.progress), n(c.progressTotal), n(c.ticksToDowngrade);
+    // Undefined until the engine first runs a claimed controller's timer: never due.
+    n(c.level), n(c.progress), n(c.progressTotal), n(c.ticksToDowngrade ?? CONTROLLER_DOWNGRADE[c.level]);
     if (absent(c.reservation)) n(0);
     else n(1), s(c.reservation.username), n(c.reservation.ticksToEnd);
     n(c.safeMode), n(c.safeModeAvailable), n(c.safeModeCooldown), n(c.upgradeBlocked);

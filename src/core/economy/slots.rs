@@ -1153,8 +1153,10 @@ pub fn casts(
             mine.iter()
                 .find(|s| matches!(s.job, Job::Work(_)) && s.room == colony.room)
         });
-        let digging = (mine.iter())
-            .any(|s| matches!(s.job, Job::Dig(_)) && s.room == colony.room && held(&s.id));
+        let sources = &derived.grounds[ci].sources;
+        let digging = (mine.iter()).any(|s| {
+            matches!(&s.job, Job::Dig(id) if sources.iter().any(|x| &x.id == id)) && held(&s.id)
+        });
         let carrying = (mine.iter()).any(|s| {
             matches!(s.job, Job::Fill | Job::Work(_)) && s.room == colony.room && held(&s.id)
         });
