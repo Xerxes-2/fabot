@@ -290,7 +290,7 @@ stopping while it refills. While a site that pays back stands (spawn,
 extension, container, storage, link, tower) every worker builds and the
 surplus is its: a structure pays only once complete, so a level is built out
 before it is upgraded, as Hivemind does (owner, 2026-11-12: only RCL3's tower
-and RCL6's minerals are worth rushing). Below RCL3 an outpost's sites wait for
+and RCL6's minerals are worth rushing), and below the reserve too. Below RCL3 an outpost's sites wait for
 the tower: its dig piles on the post and is hauled from there. Other sites and repairs take half the
 income (all past a capped controller's take), so remote roads never stall the
 controller; the stock past the reserve upgrades.
@@ -313,7 +313,12 @@ RCL8); otherwise a third of it. The fight casts it owes are added: a committed
 cast is paid before any surplus, as the old bank's order had it. Owner, 2026-11-10: the full reserve cost a
 quiet young colony a lifetime of upgrading (main kept its RCL4 stock under
 it anyway), and the season's fights come from neighbours, which intel sees.
-Open-source bots keep 75k–150k at RCL7–8.
+Open-source bots keep 75k–150k at RCL7–8. While a site
+that pays back stands at home, its builders draw the reserve, and only they,
+a crew sized to those sites alone (`Ground::kept_from_builders`): a site that
+waits pays back nothing. What a builder spends on is `work()`'s order: a
+decaying repair before a site can take a load. Lowering the reserve itself fed the surplus's upgraders
+too, and drained a raided RCL5 stock from 29k to 0 in 700 ticks.
 
 **Ramparts are kept at hits Strategy declares** beside the reserve
 (`strategy::wall`, `ColonyPlan.rampart_hits`): v1's floor, the ticks held

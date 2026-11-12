@@ -270,6 +270,19 @@ pub enum Kind {
 }
 
 impl Kind {
+    /// Hivemind's (MIT) build-out: what raises the dig, the bank or its defence.
+    pub fn pays_back(&self) -> bool {
+        matches!(
+            self,
+            Kind::Spawn
+                | Kind::Extension
+                | Kind::Container
+                | Kind::Storage
+                | Kind::Link
+                | Kind::Tower
+        )
+    }
+
     pub fn ordinal(&self) -> i32 {
         match self {
             Kind::Spawn => 0,

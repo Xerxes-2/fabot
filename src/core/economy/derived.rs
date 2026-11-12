@@ -258,6 +258,16 @@ impl Ground {
                 .sum()
         })
     }
+
+    /// A site that waits pays back nothing, so while one stands its builders
+    /// draw the reserve.
+    pub fn kept_from_builders(&self, reserve: i32) -> i32 {
+        if self.sites.iter().any(|s| s.kind.pays_back()) {
+            0
+        } else {
+            reserve
+        }
+    }
 }
 
 /// The lab a waiting body walks to, and what the colony's stores owe it.

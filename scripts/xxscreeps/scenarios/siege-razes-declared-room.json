@@ -1,5 +1,5 @@
 {
-  "why": "a declared siege razes a rival room's towers and economy and loses no body. It razes first the link carrying the rival's one source's energy in, struck as little as the extractor whose id sorts first; it fell 878 ticks after the open (about 860 casting and walking), and the bound adds 72. bodiesLost 0 -> 1 until #815, while fight work is paused: the build-before-upgrade spend (#828) casts one economy worker 1 tick later at cast 287, the W4S2 defend makes contact at t5566 instead of t5583 and loses defender fight-1261625; no fight cast moved, and main loses a harvester in the same defend (not counted)",
+  "why": "a declared siege razes a rival room's towers and economy and loses no body. It razes first the link carrying the rival's one source's energy in, struck as little as the extractor whose id sorts first; it fell 878 ticks after the open (about 860 casting and walking), and the bound adds 72. bodiesLost 0 -> 1 until #815, while fight work is paused: the build-before-upgrade spend (#828) casts one economy worker 1 tick later at cast 287, the W4S2 defend makes contact at t5566 instead of t5583 and loses defender fight-1261625; no fight cast moved, and main loses a harvester in the same defend (not counted). siegeFirstRaze 950 -> 1100 until #815: a payback site's builders draw under the reserve (#832), so the extension site standing at the open casts two floor workers (spawn spend +10k by t500) and the siege's last four bodies leave 44-143 ticks later; first raze 892 -> 1025",
   "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
   "start": {
     "world": "scripts/xxscreeps/worlds/siege-declared-room.json",
@@ -17,7 +17,7 @@
   "assert": [
     { "measure": "razeLeft", "max": 0 },
     { "measure": "siegeFirstTarget", "kind": "link", "min": 1 },
-    { "measure": "siegeFirstRaze", "max": 950 },
+    { "measure": "siegeFirstRaze", "max": 1100 },
     { "measure": "bodiesLost", "max": 1 },
     { "measure": "oscillation", "max": 8 }
   ]

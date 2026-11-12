@@ -18,14 +18,6 @@ fn standable(kind: &Kind) -> bool {
     kind.is_road() || kind.is_container() || kind.is_rampart()
 }
 
-/// What grows the economy: a road, a rampart or a late kind waits on it.
-fn pays(kind: &Kind) -> bool {
-    matches!(
-        kind,
-        Kind::Spawn | Kind::Extension | Kind::Container | Kind::Storage | Kind::Link | Kind::Tower
-    )
-}
-
 fn kinds() -> i32 {
     Kind::Other(String::new()).ordinal() + 1
 }
@@ -118,7 +110,7 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
 
         if s.owner.is_ours() && (standable(&s.kind) || occupied[t] == 0) {
             pending += 1;
-            paying += i32::from(pays(&s.kind));
+            paying += i32::from(s.kind.pays_back());
         }
     }
 
@@ -374,7 +366,7 @@ pub fn place(
         match tile_of(item) {
             Some(t)
                 if (placed.len() as i32) < budget
-                    && if pays(&item.kind) {
+                    && if item.kind.pays_back() {
                         paid
                     } else {
                         census.pending + placed.len() as i32
@@ -393,7 +385,7 @@ pub fn place(
                         < rules.allowed(&item.kind.name(), level) =>
             {
                 taken.insert(t);
-                paid += i32::from(pays(&item.kind));
+                paid += i32::from(item.kind.pays_back());
                 added[item.kind.ordinal() as usize] = added_of(&added, &item.kind) + 1;
 
                 placed.push(Placement {
@@ -548,8 +540,9 @@ mod tests {
 
             let tiles_placed: Vec<Tile> = placed.iter().map(|p| tiles::index(p.x, p.y)).collect();
 
-            let paid =
-                |kinds: &mut dyn Iterator<Item = &Kind>| kinds.filter(|k| pays(k)).count() as i32;
+            let paid = |kinds: &mut dyn Iterator<Item = &Kind>| {
+                kinds.filter(|k| k.pays_back()).count() as i32
+            };
             let paying = paid(&mut room.sites.iter().map(|s| &s.kind));
             let paying_after = paying + paid(&mut placed.iter().map(|p| &p.kind));
             let after = room.sites.len() as i32 + placed.len() as i32;
@@ -596,12 +589,16 @@ mod tests {
             assert!(may_place(&rules, &counted, case.level) || placed.is_empty());
             let full = |i: &Item| {
                 (placed.len() as i32) >= case.budget
-                    || if pays(&i.kind) { paying_after } else { after } >= SITES_IN_FLIGHT
+                    || if i.kind.pays_back() {
+                        paying_after
+                    } else {
+                        after
+                    } >= SITES_IN_FLIGHT
             };
             assert!((placed.len() as i32) <= case.budget.max(0));
             assert!(paying_after <= SITES_IN_FLIGHT.max(paying));
             assert!((placed.iter().enumerate()).all(|(i, p)| {
-                pays(&p.kind) || room.sites.len() + i < SITES_IN_FLIGHT as usize
+                p.kind.pays_back() || room.sites.len() + i < SITES_IN_FLIGHT as usize
             }));
             assert!(plan.items.iter().all(|i| !admitted(i) || full(i)));
             assert_eq!(fx::distinct(&tiles_placed), tiles_placed);

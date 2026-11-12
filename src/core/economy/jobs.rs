@@ -667,10 +667,13 @@ impl<'a> Jobs<'a> {
             .colonies
             .get(ci)
             .filter(|c| c.room == g.room && !slot.draws_reserve())
-            .map_or(0, |c| c.reserve);
+            .map_or(0, |c| match slot.job {
+                Job::Work(true) => g.kept_from_builders(c.reserve),
+                _ => c.reserve,
+            });
         let mut spots: Vec<Spot> = Vec::new();
-        // A worker never draws the reserve, that is the towers' and the
-        // spawn's, nor half a load past it: a draw takes all it has room for.
+        // The reserve is the towers' and the spawn's, a payback site's builder
+        // aside; never half a load past it: a draw takes all it has room for.
         // Under it, what stands in a link or container is the reserve's too.
         let short = g.stock().is_some_and(|n| n < reserve);
         let fed = hand_fed(self.derived, g);

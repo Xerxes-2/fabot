@@ -7,7 +7,7 @@ use crate::core::engine;
 use crate::core::grid::{self, Footprint};
 use crate::core::tick;
 use crate::core::vocabulary::{BodyPart, part_count_in};
-use crate::core::world::{Kind, Pos, RoomName};
+use crate::core::world::{Pos, RoomName};
 
 use super::bodies::{self, Leg, Pattern};
 use super::derived::{Body, Derived, dig_work};
@@ -365,7 +365,7 @@ impl Plan<'_> {
             if own || raised || colony.controller.level >= TOWER_LEVEL {
                 owed += g.sites.iter().map(|s| s.left).sum::<i32>();
                 payback += (g.sites.iter())
-                    .filter(|s| pays_back(&s.kind))
+                    .filter(|s| s.kind.pays_back())
                     .map(|s| s.left)
                     .sum::<i32>();
             }
@@ -536,14 +536,20 @@ impl Plan<'_> {
                 0.0
             };
         // A worker draws only a full load past the reserve from one store
-        // (`jobs::fuel`): short of it the surplus is the hand-fed upgraders'.
+        // (`jobs::fuel`), a payback site's builder past none: short of it the
+        // surplus is the hand-fed upgraders'.
         // With no reserve kept the containers and piles are a worker's too.
         let load = worker.as_deref().map_or(0, |w| {
             part_count_in(w, BodyPart::Carry) * engine::CARRY_PART_CAPACITY
         });
-        let draws = storage.is_none()
-            || colony.reserve <= 0
-            || (ground.stores.iter()).any(|s| s.owned && s.spare(colony.reserve) >= load);
+        let drawn = |kept: i32| {
+            storage.is_none()
+                || kept <= 0
+                || (ground.stores.iter()).any(|s| s.owned && s.spare(kept) >= load)
+        };
+        let past_reserve = drawn(colony.reserve);
+        let draws = past_reserve || drawn(ground.kept_from_builders(colony.reserve));
+        let owed = if past_reserve { owed } else { payback };
         let floor = match () {
             _ if !draws => i32::from(inside_deadline(&colony.controller)),
             _ if owed > 0 || repairs => 2,
@@ -606,6 +612,7 @@ impl Plan<'_> {
         // it is upgraded; a road backlog never stops the controller.
         let works = match () {
             _ if !draws => 0.0,
+            _ if !past_reserve => f64::from(payback) / life,
             _ if upgradable < i32::MAX => (surplus - f64::from(upgradable)).max(0.0),
             _ if payback > 0 => surplus,
             _ => ((dug - fixed) / 2.0).clamp(0.0, surplus),
@@ -671,7 +678,7 @@ impl Plan<'_> {
         });
         let builders = builders.max(i32::from(owed > 0 || mend > 0.0));
         let all_build = payback > 0 && upgradable == i32::MAX;
-        let upgraders = upgraders.max(i32::from(drunk == 0.0 && storage.is_some()));
+        let upgraders = upgraders.max(i32::from(past_reserve && drunk == 0.0 && storage.is_some()));
         // No more workers than the controller has seats in reach: one past
         // them stands in the others' way and spends nothing.
         let spenders = (builders + upgraders).min(ground.upgrade_seats.unwrap_or(i32::MAX));
@@ -905,14 +912,6 @@ const PIONEERS: usize = 4;
 const TOWER_LEVEL: i32 = 3;
 const SPEND: i32 = 10;
 const SIGHT: i32 = 3;
-
-/// Hivemind's (MIT) build-out: what raises the dig, the bank or its defence.
-fn pays_back(kind: &Kind) -> bool {
-    matches!(
-        kind,
-        Kind::Spawn | Kind::Extension | Kind::Container | Kind::Storage | Kind::Link | Kind::Tower
-    )
-}
 
 /// Cast order: a colony's own dig and its carriers first, then its outposts'
 /// reservers, whose bodies see them, their dig and haul, its floor of
