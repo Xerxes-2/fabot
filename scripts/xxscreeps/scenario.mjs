@@ -334,6 +334,11 @@ const measures = {
   leastDowngrade: (samples, a) => at(samples, a.to ?? Infinity).rooms[a.room]?.leastDowngrade ?? -Infinity,
   // Energy our bodies carried out of a home across its border.
   carriedOut: (samples, a) => (at(samples, a.to ?? Infinity).rooms[a.room]?.carriedOut ?? 0) - (at(samples, a.from ?? 0).rooms[a.room]?.carriedOut ?? 0),
+  // Energy dug in every room but the colony's own.
+  outpostDug: (samples, a) => {
+    const [first, last] = [at(samples, a.from ?? 0), at(samples, a.to ?? Infinity)];
+    return Object.keys(last.rooms).slice(1).reduce((n, r) => n + last.rooms[r].dug - (first.rooms[r]?.dug ?? 0), 0);
+  },
   dug: (samples, a) => (at(samples, a.to ?? Infinity).rooms[a.room]?.dug ?? 0) - (at(samples, a.from ?? 0).rooms[a.room]?.dug ?? 0),
   // Energy dug in `room` a tick, the least-squares slope from the tick a rival first
   // entered it (none: its first dig): a cast order shifted by a hundred ticks moves a fit less than a window.

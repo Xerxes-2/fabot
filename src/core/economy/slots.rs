@@ -908,11 +908,12 @@ pub fn plan(atlas: &mut Atlas, derived: &Derived, owners: &[Option<usize>]) -> V
 const DEADLINE: i32 = -1;
 /// Below the reserve a lost road costs more than the energy that mends it.
 const MEND: i32 = 3;
+/// The ore is RCL6's payoff: the outposts take what spawn time it leaves.
+const MINE: i32 = 3;
 /// Upgraders while the stock stands past the reserve (§5).
 const STOCKED: i32 = 4;
 const OUTPOST_HAUL: i32 = 5;
 const FLOOR: i32 = 6;
-const MINE: i32 = 7;
 const CREW: i32 = 8;
 const PIONEER: i32 = 9;
 const PIONEERS: usize = 4;

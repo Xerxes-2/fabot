@@ -1,0 +1,10 @@
+{
+  "why": "past RCL6's extractor and terminal dig is the score, so a colony's outposts take its whole spawn, and its ore miner is cast before them. Main 6d801571 held 2 outposts on half the spawn and dug 143k from them over t10000-15000; the fix holds 4 and digs 266k, its ore 22k at the end against main's 20k",
+  "modules": ["strategy", "economy"],
+  "start": { "world": "scripts/xxscreeps/worlds/season-outpost-ring.json", "room": "E25S8", "seed": 1, "node": "R6", "ended": true },
+  "ticks": 15000,
+  "assert": [
+    { "measure": "outpostDug", "from": 10000, "to": 15000, "min": 200000 },
+    { "measure": "oresAtEnd", "room": "E25S8", "min": 15000 }
+  ]
+}

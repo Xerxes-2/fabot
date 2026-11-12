@@ -6,7 +6,7 @@ use crate::core::fight::shape::{Engagement, Objective};
 use crate::core::tick::{ColonyPlan, Declarations, Derived, Outpost, REACH_HOPS};
 use crate::core::tiles;
 use crate::core::vocabulary::BodyPart;
-use crate::core::world::{RoomName, World};
+use crate::core::world::{Kind, Room, RoomName, World};
 
 /// What one intent costs the engine; a body acts about once a tick.
 const INTENT_CPU: f64 = 0.2;
@@ -92,15 +92,28 @@ pub fn busy(
         .collect()
 }
 
+/// The level rush ends with RCL6's extractor and terminal; past it dig is the
+/// score, not upgrade.
+fn outpost_spawn_ticks(home: Option<&Room>) -> f64 {
+    let life = f64::from(engine::CREEP_LIFETIME);
+    let built = |is: fn(&Kind) -> bool| {
+        home.is_some_and(|r| (r.structures.iter()).any(|s| is(&s.kind) && s.owner.is_ours()))
+    };
+    if built(Kind::is_extractor) && built(Kind::is_terminal) {
+        life
+    } else {
+        life / 2.0
+    }
+}
+
 pub fn chosen(
     world: &World,
     candidates: Vec<Candidate>,
     busy: &BTreeSet<RoomName>,
 ) -> Vec<Outpost> {
-    let life = f64::from(engine::CREEP_LIFETIME);
     let mut spawn_left: BTreeMap<RoomName, f64> = BTreeMap::new();
     for s in &world.spawns {
-        *spawn_left.entry(s.pos.room).or_default() += life / 2.0;
+        *spawn_left.entry(s.pos.room).or_default() += outpost_spawn_ticks(world.room(s.pos.room));
     }
     let mut cpu_left = world.cpu_limit / 2.0;
     let capacity = |home: RoomName| world.room(home).map_or(0, |r| r.energy_capacity);

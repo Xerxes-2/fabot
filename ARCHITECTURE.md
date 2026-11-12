@@ -264,7 +264,7 @@ at RCL3's quiet 10k half a source's dig. A stood-down outpost keeps its
 slots and its bodies wait at home. While its stock stands past the reserve
 (a pile: while its draw outruns its decay), a colony's upgraders are cast
 before its outposts' haul: the haul only adds to the stock they draw down, so a spawn too busy for
-both would bank the outposts' income. The outposts' carriers
+both would bank the outposts' income. The ore's miner is cast before the outposts, RCL6's payoff; the outposts' carriers
 take the spawns' time the colony's other bodies leave over a life, or a far ring of outposts casts nothing
 but haulers; the home's own carriers queue ahead of a fight's casts, since
 they refill the bank those are paid from. While a colony owes a fight cast
@@ -707,7 +707,8 @@ RCL8 (an RCL8 colony's remotes raised its task churn tenfold and cost its
 sweeps a third of their catches, #811): the operator's rows first, then the rooms that stand
 (intel saw a container at every source), then the most net energy a spawn
 tick (dig less the bodies' upkeep, a room another player works paying its
-bodies twice, an ally's never) while each home's spawns' half and the CPU's
+bodies twice, an ally's never) while each home's spawns' half (all of it
+once its extractor and terminal stand: the level rush is over and dig is the score) and the CPU's
 half (0.2 an intent, a body acting once a tick) carry them. A home adds one
 room that does not stand at a time, so its spawns take on one room's bodies
 at once, and the ranking puts the rooms that stand first, so a new reading
