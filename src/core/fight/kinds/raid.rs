@@ -14,7 +14,7 @@ use crate::core::intents::CreepAct;
 use crate::core::mv::Wish;
 use crate::core::tactics::{self, Sight, Tactic};
 use crate::core::tick;
-use crate::core::vocabulary::{BodyPart, Resource, same_part};
+use crate::core::vocabulary::{Part, Resource};
 use crate::core::world::{Creep, Kind, Pos, Room, Structure};
 
 /// A siege whose set shoots its way in: a ranged blob, no dismantler.
@@ -244,12 +244,7 @@ pub fn reinforce<T>(
 ) -> Option<(Vec<casting::Body>, T)> {
     let raider = casting::most(
         capacity,
-        &[
-            BodyPart::RangedAttack,
-            BodyPart::Move,
-            BodyPart::Heal,
-            BodyPart::Move,
-        ],
+        &[Part::RangedAttack, Part::Move, Part::Heal, Part::Move],
     );
 
     (2..=SETS).find_map(|n| {
@@ -274,7 +269,7 @@ pub fn dance(sight: &mut Sight, room: &Room, members: &[&Creep], c: &Creep) -> W
         .map(|m| {
             let parts = (m.body)
                 .iter()
-                .filter(|p| p.hits > 0 && same_part(p.kind, BodyPart::Heal))
+                .filter(|p| p.hits > 0 && p.kind == Part::Heal)
                 .count() as i32;
 
             (*m, parts)
@@ -351,7 +346,7 @@ pub fn volley(sight: &Sight, room: &Room, c: &Creep) -> Option<CreepAct> {
         .is_some_and(|s| s.iter().any(|p| c.pos.within(engine::RANGED_RANGE, p)));
     let guns = (c.body)
         .iter()
-        .filter(|p| p.hits > 0 && p.kind.is_ranged_attack())
+        .filter(|p| p.hits > 0 && p.kind == Part::RangedAttack)
         .count() as i32;
     if guns == 0 {
         return None;

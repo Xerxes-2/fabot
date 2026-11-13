@@ -2,10 +2,10 @@
 //! may hold no worker for a life.
 use crate::core::engine;
 use crate::core::intents::{Intent, TowerAct};
-use crate::core::vocabulary::{BodyPart, Resource};
+use crate::core::vocabulary::{Part, Resource};
 use crate::core::world::{self, Creep, Pos, Structure};
 
-fn power(creep: &Creep, part: BodyPart) -> i32 {
+fn power(creep: &Creep, part: Part) -> i32 {
     engine::power_at(
         &world::body_kinds(creep),
         &world::body_boosts(creep),
@@ -22,8 +22,8 @@ fn heal_on(target: &Creep, hostiles: &[Creep]) -> i32 {
     hostiles
         .iter()
         .map(|h| match range(h, target) {
-            r if r <= engine::MELEE_RANGE => engine::HEAL_POWER * power(h, BodyPart::Heal),
-            r if r <= engine::RANGED_RANGE => engine::RANGED_HEAL_POWER * power(h, BodyPart::Heal),
+            r if r <= engine::MELEE_RANGE => engine::HEAL_POWER * power(h, Part::Heal),
+            r if r <= engine::RANGED_RANGE => engine::RANGED_HEAL_POWER * power(h, Part::Heal),
             _ => 0,
         })
         .sum()
@@ -32,10 +32,10 @@ fn heal_on(target: &Creep, hostiles: &[Creep]) -> i32 {
 fn ours_on(target: &Creep, ours: &[Creep]) -> i32 {
     ours.iter()
         .map(|c| {
-            let ranged = engine::RANGED_ATTACK_POWER * power(c, BodyPart::RangedAttack);
+            let ranged = engine::RANGED_ATTACK_POWER * power(c, Part::RangedAttack);
             match range(c, target) {
                 r if r <= engine::MELEE_RANGE => {
-                    engine::ATTACK_POWER * power(c, BodyPart::Attack) + ranged
+                    engine::ATTACK_POWER * power(c, Part::Attack) + ranged
                 }
                 r if r <= engine::RANGED_RANGE => ranged,
                 _ => 0,
@@ -45,8 +45,8 @@ fn ours_on(target: &Creep, ours: &[Creep]) -> i32 {
 }
 
 fn strikes(hostile: &Creep, struck: &[Pos]) -> bool {
-    let melee = power(hostile, BodyPart::Attack) + power(hostile, BodyPart::Work) > 0;
-    let ranged = power(hostile, BodyPart::RangedAttack) > 0;
+    let melee = power(hostile, Part::Attack) + power(hostile, Part::Work) > 0;
+    let ranged = power(hostile, Part::RangedAttack) > 0;
     struck.iter().any(|p| match hostile.pos.range(p) {
         Some(r) if r <= engine::MELEE_RANGE => melee || ranged,
         Some(r) if r <= engine::RANGED_RANGE => ranged,

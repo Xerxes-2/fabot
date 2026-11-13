@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 
 use crate::core::tactics::{Offer, Tactic};
-use crate::core::vocabulary::BodyPart;
+use crate::core::vocabulary::Part;
 use crate::core::world::{Pos, RoomName};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,5 +92,5 @@ pub struct Cast {
     pub name: String,
     pub room: RoomName,
     #[serde(with = "crate::core::memory::letters")]
-    pub body: Vec<BodyPart>,
+    pub body: Vec<Part>,
 }

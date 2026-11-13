@@ -8,8 +8,8 @@ use crate::core::atlas::{Atlas, Mover, Target};
 use crate::core::grid::{Footprint, factor_of};
 use crate::core::mv::{Wish, arbitrate::arbitrate, plan};
 use crate::core::tiles::{self, Tile, TileSet};
-use crate::core::vocabulary::{BodyPart, Boost};
-use crate::core::world::{Creep, Owner, Part, Room, RoomName, Store, World, terrain};
+use crate::core::vocabulary::Part;
+use crate::core::world::{BodyPart, Creep, Owner, Room, RoomName, Store, World, terrain};
 
 const ROOM: RoomName = RoomName::named("W1N1");
 const CASES: u64 = 500;
@@ -131,10 +131,10 @@ fn errand(dice: &mut Dice) -> Errand {
     let range = dice.between(0, 3);
     let away = dice.chance(4);
     let body = (0..dice.between(1, 40))
-        .map(|_| Part {
-            kind: dice.pick(&[BodyPart::Move, BodyPart::Work, BodyPart::Carry]),
+        .map(|_| BodyPart {
+            kind: dice.pick(&[Part::Move, Part::Work, Part::Carry]),
             hits: 100,
-            boost: Boost::Unboosted,
+            boost: None,
         })
         .collect();
     let fatigue = if dice.chance(5) {

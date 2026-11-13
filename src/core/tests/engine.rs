@@ -1,19 +1,20 @@
 //! The engine's arithmetic, against values read off the engine and against
 //! its own inverses.
-use super::Dice;
+use super::{Dice, boosted};
 use crate::core::engine;
 use crate::core::vocabulary::{
-    ALL_BODY_PARTS, BodyPart, Boost, part_name, part_of_name, resource_name, resource_of_name,
+    ALL_BODY_PARTS, Part, ResourceType, resource_name, resource_of_name,
 };
 
 const CASES: usize = 100;
 
 /// A body head first with a boost per part, and hits within its parts.
-fn bodied(dice: &mut Dice) -> (Vec<BodyPart>, Vec<Boost>, i32) {
+fn bodied(dice: &mut Dice) -> (Vec<Part>, Vec<Option<ResourceType>>, i32) {
     let n = dice.between(1, engine::MAX_BODY_PARTS as i32);
-    let body = (0..n).map(|_| dice.pick(&ALL_BODY_PARTS)).collect();
-    let tiers = [Boost::Unboosted, Boost::Tier1, Boost::Tier2, Boost::Tier3];
-    let boosts = (0..n).map(|_| dice.pick(&tiers)).collect();
+    let body: Vec<Part> = (0..n).map(|_| dice.pick(&ALL_BODY_PARTS)).collect();
+    let boosts = (body.iter())
+        .map(|p| boosted(*p, dice.pick(&[0, 1, 2, 3])))
+        .collect();
     (body, boosts, dice.between(1, n * engine::PART_HITS))
 }
 
@@ -45,7 +46,7 @@ fn a_mass_attack_falls_10_4_1_and_stops_past_three() {
 
 #[test]
 fn the_live_parts_are_the_tail_the_hits_cover() {
-    use BodyPart::{Attack, Move, Tough};
+    use Part::{Attack, Move, Tough};
     let body = [Tough, Tough, Attack, Move];
     assert_eq!(engine::live_parts(&body, 400), body.to_vec(), "whole");
     assert_eq!(
@@ -112,17 +113,5 @@ fn a_resources_engine_name_reads_back_as_itself() {
         let r = resource_of_name(&name);
         assert_eq!(resource_name(&r), name);
         assert_eq!(resource_of_name(&resource_name(&r)), r);
-    }
-}
-
-#[test]
-fn every_body_parts_engine_name_reads_back() {
-    for part in ALL_BODY_PARTS {
-        assert_eq!(
-            part_of_name(part_name(part)),
-            Some(part),
-            "{}",
-            part_name(part)
-        );
     }
 }

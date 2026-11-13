@@ -1,15 +1,15 @@
 use crate::core::engine;
 use crate::core::grid::{FatigueFactor, step_ticks};
-use crate::core::vocabulary::{BodyPart, Boost, boost, part_count_in};
+use crate::core::vocabulary::{Part, ResourceType, part_count_in, takes};
 use crate::core::world::Pos;
 
 /// A body as the exchange reads it, on either side.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Fighter {
     /// Head first, as the engine destroys it.
-    pub body: Vec<BodyPart>,
+    pub body: Vec<Part>,
     /// One a part, head first, or empty.
-    pub boosts: Vec<Boost>,
+    pub boosts: Vec<Option<ResourceType>>,
     pub hits: i32,
     /// None for a body not yet cast.
     pub pos: Option<Pos>,
@@ -24,10 +24,15 @@ pub struct Fighter {
     pub invader: bool,
 }
 
-pub fn of_parts(body: &[BodyPart], boosts: &[Boost], hits: i32, pos: Option<Pos>) -> Fighter {
+pub fn of_parts(
+    body: &[Part],
+    boosts: &[Option<ResourceType>],
+    hits: i32,
+    pos: Option<Pos>,
+) -> Fighter {
     let power = engine::power_at(body, boosts, hits);
-    let attack = power(BodyPart::Attack);
-    let ranged = power(BodyPart::RangedAttack);
+    let attack = power(Part::Attack);
+    let ranged = power(Part::RangedAttack);
     Fighter {
         body: body.to_vec(),
         boosts: boosts.to_vec(),
@@ -35,8 +40,8 @@ pub fn of_parts(body: &[BodyPart], boosts: &[Boost], hits: i32, pos: Option<Pos>
         pos,
         attack,
         ranged,
-        heal: power(BodyPart::Heal),
-        work: power(BodyPart::Work),
+        heal: power(Part::Heal),
+        work: power(Part::Work),
         reach: if ranged > 0 {
             engine::RANGED_RANGE
         } else if attack > 0 {
@@ -46,25 +51,25 @@ pub fn of_parts(body: &[BodyPart], boosts: &[Boost], hits: i32, pos: Option<Pos>
         },
         gait: FatigueFactor {
             weight: body.len() as i32
-                - part_count_in(body, BodyPart::Move)
-                - part_count_in(body, BodyPart::Carry),
-            moves: power(BodyPart::Move),
+                - part_count_in(body, Part::Move)
+                - part_count_in(body, Part::Carry),
+            moves: power(Part::Move),
         },
         strikes_back: engine::ATTACK_POWER * attack,
         invader: false,
     }
 }
 
-pub fn cast(body: &[BodyPart]) -> Fighter {
+pub fn cast(body: &[Part]) -> Fighter {
     of_parts(body, &[], engine::PART_HITS * body.len() as i32, None)
 }
 
 /// A not-yet-cast body carrying `boost`'s compound on every part it takes.
-pub fn cast_boosted(body: &[BodyPart], boost: Option<(&str, i32)>) -> Fighter {
-    let boosts: Vec<Boost> = match boosted_by(body, boost) {
+pub fn cast_boosted(body: &[Part], boost: Option<(ResourceType, i32)>) -> Fighter {
+    let boosts: Vec<Option<ResourceType>> = match boosted_by(body, boost) {
         Some(compound) => body
             .iter()
-            .map(|p| boost::of_compound(*p, compound))
+            .map(|p| takes(*p, compound).then_some(compound))
             .collect(),
         None => Vec::new(),
     };
@@ -73,11 +78,9 @@ pub fn cast_boosted(body: &[BodyPart], boost: Option<(&str, i32)>) -> Fighter {
 
 /// The compound `boost` gives `body`, when its stock covers every part the
 /// compound would take: `boost` is the compound and the parts it covers.
-pub fn boosted_by<'a>(body: &[BodyPart], boost: Option<(&'a str, i32)>) -> Option<&'a str> {
+pub fn boosted_by(body: &[Part], boost: Option<(ResourceType, i32)>) -> Option<ResourceType> {
     let (compound, covered) = boost?;
-    let parts = (body.iter())
-        .filter(|p| boost::of_compound(**p, compound) != Boost::Unboosted)
-        .count() as i32;
+    let parts = (body.iter()).filter(|p| takes(**p, compound)).count() as i32;
     (parts > 0 && parts <= covered).then_some(compound)
 }
 

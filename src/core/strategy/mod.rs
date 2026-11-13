@@ -11,7 +11,7 @@ use super::fight::shape::{Cast, Engagement};
 use super::layout::Standing;
 use super::tick::{ColonyPlan, Context, Declarations, Derived, Outpost, Stage};
 use super::tiles;
-use super::vocabulary::{BodyPart, Boost, boost};
+use super::vocabulary::{Part, ResourceType, multiple};
 use super::world::{RoomName, Rules, World, sightings, terrain::Terrain};
 use expand::Expansions;
 use intel::Intel;
@@ -52,19 +52,21 @@ const HEALERS: i32 = 3;
 pub fn wall(rules: &Rules, rival: i32, level: i32, threatened: bool) -> (i32, bool) {
     let capacity =
         engine::SPAWN_ENERGY + rules.allowed("extension", rival) * engine::extension_energy(rival);
-    let pairs = |part: BodyPart| {
-        (capacity / engine::body_cost(&[part, BodyPart::Move]))
-            .min(engine::MAX_BODY_PARTS as i32 / 2)
+    let pairs = |part: Part| {
+        (capacity / engine::body_cost(&[part, Part::Move])).min(engine::MAX_BODY_PARTS as i32 / 2)
     };
-    let boost = |part: BodyPart| {
+    let boost = |part: Part, catalyzed: ResourceType| {
         if rules.allowed("lab", rival) > 0 {
-            boost::multiple(part, Boost::Tier3)
+            multiple(part, Some(catalyzed))
         } else {
             1
         }
     };
-    let work = pairs(BodyPart::Work);
-    let heal = HEALERS * pairs(BodyPart::Heal) * engine::HEAL_POWER * boost(BodyPart::Heal);
+    let work = pairs(Part::Work);
+    let heal = HEALERS
+        * pairs(Part::Heal)
+        * engine::HEAL_POWER
+        * boost(Part::Heal, ResourceType::CatalyzedLemergiumAlkalide);
     let fire = rules.allowed("tower", level) * engine::tower_attack_at(engine::TOWER_FALLOFF_RANGE);
     let hits = 2 * work * engine::PART_HITS;
     let held = if fire > heal {
@@ -72,7 +74,10 @@ pub fn wall(rules: &Rules, rival: i32, level: i32, threatened: bool) -> (i32, bo
     } else {
         HOLD
     };
-    let full = work * engine::DISMANTLE_POWER * boost(BodyPart::Work) * held;
+    let full = work
+        * engine::DISMANTLE_POWER
+        * boost(Part::Work, ResourceType::CatalyzedZynthiumAcid)
+        * held;
     let floor = 20 * engine::RAMPART_DECAY_AMOUNT;
     let kept = floor.max(if threatened { full } else { full / 3 });
     (kept, fire <= heal)

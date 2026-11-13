@@ -9,9 +9,9 @@ use crate::core::grid::Footprint;
 use crate::core::strategy::intel::{self, Intel, Scout};
 use crate::core::tick::{self, Declarations, Outpost};
 use crate::core::tiles::{self, Tile};
-use crate::core::vocabulary::{BodyPart, Resource, part_count_in};
+use crate::core::vocabulary::{Part, Resource, part_count_in};
 use crate::core::world::{
-    Controller, Creep, Kind, Owner, Part, Pos, Room, RoomName, Source, Spawn, Store, Structure,
+    BodyPart, Controller, Creep, Kind, Owner, Pos, Room, RoomName, Source, Spawn, Store, Structure,
     World, terrain,
 };
 
@@ -335,7 +335,7 @@ impl Derived {
     }
 }
 
-fn body_of(name: &str, pos: &Pos, parts: &[Part], store: &Store, life: i32) -> Body {
+fn body_of(name: &str, pos: &Pos, parts: &[BodyPart], store: &Store, life: i32) -> Body {
     let mut work = 0;
     let mut carry = 0;
     let mut moves = 0;
@@ -344,10 +344,10 @@ fn body_of(name: &str, pos: &Pos, parts: &[Part], store: &Store, life: i32) -> B
     for part in parts {
         if part.hits > 0 {
             match part.kind {
-                BodyPart::Work => work += 1,
-                BodyPart::Carry => carry += 1,
-                BodyPart::Move => moves += 1,
-                BodyPart::Claim => claim += 1,
+                Part::Work => work += 1,
+                Part::Carry => carry += 1,
+                Part::Move => moves += 1,
+                Part::Claim => claim += 1,
                 _ => (),
             }
         }
@@ -421,7 +421,7 @@ pub fn dug_at(capacity: i32, home: bool, rate: i32, posted: bool, seats: Option<
         Some(body) => {
             // Not knowing a source's seats is no crew.
             let diggers = if posted { 1 } else { seats.unwrap_or(0) };
-            rate.min(diggers * part_count_in(&body, BodyPart::Work) * engine::HARVEST_PER_WORK)
+            rate.min(diggers * part_count_in(&body, Part::Work) * engine::HARVEST_PER_WORK)
         }
         None => 0,
     }
@@ -451,7 +451,7 @@ fn repair_of(room: &Room, wall: i32, owned_room: bool, s: &Structure) -> Option<
                 1
             };
             let block = bodies::block_of(Pattern::Hauler);
-            let load = part_count_in(block, BodyPart::Carry) * engine::CARRY_PART_CAPACITY;
+            let load = part_count_in(block, Part::Carry) * engine::CARRY_PART_CAPACITY;
             let steps = 2.0 / f64::from(load);
             let decay = per(engine::ROAD_DECAY_AMOUNT * ratio, engine::ROAD_DECAY_TIME);
             let wear = decay * steps * f64::from(block.len() as i32 * engine::ROAD_WEAROUT);
@@ -1105,7 +1105,7 @@ fn ovens_of(world: &World) -> Vec<Body> {
                 .as_ref()
                 .filter(|oven| !tick::fights(&oven.name))
                 .map(|oven| {
-                    let life = if oven.body.iter().any(|p| p.kind == BodyPart::Claim) {
+                    let life = if oven.body.iter().any(|p| p.kind == Part::Claim) {
                         engine::CLAIM_LIFETIME
                     } else {
                         engine::CREEP_LIFETIME

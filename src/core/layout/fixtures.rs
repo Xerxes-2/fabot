@@ -406,10 +406,10 @@ pub fn creep(id: &str, owner: Owner, hits: i32, tile: Tile) -> Creep {
         name: id.to_string(),
         owner,
         pos: at(tile),
-        body: vec![crate::core::world::Part {
-            kind: crate::core::vocabulary::BodyPart::Attack,
+        body: vec![crate::core::world::BodyPart {
+            kind: crate::core::vocabulary::Part::Attack,
             hits: 100,
-            boost: crate::core::vocabulary::Boost::Unboosted,
+            boost: None,
         }],
         hits,
         hits_max: 100,

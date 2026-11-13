@@ -6,7 +6,7 @@ use crate::core::atlas::{Atlas, Mover, Target};
 use crate::core::engine;
 use crate::core::grid::{self, Footprint};
 use crate::core::tick;
-use crate::core::vocabulary::{BodyPart, part_count_in};
+use crate::core::vocabulary::{Part, part_count_in};
 use crate::core::world::{Pos, RoomName};
 
 use super::bodies::{self, Leg, Pattern};
@@ -52,7 +52,7 @@ pub struct Slot {
     pub room: RoomName,
     pub job: Job,
     pub seat: Pos,
-    pub body: Vec<BodyPart>,
+    pub body: Vec<Part>,
     /// The slot whose body digs what this one carries.
     pub fed_by: Option<String>,
     /// Spends the surplus: cast only while the colony's digs stand.
@@ -103,7 +103,7 @@ pub fn ticks_to(
     }
 }
 
-fn walk(atlas: &Atlas, derived: &Derived, parts: &[BodyPart], from: &Pos, to: &Pos) -> Option<i32> {
+fn walk(atlas: &Atlas, derived: &Derived, parts: &[Part], from: &Pos, to: &Pos) -> Option<i32> {
     let mover = Mover {
         footprint: Footprint::One,
         factor: grid::loaded_factor(parts),
@@ -113,7 +113,7 @@ fn walk(atlas: &Atlas, derived: &Derived, parts: &[BodyPart], from: &Pos, to: &P
 
 /// A room out of sight floods nothing: its walk is its crossings, unroaded.
 fn leg(atlas: &Atlas, derived: &Derived, from: &Pos, to: &Pos) -> Option<Leg> {
-    use BodyPart::{Carry, Move};
+    use Part::{Carry, Move};
     let walked = || {
         Some(Leg {
             even: walk(atlas, derived, &[Carry, Move], from, to)?,
@@ -133,7 +133,7 @@ fn leg(atlas: &Atlas, derived: &Derived, from: &Pos, to: &Pos) -> Option<Leg> {
 
 /// The haulers that carry each flow, a rate a tick over its leg: one body
 /// shape for them all, chosen on their walks weighted by what each carries.
-fn haulers(flows: &[(f64, Leg)], capacity: i32) -> Vec<Vec<BodyPart>> {
+fn haulers(flows: &[(f64, Leg)], capacity: i32) -> Vec<Vec<Part>> {
     let weighed = |at: fn(&Leg) -> i32| {
         let sum: f64 = flows
             .iter()
@@ -158,7 +158,7 @@ fn haulers(flows: &[(f64, Leg)], capacity: i32) -> Vec<Vec<BodyPart>> {
     };
     // Bodies are sized to the bank: the share over the flow carries what a
     // body loses waiting on a container or a sink.
-    let per = part_count_in(&most, BodyPart::Carry).max(1);
+    let per = part_count_in(&most, Part::Carry).max(1);
     vec![most; ((carry + per - 1) / per) as usize]
 }
 
@@ -217,8 +217,8 @@ pub fn claim_parts_for(held: i32) -> i32 {
     )
 }
 
-fn upkeep(body: &[BodyPart]) -> f64 {
-    let life = if body.contains(&BodyPart::Claim) {
+fn upkeep(body: &[Part]) -> f64 {
+    let life = if body.contains(&Part::Claim) {
         engine::CLAIM_LIFETIME
     } else {
         engine::CREEP_LIFETIME
@@ -248,9 +248,9 @@ pub fn fed(c: &crate::core::world::Controller) -> bool {
 
 /// What a WORK of a worker spends a tick at `power` a WORK while working:
 /// its load lasts so long, then it walks to its energy and back.
-fn worker_pace(atlas: &Atlas, derived: &Derived, ci: usize, body: &[BodyPart], power: i32) -> f64 {
+fn worker_pace(atlas: &Atlas, derived: &Derived, ci: usize, body: &[Part], power: i32) -> f64 {
     let (colony, ground) = (&derived.colonies[ci], &derived.grounds[ci]);
-    let work = part_count_in(body, BodyPart::Work).max(1);
+    let work = part_count_in(body, Part::Work).max(1);
     let fetches: Vec<(Pos, i32)> = match (&ground.buffer, ground.bank()) {
         (Some(b), _) => vec![(b.pos, 1)],
         (None, Some(s)) => vec![(s.pos, 1)],
@@ -258,7 +258,7 @@ fn worker_pace(atlas: &Atlas, derived: &Derived, ci: usize, body: &[BodyPart], p
             .map(|s| (s.post.unwrap_or(s.pos), s.dug.max(1)))
             .collect(),
     };
-    let empty: Vec<BodyPart> = body.iter().copied().filter(|p| !p.is_carry()).collect();
+    let empty: Vec<Part> = body.iter().copied().filter(|p| *p != Part::Carry).collect();
     let at = &colony.controller.pos;
     let (mut weighted, mut weights) = (0, 0);
     for (fetch, w) in &fetches {
@@ -270,7 +270,7 @@ fn worker_pace(atlas: &Atlas, derived: &Derived, ci: usize, body: &[BodyPart], p
             weights += w;
         }
     }
-    let load = f64::from(part_count_in(body, BodyPart::Carry) * engine::CARRY_PART_CAPACITY);
+    let load = f64::from(part_count_in(body, Part::Carry) * engine::CARRY_PART_CAPACITY);
     let working = load / f64::from(work * power);
     let trip = if weights == 0 {
         f64::from(engine::CREEP_LIFETIME)
@@ -296,7 +296,7 @@ impl Plan<'_> {
         seat: Pos,
         key: impl std::fmt::Display,
         k: usize,
-        body: Vec<BodyPart>,
+        body: Vec<Part>,
     ) {
         let tag = bodies::name_of(job.pattern());
         let own = room == self.derived.colonies[ci].room;
@@ -404,7 +404,7 @@ impl Plan<'_> {
                 let body = body.filter(|_| s.post.is_some() || !own);
                 let rate = body.as_ref().map_or(0, |b| {
                     s.rate
-                        .min(part_count_in(b, BodyPart::Work) * engine::HARVEST_PER_WORK)
+                        .min(part_count_in(b, Part::Work) * engine::HARVEST_PER_WORK)
                 });
                 // A crew digs what the post's harvester leaves of a source
                 // whose container does not stand, and builds it, a worker
@@ -412,7 +412,7 @@ impl Plan<'_> {
                 if s.container.is_none() && own {
                     let seats = s.seats.map_or(0, |n| n - i32::from(s.post.is_some()));
                     let crew = worker.as_ref().map_or(1, |w| {
-                        part_count_in(w, BodyPart::Work) * engine::HARVEST_PER_WORK / 3
+                        part_count_in(w, Part::Work) * engine::HARVEST_PER_WORK / 3
                     });
                     crews += seats.min((s.rate - rate + crew - 1) / crew.max(1));
                 }
@@ -515,9 +515,9 @@ impl Plan<'_> {
             };
             if let Some(body) = bodies::sized(Pattern::Harvester, bodies::MINER_WORK, capacity) {
                 fixed += upkeep(&body);
-                mined += f64::from(
-                    part_count_in(&body, BodyPart::Work) * engine::MINERAL_HARVEST_PER_WORK,
-                ) / f64::from(engine::MINERAL_HARVEST_CYCLE);
+                mined +=
+                    f64::from(part_count_in(&body, Part::Work) * engine::MINERAL_HARVEST_PER_WORK)
+                        / f64::from(engine::MINERAL_HARVEST_CYCLE);
                 self.push(
                     ci,
                     colony.room,
@@ -542,8 +542,8 @@ impl Plan<'_> {
         let banked = match (ground.stock(), bank) {
             (Some(stock), _) => (f64::from(stock) - kept) / life,
             (None, Some(pile)) => {
-                let pace = |w: &Vec<BodyPart>| {
-                    let work = f64::from(part_count_in(w, BodyPart::Work));
+                let pace = |w: &Vec<Part>| {
+                    let work = f64::from(part_count_in(w, Part::Work));
                     upkeep(w)
                         / work
                         / worker_pace(atlas, derived, ci, w, engine::UPGRADE_DRAIN_PER_WORK)
@@ -565,7 +565,7 @@ impl Plan<'_> {
         // surplus is the hand-fed upgraders'.
         // With no reserve kept the containers and piles are a worker's too.
         let load = worker.as_deref().map_or(0, |w| {
-            part_count_in(w, BodyPart::Carry) * engine::CARRY_PART_CAPACITY
+            part_count_in(w, Part::Carry) * engine::CARRY_PART_CAPACITY
         });
         let drawn = |kept: i32| {
             storage.is_none()
@@ -590,7 +590,7 @@ impl Plan<'_> {
         // home drinks the bank that would cast those carriers.
         let carry = |flows: &[(f64, Leg)]| {
             (haulers(flows, capacity).iter())
-                .map(|b| part_count_in(b, BodyPart::Carry))
+                .map(|b| part_count_in(b, Part::Carry))
                 .sum::<i32>()
         };
         let names: Vec<&str> = colony.spawns.iter().map(|s| s.name.as_str()).collect();
@@ -610,17 +610,11 @@ impl Plan<'_> {
         // A swamp is five plains at either pace, so two paces part road from off it.
         let upgrader = (ground.buffer.as_ref())
             .and_then(|b| {
-                let even = walk(
-                    atlas,
-                    derived,
-                    &[BodyPart::Carry, BodyPart::Move],
-                    &home,
-                    &b.pos,
-                )?;
+                let even = walk(atlas, derived, &[Part::Carry, Part::Move], &home, &b.pos)?;
                 let roaded = walk(
                     atlas,
                     derived,
-                    &[BodyPart::Carry, BodyPart::Carry, BodyPart::Move],
+                    &[Part::Carry, Part::Carry, Part::Move],
                     &home,
                     &b.pos,
                 )?;
@@ -628,10 +622,7 @@ impl Plan<'_> {
             })
             .filter(|b| {
                 !ground.buffer_seats.is_empty()
-                    && bodies::standing(
-                        part_count_in(b, BodyPart::Work),
-                        part_count_in(b, BodyPart::Carry),
-                    )
+                    && bodies::standing(part_count_in(b, Part::Work), part_count_in(b, Part::Carry))
             });
         // A structure pays only once it stands, so a level is built out before
         // it is upgraded; a road backlog never stops the controller.
@@ -664,7 +655,7 @@ impl Plan<'_> {
         let mut drunk = 0.0;
         let mut upgraded = if fed { surplus - build - mend } else { 0.0 };
         if let Some(body) = &upgrader {
-            let work = part_count_in(body, BodyPart::Work);
+            let work = part_count_in(body, Part::Work);
             let most =
                 (ground.buffer_seats.len() as i32).min(upgradable.saturating_add(work - 1) / work);
             // A standing upgrader's body is paid for: only its drink is owed.
@@ -697,7 +688,7 @@ impl Plan<'_> {
 
         let upgraded = upgraded.min(f64::from(upgradable) - drunk).max(0.0);
         let (builders, upgraders) = worker.as_ref().map_or((0, 0), |body| {
-            let work = f64::from(part_count_in(body, BodyPart::Work).max(1));
+            let work = f64::from(part_count_in(body, Part::Work).max(1));
             let per = upkeep(body) / work;
             let bodies = |spend: f64, power: i32| {
                 let pace = worker_pace(atlas, derived, ci, body, power);
@@ -749,7 +740,7 @@ impl Plan<'_> {
             let drawn: f64 = (colony.spawns.iter())
                 .filter_map(|s| s.spawning.as_ref())
                 .map(|o| {
-                    let kinds: Vec<BodyPart> = o.body.iter().map(|p| p.kind).collect();
+                    let kinds: Vec<Part> = o.body.iter().map(|p| p.kind).collect();
                     f64::from(engine::body_cost(&kinds))
                         / f64::from(engine::SPAWN_TICKS_PER_PART * kinds.len().max(1) as i32)
                 })
@@ -975,8 +966,8 @@ fn rank_of(job: &Job, own: bool) -> i32 {
     }
 }
 
-fn spawn_ticks(body: &[BodyPart]) -> f64 {
-    let life = if body.contains(&BodyPart::Claim) {
+fn spawn_ticks(body: &[Part]) -> f64 {
+    let life = if body.contains(&Part::Claim) {
         engine::CLAIM_LIFETIME
     } else {
         engine::CREEP_LIFETIME
@@ -1034,7 +1025,7 @@ fn outgrown(derived: &Derived, body: &Body, slot: &Slot) -> bool {
     let dug = |work: i32| (work * engine::HARVEST_PER_WORK).min(rate);
     body.pattern.is_harvester()
         && slot.room == derived.colonies[slot.colony].room
-        && dug(body.work) < dug(part_count_in(&slot.body, BodyPart::Work))
+        && dug(body.work) < dug(part_count_in(&slot.body, Part::Work))
 }
 
 fn expires(body: &Body, home_walk: i32) -> bool {
@@ -1157,7 +1148,7 @@ pub fn task_of(held: &str) -> Option<&str> {
 #[derive(Clone, Debug)]
 pub struct Cast {
     pub colony: RoomName,
-    pub body: Vec<BodyPart>,
+    pub body: Vec<Part>,
     pub name: String,
     pub floor: bool,
     pub slot: String,
@@ -1197,7 +1188,7 @@ pub fn casts(
             .collect();
         let mut bank = colony.bank;
         let cast = |slot: &Slot,
-                    body: Vec<BodyPart>,
+                    body: Vec<Part>,
                     floor: bool,
                     idle: &mut Vec<&crate::core::world::Spawn>,
                     bank: &mut i32| {

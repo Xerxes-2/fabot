@@ -13,10 +13,10 @@ pub use run::decide;
 pub(crate) mod dice {
     use crate::core::engine;
     use crate::core::tick::{Declared, Outpost};
-    use crate::core::vocabulary::{BodyPart, Boost, Compound, Ore, Resource, part_count_in};
+    use crate::core::vocabulary::{Compound, Ore, Part, Resource, part_count_in};
     use crate::core::world::{
-        Controller, Creep, Kind, Mineral, Owner, Part, Pile, Pos, Remains, Room, RoomName, Site,
-        Source, Spawn, Store, Structure, World,
+        BodyPart, Controller, Creep, Kind, Mineral, Owner, Pile, Pos, Remains, Room, RoomName,
+        Site, Source, Spawn, Store, Structure, World,
     };
 
     use super::task::Task;
@@ -109,16 +109,16 @@ pub(crate) mod dice {
         }
     }
 
-    pub fn oven_of(name: &str, parts: &[BodyPart]) -> crate::core::world::Oven {
+    pub fn oven_of(name: &str, parts: &[Part]) -> crate::core::world::Oven {
         crate::core::world::Oven {
             name: name.to_string(),
             remaining: 5,
             body: parts
                 .iter()
-                .map(|p| Part {
+                .map(|p| BodyPart {
                     kind: *p,
                     hits: engine::PART_HITS,
-                    boost: Boost::Unboosted,
+                    boost: None,
                 })
                 .collect(),
         }
@@ -178,17 +178,17 @@ pub(crate) mod dice {
                     1 => Some(oven_of(
                         &format!("harvester-1-{name}sp{k}"),
                         &[
-                            BodyPart::Work,
-                            BodyPart::Work,
-                            BodyPart::Work,
-                            BodyPart::Carry,
-                            BodyPart::Move,
-                            BodyPart::Move,
+                            Part::Work,
+                            Part::Work,
+                            Part::Work,
+                            Part::Carry,
+                            Part::Move,
+                            Part::Move,
                         ],
                     )),
                     _ => Some(oven_of(
                         &format!("hauler-1-{name}sp{k}"),
-                        &[BodyPart::Carry, BodyPart::Carry, BodyPart::Move],
+                        &[Part::Carry, Part::Carry, Part::Move],
                     )),
                 },
             });
@@ -243,18 +243,11 @@ pub(crate) mod dice {
         let at = pos(dice, room);
         let prefix = dice.pick(&["worker", "harvester", "hauler", "claimer", "x"]);
         let n = dice.between(1, 12);
-        let parts: Vec<BodyPart> = (0..n)
-            .map(|_| {
-                dice.pick(&[
-                    BodyPart::Work,
-                    BodyPart::Carry,
-                    BodyPart::Move,
-                    BodyPart::Claim,
-                ])
-            })
+        let parts: Vec<Part> = (0..n)
+            .map(|_| dice.pick(&[Part::Work, Part::Carry, Part::Move, Part::Claim]))
             .collect();
         let life = dice.between(1, engine::CREEP_LIFETIME);
-        let carry = part_count_in(&parts, BodyPart::Carry) * engine::CARRY_PART_CAPACITY;
+        let carry = part_count_in(&parts, Part::Carry) * engine::CARRY_PART_CAPACITY;
         let energy = dice.between(0, carry);
 
         Creep {
@@ -264,10 +257,10 @@ pub(crate) mod dice {
             pos: at,
             body: parts
                 .iter()
-                .map(|p| Part {
+                .map(|p| BodyPart {
                     kind: *p,
                     hits: engine::PART_HITS,
-                    boost: Boost::Unboosted,
+                    boost: None,
                 })
                 .collect(),
             hits: n * engine::PART_HITS,

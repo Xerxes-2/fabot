@@ -5,7 +5,7 @@ use crate::core::engine;
 use crate::core::fight::shape::{Engagement, Objective};
 use crate::core::tick::{ColonyPlan, Declarations, Derived, Outpost, REACH_HOPS};
 use crate::core::tiles;
-use crate::core::vocabulary::BodyPart;
+use crate::core::vocabulary::Part;
 use crate::core::world::{RoomName, World};
 
 /// What one intent costs the engine; a body acts about once a tick.
@@ -33,7 +33,7 @@ struct Price {
 const SPEND_PARTS: f64 = 2.0;
 
 fn price(c: &Candidate, capacity: i32) -> Price {
-    use BodyPart::{Carry, Claim, Move, Work};
+    use Part::{Carry, Claim, Move, Work};
     let life = f64::from(engine::CREEP_LIFETIME);
     let reserver = [Claim, Move];
     let reserved = capacity >= engine::body_cost(&reserver);

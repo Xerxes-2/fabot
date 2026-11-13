@@ -7,7 +7,7 @@ use super::grid::{self, Footprint};
 use super::intents::{Intent, LabAct};
 use super::mv;
 use super::tick::{Context, target_at};
-use super::vocabulary::{self, Boost, Compound, Resource};
+use super::vocabulary::{self, Compound, Resource, ResourceType};
 use super::world::{self, Pos, RoomName, World};
 
 /// A cast name's last token names the compound its body walks to a lab for.
@@ -83,12 +83,11 @@ fn can_boost(lab: &world::Structure, compound: Compound) -> bool {
 }
 
 fn boost_need(creep: &world::Creep, compound: Compound) -> (i32, i32) {
-    let name = vocabulary::resource_name(&Resource::Compound(compound));
+    let compound = vocabulary::resource_name(&Resource::Compound(compound))
+        .parse::<ResourceType>()
+        .ok();
     let parts = (creep.body.iter())
-        .filter(|p| {
-            p.boost == Boost::Unboosted
-                && vocabulary::boost::of_compound(p.kind, &name) != Boost::Unboosted
-        })
+        .filter(|p| p.boost.is_none() && compound.is_some_and(|c| vocabulary::takes(p.kind, c)))
         .count() as i32;
 
     (

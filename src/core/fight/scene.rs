@@ -12,7 +12,7 @@ use crate::core::grid::{self, Footprint};
 use crate::core::tactics::{self, Tactic};
 use crate::core::tick::{self, TacticRule};
 use crate::core::tiles::Tile;
-use crate::core::vocabulary::{BodyPart, Resource};
+use crate::core::vocabulary::{Part, Resource, ResourceType};
 use crate::core::world::{
     Creep, Owner, Pos, Room, RoomName, Sightings, Structure, World, hostiles, sightings,
 };
@@ -28,7 +28,7 @@ pub(super) struct Asked {
 }
 
 impl Asked {
-    pub(super) fn queue(&mut self, room: RoomName, body: &[BodyPart]) {
+    pub(super) fn queue(&mut self, room: RoomName, body: &[Part]) {
         let ticks = engine::SPAWN_TICKS_PER_PART * body.len() as i32;
         *self.queued.entry(room).or_insert(0) += ticks;
         *self.asked.entry(room).or_insert(0) += engine::body_cost(body);
@@ -66,7 +66,7 @@ pub(super) struct Scene<'a> {
     pub(super) landed: Vec<Cast>,
     pub(super) waiting: Vec<Cast>,
     /// The compound the declared lab cluster covers, and the parts it buys.
-    pub(super) boost: Option<(&'static str, i32)>,
+    pub(super) boost: Option<(ResourceType, i32)>,
 }
 
 impl<'a> Scene<'a> {
@@ -372,7 +372,7 @@ impl<'a> Scene<'a> {
     /// How many of the drain's bodies the set already holds, standing or in
     /// an oven: a pair's shape is no other body's.
     pub(super) fn paired(&self, e: &Engagement, ovens: &[Cast], set: &[casting::Body]) -> usize {
-        let of = |body: &[BodyPart]| set.contains(&body.to_vec());
+        let of = |body: &[Part]| set.contains(&body.to_vec());
         let stand = self
             .members_of(e)
             .iter()
@@ -578,7 +578,7 @@ impl<'a> Scene<'a> {
 
         (self.members_of(e))
             .iter()
-            .any(|c| c.pos == back && !c.body.iter().any(|p| p.kind == BodyPart::Heal))
+            .any(|c| c.pos == back && !c.body.iter().any(|p| p.kind == Part::Heal))
     }
 
     /// One of his towers struck one of ours in his room on the trip just
@@ -647,7 +647,7 @@ impl<'a> Scene<'a> {
         // A picket holds its post, not the breach.
         bodies
             .into_values()
-            .filter(|b| raid::raids(e) || !b.iter().any(|p| p.is_ranged_attack()))
+            .filter(|b| raid::raids(e) || !b.contains(&Part::RangedAttack))
             .collect()
     }
 

@@ -13,6 +13,7 @@ use crate::core::mv::Wish;
 use crate::core::tactics::{self, Tactic};
 use crate::core::tick;
 use crate::core::tiles::Tile;
+use crate::core::vocabulary::Part;
 use crate::core::world::{self, Creep, Owner, Pos, RoomName, Structure};
 use crate::core::{engine, tiles};
 
@@ -77,7 +78,7 @@ pub(super) fn act(
         .filter(|c| tick::fights(&c.name))
         .collect();
 
-    let swings = |c: &Creep| c.body.iter().any(|p| p.kind.is_attack());
+    let swings = |c: &Creep| c.body.iter().any(|p| p.kind == Part::Attack);
 
     // A group lost from sight is sought in its room, which brings it back in
     // sight; a siege's room out of sight is entered anywhere, as its middle

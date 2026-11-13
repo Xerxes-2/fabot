@@ -19,7 +19,7 @@ use self::grid::{
 use self::tiles::{Table, Tile, TileSet};
 use super::engine;
 use super::exchange::fighter::{self, Fighter};
-use super::vocabulary::BodyPart;
+use super::vocabulary::Part;
 use super::world::{Kind, Owner, Pos, Room, RoomName, World};
 
 /// A keeper's lair and the resource it guards.
@@ -545,7 +545,7 @@ impl Atlas {
             |from: Tile, f: Fighter| (from, Atlas::guarded(room, from).unwrap_or(from), f);
         let mut strikers: Vec<(Tile, Tile, Fighter)> = living
             .map(|c| {
-                let body: Vec<BodyPart> = c.body.iter().map(|p| p.kind).collect();
+                let body: Vec<Part> = c.body.iter().map(|p| p.kind).collect();
                 let boosts: Vec<_> = c.body.iter().map(|p| p.boost).collect();
                 let f = fighter::of_parts(&body, &boosts, c.hits, None);
                 striker(tiles::of_pos(&c.pos), f)

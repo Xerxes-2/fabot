@@ -1,6 +1,6 @@
 use crate::core::engine;
 use crate::core::grid::{self, FatigueFactor};
-use crate::core::vocabulary::{BodyPart, part_count_in};
+use crate::core::vocabulary::{Part, part_count_in};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Pattern {
@@ -50,33 +50,28 @@ pub fn name_of(pattern: Pattern) -> &'static str {
     }
 }
 
-pub fn block_of(pattern: Pattern) -> &'static [BodyPart] {
-    const WORKER: [BodyPart; 3] = [BodyPart::Work, BodyPart::Carry, BodyPart::Move];
-    const HARVESTER: [BodyPart; 4] = [
-        BodyPart::Work,
-        BodyPart::Work,
-        BodyPart::Carry,
-        BodyPart::Move,
-    ];
-    const HAULER: [BodyPart; 3] = [BodyPart::Carry, BodyPart::Carry, BodyPart::Move];
-    const UPGRADER: [BodyPart; 3] = [BodyPart::Work, BodyPart::Carry, BodyPart::Move];
-    const CLAIMER: [BodyPart; 2] = [BodyPart::Claim, BodyPart::Move];
+pub fn block_of(pattern: Pattern) -> &'static [Part] {
+    const WORKER: [Part; 3] = [Part::Work, Part::Carry, Part::Move];
+    const HARVESTER: [Part; 4] = [Part::Work, Part::Work, Part::Carry, Part::Move];
+    const HAULER: [Part; 3] = [Part::Carry, Part::Carry, Part::Move];
+    const UPGRADER: [Part; 3] = [Part::Work, Part::Carry, Part::Move];
+    const CLAIMER: [Part; 2] = [Part::Claim, Part::Move];
     match pattern {
         Pattern::Worker => &WORKER,
         Pattern::Harvester => &HARVESTER,
         Pattern::Hauler => &HAULER,
         Pattern::Upgrader => &UPGRADER,
         Pattern::Claimer => &CLAIMER,
-        Pattern::Scout => &[BodyPart::Move],
+        Pattern::Scout => &[Part::Move],
     }
 }
 
-pub fn key_part_of(pattern: Pattern) -> BodyPart {
+pub fn key_part_of(pattern: Pattern) -> Part {
     match pattern {
-        Pattern::Worker | Pattern::Harvester | Pattern::Upgrader => BodyPart::Work,
-        Pattern::Hauler => BodyPart::Carry,
-        Pattern::Claimer => BodyPart::Claim,
-        Pattern::Scout => BodyPart::Move,
+        Pattern::Worker | Pattern::Harvester | Pattern::Upgrader => Part::Work,
+        Pattern::Hauler => Part::Carry,
+        Pattern::Claimer => Part::Claim,
+        Pattern::Scout => Part::Move,
     }
 }
 
@@ -125,13 +120,13 @@ pub fn pattern_of_parts(work: i32, carry: i32, movement: i32, claim: i32) -> Pat
     }
 }
 
-fn replicate(n: i32, part: BodyPart) -> Vec<BodyPart> {
+fn replicate(n: i32, part: Part) -> Vec<Part> {
     vec![part; n.max(0) as usize]
 }
 
 /// `work + carry <= 2 × move` is a tile a tick loaded on a road. Grouped so
 /// damage strips Work first.
-fn worker_body(most: i32, capacity: i32) -> Vec<BodyPart> {
+fn worker_body(most: i32, capacity: i32) -> Vec<Part> {
     let block = block_of(Pattern::Worker);
     let dearest = engine::MAX_BODY_PARTS as i32;
 
@@ -150,8 +145,8 @@ fn worker_body(most: i32, capacity: i32) -> Vec<BodyPart> {
     };
 
     let mut slots = dearest - 3 * repeats;
-    let carry_cost = engine::part_cost(BodyPart::Carry);
-    let move_cost = engine::part_cost(BodyPart::Move);
+    let carry_cost = engine::part_cost(Part::Carry);
+    let move_cost = engine::part_cost(Part::Move);
     let mut go = true;
 
     while go {
@@ -173,18 +168,18 @@ fn worker_body(most: i32, capacity: i32) -> Vec<BodyPart> {
         }
     }
 
-    let mut body = replicate(work, BodyPart::Work);
-    body.extend(replicate(carry, BodyPart::Carry));
-    body.extend(replicate(moves, BodyPart::Move));
+    let mut body = replicate(work, Part::Work);
+    body.extend(replicate(carry, Part::Carry));
+    body.extend(replicate(moves, Part::Move));
     body
 }
 
 /// The dig falls into the container under it with no Carry; only a link takes
 /// it from the store, and a bank that holds links has the room.
-fn harvester_body(moves: impl Fn(i32) -> i32, most: i32, capacity: i32) -> Vec<BodyPart> {
-    let dig = |n: i32| -> Vec<BodyPart> {
-        let mut body = replicate(n, BodyPart::Work);
-        body.extend(replicate(moves(n), BodyPart::Move));
+fn harvester_body(moves: impl Fn(i32) -> i32, most: i32, capacity: i32) -> Vec<Part> {
+    let dig = |n: i32| -> Vec<Part> {
+        let mut body = replicate(n, Part::Work);
+        body.extend(replicate(moves(n), Part::Move));
         body
     };
 
@@ -196,26 +191,26 @@ fn harvester_body(moves: impl Fn(i32) -> i32, most: i32, capacity: i32) -> Vec<B
 
     let n = n.max(2);
 
-    let mut with_carry = vec![BodyPart::Carry];
+    let mut with_carry = vec![Part::Carry];
     with_carry.extend(dig(n));
     let carry = if engine::body_cost(&with_carry) <= capacity {
-        vec![BodyPart::Carry]
+        vec![Part::Carry]
     } else {
         Vec::new()
     };
 
-    let mut body = replicate(n, BodyPart::Work);
+    let mut body = replicate(n, Part::Work);
     body.extend(carry);
-    body.extend(replicate(moves(n), BodyPart::Move));
+    body.extend(replicate(moves(n), Part::Move));
     body
 }
 
 /// It walks to its seat once and empty, so its CARRY never fatigues: a MOVE
 /// is bought only while the ticks it saves upgrade more than the WORK it costs.
-fn upgrader_body(roads: i32, plains: i32, most: i32, capacity: i32) -> Vec<BodyPart> {
+fn upgrader_body(roads: i32, plains: i32, most: i32, capacity: i32) -> Vec<Part> {
     let dearest = engine::MAX_BODY_PARTS as i32;
     let [work_cost, carry_cost, move_cost] =
-        [BodyPart::Work, BodyPart::Carry, BodyPart::Move].map(engine::part_cost);
+        [Part::Work, Part::Carry, Part::Move].map(engine::part_cost);
     let priced = |moves: i32| {
         let work = ((capacity - carry_cost - moves * move_cost) / work_cost)
             .min(most)
@@ -241,19 +236,19 @@ fn upgrader_body(roads: i32, plains: i32, most: i32, capacity: i32) -> Vec<BodyP
             (moves, work, rate) = (m, w, r);
         }
     }
-    let mut body = replicate(work, BodyPart::Work);
-    body.push(BodyPart::Carry);
-    body.extend(replicate(moves, BodyPart::Move));
+    let mut body = replicate(work, Part::Work);
+    body.push(Part::Carry);
+    body.extend(replicate(moves, Part::Move));
     body
 }
 
 /// `roads` and `plains` are the walk to the seat, a swamp five plains.
-pub fn upgrader(roads: i32, plains: i32, most: i32, capacity: i32) -> Option<Vec<BodyPart>> {
+pub fn upgrader(roads: i32, plains: i32, most: i32, capacity: i32) -> Option<Vec<Part>> {
     (capacity >= engine::body_cost(block_of(Pattern::Upgrader)))
         .then(|| engine::with_move_last(upgrader_body(roads, plains, most.max(1), capacity)))
 }
 
-fn whole_blocks(block: &[BodyPart], most: i32, capacity: i32) -> Vec<BodyPart> {
+fn whole_blocks(block: &[Part], most: i32, capacity: i32) -> Vec<Part> {
     let repeats = (capacity / engine::body_cost(block))
         .min(engine::MAX_BODY_PARTS as i32 / block.len() as i32)
         .min(most);
@@ -272,7 +267,7 @@ fn whole_blocks(block: &[BodyPart], most: i32, capacity: i32) -> Vec<BodyPart> {
 /// v1's: a deposit's miner digs a container full in a hauler's few trips.
 pub const MINER_WORK: i32 = 20;
 
-pub fn sized(pattern: Pattern, most: i32, capacity: i32) -> Option<Vec<BodyPart>> {
+pub fn sized(pattern: Pattern, most: i32, capacity: i32) -> Option<Vec<Part>> {
     if capacity < engine::body_cost(block_of(pattern)) {
         None
     } else {
@@ -313,9 +308,9 @@ pub fn carry_per_move(leg: Leg) -> i32 {
 }
 
 /// A hauler of `carry` CARRY at most, in whole blocks of the ratio.
-pub fn hauler(ratio: i32, carry: i32, capacity: i32) -> Option<Vec<BodyPart>> {
-    let mut block = replicate(ratio, BodyPart::Carry);
-    block.push(BodyPart::Move);
+pub fn hauler(ratio: i32, carry: i32, capacity: i32) -> Option<Vec<Part>> {
+    let mut block = replicate(ratio, Part::Carry);
+    block.push(Part::Move);
     (capacity >= engine::body_cost(&block)).then(|| {
         let most = (carry + ratio - 1) / ratio;
         engine::with_move_last(whole_blocks(&block, most.max(1), capacity))
@@ -333,22 +328,21 @@ pub fn upgradable_at(level: i32) -> i32 {
 
 /// A tick of what `n` upgraders of the body are hired at: their drink, as much
 /// as the controller takes, and their cost over a life.
-pub fn upgrader_hire(upgradable: i32, n: i32, body: &[BodyPart]) -> f64 {
-    f64::from(
-        upgradable.min(n * part_count_in(body, BodyPart::Work) * engine::UPGRADE_DRAIN_PER_WORK),
-    ) + f64::from(n * engine::body_cost(body)) / f64::from(engine::CREEP_LIFETIME)
+pub fn upgrader_hire(upgradable: i32, n: i32, body: &[Part]) -> f64 {
+    f64::from(upgradable.min(n * part_count_in(body, Part::Work) * engine::UPGRADE_DRAIN_PER_WORK))
+        + f64::from(n * engine::body_cost(body)) / f64::from(engine::CREEP_LIFETIME)
 }
 
 /// For a seat in the casting colony's own room, which it walks once: legs
 /// never cost it a Work.
-pub fn home_harvester(most: i32, capacity: i32) -> Option<Vec<BodyPart>> {
+pub fn home_harvester(most: i32, capacity: i32) -> Option<Vec<Part>> {
     if capacity < engine::body_cost(block_of(Pattern::Harvester)) {
         None
     } else {
         let mut body = harvester_body(|_| 1, most.max(2), capacity);
-        let legs = (part_count_in(&body, BodyPart::Work) + 1) / 2 - 1;
-        let spare = (capacity - engine::body_cost(&body)) / engine::part_cost(BodyPart::Move);
-        body.extend(replicate(legs.min(spare), BodyPart::Move));
+        let legs = (part_count_in(&body, Part::Work) + 1) / 2 - 1;
+        let spare = (capacity - engine::body_cost(&body)) / engine::part_cost(Part::Move);
+        body.extend(replicate(legs.min(spare), Part::Move));
         Some(engine::with_move_last(body))
     }
 }
@@ -381,7 +375,7 @@ mod tests {
                         Some(body) => {
                             assert!(body.len() <= engine::MAX_BODY_PARTS);
                             assert!(engine::body_cost(&body) <= capacity);
-                            assert_eq!(body.last(), Some(&BodyPart::Move));
+                            assert_eq!(body.last(), Some(&Part::Move));
                         }
                     }
                 }
@@ -390,7 +384,7 @@ mod tests {
                     Some(body) => {
                         assert!(body.len() <= engine::MAX_BODY_PARTS);
                         assert!(engine::body_cost(&body) <= capacity);
-                        assert_eq!(body.last(), Some(&BodyPart::Move));
+                        assert_eq!(body.last(), Some(&Part::Move));
                     }
                 }
             }
@@ -420,7 +414,7 @@ mod tests {
         let moves = |roads: i32, plains: i32, most: i32, capacity: i32| {
             part_count_in(
                 &upgrader(roads, plains, most, capacity).unwrap(),
-                BodyPart::Move,
+                Part::Move,
             )
         };
         for capacity in [550, 1300, 2300, 5600, 12900] {
@@ -433,8 +427,8 @@ mod tests {
             }
         }
         let rcl8 = upgrader(15, 0, 15, 12900).unwrap();
-        assert_eq!(part_count_in(&rcl8, BodyPart::Work), 15);
-        assert_eq!(part_count_in(&rcl8, BodyPart::Move), 2);
+        assert_eq!(part_count_in(&rcl8, Part::Work), 15);
+        assert_eq!(part_count_in(&rcl8, Part::Move), 2);
     }
 
     #[test]
@@ -443,7 +437,7 @@ mod tests {
         for capacity in capacities() {
             for k in 1..=20 {
                 if let Some(body) = sized(Pattern::Worker, k, capacity) {
-                    assert!(part_count_in(&body, BodyPart::Work) <= k);
+                    assert!(part_count_in(&body, Part::Work) <= k);
                     assert!(engine::body_cost(&body) <= k * unit);
                 }
             }

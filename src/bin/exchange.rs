@@ -7,7 +7,7 @@
 use std::io::Read;
 
 use fabot::core::exchange::{self, Losses, Outcome, Side, Stance, Terrain, Tower, fighter};
-use fabot::core::vocabulary::{boost, part_of_name};
+use fabot::core::vocabulary::Part;
 use fabot::core::world::{Pos, RoomName};
 use serde_json::{Value, json};
 
@@ -28,12 +28,11 @@ fn predict(sample: &Value) -> Value {
             .map(|b| {
                 let parts: Vec<_> = each(b, "parts")
                     .iter()
-                    .map(|p| part_of_name(p.as_str().unwrap()).unwrap())
+                    .map(|p| p.as_str().unwrap().parse::<Part>().unwrap())
                     .collect();
-                let boosts: Vec<_> = parts
+                let boosts: Vec<_> = each(b, "boosts")
                     .iter()
-                    .zip(each(b, "boosts"))
-                    .map(|(&part, c)| boost::of_compound(part, c.as_str().unwrap()))
+                    .map(|c| c.as_str().unwrap().parse().ok())
                     .collect();
                 let mut fighter = fighter::of_parts(&parts, &boosts, int(b, "hits"), Some(pos(b)));
                 fighter.invader = b["invader"].as_bool().unwrap_or(false);

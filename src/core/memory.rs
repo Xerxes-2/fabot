@@ -283,14 +283,14 @@ impl From<Outcome> for Stored {
 
 /// A body as Memory holds it, a part a letter.
 pub mod letters {
-    use crate::core::vocabulary::{ALL_BODY_PARTS, BodyPart, part_letter};
+    use crate::core::vocabulary::{ALL_BODY_PARTS, Part, part_letter};
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
 
-    pub fn serialize<S: Serializer>(body: &[BodyPart], s: S) -> Result<S::Ok, S::Error> {
+    pub fn serialize<S: Serializer>(body: &[Part], s: S) -> Result<S::Ok, S::Error> {
         s.collect_str(&body.iter().map(|p| part_letter(*p)).collect::<String>())
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<BodyPart>, D::Error> {
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Part>, D::Error> {
         let letters = String::deserialize(d)?;
         let part = |c| ALL_BODY_PARTS.into_iter().find(|p| part_letter(*p) == c);
         (letters.chars())

@@ -6,7 +6,7 @@ use super::super::shape::{Engagement, Group, Phase};
 use crate::core::engine;
 use crate::core::tactics::Tactic;
 use crate::core::tiles::{self};
-use crate::core::vocabulary::BodyPart;
+use crate::core::vocabulary::Part;
 use crate::core::world::{Controller, Creep, Fallen, Kind, Owner, Pos, RoomName, Structure};
 
 /// What a `Defend` may fight as, in the order its ties fall to (§6.3).
@@ -140,15 +140,15 @@ const CLAIMER_REACH: i32 = engine::MELEE_RANGE + 2;
 /// Two 16-CARRY haulers: a home that never holds them casts its hands again itself.
 const REFILLING_FLOOR: i32 = 32;
 
-fn live(kind: BodyPart, c: &Creep) -> bool {
+fn live(kind: Part, c: &Creep) -> bool {
     c.body.iter().any(|p| p.kind == kind && p.hits > 0)
 }
 
 fn reaches(structure: bool, step: i32, raid: &[&Creep], at: &Pos) -> bool {
     raid.iter().any(|h| {
-        let range = if live(BodyPart::RangedAttack, h) {
+        let range = if live(Part::RangedAttack, h) {
             Some(engine::RANGED_RANGE)
-        } else if live(BodyPart::Attack, h) || structure && live(BodyPart::Work, h) {
+        } else if live(Part::Attack, h) || structure && live(Part::Work, h) {
             Some(engine::MELEE_RANGE)
         } else {
             None
@@ -165,13 +165,13 @@ fn half(lost: i32, whole: i32) -> bool {
 }
 
 fn carry(c: &Creep) -> i32 {
-    c.body.iter().filter(|p| p.kind.is_carry()).count() as i32
+    c.body.iter().filter(|p| p.kind == Part::Carry).count() as i32
 }
 
 /// v1's refiller held a Refill, which is Economy's to know; a hauler's body stands in.
 fn hand(c: &Creep) -> bool {
     carry(c) > 0
-        && !c.body.iter().any(|p| p.kind.is_work())
+        && !c.body.iter().any(|p| p.kind == Part::Work)
         && !tiles::on_edge(tiles::of_pos(&c.pos))
 }
 
@@ -220,7 +220,7 @@ fn razed(home: &Home) -> bool {
     };
     // Two of the dig fallen within a tombstone's life: a raid camping a
     // source kills faster than the spawn regrows, and no hand ever falls.
-    let dug = |c: &Creep| c.body.iter().any(|p| p.kind.is_work());
+    let dug = |c: &Creep| c.body.iter().any(|p| p.kind == Part::Work);
     let culled = home
         .fallen
         .iter()
@@ -276,7 +276,7 @@ pub fn fireable(c: &Controller) -> bool {
 
 pub fn safe_mode(running: bool, homes: &[Home]) -> Option<String> {
     let claimer =
-        |c: &Controller, h: &Creep| live(BodyPart::Claim, h) && h.pos.within(CLAIMER_REACH, &c.pos);
+        |c: &Controller, h: &Creep| live(Part::Claim, h) && h.pos.within(CLAIMER_REACH, &c.pos);
 
     if running {
         None
@@ -348,20 +348,19 @@ pub fn opens(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::vocabulary::Boost;
-    use crate::core::world::{Part, Store};
+    use crate::core::world::{BodyPart, Store};
 
     fn at(x: i32, y: i32) -> Pos {
         Pos::new(RoomName::named("W1N1"), x, y)
     }
 
-    fn creep(owner: Owner, kinds: &[BodyPart], pos: Pos, hurt: bool) -> Creep {
-        let body: Vec<Part> = kinds
+    fn creep(owner: Owner, kinds: &[Part], pos: Pos, hurt: bool) -> Creep {
+        let body: Vec<BodyPart> = kinds
             .iter()
-            .map(|k| Part {
+            .map(|k| BodyPart {
                 kind: *k,
                 hits: 100,
-                boost: Boost::Unboosted,
+                boost: None,
             })
             .collect();
         Creep {
@@ -396,19 +395,14 @@ mod tests {
     }
 
     fn home(raider: Owner, haulers: &[(i32, i32, bool)], fallen: &[Dead]) -> Home {
-        let raider = creep(
-            raider,
-            &[BodyPart::RangedAttack, BodyPart::Move],
-            at(25, 25),
-            false,
-        );
+        let raider = creep(raider, &[Part::RangedAttack, Part::Move], at(25, 25), false);
 
         let bodies: Vec<Creep> = haulers
             .iter()
             .enumerate()
             .map(|(i, (carry, dx, hurt))| {
-                let mut kinds = vec![BodyPart::Carry; *carry as usize];
-                kinds.push(BodyPart::Move);
+                let mut kinds = vec![Part::Carry; *carry as usize];
+                kinds.push(Part::Move);
                 creep(Owner::Ours, &kinds, at(22 + dx, 23 + i as i32), *hurt)
             })
             .collect();
@@ -418,8 +412,8 @@ mod tests {
             .take(5)
             .enumerate()
             .map(|(i, dead)| {
-                let mut kinds = vec![BodyPart::Carry; dead.carry as usize];
-                kinds.push(BodyPart::Move);
+                let mut kinds = vec![Part::Carry; dead.carry as usize];
+                kinds.push(Part::Move);
                 let mut gone = creep(Owner::Ours, &kinds, at(26, 23 + i as i32), false);
                 gone.ticks_to_live = dead.ticks_left;
                 Fallen {
@@ -634,10 +628,10 @@ mod tests {
             let n = 1 + rng.below(3) as usize;
             let mut h = rival(&[], &(0..n).map(|_| slain(1)).collect::<Vec<_>>());
             for f in &mut h.fallen {
-                f.creep.body.push(Part {
-                    kind: BodyPart::Work,
+                f.creep.body.push(BodyPart {
+                    kind: Part::Work,
                     hits: 100,
-                    boost: Boost::Unboosted,
+                    boost: None,
                 });
             }
 

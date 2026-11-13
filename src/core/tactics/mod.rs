@@ -9,7 +9,7 @@ use crate::core::intents::CreepAct;
 use crate::core::mv::{Wish, blob, plan};
 use crate::core::tick;
 use crate::core::tiles::Tile;
-use crate::core::vocabulary::BodyPart;
+use crate::core::vocabulary::Part;
 use crate::core::world::{Creep, Pos, RoomName};
 use crate::core::{engine, tiles};
 
@@ -106,7 +106,7 @@ fn ranked<'a>(sight: &Sight<'a>, order: &[String], creep: &Creep) -> Vec<&'a Cre
     let mut rest: Vec<&Creep> = near.filter(|h| !order.contains(&h.id)).collect();
     rest.sort_by_key(|h| {
         (
-            h.live(BodyPart::Attack) + h.live(BodyPart::RangedAttack) == 0,
+            h.live(Part::Attack) + h.live(Part::RangedAttack) == 0,
             &h.id,
         )
     });
@@ -120,13 +120,13 @@ fn ranked<'a>(sight: &Sight<'a>, order: &[String], creep: &Creep) -> Vec<&'a Cre
 pub fn strike(sight: &Sight, order: &[String], creep: &Creep, armed: bool) -> Vec<CreepAct> {
     let targets: Vec<&Creep> = ranked(sight, order, creep)
         .into_iter()
-        .filter(|h| !armed || h.live(BodyPart::Attack) > 0 || h.live(BodyPart::RangedAttack) > 0)
+        .filter(|h| !armed || h.live(Part::Attack) > 0 || h.live(Part::RangedAttack) > 0)
         .collect();
     let within = |r: i32| targets.iter().filter(move |h| creep.pos.within(r, &h.pos));
 
     let melee = within(engine::MELEE_RANGE)
         .next()
-        .filter(|_| creep.live(BodyPart::Attack) > 0)
+        .filter(|_| creep.live(Part::Attack) > 0)
         .map(|h| CreepAct::AttackCreep(h.id.clone()));
 
     let volley: i32 = within(engine::RANGED_RANGE)
@@ -139,7 +139,7 @@ pub fn strike(sight: &Sight, order: &[String], creep: &Creep, armed: bool) -> Ve
         .is_some_and(|s| s.iter().any(|p| creep.pos.within(engine::RANGED_RANGE, p)));
 
     let ranged = match within(engine::RANGED_RANGE).next() {
-        _ if creep.live(BodyPart::RangedAttack) == 0 => None,
+        _ if creep.live(Part::RangedAttack) == 0 => None,
         Some(_) if volley > engine::RANGED_ATTACK_POWER && !spares => {
             Some(CreepAct::RangedMassAttack)
         }
@@ -192,17 +192,17 @@ pub fn close(sight: &mut Sight, order: &[String], centre: &Pos, creep: &Creep) -
 }
 
 /// How far `kind` of `h` strikes next tick, a step nearer.
-fn reach(kind: BodyPart, h: &Creep) -> Option<i32> {
-    let ranged = kind == BodyPart::RangedAttack;
+fn reach(kind: Part, h: &Creep) -> Option<i32> {
+    let ranged = kind == Part::RangedAttack;
     let range = if ranged {
         engine::RANGED_RANGE
     } else {
         engine::MELEE_RANGE
     };
-    (h.live(kind) > 0).then(|| range + h.live(BodyPart::Move).min(1))
+    (h.live(kind) > 0).then(|| range + h.live(Part::Move).min(1))
 }
 
-fn struck(kind: BodyPart, h: &Creep, at: &Pos) -> bool {
+fn struck(kind: Part, h: &Creep, at: &Pos) -> bool {
     reach(kind, h).is_some_and(|r| at.within(r, &h.pos))
 }
 
@@ -236,7 +236,7 @@ pub fn kite(
 
     let swings: Vec<&Creep> = hostiles_in(sight, room)
         .iter()
-        .filter(|h| struck(BodyPart::Attack, h, &creep.pos))
+        .filter(|h| struck(Part::Attack, h, &creep.pos))
         .collect();
 
     let gap = |tile: Tile| -> i32 {
@@ -274,14 +274,14 @@ pub fn kite(
 fn threat(raid: &[Creep], at: &Pos) -> i32 {
     raid.iter()
         .map(|h| {
-            let shot = if struck(BodyPart::RangedAttack, h, at) {
-                engine::RANGED_ATTACK_POWER * h.live(BodyPart::RangedAttack)
+            let shot = if struck(Part::RangedAttack, h, at) {
+                engine::RANGED_ATTACK_POWER * h.live(Part::RangedAttack)
             } else {
                 0
             };
 
-            let swing = if struck(BodyPart::Attack, h, at) {
-                engine::ATTACK_POWER * h.live(BodyPart::Attack)
+            let swing = if struck(Part::Attack, h, at) {
+                engine::ATTACK_POWER * h.live(Part::Attack)
             } else {
                 0
             };
@@ -297,8 +297,8 @@ fn rescued(raid: &[Creep], members: &[&Creep], creep: &Creep) -> bool {
     let focus = raid
         .iter()
         .map(|h| {
-            engine::RANGED_ATTACK_POWER * h.live(BodyPart::RangedAttack)
-                + engine::ATTACK_POWER * h.live(BodyPart::Attack)
+            engine::RANGED_ATTACK_POWER * h.live(Part::RangedAttack)
+                + engine::ATTACK_POWER * h.live(Part::Attack)
         })
         .sum::<i32>()
         - members
@@ -307,12 +307,12 @@ fn rescued(raid: &[Creep], members: &[&Creep], creep: &Creep) -> bool {
                 m.pos.within(engine::MELEE_RANGE, &creep.pos)
                     && (m.name == creep.name || m.hits == m.hits_max)
             })
-            .map(|m| engine::HEAL_POWER * m.live(BodyPart::Heal))
+            .map(|m| engine::HEAL_POWER * m.live(Part::Heal))
             .sum::<i32>();
 
     let ticks_out = 1 + raid
         .iter()
-        .flat_map(|h| [reach(BodyPart::RangedAttack, h), reach(BodyPart::Attack, h)])
+        .flat_map(|h| [reach(Part::RangedAttack, h), reach(Part::Attack, h)])
         .flatten()
         .fold(0, i32::max);
 
@@ -349,7 +349,7 @@ impl Safety<'_> {
     fn apart(&self, tile: Tile) -> i32 {
         self.members
             .iter()
-            .filter(|m| m.name != self.creep.name && m.live(BodyPart::Heal) > 0)
+            .filter(|m| m.name != self.creep.name && m.live(Part::Heal) > 0)
             .map(|m| m.pos.range(&tiles::to_pos(self.room, tile)).unwrap_or(9))
             .sum()
     }
@@ -494,11 +494,11 @@ pub struct Front {
 }
 
 pub fn picket_of(creep: &Creep) -> bool {
-    creep.body.iter().any(|p| p.kind.is_ranged_attack())
+    creep.body.iter().any(|p| p.kind == Part::RangedAttack)
 }
 
 pub fn claims(creep: &Creep) -> bool {
-    creep.body.iter().any(|p| p.kind == BodyPart::Claim)
+    creep.body.iter().any(|p| p.kind == Part::Claim)
 }
 
 /// Seated beside its post, off the rival's line: there the rival harvests.
@@ -564,15 +564,15 @@ pub struct Gate {
 pub fn drain(sight: &mut Sight, gate: &Gate, creep: &Creep) -> Wish {
     let at = tiles::of_pos(&creep.pos);
     let there = |t: Tile| tiles::to_pos(gate.from, t);
-    let strikes = creep.live(BodyPart::Attack) > 0 || creep.live(BodyPart::RangedAttack) > 0;
+    let strikes = creep.live(Part::Attack) > 0 || creep.live(Part::RangedAttack) > 0;
 
     // The set waits beside his room, off the pair's tiles: the entry is the plan's.
-    if strikes || creep.live(BodyPart::Work) > 0 {
+    if strikes || creep.live(Part::Work) > 0 {
         let wait = there(tiles::index(engine::ROOM_SIDE / 2, engine::ROOM_SIDE / 2));
         return toward(sight, creep, &wait, engine::ROOM_SIDE / 2);
     }
 
-    if creep.live(BodyPart::Heal) > 0 {
+    if creep.live(Part::Heal) > 0 {
         return match seat_of(&*sight.atlas, gate) {
             Some(seat) if at == seat && creep.pos.room == gate.from => step_to(creep, at),
             Some(seat) => toward(sight, creep, &there(seat), 0),
@@ -606,12 +606,12 @@ pub fn siege(
     let room = creep.pos.room;
     let here = tiles::of_pos(&creep.pos);
 
-    let dismantles = |c: &Creep| c.body.iter().any(|p| p.kind.is_work());
+    let dismantles = |c: &Creep| c.body.iter().any(|p| p.kind == Part::Work);
 
-    let net = front.strike
-        - engine::HEAL_POWER * members.iter().map(|m| m.live(BodyPart::Heal)).sum::<i32>();
+    let net =
+        front.strike - engine::HEAL_POWER * members.iter().map(|m| m.live(Part::Heal)).sum::<i32>();
 
-    let relieved = |c: &Creep| c.live(BodyPart::Work) == 0 || c.hits < 2 * net;
+    let relieved = |c: &Creep| c.live(Part::Work) == 0 || c.hits < 2 * net;
 
     let at_breach = |c: &Creep| c.pos.within(engine::MELEE_RANGE, &front.breach);
 
@@ -794,7 +794,7 @@ pub fn allot<'p>(
     healers.sort_by(|a, b| a.name.cmp(&b.name));
     let mut out = Vec::new();
     for healer in healers {
-        let parts = healer.live(BodyPart::Heal);
+        let parts = healer.live(Part::Heal);
         let near = if shooting(&healer.name) {
             engine::MELEE_RANGE
         } else {
@@ -870,7 +870,7 @@ pub fn nets(
                 .iter()
                 .filter(|(_, p, _)| p.name == c.name)
                 .filter_map(|(h, _, _)| healers.iter().find(|m| m.name == *h))
-                .map(|h| engine::HEAL_POWER * h.live(BodyPart::Heal))
+                .map(|h| engine::HEAL_POWER * h.live(Part::Heal))
                 .sum();
             (t, threat[t] - heal)
         })
@@ -948,7 +948,7 @@ pub fn hunt(
 ) -> (Option<CreepAct>, Wish, Vec<(Tile, i64)>) {
     let room = c.pos.room;
     let spared = sight.spared.get(&room).cloned().unwrap_or_default();
-    let parts = c.live(BodyPart::RangedAttack);
+    let parts = c.live(Part::RangedAttack);
     let worth_of = |m: &Mark, damage: i32| {
         i64::from(damage.min(m.hits)) * i64::from(m.worth) / i64::from(m.hits.max(1))
     };
@@ -987,7 +987,7 @@ pub fn hunt(
             _ => (0, None),
         }
     };
-    let swing = engine::ATTACK_POWER * c.live(BodyPart::Attack);
+    let swing = engine::ATTACK_POWER * c.live(Part::Attack);
     let swung = |at: &Pos| -> i64 {
         let hit = |r: i32| if r <= engine::MELEE_RANGE { swing } else { 0 };
         (marks.iter())

@@ -1,7 +1,7 @@
 use super::vocabulary::{
-    BodyPart, Boost, Compound, Ore, Resource, boost, part_count_in, same_part,
+    Compound, Ore, Part, Resource, ResourceType, damage_ratio, multiple, part_count_in,
 };
-use screeps::{Part, StructureType};
+use screeps::StructureType;
 
 pub const MAX_BODY_PARTS: usize = screeps::MAX_CREEP_SIZE as usize;
 pub const HARVEST_PER_WORK: i32 = screeps::HARVEST_POWER as i32;
@@ -49,9 +49,9 @@ pub const UPGRADE_RANGE: i32 = 3;
 /// A keeper guards the first source, else mineral, this near its lair.
 pub const KEEPER_GUARD_RANGE: i32 = 5;
 
-pub fn keeper_body() -> Vec<BodyPart> {
-    let mut body = [[BodyPart::Tough; 17].as_slice(), &[BodyPart::Move; 13]].concat();
-    body.extend([BodyPart::Attack, BodyPart::RangedAttack].repeat(10));
+pub fn keeper_body() -> Vec<Part> {
+    let mut body = [[Part::Tough; 17].as_slice(), &[Part::Move; 13]].concat();
+    body.extend([Part::Attack, Part::RangedAttack].repeat(10));
     body
 }
 pub const INVADER_USER: &str = screeps::INVADER_USERNAME;
@@ -109,21 +109,11 @@ pub const REPAIR_HITS_PER_ENERGY: i32 = 100;
 pub const MAX_CONSTRUCTION_SITES: i32 = screeps::MAX_CONSTRUCTION_SITES as i32;
 pub const ROOM_SIDE: i32 = screeps::ROOM_SIZE as i32;
 
-pub fn part_cost(part: BodyPart) -> i32 {
-    let engine = match part {
-        BodyPart::Work => Part::Work,
-        BodyPart::Carry => Part::Carry,
-        BodyPart::Move => Part::Move,
-        BodyPart::Attack => Part::Attack,
-        BodyPart::RangedAttack => Part::RangedAttack,
-        BodyPart::Heal => Part::Heal,
-        BodyPart::Claim => Part::Claim,
-        BodyPart::Tough => Part::Tough,
-    };
-    engine.cost() as i32
+pub fn part_cost(part: Part) -> i32 {
+    part.cost() as i32
 }
 
-pub fn body_cost(body: &[BodyPart]) -> i32 {
+pub fn body_cost(body: &[Part]) -> i32 {
     body.iter().map(|part| part_cost(*part)).sum()
 }
 
@@ -176,7 +166,7 @@ pub fn tower_attack_at(range: i32) -> i32 {
 }
 
 /// The engine destroys parts from the head; a part with any hit left acts.
-pub fn live_parts(body: &[BodyPart], hits: i32) -> Vec<BodyPart> {
+pub fn live_parts(body: &[Part], hits: i32) -> Vec<Part> {
     let live = ((hits + PART_HITS - 1) / PART_HITS) as usize;
     let skip = body.len().saturating_sub(live);
     body[skip..].to_vec()
@@ -184,8 +174,8 @@ pub fn live_parts(body: &[BodyPart], hits: i32) -> Vec<BodyPart> {
 
 /// The engine puts hits on parts from the head and only a live MOVE moves:
 /// one MOVE last walks while any part lives.
-pub fn with_move_last(mut body: Vec<BodyPart>) -> Vec<BodyPart> {
-    match body.iter().rposition(|p| *p == BodyPart::Move) {
+pub fn with_move_last(mut body: Vec<Part>) -> Vec<Part> {
+    match body.iter().rposition(|p| *p == Part::Move) {
         Some(at) if at < body.len() - 1 => {
             let part = body.remove(at);
             body.push(part);
@@ -203,17 +193,17 @@ fn part_hits_at(n: usize, hits: i32, i: usize) -> i32 {
 
 /// `calcBodyEffectiveness`. `boosts` is one a part, head first, or empty.
 pub fn power_at<'a>(
-    body: &'a [BodyPart],
-    boosts: &'a [Boost],
+    body: &'a [Part],
+    boosts: &'a [Option<ResourceType>],
     hits: i32,
-) -> Box<dyn Fn(BodyPart) -> i32 + 'a> {
+) -> Box<dyn Fn(Part) -> i32 + 'a> {
     if boosts.is_empty() {
         let live = live_parts(body, hits);
         return Box::new(move |part| part_count_in(&live, part));
     }
     let live = ((hits + PART_HITS - 1) / PART_HITS) as usize;
     let skip = body.len().saturating_sub(live);
-    let acting: Vec<(BodyPart, Boost)> = body[skip..]
+    let acting: Vec<(Part, Option<ResourceType>)> = body[skip..]
         .iter()
         .copied()
         .zip(boosts[skip..].iter().copied())
@@ -221,19 +211,14 @@ pub fn power_at<'a>(
     Box::new(move |part| {
         acting
             .iter()
-            .map(|(p, boost)| {
-                if same_part(*p, part) {
-                    boost::multiple(*p, *boost)
-                } else {
-                    0
-                }
-            })
+            .filter(|(p, _)| *p == part)
+            .map(|(p, boost)| multiple(*p, *boost))
             .sum()
     })
 }
 
 /// The engine's `_applyDamage`.
-pub fn damage_taken(body: &[BodyPart], boosts: &[Boost], hits: i32, damage: i32) -> i32 {
+pub fn damage_taken(body: &[Part], boosts: &[Option<ResourceType>], hits: i32, damage: i32) -> i32 {
     if boosts.is_empty() || damage <= 0 {
         return damage;
     }
@@ -244,7 +229,7 @@ pub fn damage_taken(body: &[BodyPart], boosts: &[Boost], hits: i32, damage: i32)
         if left <= 0.0 {
             break;
         }
-        let ratio = boost::damage_ratio(*part, *boost);
+        let ratio = damage_ratio(*part, *boost);
         let taken = (f64::from(part_hits_at(n, hits, i)) / ratio).min(left);
         left -= taken;
         reduced += taken * (1.0 - ratio);
@@ -253,7 +238,7 @@ pub fn damage_taken(body: &[BodyPart], boosts: &[Boost], hits: i32, damage: i32)
     damage - (reduced + 0.5).floor() as i32
 }
 
-pub fn tough_hits(body: &[BodyPart], boosts: &[Boost], hits: i32) -> i32 {
+pub fn tough_hits(body: &[Part], boosts: &[Option<ResourceType>], hits: i32) -> i32 {
     if boosts.is_empty() {
         return 0;
     }
@@ -262,7 +247,7 @@ pub fn tough_hits(body: &[BodyPart], boosts: &[Boost], hits: i32) -> i32 {
         .zip(boosts.iter())
         .enumerate()
         .map(|(i, (part, boost))| {
-            if boost::damage_ratio(*part, *boost) < 1.0 {
+            if damage_ratio(*part, *boost) < 1.0 {
                 part_hits_at(n, hits, i)
             } else {
                 0
@@ -271,7 +256,7 @@ pub fn tough_hits(body: &[BodyPart], boosts: &[Boost], hits: i32) -> i32 {
         .sum()
 }
 
-pub fn damage_for(body: &[BodyPart], boosts: &[Boost], hits: i32, taken: i32) -> i32 {
+pub fn damage_for(body: &[Part], boosts: &[Option<ResourceType>], hits: i32, taken: i32) -> i32 {
     if boosts.is_empty() || taken <= 0 {
         return taken;
     }
@@ -281,7 +266,7 @@ pub fn damage_for(body: &[BodyPart], boosts: &[Boost], hits: i32, taken: i32) ->
     for (i, (part, boost)) in body.iter().zip(boosts.iter()).enumerate() {
         let take = part_hits_at(n, hits, i).min(left);
         left -= take;
-        damage += f64::from(take) / boost::damage_ratio(*part, *boost);
+        damage += f64::from(take) / damage_ratio(*part, *boost);
     }
     (damage + f64::from(left) - 1e-9).ceil() as i32
 }

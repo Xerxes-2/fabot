@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::engine;
 use super::tick::Declarations;
-use super::vocabulary::{BodyPart, Boost, Resource};
+use super::vocabulary::{Part, Resource, ResourceType};
 
 /// A room by its world coordinates: W0 is x = -1, N0 is y = -1.
 /// Ordered west to east, then north to south: not as its name is.
@@ -556,10 +556,10 @@ pub struct Controller {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Part {
-    pub kind: BodyPart,
+pub struct BodyPart {
+    pub kind: Part,
     pub hits: i32,
-    pub boost: Boost,
+    pub boost: Option<ResourceType>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -569,7 +569,7 @@ pub struct Creep {
     pub owner: Owner,
     pub pos: Pos,
     /// Head first, as the engine holds it.
-    pub body: Vec<Part>,
+    pub body: Vec<BodyPart>,
     pub hits: i32,
     pub hits_max: i32,
     /// Undefined while spawning; those are not in the world.
@@ -624,7 +624,7 @@ impl Room {
 pub struct Oven {
     pub name: String,
     pub remaining: i32,
-    pub body: Vec<Part>,
+    pub body: Vec<BodyPart>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -692,8 +692,8 @@ pub mod terrain {
     use crate::core::atlas::tiles::COUNT;
     use std::rc::Rc;
 
-    pub const WALL: u8 = 1;
-    pub const SWAMP: u8 = 2;
+    pub const WALL: u8 = screeps::Terrain::Wall as u8;
+    pub const SWAMP: u8 = screeps::Terrain::Swamp as u8;
 
     /// A whole room's raw buffer, shared between the map cache and each tick's rooms.
     pub type Terrain = Rc<[u8; COUNT]>;
@@ -719,25 +719,26 @@ pub mod terrain {
 }
 
 pub mod hostiles {
-    use super::{Creep, Room, RoomName};
+    use super::{Creep, Part, Room, RoomName};
     use crate::core::engine;
     use std::collections::BTreeSet;
 
     pub fn works(creep: &Creep) -> bool {
-        (creep.body.iter()).any(|p| p.kind.is_work() || p.kind.is_carry() || p.kind.is_claim())
+        (creep.body.iter())
+            .any(|p| p.kind == Part::Work || p.kind == Part::Carry || p.kind == Part::Claim)
     }
 
     pub fn strikes(creep: &Creep) -> bool {
         creep
             .body
             .iter()
-            .any(|p| p.kind.is_attack() || p.kind.is_ranged_attack())
+            .any(|p| p.kind == Part::Attack || p.kind == Part::RangedAttack)
     }
 
     /// The tiles a body can strike before our next decision: its longest
     /// weapon's range plus the two ticks v1's `ReachHorizon` let it close in.
     pub fn reach(creep: &Creep) -> i32 {
-        let range = if creep.body.iter().any(|p| p.kind.is_ranged_attack()) {
+        let range = if creep.body.iter().any(|p| p.kind == Part::RangedAttack) {
             engine::RANGED_RANGE
         } else {
             engine::MELEE_RANGE
@@ -760,10 +761,10 @@ pub mod hostiles {
     /// a rival's healer in transit or its remote harvester, but WORK in a room
     /// whose controller is ours can only be there to dismantle.
     pub fn armed(owned: &BTreeSet<RoomName>, hostiles: &[Creep], creep: &Creep) -> bool {
-        let works = creep.body.iter().any(|p| p.kind.is_work());
+        let works = creep.body.iter().any(|p| p.kind == Part::Work);
         strikes(creep)
             || works && owned.contains(&creep.pos.room)
-            || (works || creep.body.iter().any(|p| p.kind.is_heal()))
+            || (works || creep.body.iter().any(|p| p.kind == Part::Heal))
                 && hostiles
                     .iter()
                     .any(|o| o.pos.room == creep.pos.room && strikes(o))
@@ -855,9 +856,9 @@ impl Creep {
         self.owner.is_ours()
     }
 
-    pub fn live(&self, kind: BodyPart) -> i32 {
+    pub fn live(&self, kind: Part) -> i32 {
         (self.body.iter())
-            .filter(|p| p.hits > 0 && super::vocabulary::same_part(p.kind, kind))
+            .filter(|p| p.hits > 0 && p.kind == kind)
             .count() as i32
     }
 }
@@ -868,11 +869,11 @@ impl World {
     }
 }
 
-pub fn body_kinds(creep: &Creep) -> Vec<BodyPart> {
+pub fn body_kinds(creep: &Creep) -> Vec<Part> {
     creep.body.iter().map(|p| p.kind).collect()
 }
 
-pub fn body_boosts(creep: &Creep) -> Vec<Boost> {
+pub fn body_boosts(creep: &Creep) -> Vec<Option<ResourceType>> {
     creep.body.iter().map(|p| p.boost).collect()
 }
 

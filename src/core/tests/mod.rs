@@ -7,6 +7,27 @@ mod memory;
 mod mv;
 mod tick;
 
+use crate::core::vocabulary::{Part, ResourceType, takes};
+
+/// The compound of `tier` (0 for none) that boosts `part` in a fight.
+pub fn boosted(part: Part, tier: usize) -> Option<ResourceType> {
+    use ResourceType::*;
+    const LINES: [[ResourceType; 3]; 6] = [
+        [UtriumHydride, UtriumAcid, CatalyzedUtriumAcid],
+        [KeaniumOxide, KeaniumAlkalide, CatalyzedKeaniumAlkalide],
+        [
+            LemergiumOxide,
+            LemergiumAlkalide,
+            CatalyzedLemergiumAlkalide,
+        ],
+        [GhodiumOxide, GhodiumAlkalide, CatalyzedGhodiumAlkalide],
+        [ZynthiumOxide, ZynthiumAlkalide, CatalyzedZynthiumAlkalide],
+        [ZynthiumHydride, ZynthiumAcid, CatalyzedZynthiumAcid],
+    ];
+    let t = tier.checked_sub(1)?;
+    LINES.iter().map(|line| line[t]).find(|c| takes(part, *c))
+}
+
 /// A fixed-seed draw: the suites' scenes and worlds
 /// are sampled, never replayed (`ARCHITECTURE.md` §10).
 pub struct Dice(u64);

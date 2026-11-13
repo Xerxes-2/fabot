@@ -1,189 +1,64 @@
 use std::{borrow::Cow, cmp::Ordering};
 
-/// Each union compares by a hand-written ordinal: Fable's generic union
-/// equality walks the case structure, and v1 measured it on hot paths.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum BodyPart {
-    Work,
-    Carry,
-    Move,
-    Attack,
-    RangedAttack,
-    Heal,
-    Claim,
-    Tough,
-}
+use screeps::Boost;
+pub use screeps::{Part, ResourceType};
 
-impl BodyPart {
-    pub fn ordinal(self) -> i32 {
-        self as i32
-    }
-
-    pub fn is_work(self) -> bool {
-        self == BodyPart::Work
-    }
-
-    pub fn is_carry(self) -> bool {
-        self == BodyPart::Carry
-    }
-
-    pub fn is_claim(self) -> bool {
-        self == BodyPart::Claim
-    }
-
-    pub fn is_attack(self) -> bool {
-        self == BodyPart::Attack
-    }
-
-    pub fn is_ranged_attack(self) -> bool {
-        self == BodyPart::RangedAttack
-    }
-
-    pub fn is_heal(self) -> bool {
-        self == BodyPart::Heal
-    }
-}
-
-pub fn same_part(a: BodyPart, b: BodyPart) -> bool {
-    a == b
-}
-
-pub fn part_name(part: BodyPart) -> &'static str {
+pub fn part_letter(part: Part) -> char {
     match part {
-        BodyPart::Work => "work",
-        BodyPart::Carry => "carry",
-        BodyPart::Move => "move",
-        BodyPart::Attack => "attack",
-        BodyPart::RangedAttack => "ranged_attack",
-        BodyPart::Heal => "heal",
-        BodyPart::Claim => "claim",
-        BodyPart::Tough => "tough",
+        Part::Work => 'W',
+        Part::Carry => 'C',
+        Part::Move => 'M',
+        Part::Attack => 'A',
+        Part::RangedAttack => 'R',
+        Part::Heal => 'H',
+        Part::Claim => 'K',
+        Part::Tough => 'T',
+        _ => unreachable!(),
     }
 }
 
-pub fn part_of_name(name: &str) -> Option<BodyPart> {
-    Some(match name {
-        "work" => BodyPart::Work,
-        "carry" => BodyPart::Carry,
-        "move" => BodyPart::Move,
-        "attack" => BodyPart::Attack,
-        "ranged_attack" => BodyPart::RangedAttack,
-        "heal" => BodyPart::Heal,
-        "claim" => BodyPart::Claim,
-        "tough" => BodyPart::Tough,
-        _ => return None,
-    })
-}
-
-pub fn part_letter(part: BodyPart) -> char {
-    match part {
-        BodyPart::Work => 'W',
-        BodyPart::Carry => 'C',
-        BodyPart::Move => 'M',
-        BodyPart::Attack => 'A',
-        BodyPart::RangedAttack => 'R',
-        BodyPart::Heal => 'H',
-        BodyPart::Claim => 'K',
-        BodyPart::Tough => 'T',
-    }
-}
-
-pub const ALL_BODY_PARTS: [BodyPart; 8] = [
-    BodyPart::Work,
-    BodyPart::Carry,
-    BodyPart::Move,
-    BodyPart::Attack,
-    BodyPart::RangedAttack,
-    BodyPart::Heal,
-    BodyPart::Claim,
-    BodyPart::Tough,
+pub const ALL_BODY_PARTS: [Part; 8] = [
+    Part::Work,
+    Part::Carry,
+    Part::Move,
+    Part::Attack,
+    Part::RangedAttack,
+    Part::Heal,
+    Part::Claim,
+    Part::Tough,
 ];
 
-/// A fight's view of a part's boost (`BOOSTS`): a WORK boost for harvest,
-/// build or upgrade and a CARRY boost read as `Unboosted`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Boost {
-    Unboosted,
-    Tier1,
-    Tier2,
-    Tier3,
-}
-
-pub mod boost {
-    use super::{BodyPart, Boost};
-
-    /// The T2 UH-line compound, the strongest our labs make: `^UH2O` on ATTACK.
-    pub const UTRIUM_ACID: &str = "UH2O";
-
-    pub fn of_compound(part: BodyPart, compound: &str) -> Boost {
-        match (part, compound) {
-            (BodyPart::Attack, "UH")
-            | (BodyPart::RangedAttack, "KO")
-            | (BodyPart::Heal, "LO")
-            | (BodyPart::Tough, "GO")
-            | (BodyPart::Move, "ZO")
-            | (BodyPart::Work, "ZH") => Boost::Tier1,
-            (BodyPart::Attack, UTRIUM_ACID)
-            | (BodyPart::RangedAttack, "KHO2")
-            | (BodyPart::Heal, "LHO2")
-            | (BodyPart::Tough, "GHO2")
-            | (BodyPart::Move, "ZHO2")
-            | (BodyPart::Work, "ZH2O") => Boost::Tier2,
-            (BodyPart::Attack, "XUH2O")
-            | (BodyPart::RangedAttack, "XKHO2")
-            | (BodyPart::Heal, "XLHO2")
-            | (BodyPart::Tough, "XGHO2")
-            | (BodyPart::Move, "XZHO2")
-            | (BodyPart::Work, "XZH2O") => Boost::Tier3,
-            _ => Boost::Unboosted,
-        }
-    }
-
-    /// `calcBodyEffectiveness`; TOUGH's boost is in `damageRatio`.
-    pub fn multiple(part: BodyPart, boost: Boost) -> i32 {
-        match (part, boost) {
-            (
-                BodyPart::Attack
-                | BodyPart::RangedAttack
-                | BodyPart::Heal
-                | BodyPart::Move
-                | BodyPart::Work,
-                Boost::Tier1,
-            ) => 2,
-            (
-                BodyPart::Attack
-                | BodyPart::RangedAttack
-                | BodyPart::Heal
-                | BodyPart::Move
-                | BodyPart::Work,
-                Boost::Tier2,
-            ) => 3,
-            (
-                BodyPart::Attack
-                | BodyPart::RangedAttack
-                | BodyPart::Heal
-                | BodyPart::Move
-                | BodyPart::Work,
-                Boost::Tier3,
-            ) => 4,
-            _ => 1,
-        }
-    }
-
-    pub fn damage_ratio(part: BodyPart, boost: Boost) -> f64 {
-        match (part, boost) {
-            (BodyPart::Tough, Boost::Tier1) => 0.7,
-            (BodyPart::Tough, Boost::Tier2) => 0.5,
-            (BodyPart::Tough, Boost::Tier3) => 0.3,
-            _ => 1.0,
-        }
+/// A fight's `calcBodyEffectiveness`: a WORK boost counts for dismantle
+/// only; TOUGH's boost is in `damage_ratio`.
+pub fn multiple(part: Part, compound: Option<ResourceType>) -> i32 {
+    match (part, compound.and_then(ResourceType::boost)) {
+        (Part::Attack, Some(Boost::Attack(n)))
+        | (Part::RangedAttack, Some(Boost::RangedAttack(n)))
+        | (Part::Heal, Some(Boost::Heal(n)))
+        | (Part::Move, Some(Boost::Move(n)))
+        | (Part::Work, Some(Boost::Dismantle(n))) => n as i32,
+        _ => 1,
     }
 }
 
-pub fn part_count_in(body: &[BodyPart], part: BodyPart) -> i32 {
-    body.iter().filter(|each| same_part(**each, part)).count() as i32
+pub fn damage_ratio(part: Part, compound: Option<ResourceType>) -> f64 {
+    match (part, compound.and_then(ResourceType::boost)) {
+        // The crate holds the engine's tenths as f32.
+        (Part::Tough, Some(Boost::Tough(r))) => (f64::from(r) * 10.0).round() / 10.0,
+        _ => 1.0,
+    }
 }
 
+pub fn takes(part: Part, compound: ResourceType) -> bool {
+    multiple(part, Some(compound)) > 1 || damage_ratio(part, Some(compound)) < 1.0
+}
+
+pub fn part_count_in(body: &[Part], part: Part) -> i32 {
+    body.iter().filter(|each| **each == part).count() as i32
+}
+
+/// Each union compares by a hand-written ordinal: Fable's generic union
+/// equality walks the case structure, and v1 measured it on hot paths.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Ore {
     Hydrogen,

@@ -18,7 +18,7 @@ use wasm_bindgen::{JsCast, JsValue};
 use crate::core::atlas::tiles::{self, BOTTOM, LEFT, RIGHT, TOP};
 use crate::core::engine;
 use crate::core::tick::Declarations;
-use crate::core::vocabulary::{self, BodyPart, Boost};
+use crate::core::vocabulary::{self, Part};
 use crate::core::world::RoomName;
 use crate::core::world::*;
 
@@ -180,19 +180,15 @@ impl<'a> Reader<'a> {
         }
     }
 
-    fn body(&mut self) -> Vec<Part> {
+    fn body(&mut self) -> Vec<BodyPart> {
         self.list(|r| {
-            let kind = vocabulary::part_of_name(r.word()).unwrap_or(BodyPart::Tough);
+            let kind = r.word().parse().unwrap_or(Part::Tough);
             let hits = r.n();
             let boost = r.word();
-            Part {
+            BodyPart {
                 kind,
                 hits,
-                boost: if boost.is_empty() {
-                    Boost::Unboosted
-                } else {
-                    vocabulary::boost::of_compound(kind, boost)
-                },
+                boost: boost.parse().ok(),
             }
         })
     }

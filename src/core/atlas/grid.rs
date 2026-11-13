@@ -4,7 +4,7 @@ use std::num::NonZeroU8;
 
 use super::tiles::{self, Tile};
 use crate::core::engine;
-use crate::core::vocabulary::{BodyPart, boost};
+use crate::core::vocabulary::{Part, multiple};
 use crate::core::world::Creep;
 
 pub const UNREACHED: i32 = i32::MAX;
@@ -44,12 +44,12 @@ pub fn factor_of(creep: &Creep) -> FatigueFactor {
     let mut moves = 0;
     for part in &creep.body {
         match part.kind {
-            BodyPart::Move => {
+            Part::Move => {
                 if part.hits > 0 {
-                    moves += boost::multiple(BodyPart::Move, part.boost);
+                    moves += multiple(Part::Move, part.boost);
                 }
             }
-            BodyPart::Carry => {
+            Part::Carry => {
                 if part.hits > 0 {
                     carry += 1;
                 }
@@ -65,21 +65,21 @@ pub fn factor_of(creep: &Creep) -> FatigueFactor {
     }
 }
 
-pub fn empty_factor(body: &[BodyPart]) -> FatigueFactor {
+pub fn empty_factor(body: &[Part]) -> FatigueFactor {
     let mut weight = 0;
     let mut moves = 0;
     for part in body {
         match part {
-            BodyPart::Move => moves += 1,
-            BodyPart::Carry => (),
+            Part::Move => moves += 1,
+            Part::Carry => (),
             _ => weight += 1,
         }
     }
     FatigueFactor { weight, moves }
 }
 
-pub fn loaded_factor(body: &[BodyPart]) -> FatigueFactor {
-    let moves = body.iter().filter(|p| **p == BodyPart::Move).count() as i32;
+pub fn loaded_factor(body: &[Part]) -> FatigueFactor {
+    let moves = body.iter().filter(|p| **p == Part::Move).count() as i32;
     FatigueFactor {
         weight: body.len() as i32 - moves,
         moves,

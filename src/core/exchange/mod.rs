@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::core::engine;
 use crate::core::grid::{self, FatigueFactor, Weight, step_ticks};
 use crate::core::tiles::{self, Table, Tile};
-use crate::core::vocabulary::BodyPart;
+use crate::core::vocabulary::{Part, ResourceType};
 use crate::core::world::{Pos, RoomName};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -76,7 +76,7 @@ impl Outcome {
     }
 }
 
-pub type Body = Vec<BodyPart>;
+pub type Body = Vec<Part>;
 
 /// Holding a post the raid must come to, every pair stands at a swing's
 /// range; else the faster side picks the range.
@@ -572,11 +572,11 @@ fn lamed_in(
             let power = engine::power_at(&f.body, &f.boosts, hits);
             let gait = FatigueFactor {
                 weight: f.gait.weight,
-                moves: power(BodyPart::Move),
+                moves: power(Part::Move),
             };
 
             if live <= 0
-                || power(BodyPart::Attack) <= 0
+                || power(Part::Attack) <= 0
                 || fighter::falls_behind(terrain.weight, ours, gait)
             {
                 break hits;
@@ -1457,7 +1457,7 @@ pub fn cheapest_win(
     tick_worth: i32,
     theirs: &Side,
     terrain: Terrain,
-    boost: Option<(&str, i32)>,
+    boost: Option<(ResourceType, i32)>,
 ) -> Option<Vec<Body>> {
     let cost = |body: &Body, n: i32| -> Option<i32> {
         let side = Side {
@@ -1576,7 +1576,6 @@ pub fn damage_map(room: RoomName, towers: &[Pos], foes: &[Fighter]) -> Table<i32
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::vocabulary::Boost;
 
     const ROOM: RoomName = RoomName::named("W1N1");
 
@@ -1610,20 +1609,22 @@ mod tests {
 
     fn fighter(rng: &mut Rng) -> Fighter {
         let n = rng.between(1, 20);
-        let body: Vec<BodyPart> = (0..n)
+        let body: Vec<Part> = (0..n)
             .map(|_| {
                 rng.element(&[
-                    BodyPart::Attack,
-                    BodyPart::RangedAttack,
-                    BodyPart::Heal,
-                    BodyPart::Move,
-                    BodyPart::Tough,
-                    BodyPart::Work,
+                    Part::Attack,
+                    Part::RangedAttack,
+                    Part::Heal,
+                    Part::Move,
+                    Part::Tough,
+                    Part::Work,
                 ])
             })
             .collect();
-        let tier = rng.element(&[Boost::Unboosted, Boost::Tier1, Boost::Tier2, Boost::Tier3]);
-        let boosts = vec![tier; n as usize];
+        let tier = rng.element(&[0, 1, 2, 3]);
+        let boosts: Vec<_> = (body.iter())
+            .map(|p| crate::core::tests::boosted(*p, tier))
+            .collect();
         let x = rng.between(1, 48);
         let y = rng.between(1, 48);
         let pos = Some(Pos::new(ROOM, x, y));
@@ -1687,8 +1688,8 @@ mod tests {
 
     #[test]
     fn each_worker_of_a_struck_tile_needs_a_medic_of_its_own() {
-        let dismantler = fighter::cast(&[BodyPart::Work; 25]);
-        let medic = fighter::cast(&[BodyPart::Heal; 25]);
+        let dismantler = fighter::cast(&[Part::Work; 25]);
+        let medic = fighter::cast(&[Part::Heal; 25]);
         // One medic seated beside a worker heals it as much as a tower strikes it,
         // so pooling alone would price the pair in.
         let struck = engine::HEAL_POWER * 25;
@@ -1724,8 +1725,8 @@ mod tests {
 
             let plan = |heal: usize| {
                 let set = [
-                    fighter::cast(&[BodyPart::Work]),
-                    fighter::cast(&vec![BodyPart::Heal; heal]),
+                    fighter::cast(&[Part::Work]),
+                    fighter::cast(&vec![Part::Heal; heal]),
                 ];
                 breach_plan(
                     &ground,

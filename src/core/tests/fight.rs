@@ -1,7 +1,7 @@
 //! The fight's cast invariants: what a body a set walks out with is made of.
 use crate::core::engine;
 use crate::core::fight::casting;
-use crate::core::vocabulary::BodyPart;
+use crate::core::vocabulary::Part;
 
 use super::Dice;
 
@@ -26,12 +26,12 @@ fn every_body_a_set_walks_out_with_carries_a_heal() {
 
         for body in walked {
             assert!(
-                body.contains(&BodyPart::Heal),
+                body.contains(&Part::Heal),
                 "{body:?} at {capacity} for {worth} under {strike}"
             );
             assert!(body.len() <= engine::MAX_BODY_PARTS, "{body:?}");
             assert!(engine::body_cost(&body) <= capacity, "{body:?}");
-            assert_eq!(body.last(), Some(&BodyPart::Move), "{body:?}");
+            assert_eq!(body.last(), Some(&Part::Move), "{body:?}");
         }
     }
 }

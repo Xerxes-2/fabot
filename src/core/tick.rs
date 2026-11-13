@@ -13,7 +13,7 @@ use super::state::State;
 use super::strategy::intel::Intel;
 use super::tactics::{self, Tactic};
 use super::tiles::{self, Tile, TileSet};
-use super::vocabulary::{BodyPart, Compound, Resource};
+use super::vocabulary::{Compound, Part, Resource};
 use super::world::{
     Creep, Kind, Owner, Pos, Room, RoomName, Sightings, Structure, World, hostiles,
 };
@@ -290,7 +290,7 @@ pub fn nearest<'t>(
 ) -> Option<usize> {
     let walker = Mover {
         footprint: Footprint::One,
-        factor: grid::loaded_factor(&[BodyPart::Move]),
+        factor: grid::loaded_factor(&[Part::Move]),
     };
 
     let least =

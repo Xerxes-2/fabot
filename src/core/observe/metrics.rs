@@ -12,7 +12,7 @@ use crate::core::fight::shape::{Cast, Engagement, Phase};
 use crate::core::intents::{CreepAct, Intent, Refusal, SpawnAct, TowerAct};
 use crate::core::tick;
 use crate::core::tick::{Declarations, Derived};
-use crate::core::vocabulary::{BodyPart, Resource};
+use crate::core::vocabulary::{Part, Resource};
 use crate::core::world::{Creep, Kind, Owner, Pos, Room, RoomName, World, hostiles};
 
 pub const WINDOW: i32 = 100;
@@ -449,7 +449,7 @@ fn spent<'w>(
     match intent {
         Intent::Creep(name, act) => {
             let c = creeps.get(name.as_str())?;
-            let works = c.live(BodyPart::Work);
+            let works = c.live(Part::Work);
             let room = || world.room(c.pos.room);
             let held = energy(c) + fed.get(name.as_str()).copied().unwrap_or(0);
             let (what, (id, total), most) = match act {
@@ -660,9 +660,9 @@ fn steps(
 fn shots(sums: &mut Sums, world: &World, asked: &HashMap<&str, Asked>) {
     for c in &world.creeps {
         let a = asked.get(c.name.as_str()).copied().unwrap_or_default();
-        let reach = if c.live(BodyPart::RangedAttack) > 0 {
+        let reach = if c.live(Part::RangedAttack) > 0 {
             engine::RANGED_RANGE
-        } else if c.live(BodyPart::Attack) > 0 {
+        } else if c.live(Part::Attack) > 0 {
             engine::MELEE_RANGE
         } else {
             continue;

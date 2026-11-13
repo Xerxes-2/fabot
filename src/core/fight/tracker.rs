@@ -262,8 +262,8 @@ pub fn step(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::vocabulary::{BodyPart, Boost};
-    use crate::core::world::{Owner, Part, Store};
+    use crate::core::vocabulary::Part;
+    use crate::core::world::{BodyPart, Owner, Store};
 
     const GRACE: i32 = 3;
 
@@ -273,14 +273,14 @@ mod tests {
             name: id.to_string(),
             owner: Owner::Stranger("rival".to_string()),
             pos,
-            body: vec![Part {
+            body: vec![BodyPart {
                 kind: if armed {
-                    BodyPart::RangedAttack
+                    Part::RangedAttack
                 } else {
-                    BodyPart::Work
+                    Part::Work
                 },
                 hits: 100,
-                boost: Boost::Unboosted,
+                boost: None,
             }],
             hits: 100,
             hits_max: 100,

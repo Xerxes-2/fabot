@@ -8,7 +8,7 @@ use crate::core::mv::{Wish, plan};
 use crate::core::state::State;
 use crate::core::tick::{self, Context};
 use crate::core::tiles::{self, TileSet};
-use crate::core::vocabulary::{BodyPart, Resource};
+use crate::core::vocabulary::{Part, Resource};
 use crate::core::world::{Creep, Pos, RoomName};
 
 use super::bodies;
@@ -630,7 +630,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
         let Some((slot, body, task)) = at else {
             // A load held idle is lost to every sink.
             let loaded = creep.store.amount_of(&Resource::Energy) > 0;
-            let works = (creep.body.iter()).any(|p| p.kind == BodyPart::Work && p.hits > 0);
+            let works = (creep.body.iter()).any(|p| p.kind == Part::Work && p.hits > 0);
             let sink = (derived.grounds.iter())
                 .filter(|g| g.room == creep.pos.room)
                 .find_map(|g| match (works, &g.controller, g.bank()) {

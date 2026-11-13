@@ -6,35 +6,35 @@ use std::collections::BTreeMap;
 use crate::core::engine;
 use crate::core::exchange::{self, Fighter, fighter};
 use crate::core::tick::Declarations;
-use crate::core::vocabulary::{self, BodyPart, Compound, Resource};
+use crate::core::vocabulary::{Compound, Part, Resource, ResourceType};
 use crate::core::world::{
     Creep, Kind, Owner, Pos, Room, RoomName, Spawn, Store, Structure, World, terrain,
 };
 
-pub type Body = Vec<BodyPart>;
+pub type Body = Vec<Part>;
 
 /// v1's guard, ranger and defender blocks.
-const GUARD: [BodyPart; 10] = [
-    BodyPart::Tough,
-    BodyPart::Move,
-    BodyPart::Move,
-    BodyPart::Move,
-    BodyPart::Move,
-    BodyPart::Move,
-    BodyPart::Attack,
-    BodyPart::Attack,
-    BodyPart::Attack,
-    BodyPart::Heal,
+const GUARD: [Part; 10] = [
+    Part::Tough,
+    Part::Move,
+    Part::Move,
+    Part::Move,
+    Part::Move,
+    Part::Move,
+    Part::Attack,
+    Part::Attack,
+    Part::Attack,
+    Part::Heal,
 ];
-const RANGER: [BodyPart; 6] = [
-    BodyPart::Move,
-    BodyPart::Move,
-    BodyPart::Move,
-    BodyPart::RangedAttack,
-    BodyPart::RangedAttack,
-    BodyPart::Heal,
+const RANGER: [Part; 6] = [
+    Part::Move,
+    Part::Move,
+    Part::Move,
+    Part::RangedAttack,
+    Part::RangedAttack,
+    Part::Heal,
 ];
-const DEFENDER: [BodyPart; 2] = [BodyPart::Move, BodyPart::Attack];
+const DEFENDER: [Part; 2] = [Part::Move, Part::Attack];
 
 fn blocks() -> [Body; 3] {
     [GUARD.to_vec(), RANGER.to_vec(), DEFENDER.to_vec()]
@@ -46,7 +46,7 @@ pub fn home_copies(_: &Body) -> i32 {
     2
 }
 
-pub fn copies_within(worth: i32, spawn_ticks: i32, body: &[BodyPart]) -> i32 {
+pub fn copies_within(worth: i32, spawn_ticks: i32, body: &[Part]) -> i32 {
     (worth / engine::body_cost(body))
         .min(spawn_ticks / (engine::SPAWN_TICKS_PER_PART * body.len() as i32))
 }
@@ -79,20 +79,20 @@ pub fn affordable(capacity: i32) -> Vec<Body> {
 pub fn walking(capacity: i32) -> Vec<Body> {
     let mut out: Vec<Body> = affordable(capacity)
         .into_iter()
-        .filter(|b| b.contains(&BodyPart::Heal))
+        .filter(|b| b.contains(&Part::Heal))
         .collect();
 
     // `affordable`'s smallest HEAL is a RANGER at 700: the pair keeps a bank
     // under that answering.
-    out.extend(biggest(capacity, &[BodyPart::Move, BodyPart::Attack]));
+    out.extend(biggest(capacity, &[Part::Move, Part::Attack]));
     out
 }
 
 /// The body a set walks out with: one that heals what it is shot for, or its
 /// MOVE parts die to it one walk at a time (owner).
 fn with_heal(mut body: Body) -> Body {
-    if !body.contains(&BodyPart::Heal) {
-        body.extend([BodyPart::Heal, BodyPart::Move]);
+    if !body.contains(&Part::Heal) {
+        body.extend([Part::Heal, Part::Move]);
     }
 
     engine::with_move_last(body)
@@ -130,7 +130,7 @@ pub fn core_as_hostile(core: &Structure) -> Creep {
 pub fn razer(capacity: i32, hits: i32, ours: &[Fighter]) -> Vec<Body> {
     let swing = engine::ATTACK_POWER * ours.iter().map(|f| f.attack).sum::<i32>();
 
-    biggest(capacity, &[BodyPart::Move, BodyPart::Attack])
+    biggest(capacity, &[Part::Move, Part::Attack])
         .filter(|_| swing * engine::CREEP_LIFETIME < hits)
         .into_iter()
         .collect()
@@ -140,14 +140,14 @@ pub fn razer(capacity: i32, hits: i32, ours: &[Fighter]) -> Vec<Body> {
 /// shortens the declaim (v1). The HEAL a body out of our rooms takes costs it
 /// a block, so none below 950.
 pub fn tapper(capacity: i32) -> Option<Body> {
-    biggest(capacity, &[BodyPart::Move, BodyPart::Claim])
+    biggest(capacity, &[Part::Move, Part::Claim])
 }
 
 /// The most of `block` the bank buys, with the HEAL and MOVE a body that walks
 /// out of our rooms takes (owner): sized here, so it fits the colony the body
 /// is cast from.
-fn biggest(capacity: i32, block: &[BodyPart]) -> Option<Body> {
-    let legs = [BodyPart::Heal, BodyPart::Move];
+fn biggest(capacity: i32, block: &[Part]) -> Option<Body> {
+    let legs = [Part::Heal, Part::Move];
     let most = ((capacity - engine::body_cost(&legs)) / engine::body_cost(block))
         .min((engine::MAX_BODY_PARTS as i32 - legs.len() as i32) / block.len() as i32);
 
@@ -195,13 +195,13 @@ pub fn side_in(room: &Room, bodies: Vec<Fighter>) -> exchange::Side {
 /// parts the cluster's colony holds for it; None while no cluster is declared
 /// or it holds under a part's worth. A body the stock does not all cover is
 /// cast unboosted rather than held.
-pub fn cluster_boost(world: &World, declarations: &Declarations) -> Option<(&'static str, i32)> {
+pub fn cluster_boost(world: &World, declarations: &Declarations) -> Option<(ResourceType, i32)> {
     let (home, _) = declarations.labs()?;
     let (compound, energy) = crate::core::boost::home_holds(world, home, Compound::UtriumAcid);
     let parts =
         (compound / engine::BOOST_MINERAL_PER_PART).min(energy / engine::BOOST_ENERGY_PER_PART);
 
-    (parts > 0).then_some((vocabulary::boost::UTRIUM_ACID, parts))
+    (parts > 0).then_some((ResourceType::UtriumAcid, parts))
 }
 
 pub fn wins(
@@ -226,7 +226,7 @@ pub fn price(
     bodies: &[Body],
     copies_of: impl Fn(&Body) -> i32,
     tick_worth: i32,
-    boost: Option<(&str, i32)>,
+    boost: Option<(ResourceType, i32)>,
 ) -> Option<(Vec<Body>, exchange::Outcome, exchange::Side)> {
     let set: Vec<Body> = if wins(stance, ours, theirs, terrain) {
         Vec::new()
@@ -262,7 +262,7 @@ pub fn spent(set: &[Body], losses: exchange::Losses, ticks: i32, tick_worth: i32
 /// No more medics heal one body from beside it than the tiles around it.
 const AROUND_ONE: i32 = 8;
 
-pub fn most(capacity: i32, block: &[BodyPart]) -> Body {
+pub fn most(capacity: i32, block: &[Part]) -> Body {
     let n = (capacity / engine::body_cost(block))
         .min(engine::MAX_BODY_PARTS as i32 / block.len() as i32);
     let mut body = Vec::new();
@@ -280,8 +280,8 @@ pub fn siege<T>(
     capacity: i32,
     mut priced: impl FnMut(&[Body]) -> Option<T>,
 ) -> Option<(Vec<Body>, T)> {
-    let dismantler = most(capacity, &[BodyPart::Work, BodyPart::Move]);
-    let medic = most(capacity, &[BodyPart::Move, BodyPart::Heal]);
+    let dismantler = most(capacity, &[Part::Work, Part::Move]);
+    let medic = most(capacity, &[Part::Move, Part::Heal]);
 
     if dismantler.is_empty() {
         None
@@ -307,17 +307,14 @@ pub fn reinforce<T>(
     fielded: &[Body],
     mut priced: impl FnMut(&[Body]) -> Option<T>,
 ) -> Option<(Vec<Body>, T)> {
-    let dismantler = most(capacity, &[BodyPart::Work, BodyPart::Move]);
-    let medic = most(capacity, &[BodyPart::Move, BodyPart::Heal]);
+    let dismantler = most(capacity, &[Part::Work, Part::Move]);
+    let medic = most(capacity, &[Part::Move, Part::Heal]);
 
     if medic.is_empty() || dismantler.is_empty() {
         return None;
     }
 
-    let standing = fielded
-        .iter()
-        .filter(|b| b.contains(&BodyPart::Work))
-        .count();
+    let standing = fielded.iter().filter(|b| b.contains(&Part::Work)).count();
     let short = 2usize.saturating_sub(standing);
 
     (1..=AROUND_ONE as usize).find_map(|n| {
@@ -338,13 +335,13 @@ const MEDIC_HEAL: i32 = 13;
 
 pub fn pair() -> [Body; 2] {
     let bouncer = [
-        vec![BodyPart::Tough; BOUNCER_TOUGH],
-        vec![BodyPart::Move; BOUNCER_TOUGH],
+        vec![Part::Tough; BOUNCER_TOUGH],
+        vec![Part::Move; BOUNCER_TOUGH],
     ]
     .concat();
     let medic = [
-        vec![BodyPart::Heal; MEDIC_HEAL as usize],
-        vec![BodyPart::Move; MEDIC_HEAL as usize],
+        vec![Part::Heal; MEDIC_HEAL as usize],
+        vec![Part::Move; MEDIC_HEAL as usize],
     ]
     .concat();
     [bouncer, medic]
@@ -380,14 +377,14 @@ pub fn squad(capacity: i32, strike: i32, worth: i32) -> Vec<Body> {
     let heal = (((strike + 2 * engine::HEAL_POWER - 1) / (2 * engine::HEAL_POWER)) as usize).max(1);
     let n = if strike > 0 { 2 } else { 1 };
     let body = |ranged: usize| -> Body {
-        let mut b = vec![BodyPart::RangedAttack; ranged];
-        b.extend(vec![BodyPart::Move; heal + ranged]);
-        b.extend(vec![BodyPart::Heal; heal]);
+        let mut b = vec![Part::RangedAttack; ranged];
+        b.extend(vec![Part::Move; heal + ranged]);
+        b.extend(vec![Part::Heal; heal]);
         engine::with_move_last(b)
     };
     let fits = |b: &Body| b.len() <= engine::MAX_BODY_PARTS && engine::body_cost(b) <= capacity;
-    let paid = (worth / n as i32 / engine::body_cost(&[BodyPart::RangedAttack, BodyPart::Move]))
-        .max(1) as usize;
+    let paid =
+        (worth / n as i32 / engine::body_cost(&[Part::RangedAttack, Part::Move])).max(1) as usize;
     (1..=paid)
         .take_while(|r| fits(&body(*r)))
         .last()
@@ -441,7 +438,7 @@ pub fn colony_for(
     queued: &BTreeMap<RoomName, i32>,
     asked: &BTreeMap<RoomName, i32>,
     walk: impl Fn(RoomName) -> Option<i32>,
-    body: &[BodyPart],
+    body: &[Part],
 ) -> Option<RoomName> {
     let cost = engine::body_cost(body);
     let spawn_ticks = engine::SPAWN_TICKS_PER_PART * body.len() as i32;
@@ -540,7 +537,7 @@ mod tests {
     /// nearest colony is not the one that lands it soonest.
     #[test]
     fn a_body_is_cast_to_the_colony_that_lands_it_soonest_not_the_nearest() {
-        let body: Body = vec![BodyPart::Move; 20];
+        let body: Body = vec![Part::Move; 20];
         let (near, far) = (colony("W1N1", 12_000), colony("W3N1", 12_000));
         let spawns = [
             spawns_in(RoomName::named("W1N1"), 3),

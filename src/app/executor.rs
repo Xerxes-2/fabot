@@ -242,7 +242,7 @@ fn act(intent: &Intent) -> (String, i32) {
             Some(spawn) => {
                 let parts = Array::new();
                 for part in body {
-                    parts.push(&JsValue::from_str(vocabulary::part_name(*part)));
+                    parts.push(&JsValue::from(*part));
                 }
                 let options: SpawnOptions = Object::new().unchecked_into();
                 if !drawn.is_empty() {

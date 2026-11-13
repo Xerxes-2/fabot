@@ -1,5 +1,5 @@
 use super::mv::Wish;
-use super::vocabulary::{BodyPart, Resource};
+use super::vocabulary::{Part, Resource};
 use super::world::{Kind, RoomName};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,7 +69,7 @@ pub fn performed(acts: &[CreepAct]) -> Vec<CreepAct> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SpawnAct {
-    SpawnCreep(Vec<BodyPart>, String, Vec<String>),
+    SpawnCreep(Vec<Part>, String, Vec<String>),
     RecycleCreep(String),
 }
 
@@ -131,7 +131,7 @@ impl Rank {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Ask {
-    pub body: Vec<BodyPart>,
+    pub body: Vec<Part>,
     pub name: String,
     pub rank: Rank,
 }

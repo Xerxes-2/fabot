@@ -7,7 +7,7 @@ use crate::core::engine;
 use crate::core::intents::Intent;
 use crate::core::tick::{self, Declarations, Declared, Outpost};
 use crate::core::tiles;
-use crate::core::vocabulary::{BodyPart, Resource, resource_name, resource_of_name};
+use crate::core::vocabulary::{Part, Resource, resource_name, resource_of_name};
 use crate::core::world::{Controller, Owner, Pos, Room, RoomName, Source, World, push_int};
 
 /// A room as it stood when last seen, by username: a stance is the
@@ -63,7 +63,7 @@ pub fn step(world: &World, intel: &mut Intel) {
             // An ally's body is never hunted, so it never hides an enemy's.
             worker: room
                 .hostiles()
-                .find(|h| h.body.iter().any(|p| p.kind == BodyPart::Work))
+                .find(|h| h.body.iter().any(|p| p.kind == Part::Work))
                 .and_then(|h| user(&world.me, &h.owner)),
             lairs: Some(Atlas::posts(room)),
             controller: c.map(|c| Declared {

@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use super::super::shape::{Engagement, Phase};
 use crate::core::engine;
 use crate::core::tactics::Tactic;
-use crate::core::vocabulary::BodyPart;
+use crate::core::vocabulary::Part;
 use crate::core::world::{Creep, Owner, Pos, Room, RoomName, Source};
 
 pub const CANDIDATES: &[Tactic] = &[Tactic::BlobKite, Tactic::Kite];
@@ -30,10 +30,10 @@ pub fn prey(room: &Room) -> Vec<&Creep> {
         .filter(|h| {
             h.body
                 .iter()
-                .all(|p| !p.kind.is_attack() && !p.kind.is_ranged_attack())
+                .all(|p| p.kind != Part::Attack && p.kind != Part::RangedAttack)
                 && h.body
                     .iter()
-                    .any(|p| p.kind.is_work() || p.kind.is_carry() || p.kind == BodyPart::Claim)
+                    .any(|p| p.kind == Part::Work || p.kind == Part::Carry || p.kind == Part::Claim)
         })
         .collect()
 }
@@ -41,7 +41,7 @@ pub fn prey(room: &Room) -> Vec<&Creep> {
 /// v1's kill value less the work lost until it is replaced.
 pub fn worth(c: &Creep) -> i32 {
     let body = crate::core::world::body_kinds(c);
-    let claims = body.contains(&BodyPart::Claim);
+    let claims = body.contains(&Part::Claim);
     let life = if claims {
         engine::CLAIM_LIFETIME
     } else {

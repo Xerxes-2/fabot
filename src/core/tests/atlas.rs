@@ -9,9 +9,9 @@ use crate::core::grid::{
     FatigueFactor, Footprint, empty_factor, factor_of, loaded_factor, on_edge, step_ticks,
 };
 use crate::core::tiles::{self, Tile};
-use crate::core::vocabulary::{ALL_BODY_PARTS, BodyPart, Boost, Resource};
+use crate::core::vocabulary::{ALL_BODY_PARTS, Part, Resource};
 use crate::core::world::{
-    Creep, Kind, Mineral, Owner, Part, Pos, Room, RoomName, Source, Store, Structure, World,
+    BodyPart, Creep, Kind, Mineral, Owner, Pos, Room, RoomName, Source, Store, Structure, World,
     terrain,
 };
 
@@ -141,7 +141,7 @@ fn ground(dice: &mut Dice) -> Ground {
     }
 }
 
-fn parts(dice: &mut Dice, most: i32) -> Vec<BodyPart> {
+fn parts(dice: &mut Dice, most: i32) -> Vec<Part> {
     let n = dice.between(1, most);
     (0..n).map(|_| dice.pick(&ALL_BODY_PARTS)).collect()
 }
@@ -346,10 +346,10 @@ fn a_loaded_body_weighs_at_least_its_empty_self_and_a_creep_reads_as_its_parts()
             pos: Pos::new(ROOM, 1, 1),
             body: kinds
                 .iter()
-                .map(|&kind| Part {
+                .map(|&kind| BodyPart {
                     kind,
                     hits: 100,
-                    boost: Boost::Unboosted,
+                    boost: None,
                 })
                 .collect(),
             hits: 100,
@@ -641,10 +641,10 @@ fn every_tile_a_keeper_strikes_is_walled_and_a_room_of_keepers_not_due_walls_non
                 pos: pos(at),
                 body: engine::keeper_body()
                     .into_iter()
-                    .map(|kind| Part {
+                    .map(|kind| BodyPart {
                         kind,
                         hits: engine::PART_HITS,
-                        boost: Boost::Unboosted,
+                        boost: None,
                     })
                     .collect(),
                 hits: 5000,
@@ -717,7 +717,7 @@ fn a_body_walking_first_steps_never_enters_a_room_twice_and_arrives_where_a_rout
         let open = |dice: &mut Dice| tiles::index(1 + dice.below(48), 1 + dice.below(48));
         let room = |dice: &mut Dice| RoomName::new(dice.below(3), dice.below(3));
         let mut body = parts(&mut dice, 10);
-        body.push(BodyPart::Move);
+        body.push(Part::Move);
         let mover = Mover {
             footprint: Footprint::One,
             factor: loaded_factor(&body),
