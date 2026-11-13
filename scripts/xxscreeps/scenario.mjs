@@ -713,6 +713,8 @@ const opponentsOf = (name, opponents) => {
   return ["--opponents", file];
 };
 const preludes = [];
+// Two preludes of one world would save into one directory.
+const preluding = new Map();
 const play = async ({ name, start, ticks }) => {
   if (start.world && (start.declarations || start.off || start.memory || start.gcl)) {
     const world = join(REPO, "soak-runs", `world-${name}.json`);
@@ -742,16 +744,17 @@ const play = async ({ name, start, ticks }) => {
       ...opponentsOf(name, start.opponents),
     ]);
   const world = worldDir(start);
-  if (!existsSync(world)) {
-    const began = Date.now();
-    preludes.push({ label: `world ${worldOf(start)}`, dir: `world-${worldOf(start)}` });
-    const code = await soak([...recipe, "--ticks", String(start.at), "--run", `world-${worldOf(start)}`, "--bot", bundleAt(start.bundle), "--save", world, ...opponentsOf(`world-${name}`, start.opponents && seats(start.opponents))]);
-    console.error(`world ${worldOf(start)} played in ${((Date.now() - began) / 1000).toFixed(0)} s, counted in its first soak`);
-    if (code !== 0) {
-      rmSync(world, { recursive: true, force: true });
+  if (!existsSync(world) && !preluding.has(world))
+    preluding.set(world, (async () => {
+      const began = Date.now();
+      if (!preludes.some((p) => p.dir === `world-${worldOf(start)}`)) preludes.push({ label: `world ${worldOf(start)}`, dir: `world-${worldOf(start)}` });
+      const code = await soak([...recipe, "--ticks", String(start.at), "--run", `world-${worldOf(start)}`, "--bot", bundleAt(start.bundle), "--save", world, ...opponentsOf(`world-${name}`, start.opponents && seats(start.opponents))]);
+      console.error(`world ${worldOf(start)} played in ${((Date.now() - began) / 1000).toFixed(0)} s, counted in the soaks that waited on it`);
+      if (code !== 0) rmSync(world, { recursive: true, force: true });
       return code;
-    }
-  }
+    })());
+  const code = await preluding.get(world);
+  if (code !== undefined && code !== 0) return code;
   return soak(["--room", start.room, "--seed", String(start.seed), "--ticks", String(ticks), "--run", name, "--bot", bot, "--from", world, ...opponentsOf(name, start.opponents)]);
 };
 // A long soak started last is the whole run's tail; ticks, with a world still to play, stand in for its cost.
@@ -777,6 +780,7 @@ const LOST = 3;
 const invalid = [...runs.values()].filter((r) => r.code === LOST);
 if (invalid.length) {
   console.error(`${invalid.length} soaks lost ticks; again, ${Math.max(1, jobs >> 1)} at a time`);
+  preluding.clear();
   await playAll(invalid, Math.max(1, jobs >> 1));
 }
 
