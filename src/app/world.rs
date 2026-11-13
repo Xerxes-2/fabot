@@ -24,6 +24,18 @@ use crate::core::world::*;
 extern "C" {
     #[wasm_bindgen(js_name = __fabotRead)]
     fn read(drain: JsValue) -> Array;
+
+    type Game;
+    #[wasm_bindgen(static_method_of = Game, catch, js_name = getObjectById)]
+    fn object(id: &str) -> Result<JsValue, JsValue>;
+    #[wasm_bindgen(static_method_of = Game, catch, getter)]
+    fn creeps() -> Result<Named, JsValue>;
+    #[wasm_bindgen(static_method_of = Game, catch, getter)]
+    fn rooms() -> Result<Named, JsValue>;
+
+    type Named;
+    #[wasm_bindgen(method, structural, catch, indexing_getter)]
+    fn get(this: &Named, name: &str) -> Result<JsValue, JsValue>;
 }
 
 fn absent(v: &JsValue) -> bool {
@@ -468,25 +480,22 @@ fn status_of(name: RoomName) -> Option<String> {
 
 /// `Game.getObjectById` as `Executor` reads it: absent is a refusal, never an error.
 pub fn object_by_id(id: &str) -> Option<JsValue> {
-    let game = Reflect::get(&js_sys::global(), &JsValue::from_str("Game")).ok()?;
-    let get = field(&game, "getObjectById");
-    let arguments = Array::new();
-    arguments.push(&JsValue::from_str(id));
-    let found = Reflect::apply(get.unchecked_ref::<js_sys::Function>(), &game, &arguments).ok()?;
-    if absent(&found) { None } else { Some(found) }
+    Game::object(id).ok().filter(|found| !absent(found))
 }
 
 /// `Game.creeps[name]`, for the executor's creep.
 pub fn creep_by_name(name: &str) -> Option<JsValue> {
-    let game = Reflect::get(&js_sys::global(), &JsValue::from_str("Game")).ok()?;
-    let creeps = field(&game, "creeps");
-    let creep = field(&creeps, name);
-    if absent(&creep) { None } else { Some(creep) }
+    Game::creeps()
+        .ok()?
+        .get(name)
+        .ok()
+        .filter(|creep| !absent(creep))
 }
 
 pub fn room_by_name(name: RoomName) -> Option<JsValue> {
-    let game = Reflect::get(&js_sys::global(), &JsValue::from_str("Game")).ok()?;
-    let rooms = field(&game, "rooms");
-    let room = Reflect::get(&rooms, &js::room(name)).unwrap_or(JsValue::UNDEFINED);
-    if absent(&room) { None } else { Some(room) }
+    Game::rooms()
+        .ok()?
+        .get(&name.to_string())
+        .ok()
+        .filter(|room| !absent(room))
 }
