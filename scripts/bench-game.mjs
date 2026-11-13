@@ -132,6 +132,8 @@ globalThis.EVENT_ATTACK ??= 1;
 globalThis.EVENT_OBJECT_DESTROYED ??= 2;
 // Only the metrics price a lost structure, and no decision reads them.
 globalThis.CONSTRUCTION_COST ??= {};
+// The engine's, for a capture whose controllers lack ticksToDowngrade.
+globalThis.CONTROLLER_DOWNGRADE ??= { 1: 20000, 2: 10000, 3: 20000, 4: 40000, 5: 80000, 6: 120000, 7: 150000, 8: 200000 };
 // The vanilla engine's, for a capture from before captures carried the table.
 const from = (level, n) => Array.from({ length: 9 }, (_, l) => (l >= level ? n : 0));
 const VANILLA = {
