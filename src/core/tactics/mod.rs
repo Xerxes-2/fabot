@@ -104,7 +104,12 @@ fn ranked<'a>(sight: &Sight<'a>, order: &[String], creep: &Creep) -> Vec<&'a Cre
         .collect();
 
     let mut rest: Vec<&Creep> = near.filter(|h| !order.contains(&h.id)).collect();
-    rest.sort_by(|a, b| a.id.cmp(&b.id));
+    rest.sort_by_key(|h| {
+        (
+            h.live(BodyPart::Attack) + h.live(BodyPart::RangedAttack) == 0,
+            &h.id,
+        )
+    });
 
     first.extend(rest);
     first

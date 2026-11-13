@@ -133,9 +133,11 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
 
     let (mut engagements, into) = merged(&events, &state.engagements);
 
-    let armed: BTreeSet<String> = hostiles
-        .iter()
-        .filter(|h| cores.contains(&h.id) || hostiles::armed(owned, &hostiles, h))
+    // An outpost has no towers to answer a body that works it (§7.2).
+    let outpost = |r: &RoomName| worked.contains(r) && !homes.contains(r);
+    let works = |h: &Creep| outpost(&h.pos.room) && hostiles::works(h);
+    let armed: BTreeSet<String> = (hostiles.iter())
+        .filter(|h| cores.contains(&h.id) || hostiles::armed(owned, &hostiles, h) || works(h))
         .map(|h| h.id.clone())
         .collect();
 
@@ -147,11 +149,8 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
             continue;
         }
 
-        let in_room = |id: i32| -> bool {
-            by_id
-                .get(&id)
-                .is_some_and(|g| g.room == e.room && g.last_seen == world.time)
-        };
+        let in_room =
+            |id| (by_id.get(&id)).is_some_and(|g| g.room == e.room && g.last_seen == world.time);
 
         let gone = if homes.contains(&e.room) {
             !in_room(e.group)

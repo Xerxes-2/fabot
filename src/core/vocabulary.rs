@@ -27,6 +27,10 @@ impl BodyPart {
         self == BodyPart::Carry
     }
 
+    pub fn is_claim(self) -> bool {
+        self == BodyPart::Claim
+    }
+
     pub fn is_attack(self) -> bool {
         self == BodyPart::Attack
     }

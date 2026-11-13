@@ -1,0 +1,16 @@
+{
+  "why": "a stranger's harvesters and haulers working our outpost are struck there and answered by its Defend, though unarmed: the outpost is ours to defend. Hivemind works E26S8 from t2500; our first defender is affordable near t4400",
+  "modules": ["fight", "strategy", "tactics"],
+  "start": {
+    "world": "scripts/xxscreeps/worlds/season-outpost-ring.json",
+    "room": "E25S8",
+    "seed": 1,
+    "ended": true,
+    "opponents": [{ "name": "hivemind", "bot": "scripts/xxscreeps/engine/hivemind", "room": "E27S9" }]
+  },
+  "ticks": 8000,
+  "assert": [
+    { "measure": "hostileTicks", "room": "E26S8", "from": 5000, "max": 1700 },
+    { "measure": "bodiesLost", "max": 0 }
+  ]
+}

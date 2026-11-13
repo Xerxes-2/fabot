@@ -740,6 +740,10 @@ pub mod hostiles {
     use crate::core::engine;
     use std::collections::BTreeSet;
 
+    pub fn works(creep: &Creep) -> bool {
+        (creep.body.iter()).any(|p| p.kind.is_work() || p.kind.is_carry() || p.kind.is_claim())
+    }
+
     pub fn strikes(creep: &Creep) -> bool {
         creep
             .body

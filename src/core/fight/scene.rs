@@ -14,7 +14,7 @@ use crate::core::tick::{self, TacticRule};
 use crate::core::tiles::Tile;
 use crate::core::vocabulary::{BodyPart, Resource};
 use crate::core::world::{
-    Creep, Owner, Pos, Room, RoomName, Sightings, Structure, World, sightings,
+    Creep, Owner, Pos, Room, RoomName, Sightings, Structure, World, hostiles, sightings,
 };
 use crate::core::{engine, tiles};
 
@@ -70,11 +70,12 @@ pub(super) struct Scene<'a> {
 }
 
 impl<'a> Scene<'a> {
-    /// The reflex's stance (§7.2): a stranger only where it threatens.
+    /// The reflex's stance (§7.2): a stranger where it threatens or works our room.
     pub(super) fn struck(&self, h: &Creep) -> bool {
+        let ours = self.homes.contains(&h.pos.room) || self.worked.contains(&h.pos.room);
         match h.owner {
             Owner::Ally(_) => false,
-            Owner::Stranger(_) => self.armed.contains(&h.id),
+            Owner::Stranger(_) => self.armed.contains(&h.id) || ours && hostiles::works(h),
             _ => true,
         }
     }

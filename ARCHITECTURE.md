@@ -484,8 +484,9 @@ Common to every kind:
 
 `Defend` (v2.0):
 - Opened by Strategy when a group threatens: it stands in a room we hold or
-  work, or its centre drifts toward one. A level-0 Invader core strikes nothing
-  but holds its room's controller: the fight sees it as an armed hostile
+  work, or its centre drifts toward one; in an outpost, also a body that
+  works it (WORK, CARRY or CLAIM), which no tower answers there. A level-0
+  Invader core strikes nothing but holds its room's controller: the fight sees it as an armed hostile
   without a body, which no exchange prices and the biggest melee body the bank
   buys razes (v1's guard), so an engagement needs no structure target yet.
 - `Forming → Approaching` when every asked body stands (or the group reaches a
@@ -641,8 +642,9 @@ runs for every body with ATTACK or RANGED_ATTACK, in every phase, inside or
 outside an engagement: a swing and
 a shot at the first in reach in the kill order, a volley where it outdeals the
 shot and no ally or spared stranger stands in its reach. It strikes by stance
-(§7.2): an enemy's, an Invader's or a keeper's bodies all, a stranger's only
-armed ones, an ally's never. A Hunt's scored shot
+(§7.2): an enemy's, an Invader's or a keeper's bodies all, a stranger's
+armed ones, and in a room we own or work its WORK, CARRY or CLAIM ones too,
+an ally's never; the unarmed after the armed. A Hunt's scored shot
 stands in for it. Target selection is a static kill order set at open
 (healers first, then by damage/hits), re-computed only on events.
 
@@ -718,7 +720,8 @@ rules by the operator alone) and editable by the operator (`observe declare`;
 forbid? }`, refused where a name is no tactic's or a pin is what a rule that
 joins it forbids). The world reader turns every owner into its stance once
 (`world::Owner`): a stranger, neither ally nor enemy, is fought where it
-threatens us but never hunted; enemies are declared by hand, and a declared siege's owner, as intel last saw it, is one (owner's call). Candidates are priced off intel:
+threatens us or works a room we own or work (owner's call, 2026-11-13: an
+outpost is ours to defend), never followed out of it and never hunted; enemies are declared by hand, and a declared siege's owner, as intel last saw it, is one (owner's call). Candidates are priced off intel:
 an outpost by sources, distance, threat and the CPU it costs (v1 withdrew an
 outpost for CPU; the budget is explicit here); a claim by the same plus GCL
 room; a room is avoided by what intel saw there. A priced candidate that pays
