@@ -91,28 +91,7 @@ fn spot_of(derived: &Derived, task: &Task) -> Option<Pos> {
         | Task::Reserve(id)
         | Task::Claim(id) => id,
     };
-    let claim = derived.claims.iter().filter(|c| &c.id == id).map(|c| c.pos);
-    derived
-        .grounds
-        .iter()
-        .find_map(|g| {
-            let ctrl = g.controller.iter().filter(|c| &c.id == id).map(|c| c.pos);
-            (g.sources.iter().filter(|x| &x.id == id).map(|x| x.pos))
-                .chain(g.minerals.iter().filter(|x| &x.id == id).map(|x| x.pos))
-                .chain(g.stores.iter().filter(|x| &x.id == id).map(|x| x.pos))
-                .chain(g.refills.iter().filter(|x| &x.id == id).map(|x| x.pos))
-                .chain(g.sites.iter().filter(|x| &x.id == id).map(|x| x.pos))
-                .chain(g.repairs.iter().filter(|x| &x.id == id).map(|x| x.pos))
-                .chain(g.piles.iter().filter(|x| &x.id == id).map(|x| x.pos))
-                .chain(g.labs.iter().filter(|x| &x.id == id).map(|x| x.pos))
-                .chain(g.links.iter().filter(|x| &x.id == id).map(|x| x.pos))
-                .chain(g.terminal.iter().filter(|x| &x.id == id).map(|x| x.pos))
-                .chain(g.boost_lab.iter().filter(|x| &x.id == id).map(|x| x.pos))
-                .chain(g.ores.iter().filter(|x| &x.0 == id).map(|x| x.1))
-                .chain(ctrl)
-                .next()
-        })
-        .or_else(|| claim.clone().next())
+    derived.spots.get(id).copied()
 }
 
 /// What a store, link, lab or container holds of `r`: the engine refuses a

@@ -2,6 +2,7 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::core::HashMap;
 use crate::core::atlas::{Atlas, Tree};
 use crate::core::engine;
 use crate::core::grid::Footprint;
@@ -320,6 +321,7 @@ pub struct Derived {
     pub routes: BTreeMap<RoomName, Tree>,
     /// The declared outposts a foe stands down this tick.
     pub closed: Vec<Outpost>,
+    pub spots: HashMap<String, Pos>,
 }
 
 impl Derived {
@@ -1220,6 +1222,18 @@ pub fn of_world(
         tree_of(&mut routes, atlas, room);
     }
 
+    let claims: Vec<Controller> = declarations
+        .claims
+        .iter()
+        .filter(|_| (ours.owned.len() as i32) < world.rooms_allowed)
+        .filter_map(|claim| match world.room(claim.room) {
+            Some(room) => room.controller.clone(),
+            None => blind(claim, intel, world, declarations).controller,
+        })
+        .filter(reservable)
+        .collect();
+    let spots = spots_of(&grounds, &claims);
+
     Derived {
         time: world.time,
         colonies,
@@ -1228,16 +1242,8 @@ pub fn of_world(
             .iter()
             .map(|s| (Pos::new(s.room, 25, 25), s.age, s.cast))
             .collect(),
-        claims: declarations
-            .claims
-            .iter()
-            .filter(|_| (ours.owned.len() as i32) < world.rooms_allowed)
-            .filter_map(|claim| match world.room(claim.room) {
-                Some(room) => room.controller.clone(),
-                None => blind(claim, intel, world, declarations).controller,
-            })
-            .filter(reservable)
-            .collect(),
+        spots,
+        claims,
         ovens: ovens_of(world),
         routes,
         bodies,
@@ -1247,4 +1253,30 @@ pub fn of_world(
             .cloned()
             .collect(),
     }
+}
+
+fn spots_of(grounds: &[Ground], claims: &[Controller]) -> HashMap<String, Pos> {
+    let mut spots = HashMap::default();
+    for g in grounds {
+        let ids = (g.sources.iter().map(|x| (&x.id, x.pos)))
+            .chain(g.minerals.iter().map(|x| (&x.id, x.pos)))
+            .chain(g.stores.iter().map(|x| (&x.id, x.pos)))
+            .chain(g.refills.iter().map(|x| (&x.id, x.pos)))
+            .chain(g.sites.iter().map(|x| (&x.id, x.pos)))
+            .chain(g.repairs.iter().map(|x| (&x.id, x.pos)))
+            .chain(g.piles.iter().map(|x| (&x.id, x.pos)))
+            .chain(g.labs.iter().map(|x| (&x.id, x.pos)))
+            .chain(g.links.iter().map(|x| (&x.id, x.pos)))
+            .chain(g.terminal.iter().map(|x| (&x.id, x.pos)))
+            .chain(g.boost_lab.iter().map(|x| (&x.id, x.pos)))
+            .chain(g.ores.iter().map(|x| (&x.0, x.1)))
+            .chain(g.controller.iter().map(|x| (&x.id, x.pos)));
+        for (id, pos) in ids {
+            spots.entry(id.clone()).or_insert(pos);
+        }
+    }
+    for c in claims {
+        spots.entry(c.id.clone()).or_insert(c.pos);
+    }
+    spots
 }
