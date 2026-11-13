@@ -756,3 +756,23 @@ fn a_body_walking_first_steps_never_enters_a_room_twice_and_arrives_where_a_rout
         assert_eq!(arrived, routed, "{entered:?} toward {onto}");
     }
 }
+
+#[test]
+fn a_route_goes_round_a_stronghold_where_another_way_stands() {
+    let rooms: Vec<Room> = (0..3)
+        .flat_map(|x| (0..2).map(move |y| RoomName::new(x, y)))
+        .map(|name| room_of(name, vec![0; tiles::COUNT], Vec::new()))
+        .collect();
+    let world = world_of_rooms(rooms);
+    let (from, core, onto) = (
+        RoomName::new(0, 0),
+        RoomName::new(1, 0),
+        RoomName::new(2, 0),
+    );
+    let route = |stronghold: bool| {
+        let atlas = Atlas::following(Atlas::empty(), &world, [(core, None, stronghold)], []);
+        atlas.route(&BTreeSet::new(), 4, from, onto).unwrap()
+    };
+    assert!(route(false).contains(&core));
+    assert!(!route(true).contains(&core));
+}

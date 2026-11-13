@@ -253,10 +253,6 @@ pub fn step(
         n
     };
 
-    let strongholds: Vec<RoomName> = (intel.iter())
-        .filter(|(_, r)| r.stronghold)
-        .map(|(room, _)| *room)
-        .collect();
     let dug_elsewhere = |mineral: &Resource, but: Option<RoomName>| {
         (derived.colonies.iter())
             .filter(|c| Some(**c) != but)
@@ -283,9 +279,6 @@ pub fn step(
                     || world.closed.contains(&name)
                     || declarations.sieges.contains(&name)
                     || (rivals.iter()).any(|(t, _)| tiles::rooms_apart(*t, name) <= THREAT)
-                    || strongholds
-                        .iter()
-                        .any(|t| tiles::rooms_apart(*t, name) <= THREAT)
                     || scored.iter().any(|(_, o)| o.room == name)
                 {
                     continue;

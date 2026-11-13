@@ -56,6 +56,9 @@ pub struct RoomGrid {
     seen: bool,
     /// A keeper room out of sight whose lairs no intel places: crossed last.
     blind: bool,
+    /// Intel saw an Invader stronghold here: its towers cover the room, so it
+    /// is crossed last, as a blind keeper room is.
+    stronghold: bool,
 }
 
 /// What a flood is a function of besides the room's weights: the mover's
@@ -616,7 +619,7 @@ impl Atlas {
     pub fn following<'a>(
         mut previous: Atlas,
         world: &World,
-        seen: impl IntoIterator<Item = (RoomName, Option<&'a [Post]>)>,
+        seen: impl IntoIterator<Item = (RoomName, Option<&'a [Post]>, bool)>,
         terrains: impl IntoIterator<Item = (RoomName, &'a [u8; tiles::COUNT])>,
     ) -> Atlas {
         let mut rooms: HashMap<Coords, RoomGrid> = HashMap::default();
@@ -674,11 +677,20 @@ impl Atlas {
                 standing,
                 seen: true,
                 blind: false,
+                stronghold: false,
             };
             rooms.insert(c, grid);
         }
 
-        let posts: HashMap<RoomName, Option<&[Post]>> = seen.into_iter().collect();
+        let mut strongholds: Vec<Coords> = Vec::new();
+        let posts: HashMap<RoomName, Option<&[Post]>> = (seen.into_iter())
+            .map(|(room, posts, stronghold)| {
+                if stronghold {
+                    strongholds.push(room.coords());
+                }
+                (room, posts)
+            })
+            .collect();
         let lairs: HashMap<Coords, bool> = (posts.iter())
             .filter_map(|(name, posts)| Some((name.coords(), !(*posts)?.is_empty())))
             .filter(|(c, lairs)| *lairs != tiles::is_keeper_room(*c))
@@ -715,12 +727,16 @@ impl Atlas {
                         struck,
                         seen: false,
                         blind: keeper(c) && placed.is_none(),
+                        stronghold: false,
                     }
                 }
             };
             rooms.insert(c, grid);
         }
 
+        for (c, grid) in &mut rooms {
+            grid.stronghold = strongholds.contains(c);
+        }
         Atlas {
             rooms,
             lairs,

@@ -270,8 +270,9 @@ pub type Stop = (Coords, Option<Tile>);
 
 /// Grown from `root` (its target's seats, else any tile of it) out to
 /// `max_hops` crossings, until each of `stops` is settled or shown to have no
-/// way out: fewest blind keeper rooms first, since a guard may stand where a
-/// blind entry lands, then fewest ticks, equal ones in the order met.
+/// way out: fewest blind keeper rooms and strongholds first, since a guard
+/// may stand where a blind entry lands and a stronghold's towers cover its
+/// room, then fewest ticks, equal ones in the order met.
 pub fn search(
     atlas: &Atlas,
     mover: Mover,
@@ -299,7 +300,7 @@ pub fn search(
     let avoid: Vec<Coords> = avoid.iter().map(|r| r.coords()).collect();
     let grid_of = |c: Coords| atlas.rooms.get(&c);
     let blind = |c: Coords| match grid_of(c) {
-        Some(grid) => grid.blind,
+        Some(grid) => grid.blind || grid.stronghold,
         None => atlas
             .lairs
             .get(&c)

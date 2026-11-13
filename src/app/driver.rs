@@ -105,7 +105,7 @@ fn run_tick() -> Result<(), String> {
     phases.push(("world".to_string(), clock() - start));
 
     let start = clock();
-    let seen = (rows.iter()).map(|(room, row)| (*room, row.lairs.as_deref()));
+    let seen = (rows.iter()).map(|(room, row)| (*room, row.lairs.as_deref(), row.stronghold));
     atlas = Atlas::following(atlas, &world, seen, maps.terrains());
     phases.push(("atlas".to_string(), clock() - start));
 
