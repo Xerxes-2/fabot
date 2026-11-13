@@ -86,12 +86,14 @@ fn run_tick() -> Result<(), String> {
     let metrics = metrics.or_else(|| asked.then(wire::read_metrics));
 
     let start = clock();
-    let mut state = wire::read_state();
+    let mut memory = wire::read_memory();
+    let mut state = memory.state();
     state.layout = standing;
     phases.push(("memory".to_string(), clock() - start));
 
-    let mut declarations: Declarations =
-        wire::read_declarations().besieging(intel.as_ref().unwrap_or(&Intel::new()));
+    let mut declarations: Declarations = memory
+        .declarations()
+        .besieging(intel.as_ref().unwrap_or(&Intel::new()));
     let start = clock();
     let drain = (state.engagements.iter())
         .find(|e| e.phase == crate::core::fight::shape::Phase::Draining)
@@ -148,7 +150,7 @@ fn run_tick() -> Result<(), String> {
     let execute_cpu = clock() - start;
 
     let start = clock();
-    wire::write_state(&result.state);
+    wire::write_state(&mut memory, &result.state);
     if let Some(rows) = &intel
         && world.time % INTEL_WRITTEN_EVERY == 0
     {
@@ -159,9 +161,10 @@ fn run_tick() -> Result<(), String> {
     phases.push(("execute".to_string(), execute_cpu));
     phases.push(("write".to_string(), write_cpu));
 
-    if wire::recording() {
+    if memory.recording() {
         let start = clock();
-        if let Some(fault) = wire::record(&world, &pass, intel.as_ref().unwrap_or(&unread)) {
+        let rows = intel.as_ref().unwrap_or(&unread);
+        if let Some(fault) = wire::record(&world, &pass, &memory.text, rows) {
             record_fault(&mut faults, "record", &fault);
         }
         phases.push(("record".to_string(), clock() - start));

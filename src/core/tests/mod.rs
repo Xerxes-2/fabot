@@ -3,6 +3,7 @@
 mod atlas;
 mod engine;
 mod fight;
+mod memory;
 mod mv;
 mod tick;
 

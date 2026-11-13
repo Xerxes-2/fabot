@@ -32,11 +32,12 @@ pub struct Outpost {
     pub sources: Vec<Declared>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
 pub struct TacticRule {
     pub rival: Option<String>,
     pub room: Option<RoomName>,
     pub pin: Option<String>,
+    #[serde(default)]
     pub forbid: Vec<String>,
 }
 

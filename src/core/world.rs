@@ -141,8 +141,21 @@ impl std::fmt::Debug for RoomName {
     }
 }
 
+impl serde::Serialize for RoomName {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_str(self)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for RoomName {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let name = String::deserialize(d)?;
+        RoomName::parse(&name).ok_or_else(|| serde::de::Error::custom("no room name"))
+    }
+}
+
 /// Compared by hand: Fable's record compare walks every field, per tile per tick.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct Pos {
     pub room: RoomName,
     pub x: i32,

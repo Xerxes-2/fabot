@@ -11,15 +11,17 @@ use crate::core::tiles;
 use crate::core::vocabulary::Resource;
 use crate::core::world::{Room, RoomName, World, terrain::Terrain};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Expansion {
     pub room: RoomName,
     pub since: i32,
 }
 
 /// `ARCHITECTURE.md` §4 `expansion`.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Expansions {
+    #[serde(flatten)]
     pub in_flight: Option<Expansion>,
     /// `since` the tick it failed.
     pub failed: Vec<Expansion>,

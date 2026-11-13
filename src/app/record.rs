@@ -37,8 +37,7 @@ fn base64(bytes: &[u8]) -> String {
 }
 
 /// NUL parts the fields: JSON escapes it in Memory, and a name holds none.
-fn text(time: i32, cpu_limit: f64, pass: &Pass, intel: &str) -> String {
-    let memory = raw_memory::get().as_string().unwrap_or_default();
+fn text(time: i32, cpu_limit: f64, pass: &Pass, memory: &str, intel: &str) -> String {
     let mut text =
         String::with_capacity(memory.len() + intel.len() + pass.strs.len() + pass.ints.len() * 4);
     let _ = write!(text, "{time} {cpu_limit}\0{memory}\0{intel}\0");
@@ -55,8 +54,8 @@ fn text(time: i32, cpu_limit: f64, pass: &Pass, intel: &str) -> String {
 
 /// A tick of `parts` starts at slot `time * parts`, so the newest tick is
 /// always whole and the ring keeps the last `RING / parts`.
-pub fn record(time: i32, cpu_limit: f64, pass: &Pass, intel: &str) -> Option<String> {
-    let text = text(time, cpu_limit, pass, intel);
+pub fn record(time: i32, cpu_limit: f64, pass: &Pass, memory: &str, intel: &str) -> Option<String> {
+    let text = text(time, cpu_limit, pass, memory, intel);
     let packed = base64(&miniz_oxide::deflate::compress_to_vec(
         text.as_bytes(),
         LEVEL,

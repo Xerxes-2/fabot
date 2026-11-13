@@ -136,7 +136,7 @@ pub struct Ask {
     pub rank: Rank,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct Refusal {
     pub actor: String,
     pub act: String,

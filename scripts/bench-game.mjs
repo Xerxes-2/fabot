@@ -221,13 +221,16 @@ export function stand(captured, list, getHeapStatistics, clock) {
   Object.defineProperty(globalThis, "Memory", {
     configurable: true,
     get() {
-      parsed = JSON.parse(tick.memory);
+      parsed = JSON.parse(tick.memory || "{}");
       parsed.__proto__ = null;
       Object.defineProperty(globalThis, "Memory", { configurable: true, value: parsed });
       return parsed;
     },
   });
-  globalThis.RawMemory = { segments, get: () => tick.memory, setActiveSegments: () => {} };
+  // As the engine flushes: a `set` drops what `Memory` parsed.
+  let written;
+  const set = (text) => ((written = text), (parsed = undefined));
+  globalThis.RawMemory = { segments, get: () => written ?? tick.memory, set, setActiveSegments: () => {} };
   globalThis.Game = {
     time: tick.time,
     cpu: { ...tick.cpu, getUsed: () => clock() + 0.2 * intents.charged.size, getHeapStatistics },
@@ -239,5 +242,5 @@ export function stand(captured, list, getHeapStatistics, clock) {
     constructionSites: Object.fromEntries(tick.constructionSites.map((key) => [key, objects[key]])),
     getObjectById: (id) => objects[id] || null,
   };
-  return { segments, memory: () => (parsed === undefined ? tick.memory : JSON.stringify(parsed)) };
+  return { segments, memory: () => (parsed === undefined ? (written ?? tick.memory) : JSON.stringify(parsed)) };
 }

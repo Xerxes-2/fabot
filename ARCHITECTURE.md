@@ -180,8 +180,11 @@ Every value that crosses a tick is listed here, with one owner. A reader that is
 not the owner reads it through the owner's module. Adding a row is an
 architecture change, not a fix.
 
-**Where it lives.** `Memory` is parsed by the engine on first access every tick,
-so its size is a per-tick tax: it holds only what every tick reads. Everything
+**Where it lives.** `Memory` is `RawMemory`'s text, parsed once a tick into
+`core/memory.rs` and set once at its end, its rows (de)serialized by serde in
+the shape they are stored in. The global `Memory` is never touched, so the
+engine neither parses nor stringifies it and no row crosses the JS seam a field
+at a time. Its size is a per-tick tax: it holds only what every tick reads. Everything
 read on a key change, on demand or by the operator goes in **segments**
 (`RawMemory.segments`, read when asked). The heap is a cache and is rebuildable
 from the other two (§1, cold start).
@@ -829,7 +832,8 @@ benchmark meets three requirements:
    through the built bundle. v1's `capture-tick` read room history after the
    fact; that is not what the bot saw. No synthetic scenario is a benchmark.
 2. **The cost model is the engine's.** Memory is `JSON.parse`d from the real
-   string on first access and `JSON.stringify`ed at the tick's end; accepted
+   string on first access and `JSON.stringify`ed at the tick's end, unless
+   `RawMemory.set` replaced it; accepted
    intents cost 0.2 each; the harness runs under the live isolate's heap limit
    so GC shows; the first ticks after load are reported apart (cold).
 3. **It is calibrated against live.** `Main` records per-module CPU

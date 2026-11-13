@@ -6,6 +6,7 @@ pub mod exchange;
 pub mod fight;
 pub mod intents;
 pub mod layout;
+pub mod memory;
 pub mod mv;
 pub mod observe;
 pub mod season;

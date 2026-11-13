@@ -31,7 +31,7 @@ const spawn = {
   hitsMax: 5000,
   store: store({ energy: 300 }, 300),
   spawning: null,
-  spawnCreep: (body, name) => (((Memory.creeps ??= {})[name] = {}), 0),
+  spawnCreep: () => 0,
 };
 const road = { id: "r1", structureType: "road", pos: at(26, 25), hits: 5000, hitsMax: 5000 };
 const creep = {
@@ -86,8 +86,10 @@ const terrain = new Uint8Array(2500);
 terrain[0] = 1;
 terrain[51] = 2;
 
-globalThis.Memory = { fabot: { v1: "left alone" }, creeps: { dead: {} } };
-globalThis.RawMemory = { segments, get: () => JSON.stringify(globalThis.Memory), setActiveSegments: (ids) => active.push(ids) };
+let memory = JSON.stringify({ fabot: { v1: "left alone" }, creeps: { dead: {} } });
+// The engine parses and stringifies `Memory` on a tick that touches it.
+Object.defineProperty(globalThis, "Memory", { configurable: true, get: () => fail("the bot touched Memory") });
+globalThis.RawMemory = { segments, get: () => memory, set: (text) => (memory = text), setActiveSegments: (ids) => active.push(ids) };
 globalThis.Game = {
   time: 100,
   cpu: { limit: 20, bucket: 10000, getUsed: () => (used += 0.25) },
@@ -127,7 +129,8 @@ for (let t = 0; t < 3; t++) {
   Game.time = 100 + t;
   main.loop();
 }
-Memory.v2.switches.recorder = true;
+memory = JSON.stringify({ v2: { ...JSON.parse(memory).v2, switches: { recorder: true } } });
+const before = memory;
 Game.time = 103;
 main.loop();
 
@@ -141,11 +144,12 @@ const pass = globalThis.__fabotRead().map((each) => (typeof each === "string" ? 
 const [recorded] = unpack(RECORDER.map((id) => segments[id]));
 if (recorded?.time !== 103) fail(`recorder wrote no tick 103: ${recorded?.time}`);
 if (!recorded.intel.startsWith("W1N1 103 ")) fail(`recorder's intel lost the room: ${recorded.intel}`);
-if (recorded.memory !== RawMemory.get()) fail("recorder's Memory is not the tick's");
-if (Memory.fabot !== undefined) fail(`v1's Memory was kept: ${JSON.stringify(Memory.fabot)}`);
-if (Memory.creeps !== undefined) fail(`a dead creep's Memory was kept: ${JSON.stringify(Memory.creeps)}`);
-const held = Memory.v2.assignments?.a;
-if (typeof held !== "string") fail(`the creep holds no task: ${JSON.stringify(Memory.v2.assignments)}`);
+if (recorded.memory !== before) fail("recorder's Memory is not the tick's");
+const stored = JSON.parse(memory);
+if (stored.fabot !== undefined) fail(`v1's Memory was kept: ${JSON.stringify(stored.fabot)}`);
+if (stored.creeps !== undefined) fail(`a dead creep's Memory was kept: ${JSON.stringify(stored.creeps)}`);
+const held = stored.v2.assignments?.a;
+if (typeof held !== "string") fail(`the creep holds no task: ${JSON.stringify(stored.v2.assignments)}`);
 if (observe.refusals.some((r) => r.code === -100)) fail(`an intent threw: ${JSON.stringify(observe.refusals)}`);
 
 // A read too short for its decoder panics, a wasm trap; the tick after runs

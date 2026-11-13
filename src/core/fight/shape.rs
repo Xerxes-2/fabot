@@ -1,10 +1,13 @@
 use std::collections::BTreeSet;
 
+use serde::{Deserialize, Serialize};
+
 use crate::core::tactics::{Offer, Tactic};
 use crate::core::vocabulary::BodyPart;
 use crate::core::world::{Pos, RoomName};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "crate::core::memory::Seen", into = "crate::core::memory::Seen")]
 pub struct Group {
     pub id: i32,
     pub members: BTreeSet<String>,
@@ -13,7 +16,8 @@ pub struct Group {
     pub centre: Pos,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Phase {
     Forming,
     Approaching,
@@ -28,14 +32,16 @@ pub enum Phase {
 /// Set when a side is priced, never between: `order` is the hostiles' ids,
 /// first struck first; `offers` what the price found, the chosen one among
 /// them, kept in this tick's heap only (§4) for the observe row to print.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Plan {
     pub tactic: Tactic,
     pub order: Vec<String>,
+    #[serde(skip)]
     pub offers: Vec<Offer>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "crate::core::memory::Kind", into = "crate::core::memory::Kind")]
 pub enum Objective {
     Defend,
     /// Into its room to the rival structure `target`; the plan's order is the
@@ -47,13 +53,15 @@ pub enum Objective {
 
 /// A Defend's target is `Group`, and `room` the room held or worked it
 /// threatened; a Siege's and a Sweep's `group` is none (0).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Engagement {
-    pub id: i32,
+    #[serde(flatten)]
     pub objective: Objective,
+    pub id: i32,
     pub group: i32,
     pub room: RoomName,
     pub ours: BTreeSet<String>,
+    #[serde(flatten)]
     pub plan: Plan,
     pub phase: Phase,
     pub opened: i32,
@@ -61,11 +69,13 @@ pub struct Engagement {
     pub lost: i32,
     /// The bodies it may lose before it disengages.
     pub budget: i32,
+    #[serde(serialize_with = "crate::core::memory::js_number")]
     pub priority: f64,
     /// Starved: towers and ramparts answer it alone.
     pub unanswered: bool,
     /// Bouncer trips onto his border his towers left untouched, since the last
     /// one they struck: a drain counts them and gives up (§6.2).
+    #[serde(default)]
     pub ignored: i32,
     /// The bank it was last priced against; a larger one is an event.
     pub capacity: i32,
@@ -76,10 +86,11 @@ pub struct Engagement {
 }
 
 /// A body asked of `room`'s spawns under `name`, until it stands.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Cast {
     pub engagement: i32,
     pub name: String,
     pub room: RoomName,
+    #[serde(with = "crate::core::memory::letters")]
     pub body: Vec<BodyPart>,
 }

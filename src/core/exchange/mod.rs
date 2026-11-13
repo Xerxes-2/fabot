@@ -39,7 +39,11 @@ pub struct Losses {
     pub hits: i32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(
+    from = "crate::core::memory::Stored",
+    into = "crate::core::memory::Stored"
+)]
 pub enum Outcome {
     Win(i32, Losses),
     Kite(i32),
