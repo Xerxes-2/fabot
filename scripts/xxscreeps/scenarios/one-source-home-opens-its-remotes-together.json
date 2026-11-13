@@ -1,0 +1,10 @@
+{
+  "why": "a one-source home from zero opens every neighbour that pays at once, as The International does from RCL1 (main opens one at a time, each once the last's container stands: E24S8 and E25S9 dug 0 by t5000, the fifth room from t9000; this change 12.0k and 11.2k; over seeds 1, 2, 1+7 RCL3 at ~9.9k against main's ~10.6k and 30k upgrade 250k against 206k)",
+  "modules": ["strategy", "economy"],
+  "start": { "world": "scripts/xxscreeps/worlds/season-outpost-ring.json", "room": "E23S9", "seed": 1, "ended": true },
+  "ticks": 5000,
+  "assert": [
+    { "measure": "dug", "room": "E24S8", "to": 5000, "min": 6000 },
+    { "measure": "dug", "room": "E25S9", "to": 5000, "min": 6000 }
+  ]
+}

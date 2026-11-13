@@ -264,9 +264,10 @@ The pile is a store like the storage, but keeps no reserve: one on the
 ground pays its decay every tick,
 at RCL3's quiet 10k half a source's dig. A stood-down outpost keeps its
 slots and its bodies wait at home. While its stock stands past the reserve
-(a pile: while its draw outruns its decay), a colony's upgraders are cast
-before its outposts' haul: the haul only adds to the stock they draw down, so a spawn too busy for
-both would bank the outposts' income. The ore's miner is cast before the outposts, RCL6's payoff; the outposts' carriers
+(a pile: while its draw outruns its decay), a colony's upgraders, and before a
+storage its workers other than its crews, are cast before its outposts' haul: the haul only adds to the stock they draw down, so a spawn too busy for
+both would bank the outposts' income, and a young colony with every outpost
+open would leave its workers behind the haul while its pile decays. The ore's miner is cast before the outposts, RCL6's payoff; the outposts' carriers
 take the spawns' time the colony's other bodies leave over a life, or a far ring of outposts casts nothing
 but haulers; the home's own carriers queue ahead of a fight's casts, since
 they refill the bank those are paid from. While a colony owes a fight cast
@@ -731,10 +732,12 @@ without outposts it banks nothing for boosts, labs or ramparts; owner): the oper
 tick (dig less the bodies' upkeep, a room another player works paying its
 bodies twice, an ally's never) while each home's spawns' half (all of it
 once its extractor and terminal stand: the level rush is over and dig is the score) and the CPU's
-half (0.2 an intent, a body acting once a tick) carry them. A home adds one
+half (0.2 an intent, a body acting once a tick) carry them. A home with a storage adds one
 room that does not stand at a time, so its spawns take on one room's bodies
-at once, and the ranking puts the rooms that stand first, so a new reading
-of intel never drops one. While an
+at once; a young one opens every room that pays at once, as The
+International's do from RCL1, since one at a time, each waiting for its
+containers, put a one-source home's RCL3 later. The ranking puts the rooms
+that stand first, so a new reading of intel never drops one. While an
 operation is open (a fight cast owed, a declared claim not yet spawned, a
 declared siege, an open siege or sweep, a boost the colony fills) a colony adds no
 room that does not stand: an operator's declaration wins over an

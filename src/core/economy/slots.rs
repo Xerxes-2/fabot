@@ -338,7 +338,7 @@ impl Plan<'_> {
                 );
             }
             if inside_deadline(&colony.controller) {
-                self.worker(ci, colony.room, 0, false, FLOOR, MOST);
+                self.worker(ci, colony.room, 0, (false, false), FLOOR, MOST);
             }
             return;
         }
@@ -385,13 +385,13 @@ impl Plan<'_> {
             if raised {
                 // A claim without its spawn is raised by workers sent from here.
                 for k in 0..PIONEERS {
-                    self.worker(ci, g.room, k, true, PIONEER, MOST);
+                    self.worker(ci, g.room, k, (true, false), PIONEER, MOST);
                 }
                 continue;
             }
             // Hivemind's mine builder.
             if !own && at_risk && storage.is_some() {
-                self.worker(ci, g.room, 0, false, MENDER, MENDER_WORK);
+                self.worker(ci, g.room, 0, (false, false), MENDER, MENDER_WORK);
             }
             for s in &g.sources {
                 let body = if own {
@@ -497,7 +497,14 @@ impl Plan<'_> {
             // Past its tower's level they build: upgrading, they drank what its builders draw.
             let builds = derived.colonies[cj].controller.level >= TOWER_LEVEL;
             for k in 0..PIONEERS {
-                self.worker(ci, derived.colonies[cj].room, k, builds, PIONEER, MOST);
+                self.worker(
+                    ci,
+                    derived.colonies[cj].room,
+                    k,
+                    (builds, false),
+                    PIONEER,
+                    MOST,
+                );
             }
         }
 
@@ -719,8 +726,13 @@ impl Plan<'_> {
                 k if k < floor + crews => CREW,
                 _ => SPEND,
             };
+            let spends = rank == SPEND;
+            let rank = match rank {
+                FLOOR | SPEND if banked > 0.0 && storage.is_none() => STOCKED,
+                rank => rank,
+            };
             let builds = (all_build || k < builders) && rank != DEADLINE;
-            self.worker(ci, colony.room, k as usize, builds, rank, MOST);
+            self.worker(ci, colony.room, k as usize, (builds, spends), rank, MOST);
         }
 
         // The dig, the ring's upkeep, the controller's drink and the ore, each
@@ -790,7 +802,15 @@ impl Plan<'_> {
         }
     }
 
-    fn worker(&mut self, ci: usize, room: RoomName, k: usize, builds: bool, rank: i32, work: i32) {
+    fn worker(
+        &mut self,
+        ci: usize,
+        room: RoomName,
+        k: usize,
+        (builds, spends): (bool, bool),
+        rank: i32,
+        work: i32,
+    ) {
         let capacity = self.derived.colonies[ci].bank_capacity;
         let Some(body) = bodies::sized(Pattern::Worker, work, capacity) else {
             return;
@@ -808,7 +828,7 @@ impl Plan<'_> {
         self.push(ci, room, Job::Work(builds), seat, &key, k, body);
         let slot = self.out.last_mut().expect("pushed");
         slot.rank = rank;
-        slot.spends = rank == SPEND;
+        slot.spends = spends;
     }
 }
 
@@ -930,7 +950,7 @@ const DEADLINE: i32 = -1;
 const MEND: i32 = 3;
 /// The ore is RCL6's payoff: the outposts take what spawn time it leaves.
 const MINE: i32 = 3;
-/// Upgraders while the stock stands past the reserve (§5).
+/// Upgraders while the stock stands past the reserve, a young colony's workers but crews too (§5).
 const STOCKED: i32 = 4;
 const OUTPOST_HAUL: i32 = 5;
 const MOST: i32 = engine::MAX_BODY_PARTS as i32;
@@ -1220,7 +1240,7 @@ pub fn casts(
         let mut waiting = false;
         for s in mine {
             // A spend body cast now holds a spawn the fight's ask waits on.
-            if colony.owes && (s.spends || s.rank == STOCKED)
+            if colony.owes && s.spends
                 || !open(s)
                 || !fed(s)
                 || s.body.is_empty()

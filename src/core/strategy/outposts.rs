@@ -131,6 +131,12 @@ pub fn chosen(
             .then(value(pb).total_cmp(&value(pa)))
             .then(a.outpost.room.cmp(&b.outpost.room))
     });
+    // A young home opens every room that pays at once, as The International does.
+    let stocked = |home: RoomName| {
+        world.room(home).is_some_and(|r| {
+            (r.structures.iter()).any(|s| s.kind.is_storage() && s.owner.is_ours())
+        })
+    };
     let mut out = Vec::new();
     let mut rising: BTreeSet<RoomName> = BTreeSet::new();
     for (c, p) in priced {
@@ -140,7 +146,7 @@ pub fn chosen(
         if !c.declared && (unpaid || yields || rising.contains(&c.home)) {
             continue;
         }
-        if !c.stands {
+        if !c.stands && stocked(c.home) {
             rising.insert(c.home);
         }
         *left -= p.spawn;
