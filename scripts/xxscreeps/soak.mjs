@@ -596,10 +596,10 @@ console.log(
   [
     `${run}: ${stepped.ticks} ticks in ${(stepped.ms / 1000).toFixed(1)} s (${(stepped.ms / stepped.ticks).toFixed(1)} ms/tick)`,
     `final RCL ${last.rcl} progress ${last.progress}`,
-    `peak creeps ${Math.max(...samples.map((s) => s.creeps))}`,
+    `peak creeps ${samples.reduce((m, s) => Math.max(m, s.creeps), 0)}`,
     `RCL2 ${reached(2) === undefined ? "not reached" : `t${reached(2)}`}`,
     `RCL3 ${reached(3) === undefined ? "not reached" : `t${reached(3)}`}`,
-    `cpu mean ${cpus.length ? (cpus.reduce((a, b) => a + b, 0) / cpus.length).toFixed(2) : "-"} max ${cpus.length ? Math.max(...cpus).toFixed(2) : "-"}`,
+    `cpu mean ${cpus.length ? (cpus.reduce((a, b) => a + b, 0) / cpus.length).toFixed(2) : "-"} max ${cpus.length ? cpus.reduce((m, c) => Math.max(m, c)).toFixed(2) : "-"}`,
     `faults ${faults.length}`,
     `refusals ${top.length ? top.join(", ") : "none"}`,
     `slow steps ${slow.length ? slow.map((t) => `t${t}`).join(", ") : "none"}`,

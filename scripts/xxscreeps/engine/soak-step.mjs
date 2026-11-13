@@ -486,7 +486,8 @@ function ledgerRow() {
 // A site that pays back, by id: the tick a sample first saw it.
 const PAYING = ["spawn", "extension", "container", "storage", "link", "tower"];
 const placedAt = new Map();
-function sample(t, time, room) {
+const summary = ({ bodies, foes, ...s }) => s;
+function sample(t, time, room, user = ours) {
   const row = {
     t,
     time,
@@ -512,7 +513,7 @@ function sample(t, time, room) {
     foes: [],
   };
   for (const o of room["#objects"]) {
-    const mine = o["#user"] === ours;
+    const mine = o["#user"] === user;
     // Our structures, and the roads and containers nobody owns, in our room.
     const ownerless = o.structureType === "road" || o.structureType === "container";
     if (o.structureType !== undefined && o["#lookType"] !== "constructionSite" && (mine || ownerless) && o.structureType !== "controller")
@@ -556,7 +557,7 @@ function sample(t, time, room) {
   const sourceContainers = objects.filter((o) => o.structureType === "container" && o["#lookType"] !== "constructionSite" && atSource(o));
   row.sourceContainers = sourceContainers.length;
   const roads = objects.filter((o) => o.structureType === "road" && o["#lookType"] !== "constructionSite");
-  const solid = objects.filter((o) => o["#lookType"] === "structure" && o["#user"] === ours && !["road", "container", "rampart", "controller"].includes(o.structureType));
+  const solid = objects.filter((o) => o["#lookType"] === "structure" && o["#user"] === user && !["road", "container", "rampart", "controller"].includes(o.structureType));
   row.buried = roads.filter((r) => solid.some((o) => o.pos.x === r.pos.x && o.pos.y === r.pos.y)).length;
   // A bay's extension is its harvester's, filled from the container beside it.
   row.unroaded = solid.filter((o) => o.structureType === "extension" && !sourceContainers.some((c) => near(c.pos, o.pos, 1)) && !roads.some((r) => near(r.pos, o.pos, 1) && !solid.some((s) => s.pos.x === r.pos.x && s.pos.y === r.pos.y))).length;
@@ -569,10 +570,11 @@ function sample(t, time, room) {
   const buffer =
     controller &&
     (objects
-      .filter((o) => built(o, "link") && o["#user"] === ours && range(o) <= 3 && !beside(o, 2, ["source"]))
+      .filter((o) => built(o, "link") && o["#user"] === user && range(o) <= 3 && !beside(o, 2, ["source"]))
       .sort((a, b) => range(a) - range(b) || a.pos.y * 50 + a.pos.x - (b.pos.y * 50 + b.pos.x))[0] ??
       objects.find((o) => built(o, "container") && range(o) <= 3 && !beside(o, 1, ["source", "mineral"])));
-  row.dry = !!buffer && energyIn(buffer) === 0 && objects.some((o) => o.body !== undefined && o["#user"] === ours && o.name.startsWith("upgrader-") && near(o.pos, buffer.pos, 1));
+  row.dry = !!buffer && energyIn(buffer) === 0 && objects.some((o) => o.body !== undefined && o["#user"] === user && o.name.startsWith("upgrader-") && near(o.pos, buffer.pos, 1));
+  row.mineralAmount = objects.find((o) => o["#lookType"] === "mineral")?.mineralAmount ?? null;
   return row;
 }
 
@@ -1045,9 +1047,10 @@ for (let t = 0; t < ticks; t++) {
         // Its towers' energy, and every shot they have spent.
         fire: objects.filter((x) => x.structureType === "tower").reduce((n, t) => n + energyIn(t), 0),
         spent: burned.get(o.id) ?? 0,
+        home: room["#user"] === o.id ? summary(sample(t, time, room, o.id)) : null,
       };
     }
-    if (homes.length > 1) row.homes = Object.fromEntries(homes.map((h, i) => [h, (({ bodies, foes, ...s }) => s)(sample(t, time, rooms[i]))]));
+    if (homes.length > 1) row.homes = Object.fromEntries(homes.map((h, i) => [h, summary(sample(t, time, rooms[i]))]));
     row.botCpu = fresh ? obs.cpu : null;
     row.roadLoss = roadLoss;
     row.roadsLost = { ...roadsLost };
