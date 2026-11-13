@@ -758,7 +758,10 @@ International's) is declared a claim, until its spawn stands, and kept in
 player takes it; the operator's claim in flight holds it off. It **fails**
 when another player owns the room, when it is not ours five lifetimes after
 it was declared (owner) or has no storage 40k ticks after (about twice the
-21k a room two crossings off took, measured). A fresh failure costs every room
+21k a room two crossings off took, measured), or its safe mode ran out
+with no tower up: RCL2 grants a young colony one (the engine adds one a
+level), a home's unanswered Defend spends it where no tower stands (§6.2),
+and nothing holds the room once it ends. A fresh failure costs every room
 within one of it more than any room scores, fading to nothing over 100k ticks
 (Hivemind's), and a room that scores nothing is never declared.
 

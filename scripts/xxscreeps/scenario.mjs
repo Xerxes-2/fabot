@@ -202,6 +202,7 @@ const windowsOf = (dir, a) =>
 const LEDGER_LEAST = 1000;
 // `AGED` in `src/core/observe/metrics.rs`: fewer ticks to live, a body died of age.
 const AGED = 5;
+const firstClaimed = (samples, met) => samples.find((s) => Object.keys(s.claimed ?? {}).length && Object.values(s.claimed).every(met))?.t ?? Infinity;
 const measures = {
   metric: (_, a, dir) => {
     const values = windowsOf(dir, a).filter((w) => w.ticks === 100 && w.row === (a.room ?? "*")).map((w) => w.values[a.metric] ?? 0);
@@ -261,13 +262,16 @@ const measures = {
   // Ticks bodies lost beside a road: grounded off it, or stopped for a body on it.
   roadLoss: (samples, a) => at(samples, a.to ?? Infinity).roadLoss - at(samples, a.from ?? 0).roadLoss,
   stillLoaded: (samples, a) => at(samples, a.to ?? Infinity).stillLoaded,
-  // The claims we own, the lowest level one stands at, and the first tick every one has a spawn.
+  // The claims we own, the lowest level one stands at, the first tick every one has a spawn, and whether a safe mode ran in one.
+  claimToRcl2: (samples) => firstClaimed(samples, (c) => c.level >= 2) - firstClaimed(samples, (c) => c.level >= 1),
+  rcl2ToTower: (samples) => firstClaimed(samples, (c) => c.towers > 0) - firstClaimed(samples, (c) => c.level >= 2),
+  claimSafeMode: (samples, a) => (within(samples, a).some((s) => Object.values(s.claimed ?? {}).some((c) => c.safe)) ? 1 : 0),
   claimLevelOf: (samples, a) => at(samples, a.to ?? Infinity).claimed?.[a.room]?.level ?? 0,
   // A home's level at the window's end.
   homeLevel: (samples, a) => { const s = at(samples, a.to ?? Infinity); return s.homes?.[a.room]?.rcl ?? s.rcl; },
   claimsOwned: (samples, a) => Object.values(at(samples, a.to ?? Infinity).claimed ?? {}).filter((c) => c.level > 0).length,
   claimLevel: (samples, a) => Math.min(...Object.values(at(samples, a.to ?? Infinity).claimed ?? {}).map((c) => c.level)),
-  claimCharged: (samples) => samples.find((s) => Object.values(s.claimed ?? {}).every((c) => c.fire >= 1000) && Object.keys(s.claimed ?? {}).length)?.t ?? Infinity,
+  claimCharged: (samples) => firstClaimed(samples, (c) => c.fire >= 1000),
   // Scouts cast, the most ticks one stood still (a scout never idles), and
   // the ticks scouts stood in `room`.
   scoutsCast: (_, __, dir) => new Set(scoutsOf(dir).map((b) => b.name)).size,
@@ -309,7 +313,7 @@ const measures = {
     return ticks ? Math.round((100 * of.reduce((n, b) => n + (b.acts[a.act] ?? 0), 0)) / ticks) : -Infinity;
   },
   claimersCast: (samples, a) => new Set(within(samples, a).flatMap((s) => s.bodies.filter((b) => b.startsWith("claimer-")).map((b) => b.split("@")[0]))).size,
-  claimSpawned: (samples) => samples.find((s) => Object.values(s.claimed ?? {}).every((c) => c.spawns > 0) && Object.keys(s.claimed ?? {}).length)?.t ?? Infinity,
+  claimSpawned: (samples) => firstClaimed(samples, (c) => c.spawns > 0),
   // The most of a compound (`resource`) stood at once.
   made: (samples, a) => Math.max(0, ...samples.map((s) => s.made?.[a.resource] ?? 0)),
   // Our bodies' boosted parts at once, the most over the run.

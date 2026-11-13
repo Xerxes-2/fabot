@@ -122,7 +122,7 @@ enum Fate {
     Flying,
 }
 
-fn fate(age: i32, owned: bool, theirs: bool, stored: bool) -> Fate {
+fn fate(age: i32, owned: bool, lost: bool, stored: bool) -> Fate {
     let deadline = if owned {
         RAISE_DEADLINE
     } else {
@@ -130,7 +130,7 @@ fn fate(age: i32, owned: bool, theirs: bool, stored: bool) -> Fate {
     };
     match () {
         _ if stored => Fate::Raised,
-        _ if theirs || age > deadline => Fate::Failed,
+        _ if lost || age > deadline => Fate::Failed,
         _ => Fate::Flying,
     }
 }
@@ -187,7 +187,15 @@ pub fn step(
             (r.structures.iter())
                 .any(|s| (s.kind.is_storage() || s.kind.is_terminal()) && s.owner.is_ours())
         });
-        match fate(world.time - e.since, owned, theirs, stored) {
+        // Nothing holds it once its safe mode is gone: RCL2's grant spent, the
+        // cooldown running and no tower up.
+        let bare = owned
+            && world.room(e.room).is_some_and(|r| {
+                r.controller.as_ref().is_some_and(|c| {
+                    c.safe_mode == 0 && c.safe_mode_available == 0 && c.safe_mode_cooldown > 0
+                }) && !(r.structures.iter()).any(|s| s.kind.is_tower() && s.owner.is_ours())
+            });
+        match fate(world.time - e.since, owned, theirs || bare, stored) {
             Fate::Failed if owned && may_give_up(e.room, expansion) => give_up(e.room, expansion),
             // Given up once its fight is over.
             Fate::Failed if owned => expansion.in_flight = Some(e),

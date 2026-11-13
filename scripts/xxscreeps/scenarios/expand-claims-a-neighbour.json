@@ -1,10 +1,12 @@
 {
-  "why": "a colony with GCL to spare and a stock past its reserve claims a two-source room on its own, raises its spawn and grows it to RCL2; main, with nothing declared, claims nothing",
-  "modules": ["atlas", "economy", "layout", "mv", "strategy"],
+  "why": "a colony with GCL to spare and a stock past its reserve claims a two-source room on its own, raises its spawn, grows it to RCL3, and stands its tower within the safe mode RCL2 grants (SAFE_MODE_DURATION, 20000 ticks); main, with nothing declared, claims nothing",
+  "modules": ["atlas", "economy", "fight", "layout", "mv", "strategy"],
   "start": { "room": "W8N3", "seed": 1, "node": "X2" },
-  "ticks": 8000,
+  "ticks": 16000,
   "assert": [
     { "measure": "claimSpawned", "max": 4000 },
-    { "measure": "claimLevel", "min": 2 }
+    { "measure": "claimLevel", "min": 3 },
+    { "measure": "claimToRcl2", "max": 3000 },
+    { "measure": "rcl2ToTower", "max": 20000 }
   ]
 }
