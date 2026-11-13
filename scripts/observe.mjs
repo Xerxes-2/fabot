@@ -75,13 +75,9 @@ switch (cmd) {
     console.log(`refusals this tick: ${o.refusals.length}`);
     for (const alert of o.alerts ?? []) console.log(`metric ${alert}`);
     for (const [key] of o.counts.filter(([k]) => k.startsWith("refused:"))) console.log(`refused ${key.slice("refused:".length)}`);
-    // Destroyed before the unclaim: `destroy()` needs our controller, and an
-    // owned structure left standing keeps the room in sight, read every tick.
     for (const [key, left] of o.counts.filter(([k]) => k.startsWith("abandon:"))) {
       const room = key.slice("abandon:".length);
-      console.log(`abandon ${room}: ${left} held${left > 200 ? "" : ` — empty; in the console, then the next tick:
-  for (const s of Game.rooms["${room}"].find(FIND_MY_STRUCTURES)) if (s.structureType !== "controller") s.destroy();
-  Game.rooms["${room}"].controller.unclaim();`}`);
+      console.log(`abandon ${room}: ${left} held${left > 200 ? "" : " — shipped; the bot razes and unclaims it"}`);
     }
     break;
   }

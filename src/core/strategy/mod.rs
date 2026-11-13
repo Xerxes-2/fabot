@@ -128,7 +128,11 @@ pub fn plan(
                 .flatten();
             Some(ColonyPlan {
                 room: room.name,
-                stage: Stage::Exploit,
+                stage: if expansion.abandoning(room.name) {
+                    Stage::Abandon
+                } else {
+                    Stage::Exploit
+                },
                 target: level,
                 reserve: kept + asked,
                 rampart_hits,
@@ -148,11 +152,18 @@ pub fn plan(
     );
     let candidates = outposts::survey(world, derived, (declarations, &plans, claimed), intel);
     let chosen = outposts::chosen(world, candidates, &busy);
+    let fought: BTreeSet<RoomName> = engagements.iter().map(|e| e.room).collect();
+    let around = expand::Around {
+        rivals: &rivals,
+        outposts: &chosen,
+        busy: &busy,
+        fought: &fought,
+    };
     expand::step(
         world,
         derived,
         (declarations, &plans),
-        (&rivals, &chosen, &busy),
+        &around,
         intel,
         terrain,
         expansion,

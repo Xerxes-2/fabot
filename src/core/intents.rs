@@ -101,6 +101,7 @@ pub enum TerminalAct {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ControllerAct {
     ActivateSafeMode,
+    Unclaim,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -1,8 +1,7 @@
-/// A colony declared `abandon` is emptied into another colony's terminal for
-/// the owner to unclaim by hand (owner, 2026-10-18): it digs, builds, repairs
-/// and upgrades nothing more, and keeps only its ring, which spawns the
-/// haulers and charges the towers that guard them.
+/// A colony given up (§5, owner 2026-10-18) digs, builds and upgrades nothing
+/// more; its ring spawns the haulers and charges the towers that guard them.
 use crate::core::engine;
+use crate::core::intents::{ControllerAct, Intent, RoomAct};
 use crate::core::tiles;
 use crate::core::vocabulary::Resource;
 use crate::core::world::{Creep, Kind, Room, RoomName, Structure};
@@ -24,6 +23,28 @@ pub fn left(room: &Room) -> i32 {
         .filter(|s| shipped(s))
         .map(|s| s.store.used())
         .sum()
+}
+
+/// What stays once shipped: energy under the least send and its fee.
+const LEFT: i32 = 200;
+
+/// `destroy()` needs our controller: the unclaim waits for the last structure.
+pub fn raze(room: &Room) -> Vec<Intent> {
+    let Some(c) = room.controller.as_ref().filter(|c| c.owner.is_ours()) else {
+        return Vec::new();
+    };
+    if left(room) > LEFT {
+        return Vec::new();
+    }
+    let ours: Vec<Intent> = (room.structures.iter())
+        .filter(|s| s.owner.is_ours() && s.kind.name() != "controller")
+        .map(|s| Intent::Room(room.name, RoomAct::Destroy(s.id.clone())))
+        .collect();
+    if ours.is_empty() {
+        vec![Intent::Controller(c.id.clone(), ControllerAct::Unclaim)]
+    } else {
+        ours
+    }
 }
 
 /// `to` is the receiving colony and its terminal's free room. Energy ships

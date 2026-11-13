@@ -208,7 +208,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | `observe.*` | health, faults, per-module CPU, counters, this tick's tactic offers (§6.3), the metrics past their threshold | Main, then Observe | segment 1 | operator; calibrates the benchmark |
 | `metrics` | the open window's sums; each creep's last task and load, each site's last progress and when, each colony's last controller progress, last tick's engagements and each room's last close; each body's last tile and the one before, its stuck run, the room it last left and when, its ticks to live, whether it was wounded and what last struck it and when, its last energy draw not yet delivered; the closed windows | Observe | heap | what a tick is compared against; a reset loses the open window and the bodies' tracks and restarts the sites' ages |
 | `metrics.windows` | 100-tick windows aligned on the game tick, a row a room and one for the world, the last 150 (fewer past the segment's 100 KB) | Observe | segment 3, written as a window closes | `observe metrics`, the soak's `metrics.jsonl` (§10.5) |
-| `expansion` | the claim Strategy has in flight: its room and the tick it was declared; each room an expansion failed in and when, for 100k ticks | Strategy | Memory | one at a time (owner, 2026-11-13); a claim outlives the walk its claimer takes and the stock that triggered it; a failure's penalty fades over ticks no other row keeps |
+| `expansion` | the claim Strategy has in flight: its room and the tick it was declared; each room an expansion failed in and when, for 100k ticks; each colony it gave up, while ours | Strategy | Memory | one at a time (owner, 2026-11-13); a claim outlives the walk its claimer takes and the stock that triggered it; a failure's penalty fades over ticks no other row keeps, and a give-up outlives the ticks its room ships and razes |
 | `scouts`, `preyed` | the declared and threat-radius rooms a scout serves, with their rows' age; the rooms an enemy owns, reserves or works, stalest first | Strategy | heap, this tick only | Economy casts scouts, Fight's sweep candidates; derived from intel each tick |
 | `sightings` | room → each armed hostile's or Invader core's id → the tick it is gone (seen tick + its ticksToLive, or the core's collapse; a deploying core's deploy plus the longest collapse) and whether it is armed; a room in sight holds only what stands there now. A level-0 core is unarmed: it keeps its core engagement open but stands nothing down | World | heap | vision grace; when a stood-down outpost is clear |
 | `standing.*` | per module: last output and the key it was decided on | each module | heap | the replay (§1) |
@@ -399,10 +399,11 @@ the home's stores by the pool as any other load.
 A colony declared `abandon` (owner, 2026-10-18: given up once its mineral is
 dug out) digs, builds and upgrades nothing past its downgrade deadline, casts
 only its supply floor, and ships what its storage, terminal and labs hold to
-the colony whose terminal has most room, energy last. The owner destroys its
-structures and unclaims by hand: `destroy()` needs our controller, and an
-owned structure left after the unclaim keeps the room in sight and in the
-world read every tick (`observe health` prints both commands once it is empty).
+the colony whose terminal has most room, energy last. Once shipped it
+destroys its structures, then unclaims (`economy::abandon::raze`; owner,
+2026-11-13: automatic): `destroy()` needs our controller, and an owned
+structure left after the unclaim keeps the room in sight and in the world read
+every tick.
 
 ## 6. Fight (new)
 
@@ -760,6 +761,18 @@ it was declared (owner) or has no storage 40k ticks after (about twice the
 21k a room two crossings off took, measured). A fresh failure costs every room
 within one of it more than any room scores, fading to nothing over 100k ticks
 (Hivemind's), and a room that scores nothing is never declared.
+
+**Abandon** (owner, 2026-11-13; S11's leaders cycled claim, RCL6, mine,
+abandon). Strategy declares a colony `abandon` (§5) and keeps it in
+`expansion` while it is ours: a young colony whose expansion failed; one
+whose season resource is dug out (`season::spent`, false under vanilla
+rules); and at the GCL cap, the weakest colony below RCL6, scored as a
+candidate is with its own outposts for neighbours, when the best candidate
+beats it by a source's dig, none within 100k ticks of a failure or a give-up
+(Hivemind's abandonWeakRooms), nor one an operation holds. Never the last
+colony, the operator's abandons counted, nor one an engagement is open in: a
+failed one is given up once its fight closes. A given-up room
+counts as a failure, so it is not claimed again soon.
 
 ### 7.3 Operations and force allocation
 

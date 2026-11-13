@@ -378,6 +378,7 @@ fn expansion_of(o: &JsValue) -> Expansions {
     Expansions {
         in_flight: at(o),
         failed: list_of(at, &field(o, "failed")),
+        abandoned: list_of(at, &field(o, "abandoned")),
     }
 }
 
@@ -433,6 +434,10 @@ pub fn write_state(state: &State) {
         .map(|e| JsValue::from(at(e)))
         .collect();
     set_field(expansion.as_ref(), "failed", failed.as_ref());
+    let abandoned: Array = (state.expansion.abandoned.iter())
+        .map(|e| JsValue::from(at(e)))
+        .collect();
+    set_field(expansion.as_ref(), "abandoned", abandoned.as_ref());
     set_field(&root, "expansion", expansion.as_ref());
 }
 

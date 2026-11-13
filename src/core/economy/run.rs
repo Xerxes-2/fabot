@@ -730,6 +730,8 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
     intents.extend(pickups(&derived, &taken));
     intents.extend(sends(&derived));
     intents.extend(moves);
+    let given_up = (context.world.rooms.iter()).filter(|r| context.declarations.abandoning(r.name));
+    intents.extend(given_up.flat_map(super::abandon::raze));
 
     state.assignments = next;
     Ok(intents)

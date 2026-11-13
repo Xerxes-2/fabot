@@ -110,7 +110,7 @@ fn checked(rules: Vec<TacticRule>) -> (Vec<TacticRule>, Vec<String>) {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
     Exploit,
-    /// Emptied before the owner unclaims it by hand.
+    /// Emptied, razed and unclaimed.
     Abandon,
 }
 

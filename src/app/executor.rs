@@ -178,6 +178,13 @@ fn act(intent: &Intent) -> (String, i32) {
                 Err(()) => ("threw".to_string(), THREW),
             },
         },
+        Intent::Controller(id, ControllerAct::Unclaim) => match world::object_by_id(id) {
+            None => ("unclaim".to_string(), NOT_FOUND),
+            Some(controller) => match call(&controller, "unclaim", &[]) {
+                Ok(code) => ("unclaim".to_string(), code),
+                Err(()) => ("threw".to_string(), THREW),
+            },
+        },
         Intent::Link(id, LinkAct::TransferEnergy(target, amount)) => {
             match world::object_by_id(id) {
                 None => ("link".to_string(), NOT_FOUND),
