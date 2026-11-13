@@ -208,6 +208,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | `observe.*` | health, faults, per-module CPU, counters, this tick's tactic offers (§6.3), the metrics past their threshold | Main, then Observe | segment 1 | operator; calibrates the benchmark |
 | `metrics` | the open window's sums; each creep's last task and load, each site's last progress and when, each colony's last controller progress, last tick's engagements and each room's last close; each body's last tile and the one before, its stuck run, the room it last left and when, its ticks to live, whether it was wounded and what last struck it and when, its last energy draw not yet delivered; the closed windows | Observe | heap | what a tick is compared against; a reset loses the open window and the bodies' tracks and restarts the sites' ages |
 | `metrics.windows` | 100-tick windows aligned on the game tick, a row a room and one for the world, the last 150 (fewer past the segment's 100 KB) | Observe | segment 3, written as a window closes | `observe metrics`, the soak's `metrics.jsonl` (§10.5) |
+| `expansion` | the claim Strategy has in flight: its room and the tick it was declared | Strategy | Memory | one at a time (owner, 2026-11-13); a claim outlives the walk its claimer takes and the stock that triggered it |
 | `scouts`, `preyed` | the declared and threat-radius rooms a scout serves, with their rows' age; the rooms an enemy owns, reserves or works, stalest first | Strategy | heap, this tick only | Economy casts scouts, Fight's sweep candidates; derived from intel each tick |
 | `sightings` | room → each armed hostile's or Invader core's id → the tick it is gone (seen tick + its ticksToLive, or the core's collapse; a deploying core's deploy plus the longest collapse) and whether it is armed; a room in sight holds only what stands there now. A level-0 core is unarmed: it keeps its core engagement open but stands nothing down | World | heap | vision grace; when a stood-down outpost is clear |
 | `standing.*` | per module: last output and the key it was decided on | each module | heap | the replay (§1) |
@@ -736,6 +737,20 @@ under the operator's rows: **an operator row
 always wins** and Strategy fills only rooms the operator left undeclared
 (owner's call), so a hand decision is never undone by the next plan.
 
+**Expansion** (`strategy::expand`, owner 2026-11-13: automatic, one claim in
+flight; from a survey of Hivemind, Overmind, TooAngel and The International).
+On a due tick, while GCL leaves a room, the bucket is near full (Hivemind's CPU
+headroom) and no claim is in flight, a **sponsor** (RCL4 with a storage holding
+its reserve and 30k more, that no operation holds as it holds
+outposts: a siege's successors lagged behind a claim's bodies) looks over intel's rooms in its
+reach: two sources, nobody's, two rooms from any of ours and from a rival's
+room. Each is scored as a priced choice would be (energy a tick: its own dig,
+half its free neighbours', less a tick a crossing from the sponsor, plus
+`season::worth`); the best one Layout can plan whole before it is claimed (The
+International's) is declared a claim, kept in `expansion` until its spawn
+stands or another player takes it, and the operator's claim in flight holds it
+off.
+
 ### 7.3 Operations and force allocation
 
 - Each candidate operation (`Siege` on X, a `PowerBank` seen at Y, `KeeperDuty`
@@ -758,8 +773,9 @@ Every season changes the rules: what scores, which structures exist, which NPCs
 walk. `Season/` holds all of it: scoring, the season's structures and
 resources, their intents, and the declarations that make the economy and the
 fight serve them ("haul Thorium to the reactor" is a declaration). `Strategy`
-reads `Season.worth` to price what the season rewards. Nothing else imports
-`Season`. Next season, the directory is deleted and rewritten; the rest of the
+reads `season::worth`, what holding a room scores beside its dig, to price
+what the season rewards: a term of the expansion score (§7.2), zero under
+vanilla rules. Nothing else imports `Season`. Next season, the directory is deleted and rewritten; the rest of the
 bot is unchanged. v1's reactor, Thorium and programme code is not ported: it
 is this season's `Season/` if anything, and this season ends in weeks.
 

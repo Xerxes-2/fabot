@@ -4,10 +4,10 @@ use crate::core::atlas::tiles::Tile;
 use crate::core::atlas::{Atlas, Post};
 use crate::core::engine;
 use crate::core::intents::Intent;
-use crate::core::tick::{self, Declarations, Declared};
+use crate::core::tick::{self, Declarations, Declared, Outpost};
 use crate::core::tiles;
 use crate::core::vocabulary::BodyPart;
-use crate::core::world::{Owner, Pos, RoomName, World, push_int};
+use crate::core::world::{Controller, Owner, Pos, Room, RoomName, Source, World, push_int};
 
 /// A room as it stood when last seen, by username: a stance is the
 /// declarations' and changes without a sight.
@@ -83,6 +83,55 @@ pub fn step(world: &World, intel: &mut Intel) {
                 intel.insert(room.name, row);
             }
         }
+    }
+}
+
+/// A room out of sight stands as it was last seen, or as nobody's.
+pub fn blind(outpost: &Outpost, intel: &Intel, world: &World, declarations: &Declarations) -> Room {
+    let time = world.time;
+    let row = intel.get(&outpost.room);
+    let owner = |user: &String| Owner::of_user(user.clone(), &world.me, declarations);
+    Room {
+        name: outpost.room,
+        terrain: None,
+        controller: Some(Controller {
+            id: outpost.controller.id.clone(),
+            pos: outpost.controller.pos,
+            owner: row
+                .and_then(|r| r.owner.as_ref())
+                .map_or(Owner::Nobody, owner),
+            level: row.map_or(0, |r| r.level),
+            progress: 0,
+            progress_total: 0,
+            ticks_to_downgrade: 0,
+            reservation: row
+                .and_then(|r| r.reservation.as_ref())
+                .filter(|(_, lapse)| *lapse > time)
+                .map(|(user, lapse)| (owner(user), lapse - time)),
+            safe_mode: 0,
+            safe_mode_available: 0,
+            safe_mode_cooldown: 0,
+            upgrade_blocked: 0,
+        }),
+        energy_available: 0,
+        energy_capacity: 0,
+        sources: outpost
+            .sources
+            .iter()
+            .map(|s| Source {
+                id: s.id.clone(),
+                pos: s.pos,
+                energy: 0,
+                energy_capacity: 0,
+                ticks_to_regeneration: 0,
+            })
+            .collect(),
+        minerals: Vec::new(),
+        structures: Vec::new(),
+        sites: Vec::new(),
+        piles: Vec::new(),
+        remains: Vec::new(),
+        others: Vec::new(),
     }
 }
 

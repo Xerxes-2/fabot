@@ -72,7 +72,7 @@ fn price(c: &Candidate, capacity: i32) -> Price {
 /// every colony.
 pub fn busy(
     plans: &[ColonyPlan],
-    declarations: &Declarations,
+    (declarations, claimed): (&Declarations, Option<RoomName>),
     (engagements, preyed, derived): (&[Engagement], &[RoomName], &Derived),
 ) -> BTreeSet<RoomName> {
     let hunts = |home: RoomName| {
@@ -81,6 +81,7 @@ pub fn busy(
     };
     let raising = |room: &RoomName| !derived.colonies.contains(room);
     let operation = (declarations.claims.iter()).any(|c| raising(&c.room))
+        || claimed.is_some()
         || !declarations.sieges.is_empty()
         || (engagements.iter()).any(|e| !matches!(e.objective, Objective::Defend));
     let boosting = (declarations.labs())
@@ -154,7 +155,7 @@ pub fn chosen(
 pub fn survey(
     world: &World,
     derived: &Derived,
-    (declarations, plans): (&Declarations, &[ColonyPlan]),
+    (declarations, plans, claimed): (&Declarations, &[ColonyPlan], Option<RoomName>),
     intel: &Intel,
 ) -> Vec<Candidate> {
     let mut by_room: BTreeMap<RoomName, Candidate> = BTreeMap::new();
@@ -163,6 +164,7 @@ pub fn survey(
             || declarations.avoid.contains(room)
             || declarations.sieges.contains(room)
             || declarations.claims.iter().any(|c| &c.room == room)
+            || claimed == Some(*room)
     };
     for (home, tree) in &derived.trees {
         let Some(room) = world.room(*home) else {

@@ -6,7 +6,7 @@ use crate::core::HashMap;
 use crate::core::atlas::{Atlas, Tree};
 use crate::core::engine;
 use crate::core::grid::Footprint;
-use crate::core::strategy::intel::{Intel, Scout};
+use crate::core::strategy::intel::{self, Intel, Scout};
 use crate::core::tick::{self, Declarations, Outpost};
 use crate::core::tiles::{self, Tile};
 use crate::core::vocabulary::{BodyPart, Resource, part_count_in};
@@ -78,7 +78,6 @@ pub struct MineralFact {
     pub cooldown: i32,
     pub post: Option<Pos>,
     pub container: Option<String>,
-    /// What of it the container holds.
     pub held: i32,
 }
 
@@ -843,55 +842,6 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
     }
 }
 
-/// A room out of sight stands as it was last seen, or as nobody's.
-fn blind(outpost: &Outpost, intel: &Intel, world: &World, declarations: &Declarations) -> Room {
-    let time = world.time;
-    let row = intel.get(&outpost.room);
-    let owner = |user: &String| Owner::of_user(user.clone(), &world.me, declarations);
-    Room {
-        name: outpost.room,
-        terrain: None,
-        controller: Some(Controller {
-            id: outpost.controller.id.clone(),
-            pos: outpost.controller.pos,
-            owner: row
-                .and_then(|r| r.owner.as_ref())
-                .map_or(Owner::Nobody, owner),
-            level: row.map_or(0, |r| r.level),
-            progress: 0,
-            progress_total: 0,
-            ticks_to_downgrade: 0,
-            reservation: row
-                .and_then(|r| r.reservation.as_ref())
-                .filter(|(_, lapse)| *lapse > time)
-                .map(|(user, lapse)| (owner(user), lapse - time)),
-            safe_mode: 0,
-            safe_mode_available: 0,
-            safe_mode_cooldown: 0,
-            upgrade_blocked: 0,
-        }),
-        energy_available: 0,
-        energy_capacity: 0,
-        sources: outpost
-            .sources
-            .iter()
-            .map(|s| crate::core::world::Source {
-                id: s.id.clone(),
-                pos: s.pos,
-                energy: 0,
-                energy_capacity: 0,
-                ticks_to_regeneration: 0,
-            })
-            .collect(),
-        minerals: Vec::new(),
-        structures: Vec::new(),
-        sites: Vec::new(),
-        piles: Vec::new(),
-        remains: Vec::new(),
-        others: Vec::new(),
-    }
-}
-
 fn tree_of(routes: &mut BTreeMap<RoomName, Tree>, atlas: &Atlas, room: RoomName) {
     routes
         .entry(room)
@@ -1118,7 +1068,7 @@ fn remote_of(
     outpost: &Outpost,
 ) -> Ground {
     let room: Cow<Room> = world.room(outpost.room).map_or_else(
-        || Cow::Owned(blind(outpost, intel, world, declarations)),
+        || Cow::Owned(intel::blind(outpost, intel, world, declarations)),
         Cow::Borrowed,
     );
 
@@ -1311,7 +1261,7 @@ pub fn of_world(
         .filter(|_| (ours.owned.len() as i32) < world.rooms_allowed)
         .filter_map(|claim| match world.room(claim.room) {
             Some(room) => room.controller.clone(),
-            None => blind(claim, intel, world, declarations).controller,
+            None => intel::blind(claim, intel, world, declarations).controller,
         })
         .filter(reservable)
         .collect();

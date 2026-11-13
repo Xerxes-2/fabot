@@ -1,0 +1,14 @@
+{
+  "why": "the room expansion would pick held by a rival is never claimed, nor any room within its raid's reach, so it claims nothing (`expand-claims-a-neighbour` claims it when it stands empty); a scripted holder, since only its controller's level is read",
+  "modules": ["atlas", "economy", "mv", "strategy"],
+  "start": {
+    "room": "W8N3",
+    "seed": 1,
+    "node": "X2",
+    "opponents": [{ "name": "rival", "bot": "scripts/xxscreeps/engine/rival", "room": "W6N3", "config": { "role": "keep" } }]
+  },
+  "ticks": 4000,
+  "assert": [
+    { "measure": "claimsOwned", "max": 0 }
+  ]
+}

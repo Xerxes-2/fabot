@@ -1,0 +1,10 @@
+{
+  "why": "a colony with GCL to spare and a stock past its reserve claims a two-source room on its own, raises its spawn and grows it to RCL2; main, with nothing declared, claims nothing",
+  "modules": ["atlas", "economy", "layout", "mv", "strategy"],
+  "start": { "room": "W8N3", "seed": 1, "node": "X2" },
+  "ticks": 8000,
+  "assert": [
+    { "measure": "claimSpawned", "max": 4000 },
+    { "measure": "claimLevel", "min": 2 }
+  ]
+}

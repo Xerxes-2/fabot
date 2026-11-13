@@ -190,7 +190,11 @@ impl Declarations {
         refused
     }
 
-    pub fn planned(mut self, (plans, outposts): (Vec<ColonyPlan>, Vec<Outpost>)) -> Declarations {
+    pub fn planned(
+        mut self,
+        (plans, outposts, claim): (Vec<ColonyPlan>, Vec<Outpost>, Option<Outpost>),
+    ) -> Declarations {
+        (self.claims).extend(claim.filter(|c| !self.claims.iter().any(|o| o.room == c.room)));
         let declared: BTreeSet<RoomName> = self.colonies.iter().map(|p| p.room).collect();
         (self.colonies).extend(plans.into_iter().filter(|p| !declared.contains(&p.room)));
         let declared: BTreeSet<RoomName> = self.outposts.iter().map(|o| o.room).collect();

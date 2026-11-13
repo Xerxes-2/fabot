@@ -1,3 +1,4 @@
+pub mod expand;
 pub mod intel;
 pub mod outposts;
 
@@ -11,7 +12,8 @@ use super::layout::Standing;
 use super::tick::{ColonyPlan, Context, Declarations, Derived, Outpost, Stage};
 use super::tiles;
 use super::vocabulary::{BodyPart, Boost, boost};
-use super::world::{RoomName, Rules, World, sightings};
+use super::world::{RoomName, Rules, World, sightings, terrain::Terrain};
+use expand::Expansion;
 use intel::Intel;
 
 pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, String> {
@@ -90,7 +92,8 @@ pub fn plan(
     intel: &Intel,
     (engagements, casts, due): (&[Engagement], &[Cast], &BTreeSet<RoomName>),
     layout: &BTreeMap<RoomName, Standing>,
-) -> (Vec<ColonyPlan>, Vec<Outpost>) {
+    (terrain, expansion): (&dyn Fn(RoomName) -> Option<Terrain>, &mut Option<Expansion>),
+) -> (Vec<ColonyPlan>, Vec<Outpost>, Option<Outpost>) {
     let rival = |name: &str| name != world.me && !declarations.allies.contains(name);
     let rivals: Vec<(RoomName, i32)> = (intel.iter())
         .filter(|(_, row)| row.level > 0 && row.owner.as_deref().is_some_and(rival))
@@ -135,8 +138,26 @@ pub fn plan(
             })
         })
         .collect();
+    // An expansion declared this tick holds the outposts from the next.
+    let claimed = expand::claim(intel, expansion.as_ref()).map(|c| c.room);
     let preyed = intel::preyed(intel, declarations, world.time);
-    let busy = outposts::busy(&plans, declarations, (engagements, &preyed, derived));
-    let candidates = outposts::survey(world, derived, (declarations, &plans), intel);
-    (plans, outposts::chosen(world, candidates, &busy))
+    let busy = outposts::busy(
+        &plans,
+        (declarations, claimed),
+        (engagements, &preyed, derived),
+    );
+    let candidates = outposts::survey(world, derived, (declarations, &plans, claimed), intel);
+    let chosen = outposts::chosen(world, candidates, &busy);
+    let held = expansion.take();
+    *expansion = expand::step(
+        world,
+        derived,
+        (declarations, &plans),
+        (&rivals, &chosen, &busy),
+        intel,
+        terrain,
+        held,
+    );
+    let claim = expand::claim(intel, expansion.as_ref());
+    (plans, chosen, claim)
 }

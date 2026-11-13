@@ -46,6 +46,10 @@ impl Maps {
         (self.terrain.iter()).filter_map(|(room, t)| Some((*room, &**t.as_ref()?)))
     }
 
+    pub fn terrain(&self, room: RoomName) -> Option<terrain::Terrain> {
+        self.terrain.get(&room)?.clone()
+    }
+
     /// Kept when empty too, so a room the map lacks is asked once.
     fn read_around(&mut self, homes: impl Iterator<Item = (i32, i32)>) {
         let reach = crate::core::tick::SIEGE_HOPS;

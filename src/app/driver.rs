@@ -119,6 +119,7 @@ fn run_tick() -> Result<(), String> {
         rows,
         (&state.engagements, &state.casts, &state.due),
         &state.layout,
+        (&|room| maps.terrain(room), &mut state.expansion),
     );
     let declarations = declarations.planned(plans);
     derived.worked = tick::worked(&world, &sightings, &declarations, &derived);

@@ -8,6 +8,7 @@ pub mod intents;
 pub mod layout;
 pub mod mv;
 pub mod observe;
+pub mod season;
 pub mod state;
 pub mod strategy;
 pub mod tactics;

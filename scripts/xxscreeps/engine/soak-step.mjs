@@ -1055,8 +1055,9 @@ for (let t = 0; t < ticks; t++) {
     row.boosted = rooms.flatMap((r) => [...r["#objects"]])
       .filter((o) => o.body !== undefined && o["#user"] === ours)
       .reduce((n, o) => n + o.body.filter((p) => p.boost !== undefined).length, 0);
-    // A declared claim's level, spawns and the energy its towers hold: 0 until it is ours.
-    row.claimed = Object.fromEntries(claimed.map((name) => {
+    // A declared claim's, or a room Strategy claimed, level, spawns and the energy its towers hold: 0 until it is ours.
+    const raised = roomNames.filter((name, i) => !homes.includes(name) && rooms[i]?.["#user"] === ours && rooms[i]["#level"] > 0);
+    row.claimed = Object.fromEntries([...new Set([...claimed, ...raised])].map((name) => {
       const r = rooms[roomNames.indexOf(name)];
       const mine = r["#user"] === ours;
       const towers = mine ? [...r["#objects"]].filter((o) => o.structureType === "tower" && o["#user"] === ours && o.store) : [];

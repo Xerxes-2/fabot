@@ -22,6 +22,7 @@
 //            (Memory.v2.declarations.outposts) and an Invader wave in each;
 //            E2 is N5 with the first of them declared a claim (`claims`),
 //            C2 with both, G2 E2 with no GCL level spare for it;
+//            X2 is N5 with a GCL level spare and nothing declared;
 //            L5 is N5 with H, O and U stocked and its labs the cluster (`labs`);
 //            N6 and N7 are RCL7 and RCL8 with their bodies standing; R8 is
 //            RCL8 on RCL7's plan, roads on the extension tiles RCL8 adds, and
@@ -91,7 +92,7 @@ import { patchRuntimeCache } from "./runtime-cache.mjs";
 // Where the run's wall time went, written to timing.json (`scenario.mjs` sums them).
 const began = Date.now();
 const marks = { node26: 0, node26Calls: 0 };
-const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|T3|N4|T4|N5|R6|T7|N6|N7|R8|A7|E0|E1|E2|C2|G2|L5] [--invaders room:every[:first],…] [--wave role[:size],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--world <capture.json>] [--follow room,…] [--unsafe] [--ended] [--keep] [--fetch] [--watch [--tick-ms N] [--port N]]";
+const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|T3|N4|T4|N5|R6|T7|N6|N7|R8|A7|E0|E1|E2|C2|G2|X2|L5] [--invaders room:every[:first],…] [--wave role[:size],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--world <capture.json>] [--follow room,…] [--unsafe] [--ended] [--keep] [--fetch] [--watch [--tick-ms N] [--port N]]";
 const fail = (message) => {
   console.error(message);
   process.exit(1);
@@ -146,6 +147,7 @@ const NODES = {
   E2: { level: 6, stored: 100000, without: ["rampart"], claims: 1 },
   C2: { level: 6, stored: 100000, without: ["rampart"], claims: 2 },
   G2: { level: 6, stored: 100000, without: ["rampart"], claims: 1, short: true },
+  X2: { level: 6, stored: 100000, without: ["rampart"], spare: 1 },
   // N5 with the ore for the UH line stocked and its labs declared the cluster.
   L5: { level: 6, stored: "100000,H:6000,O:6000,U:6000", without: ["rampart"], labs: { UH2O: 3000 } },
   // L5 without its tower, its first lab holding what a body is boosted with:
@@ -453,11 +455,11 @@ const near = (room, hops) => {
   const name = (i, j) => `${i < 0 ? `W${-i - 1}` : `E${i}`}${j < 0 ? `N${-j - 1}` : `S${j}`}`;
   return Array.from({ length: (2 * hops + 1) ** 2 }, (_, k) => name(cx + (k % (2 * hops + 1)) - hops, cy + Math.floor(k / (2 * hops + 1)) - hops)).filter((r) => r !== room);
 };
-if (node?.outposts || node?.claims || node?.labs || node?.alone || (allies.length && !seated && !from)) {
+if (node?.outposts || node?.claims || node?.spare || node?.labs || node?.alone || (allies.length && !seated && !from)) {
   const claims = colony.outposts.slice(0, node?.claims ?? 0);
   const labs = node?.labs ? { labs: { home: colony.room, targets: node.labs } } : {};
   writeFileSync(join(world, "declarations.json"), JSON.stringify({ outposts: node?.outposts ? colony.outposts : [], claims, allies, ...labs, ...(node?.alone ? { avoid: near(colony.room, 3) } : {}) }));
-  node26([XXSCREEPS, script("node.mjs"), "declare", colony.room, OUR_NAME, "declarations.json", ...(node?.short ? ["short"] : [])], world);
+  node26([XXSCREEPS, script("node.mjs"), "declare", colony.room, OUR_NAME, "declarations.json", ...(node?.short ? ["short"] : node?.spare ? [String(node.spare)] : [])], world);
 }
 if (node?.outposts && !flags["--invaders"]) waves.push(...colony.outposts.map((o, i) => `${o.room}:4000:${1000 + 1500 * i}`));
 if (watch) node26([XXSCREEPS, "manage", "user", "password", OUR_NAME, "--", watch.password], world);

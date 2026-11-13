@@ -11,6 +11,7 @@ use crate::core::exchange::{Losses, Outcome};
 use crate::core::fight::shape::{Cast, Engagement, Group, Objective, Phase, Plan};
 use crate::core::observe::metrics::Metrics;
 use crate::core::state::State;
+use crate::core::strategy::expand::Expansion;
 use crate::core::strategy::intel::{self, Intel};
 use crate::core::tactics::{self, Offer, Tactic};
 use crate::core::tick::{
@@ -363,7 +364,15 @@ pub fn read_state() -> State {
         due: rooms(&fight, "due"),
         scouts: Vec::new(),
         preyed: Vec::new(),
+        expansion: expansion_of(&field(&root(), "expansion")),
     }
+}
+
+fn expansion_of(o: &JsValue) -> Option<Expansion> {
+    Some(Expansion {
+        room: room_of(&field(o, "room"))?,
+        since: int_of(&field(o, "since"))?,
+    })
 }
 
 fn entries(o: &JsValue) -> Vec<(String, JsValue)> {
@@ -407,6 +416,13 @@ pub fn write_state(state: &State) {
         .collect();
     set_field(fight.as_ref(), "due", due.as_ref());
     set_field(&root, "fight", fight.as_ref());
+    let expansion = state.expansion.as_ref().map_or(JsValue::UNDEFINED, |e| {
+        let o = Object::new();
+        set_field(o.as_ref(), "room", &js::room(e.room));
+        set_field(o.as_ref(), "since", &JsValue::from(e.since));
+        o.into()
+    });
+    set_field(&root, "expansion", &expansion);
 }
 
 fn declared_at(room: RoomName, o: &JsValue) -> Option<Declared> {
