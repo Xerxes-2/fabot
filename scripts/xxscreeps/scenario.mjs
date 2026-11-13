@@ -262,6 +262,7 @@ const measures = {
   roadLoss: (samples, a) => at(samples, a.to ?? Infinity).roadLoss - at(samples, a.from ?? 0).roadLoss,
   stillLoaded: (samples, a) => at(samples, a.to ?? Infinity).stillLoaded,
   // The claims we own, the lowest level one stands at, and the first tick every one has a spawn.
+  claimLevelOf: (samples, a) => at(samples, a.to ?? Infinity).claimed?.[a.room]?.level ?? 0,
   claimsOwned: (samples, a) => Object.values(at(samples, a.to ?? Infinity).claimed ?? {}).filter((c) => c.level > 0).length,
   claimLevel: (samples, a) => Math.min(...Object.values(at(samples, a.to ?? Infinity).claimed ?? {}).map((c) => c.level)),
   claimCharged: (samples) => samples.find((s) => Object.values(s.claimed ?? {}).every((c) => c.fire >= 1000) && Object.keys(s.claimed ?? {}).length)?.t ?? Infinity,

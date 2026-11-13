@@ -12,10 +12,11 @@
 //     around the first spawn, `<pattern>:<part><n>…[*<count>],…` (as
 //     `harvester:work6carry1move3*2`), named as the bot casts them, their
 //     ticks to live spread over a lifetime.
-//   xxscreeps.js file://…/node.mjs declare <room> <username> <declarations.json> [short | <n>]
+//   xxscreeps.js file://…/node.mjs declare <room> <username> <declarations.json> [short | <n>] [<v2.json>]
 //     <username>'s Memory as `{ v2: { declarations } }`, what the bot reads
-//     its declarations from (src/app/wire.rs), and the GCL its claims need
-//     unless `short`, or <n> rooms past the first; <room> is not read.
+//     its declarations from (src/app/wire.rs), with <v2.json>'s keys beside
+//     them, and the GCL its claims need unless `short`, or <n> rooms past the
+//     first; <room> is not read.
 //   xxscreeps.js file://…/node.mjs unsafe <room>
 //     <room>'s safe mode ended and none left to activate.
 //   xxscreeps.js file://…/node.mjs ended <room>
@@ -159,10 +160,11 @@ if (mode === "ground") {
   await Promise.all([db.save(), shard.save()]);
   console.log(`stood ${list.length} structures at level ${level} in ${roomName}`);
 } else if (mode === "declare") {
-  const [username, path, short] = rest;
+  const [username, path, short, v2Path] = rest;
   const declarations = JSON.parse(fs.readFileSync(path, "utf8"));
+  const v2 = v2Path ? JSON.parse(fs.readFileSync(v2Path, "utf8")) : {};
   const user = await User.findUserByName(db, username);
-  await saveMemoryBlob(shard, user, utf16ToBuffer(JSON.stringify({ v2: { declarations } })));
+  await saveMemoryBlob(shard, user, utf16ToBuffer(JSON.stringify({ v2: { ...v2, declarations } })));
   // A level of GCL a declared claim, at the engine's 1e6 × (level − 1)^2.4.
   const claims = Number(short) || (declarations.claims?.length ?? 0);
   if (claims && short !== "short") await db.data.hSet(User.infoKey(user), "gcl", String(Math.ceil(1e6 * claims ** 2.4)));

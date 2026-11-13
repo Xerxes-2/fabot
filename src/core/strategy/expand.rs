@@ -9,11 +9,18 @@ use crate::core::tiles;
 use crate::core::vocabulary::Resource;
 use crate::core::world::{RoomName, World, terrain::Terrain};
 
-/// The claim in flight (`ARCHITECTURE.md` §4 `expansion`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Expansion {
     pub room: RoomName,
     pub since: i32,
+}
+
+/// `ARCHITECTURE.md` §4 `expansion`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Expansions {
+    pub in_flight: Option<Expansion>,
+    /// `since` the tick it failed.
+    pub failed: Vec<Expansion>,
 }
 
 /// Candidates are planned on a due tick, not each tick: a plan is a Layout draw.
@@ -27,6 +34,13 @@ const MARGIN: i32 = 30_000;
 const SPONSOR_LEVEL: i32 = 4;
 /// A rival this near raids a young room before its towers stand.
 const THREAT: i32 = 2;
+/// The owner's.
+const CLAIM_DEADLINE: i32 = 5 * engine::CREEP_LIFETIME;
+/// About twice the claim to storage measured two crossings off (21k ticks).
+const RAISE_DEADLINE: i32 = 40_000;
+/// A fresh failure near a room outweighs the most a room scores (its dig and
+/// four neighbours'), fading over this (Hivemind's).
+const FORGET: i32 = 100_000;
 
 /// What a room is worth holding, in energy a tick.
 pub struct Facts {
@@ -34,12 +48,15 @@ pub struct Facts {
     pub free_near: usize,
     pub crossings: i32,
     pub worth: f64,
+    /// Failures in or beside it, each fading as it ages.
+    pub failed: f64,
 }
 
 /// A simple rule shaped as its priced replacement (`AGENTS.md`).
 pub fn score(f: &Facts) -> f64 {
     let held = f64::from(engine::HELD_OUTPUT_PER_TICK);
     held * f.sources as f64 + held / 2.0 * f.free_near as f64 - f64::from(f.crossings) + f.worth
+        - 6.0 * held * f.failed
 }
 
 fn free(world: &World, row: &Row) -> bool {
@@ -77,6 +94,26 @@ fn fits(world: &World, outpost: &Outpost, intel: &Intel, terrain: Terrain) -> bo
         .is_some_and(|p| p.unfit.is_empty())
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum Fate {
+    Raised,
+    Failed,
+    Flying,
+}
+
+fn fate(age: i32, owned: bool, theirs: bool, stored: bool) -> Fate {
+    let deadline = if owned {
+        RAISE_DEADLINE
+    } else {
+        CLAIM_DEADLINE
+    };
+    match () {
+        _ if stored => Fate::Raised,
+        _ if theirs || age > deadline => Fate::Failed,
+        _ => Fate::Flying,
+    }
+}
+
 /// One claim in flight at a time (owner, 2026-11-13); `held` the last tick's.
 pub fn step(
     world: &World,
@@ -85,10 +122,11 @@ pub fn step(
     (rivals, chosen, busy): (&[(RoomName, i32)], &[Outpost], &BTreeSet<RoomName>),
     intel: &Intel,
     terrain: &dyn Fn(RoomName) -> Option<Terrain>,
-    held: Option<Expansion>,
-) -> Option<Expansion> {
+    expansion: &mut Expansions,
+) {
     let raising = (declarations.claims.iter()).any(|c| !derived.colonies.contains(&c.room));
-    if let Some(e) = held {
+    (expansion.failed).retain(|f| world.time - f.since < FORGET);
+    if let Some(e) = expansion.in_flight.take() {
         let owned = derived.owned.contains(&e.room);
         let theirs =
             (intel.get(&e.room).and_then(|r| r.owner.as_ref())).is_some_and(|o| o != &world.me);
@@ -97,16 +135,30 @@ pub fn step(
             (r.structures.iter())
                 .any(|s| (s.kind.is_storage() || s.kind.is_terminal()) && s.owner.is_ours())
         });
-        // The operator's claim takes the room GCL leaves.
-        return (!stored && !theirs && (owned || !raising)).then_some(e);
+        match fate(world.time - e.since, owned, theirs, stored) {
+            Fate::Failed => expansion.failed.push(Expansion {
+                since: world.time,
+                ..e
+            }),
+            // One not yet owned yields to the operator's claim in flight.
+            Fate::Flying if owned || !raising => expansion.in_flight = Some(e),
+            _ => (),
+        }
+        return;
     }
     if world.time % DUE != 0
         || raising
         || derived.owned.len() as i32 >= world.rooms_allowed
         || world.bucket < BUCKET
     {
-        return None;
+        return;
     }
+    let failed = |room: RoomName| -> f64 {
+        (expansion.failed.iter())
+            .filter(|f| tiles::rooms_apart(f.room, room) <= 1)
+            .map(|f| 1.0 - f64::from(world.time - f.since) / f64::from(FORGET))
+            .sum()
+    };
     let sponsors = sponsors(world, plans, busy);
     let apart_from_ours = |room: RoomName| {
         derived
@@ -161,23 +213,28 @@ pub fn step(
                     free_near: free_near(name),
                     crossings,
                     worth: season::worth(name),
+                    failed: failed(name),
                 };
                 let outpost = Outpost {
                     room: name,
                     controller: controller.clone(),
                     sources: sources.clone(),
                 };
-                scored.push((score(&facts), outpost));
+                // A room that does not pay is never declared (§7.2).
+                let score = score(&facts);
+                if score > 0.0 {
+                    scored.push((score, outpost));
+                }
             }
         }
     }
     scored.sort_by(|(a, x), (b, y)| b.total_cmp(a).then(x.room.cmp(&y.room)));
     let chosen = (scored.into_iter())
-        .find(|(_, o)| terrain(o.room).is_some_and(|t| fits(world, o, intel, t)))?;
-    Some(Expansion {
-        room: chosen.1.room,
+        .find(|(_, o)| terrain(o.room).is_some_and(|t| fits(world, o, intel, t)));
+    expansion.in_flight = chosen.map(|(_, o)| Expansion {
+        room: o.room,
         since: world.time,
-    })
+    });
 }
 
 pub fn claim(intel: &Intel, derived: &Derived, held: Option<&Expansion>) -> Option<Outpost> {
@@ -195,12 +252,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_claim_fails_past_its_deadline_or_to_another_player() {
+        assert_eq!(fate(CLAIM_DEADLINE + 1, false, false, false), Fate::Failed);
+        assert_eq!(fate(CLAIM_DEADLINE + 1, true, false, false), Fate::Flying);
+        assert_eq!(fate(RAISE_DEADLINE + 1, true, false, false), Fate::Failed);
+        assert_eq!(fate(RAISE_DEADLINE + 1, true, false, true), Fate::Raised);
+        assert_eq!(fate(0, false, true, false), Fate::Failed);
+    }
+
+    #[test]
     fn season_worth_outbids_dig() {
         let near = Facts {
             sources: 2,
             free_near: 4,
             crossings: 2,
             worth: 0.0,
+            failed: 0.0,
         };
         let scoring = Facts {
             free_near: 0,

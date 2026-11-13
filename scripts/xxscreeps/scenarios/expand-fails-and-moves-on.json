@@ -1,0 +1,11 @@
+{
+  "why": "an expansion in flight past its claim deadline (five lifetimes) is recorded failed, and the next pick goes to a room not beside it: the parent kept it in flight for ever and claimed it",
+  "modules": ["strategy"],
+  "start": { "room": "W8N3", "seed": 1, "node": "F2" },
+  "ticks": 8000,
+  "assert": [
+    { "measure": "claimLevelOf", "room": "W7N3", "max": 0 },
+    { "measure": "claimLevelOf", "room": "W6N3", "max": 0 },
+    { "measure": "claimsOwned", "min": 1 }
+  ]
+}

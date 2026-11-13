@@ -13,7 +13,7 @@ use super::tick::{ColonyPlan, Context, Declarations, Derived, Outpost, Stage};
 use super::tiles;
 use super::vocabulary::{BodyPart, Boost, boost};
 use super::world::{RoomName, Rules, World, sightings, terrain::Terrain};
-use expand::Expansion;
+use expand::Expansions;
 use intel::Intel;
 
 pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, String> {
@@ -92,7 +92,7 @@ pub fn plan(
     intel: &Intel,
     (engagements, casts, due): (&[Engagement], &[Cast], &BTreeSet<RoomName>),
     layout: &BTreeMap<RoomName, Standing>,
-    (terrain, expansion): (&dyn Fn(RoomName) -> Option<Terrain>, &mut Option<Expansion>),
+    (terrain, expansion): (&dyn Fn(RoomName) -> Option<Terrain>, &mut Expansions),
 ) -> (Vec<ColonyPlan>, Vec<Outpost>, Option<Outpost>) {
     let rival = |name: &str| name != world.me && !declarations.allies.contains(name);
     let rivals: Vec<(RoomName, i32)> = (intel.iter())
@@ -139,7 +139,7 @@ pub fn plan(
         })
         .collect();
     // An expansion declared this tick holds the outposts from the next.
-    let claimed = expand::claim(intel, derived, expansion.as_ref()).map(|c| c.room);
+    let claimed = expand::claim(intel, derived, expansion.in_flight.as_ref()).map(|c| c.room);
     let preyed = intel::preyed(intel, declarations, world.time);
     let busy = outposts::busy(
         &plans,
@@ -148,16 +148,15 @@ pub fn plan(
     );
     let candidates = outposts::survey(world, derived, (declarations, &plans, claimed), intel);
     let chosen = outposts::chosen(world, candidates, &busy);
-    let held = expansion.take();
-    *expansion = expand::step(
+    expand::step(
         world,
         derived,
         (declarations, &plans),
         (&rivals, &chosen, &busy),
         intel,
         terrain,
-        held,
+        expansion,
     );
-    let claim = expand::claim(intel, derived, expansion.as_ref());
+    let claim = expand::claim(intel, derived, expansion.in_flight.as_ref());
     (plans, chosen, claim)
 }

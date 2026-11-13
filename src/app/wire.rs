@@ -11,7 +11,7 @@ use crate::core::exchange::{Losses, Outcome};
 use crate::core::fight::shape::{Cast, Engagement, Group, Objective, Phase, Plan};
 use crate::core::observe::metrics::Metrics;
 use crate::core::state::State;
-use crate::core::strategy::expand::Expansion;
+use crate::core::strategy::expand::{Expansion, Expansions};
 use crate::core::strategy::intel::{self, Intel};
 use crate::core::tactics::{self, Offer, Tactic};
 use crate::core::tick::{
@@ -368,11 +368,17 @@ pub fn read_state() -> State {
     }
 }
 
-fn expansion_of(o: &JsValue) -> Option<Expansion> {
-    Some(Expansion {
-        room: room_of(&field(o, "room"))?,
-        since: int_of(&field(o, "since"))?,
-    })
+fn expansion_of(o: &JsValue) -> Expansions {
+    let at = |o: &JsValue| {
+        Some(Expansion {
+            room: room_of(&field(o, "room"))?,
+            since: int_of(&field(o, "since"))?,
+        })
+    };
+    Expansions {
+        in_flight: at(o),
+        failed: list_of(at, &field(o, "failed")),
+    }
 }
 
 fn entries(o: &JsValue) -> Vec<(String, JsValue)> {
@@ -416,13 +422,18 @@ pub fn write_state(state: &State) {
         .collect();
     set_field(fight.as_ref(), "due", due.as_ref());
     set_field(&root, "fight", fight.as_ref());
-    let expansion = state.expansion.as_ref().map_or(JsValue::UNDEFINED, |e| {
+    let at = |e: &Expansion| {
         let o = Object::new();
         set_field(o.as_ref(), "room", &js::room(e.room));
         set_field(o.as_ref(), "since", &JsValue::from(e.since));
-        o.into()
-    });
-    set_field(&root, "expansion", &expansion);
+        o
+    };
+    let expansion = (state.expansion.in_flight.as_ref()).map_or_else(Object::new, at);
+    let failed: Array = (state.expansion.failed.iter())
+        .map(|e| JsValue::from(at(e)))
+        .collect();
+    set_field(expansion.as_ref(), "failed", failed.as_ref());
+    set_field(&root, "expansion", expansion.as_ref());
 }
 
 fn declared_at(room: RoomName, o: &JsValue) -> Option<Declared> {

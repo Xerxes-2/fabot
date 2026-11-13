@@ -208,7 +208,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | `observe.*` | health, faults, per-module CPU, counters, this tick's tactic offers (§6.3), the metrics past their threshold | Main, then Observe | segment 1 | operator; calibrates the benchmark |
 | `metrics` | the open window's sums; each creep's last task and load, each site's last progress and when, each colony's last controller progress, last tick's engagements and each room's last close; each body's last tile and the one before, its stuck run, the room it last left and when, its ticks to live, whether it was wounded and what last struck it and when, its last energy draw not yet delivered; the closed windows | Observe | heap | what a tick is compared against; a reset loses the open window and the bodies' tracks and restarts the sites' ages |
 | `metrics.windows` | 100-tick windows aligned on the game tick, a row a room and one for the world, the last 150 (fewer past the segment's 100 KB) | Observe | segment 3, written as a window closes | `observe metrics`, the soak's `metrics.jsonl` (§10.5) |
-| `expansion` | the claim Strategy has in flight: its room and the tick it was declared | Strategy | Memory | one at a time (owner, 2026-11-13); a claim outlives the walk its claimer takes and the stock that triggered it |
+| `expansion` | the claim Strategy has in flight: its room and the tick it was declared; each room an expansion failed in and when, for 100k ticks | Strategy | Memory | one at a time (owner, 2026-11-13); a claim outlives the walk its claimer takes and the stock that triggered it; a failure's penalty fades over ticks no other row keeps |
 | `scouts`, `preyed` | the declared and threat-radius rooms a scout serves, with their rows' age; the rooms an enemy owns, reserves or works, stalest first | Strategy | heap, this tick only | Economy casts scouts, Fight's sweep candidates; derived from intel each tick |
 | `sightings` | room → each armed hostile's or Invader core's id → the tick it is gone (seen tick + its ticksToLive, or the core's collapse; a deploying core's deploy plus the longest collapse) and whether it is armed; a room in sight holds only what stands there now. A level-0 core is unarmed: it keeps its core engagement open but stands nothing down | World | heap | vision grace; when a stood-down outpost is clear |
 | `standing.*` | per module: last output and the key it was decided on | each module | heap | the replay (§1) |
@@ -754,7 +754,12 @@ half its free neighbours', less a tick a crossing from the sponsor, plus
 `season::worth`); the best one Layout can plan whole before it is claimed (The
 International's) is declared a claim, until its spawn stands, and kept in
 `expansion` until its storage does (one young colony at a time) or another
-player takes it; the operator's claim in flight holds it off.
+player takes it; the operator's claim in flight holds it off. It **fails**
+when another player owns the room, when it is not ours five lifetimes after
+it was declared (owner) or has no storage 40k ticks after (about twice the
+21k a room two crossings off took, measured). A fresh failure costs every room
+within one of it more than any room scores, fading to nothing over 100k ticks
+(Hivemind's), and a room that scores nothing is never declared.
 
 ### 7.3 Operations and force allocation
 

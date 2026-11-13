@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::fight::shape::{Cast, Engagement, Group};
 use super::layout::shape::Standing;
-use super::strategy::expand::Expansion;
+use super::strategy::expand::Expansions;
 use super::strategy::intel::Scout;
 use super::world::RoomName;
 
@@ -23,7 +23,7 @@ pub struct State {
     pub scouts: Vec<Scout>,
     /// Strategy's sweep candidates this tick, the stalest seen first.
     pub preyed: Vec<RoomName>,
-    pub expansion: Option<Expansion>,
+    pub expansion: Expansions,
 }
 
 impl State {
@@ -38,7 +38,7 @@ impl State {
             due: BTreeSet::new(),
             scouts: Vec::new(),
             preyed: Vec::new(),
-            expansion: None,
+            expansion: Expansions::default(),
         }
     }
 }
