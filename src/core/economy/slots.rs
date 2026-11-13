@@ -168,7 +168,8 @@ fn sponsors(atlas: &mut Atlas, derived: &Derived) -> Vec<Option<usize>> {
     let banks = |ci: usize| !derived.grounds[ci].abandoned && derived.grounds[ci].has_storage();
     (derived.colonies.iter().enumerate())
         .map(|(cj, c)| {
-            let young = c.controller.level < TOWER_LEVEL && !derived.grounds[cj].has_storage();
+            let g = &derived.grounds[cj];
+            let young = c.controller.level <= STORAGE_LEVEL && !g.has_storage() && !g.abandoned;
             let can = |ci: usize| ci != cj && banks(ci);
             let at = c.controller.pos;
             young.then(|| tick::nearest(atlas, &|r| derived.routes.get(&r), &homes, can, &at))?
@@ -493,8 +494,10 @@ impl Plan<'_> {
         }
 
         for cj in (0..sponsors.len()).filter(|cj| sponsors[*cj] == Some(ci)) {
+            // Past its tower's level they build: upgrading, they drank what its builders draw.
+            let builds = derived.colonies[cj].controller.level >= TOWER_LEVEL;
             for k in 0..PIONEERS {
-                self.worker(ci, derived.colonies[cj].room, k, false, PIONEER, MOST);
+                self.worker(ci, derived.colonies[cj].room, k, builds, PIONEER, MOST);
             }
         }
 
@@ -937,21 +940,21 @@ const MENDER_WORK: i32 = 2;
 const MENDER: i32 = 7;
 const FLOOR: i32 = 6;
 const CREW: i32 = 8;
-const PIONEER: i32 = 9;
+/// After the sponsor's own dig and carriers, before its outposts (The International's).
+const PIONEER: i32 = 2;
 const PIONEERS: usize = 4;
-/// Below the level its first tower stands at, a colony is raised by its
-/// nearest stocked neighbour's workers too.
 const TOWER_LEVEL: i32 = 3;
+const STORAGE_LEVEL: i32 = 4;
 const SPEND: i32 = 10;
 const SIGHT: i32 = 3;
 
-/// Cast order: a colony's own dig and its carriers first, then its outposts'
-/// reservers, whose bodies see them, their dig and haul, its floor of
-/// workers, and the surplus last.
+/// Cast order: a colony's own dig and its carriers first, the pioneers it
+/// sponsors, then its outposts' reservers, whose bodies see them, their dig
+/// and haul, its floor of workers, and the surplus last.
 fn rank_of(job: &Job, own: bool) -> i32 {
     match (job, own) {
         (Job::Dig(_), true) => 0,
-        (Job::Fill, _) => 2,
+        (Job::Fill, _) => 1,
         (Job::Reserve(_) | Job::Claim(_), _) => SIGHT,
         (Job::Scout(_), _) => 12,
         (Job::Dig(_), false) => 4,

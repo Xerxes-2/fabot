@@ -102,10 +102,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
         .collect();
 
     let owned = &context.derived.owned;
-    let held = state
-        .engagements
-        .iter()
-        .fold(0, |most, e| most.max(e.group));
+    let held = (state.engagements.iter()).fold(0, |most, e| most.max(e.group));
 
     let (groups, events) = tracker::step(
         tracker::LOST_GROUP_TICKS,
@@ -117,7 +114,10 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
     );
 
     let homes: BTreeSet<RoomName> = context.derived.colonies.iter().copied().collect();
-    let worked: BTreeSet<RoomName> = declarations.outposts.iter().map(|o| o.room).collect();
+    let worked: BTreeSet<RoomName> = (declarations.outposts.iter())
+        .chain(&declarations.claims)
+        .map(|o| o.room)
+        .collect();
 
     let by_id: BTreeMap<i32, Group> = groups.iter().map(|g| (g.id, g.clone())).collect();
     let hostile_at: BTreeMap<String, Pos> =

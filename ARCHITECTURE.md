@@ -381,7 +381,12 @@ Port with these cuts:
 Economy serves declarations it did not make: a `Mine room` from `KeeperDuty`, a
 `Pickup pile` from `PowerBank`, a `Boost compound × n` from a `Siege` (labs), a
 `Claim room` from Strategy (the claimer and pioneers are economy bodies until a
-spawn stands).
+spawn stands). A colony without a storage is a **young** one: its nearest
+stocked colony sponsors it with four pioneers (TooAngel's and Hivemind's
+support to RCL4 and a storage), cast after the sponsor's own dig and carriers and
+before its outposts (The International's), upgrading below RCL3 and building
+from it, drawing the sponsor's stock past its reserve. Defend covers a
+claimed room as it does an outpost.
 
 The cluster the operator declares (`declarations.labs`: a home and the stock it
 keeps of each compound) reacts toward those targets: `labs::plan_for` picks the
@@ -747,9 +752,9 @@ reach: two sources, nobody's, two rooms from any of ours and from a rival's
 room. Each is scored as a priced choice would be (energy a tick: its own dig,
 half its free neighbours', less a tick a crossing from the sponsor, plus
 `season::worth`); the best one Layout can plan whole before it is claimed (The
-International's) is declared a claim, kept in `expansion` until its spawn
-stands or another player takes it, and the operator's claim in flight holds it
-off.
+International's) is declared a claim, until its spawn stands, and kept in
+`expansion` until its storage does (one young colony at a time) or another
+player takes it; the operator's claim in flight holds it off.
 
 ### 7.3 Operations and force allocation
 

@@ -92,9 +92,13 @@ pub fn step(
         let owned = derived.owned.contains(&e.room);
         let theirs =
             (intel.get(&e.room).and_then(|r| r.owner.as_ref())).is_some_and(|o| o != &world.me);
+        // In flight until it stands on its own: support ends with its storage.
+        let stored = world.room(e.room).is_some_and(|r| {
+            (r.structures.iter())
+                .any(|s| (s.kind.is_storage() || s.kind.is_terminal()) && s.owner.is_ours())
+        });
         // The operator's claim takes the room GCL leaves.
-        return (!derived.colonies.contains(&e.room) && !theirs && (owned || !raising))
-            .then_some(e);
+        return (!stored && !theirs && (owned || !raising)).then_some(e);
     }
     if world.time % DUE != 0
         || raising
@@ -176,8 +180,8 @@ pub fn step(
     })
 }
 
-pub fn claim(intel: &Intel, held: Option<&Expansion>) -> Option<Outpost> {
-    let e = held?;
+pub fn claim(intel: &Intel, derived: &Derived, held: Option<&Expansion>) -> Option<Outpost> {
+    let e = held.filter(|e| !derived.colonies.contains(&e.room))?;
     let row = intel.get(&e.room)?;
     Some(Outpost {
         room: e.room,

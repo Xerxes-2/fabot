@@ -1,0 +1,10 @@
+{
+  "why": "a claim is carried by its sponsor until its storage stands, its pioneers cast before the sponsor's outposts and building past RCL3, so it reaches RCL4 with its tower charged; main stopped its pioneers at RCL3 and stood at RCL3 at t16000",
+  "modules": ["atlas", "economy", "fight", "layout", "mv", "strategy"],
+  "start": { "room": "W8N3", "seed": 1, "node": "E2" },
+  "ticks": 16000,
+  "assert": [
+    { "measure": "claimLevel", "min": 4 },
+    { "measure": "claimCharged", "max": 9000 }
+  ]
+}

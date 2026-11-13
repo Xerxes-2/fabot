@@ -139,7 +139,7 @@ pub fn plan(
         })
         .collect();
     // An expansion declared this tick holds the outposts from the next.
-    let claimed = expand::claim(intel, expansion.as_ref()).map(|c| c.room);
+    let claimed = expand::claim(intel, derived, expansion.as_ref()).map(|c| c.room);
     let preyed = intel::preyed(intel, declarations, world.time);
     let busy = outposts::busy(
         &plans,
@@ -158,6 +158,6 @@ pub fn plan(
         terrain,
         held,
     );
-    let claim = expand::claim(intel, expansion.as_ref());
+    let claim = expand::claim(intel, derived, expansion.as_ref());
     (plans, chosen, claim)
 }
