@@ -1,52 +1,49 @@
 use super::vocabulary::{
     BodyPart, Boost, Compound, Ore, Resource, boost, part_count_in, same_part,
 };
+use screeps::{Part, StructureType};
 
-/// MAX_CREEP_SIZE: a larger body is refused.
-pub const MAX_BODY_PARTS: usize = 50;
-pub const HARVEST_PER_WORK: i32 = 2;
-pub const CARRY_PART_CAPACITY: i32 = 50;
-pub const MINERAL_HARVEST_PER_WORK: i32 = 1;
-pub const EXTRACTOR_COOLDOWN: i32 = 5;
+pub const MAX_BODY_PARTS: usize = screeps::MAX_CREEP_SIZE as usize;
+pub const HARVEST_PER_WORK: i32 = screeps::HARVEST_POWER as i32;
+pub const CARRY_PART_CAPACITY: i32 = screeps::CARRY_CAPACITY as i32;
+pub const MINERAL_HARVEST_PER_WORK: i32 = screeps::HARVEST_MINERAL_POWER as i32;
+pub const EXTRACTOR_COOLDOWN: i32 = screeps::EXTRACTOR_COOLDOWN as i32;
 /// The intent pass runs before the object pass, so digs land one tick later.
 pub const MINERAL_HARVEST_CYCLE: i32 = EXTRACTOR_COOLDOWN + 1;
-pub const CREEP_LIFETIME: i32 = 1500;
-pub const CLAIM_LIFETIME: i32 = 600;
-/// STRONGHOLD_DECAY_TICKS ×1.1: the longest a deployed core stands.
-pub const STRONGHOLD_LONGEST_COLLAPSE: i32 = 82_500;
-/// CREEP_SPAWN_TIME.
-pub const SPAWN_TICKS_PER_PART: i32 = 3;
-pub const BOOST_ENERGY_PER_PART: i32 = 20;
-pub const BOOST_MINERAL_PER_PART: i32 = 30;
-pub const RESERVATION_CAP: i32 = 5000;
-pub const SPAWN_ENERGY: i32 = 300;
+pub const CREEP_LIFETIME: i32 = screeps::CREEP_LIFE_TIME as i32;
+pub const CLAIM_LIFETIME: i32 = screeps::CREEP_CLAIM_LIFE_TIME as i32;
+/// ×1.1: the longest a deployed core stands.
+pub const STRONGHOLD_LONGEST_COLLAPSE: i32 = screeps::STRONGHOLD_DECAY_TICKS as i32 * 11 / 10;
+pub const SPAWN_TICKS_PER_PART: i32 = screeps::CREEP_SPAWN_TIME as i32;
+pub const BOOST_ENERGY_PER_PART: i32 = screeps::LAB_BOOST_ENERGY as i32;
+pub const BOOST_MINERAL_PER_PART: i32 = screeps::LAB_BOOST_MINERAL as i32;
+pub const RESERVATION_CAP: i32 = screeps::CONTROLLER_RESERVE_MAX as i32;
+pub const SPAWN_ENERGY: i32 = screeps::SPAWN_ENERGY_CAPACITY as i32;
 
 pub fn extension_energy(level: i32) -> i32 {
-    match level {
-        7 => 100,
-        l if l >= 8 => 200,
-        _ => 50,
-    }
+    screeps::extension_energy_capacity(level.max(0) as u32) as i32
 }
-/// CONTROLLER_RESERVE. The reservation decays by one a tick, so N parts gain N - 1.
-pub const RESERVE_PER_CLAIM: i32 = 1;
-pub const CONTAINER_CAPACITY: i32 = 2000;
-pub const STORAGE_CAPACITY: i32 = 1_000_000;
-/// ENERGY_DECAY: a dropped pile loses ceil(amount / this) a tick.
-pub const ENERGY_DECAY: i32 = 1000;
-pub const TERMINAL_MIN_SEND: i32 = 100;
+/// The reservation decays by one a tick, so N parts gain N - 1.
+pub const RESERVE_PER_CLAIM: i32 = screeps::CONTROLLER_RESERVE as i32;
+pub const CONTAINER_CAPACITY: i32 = screeps::CONTAINER_CAPACITY as i32;
+pub const STORAGE_CAPACITY: i32 = screeps::STORAGE_CAPACITY as i32;
+/// A dropped pile loses ceil(amount / this) a tick.
+pub const ENERGY_DECAY: i32 = screeps::ENERGY_DECAY as i32;
+pub const TERMINAL_MIN_SEND: i32 = screeps::TERMINAL_MIN_SEND as i32;
 
 /// The energy a terminal spends sending `amount` across `distance` rooms.
 pub fn send_cost(amount: i32, distance: i32) -> i32 {
-    (f64::from(amount) * (1.0 - (-f64::from(distance) / 30.0).exp())).ceil() as i32
+    (f64::from(amount)
+        * (1.0 - (-f64::from(distance) / f64::from(screeps::TERMINAL_SEND_COST_SCALE)).exp()))
+    .ceil() as i32
 }
-pub const LAB_MINERAL_CAPACITY: i32 = 3000;
-pub const LAB_REACTION_AMOUNT: i32 = 5;
-pub const LAB_REACTION_RANGE: i32 = 2;
+pub const LAB_MINERAL_CAPACITY: i32 = screeps::LAB_MINERAL_CAPACITY as i32;
+pub const LAB_REACTION_AMOUNT: i32 = screeps::LAB_REACTION_AMOUNT as i32;
+pub const LAB_REACTION_RANGE: i32 = screeps::LAB_REACTION_RANGE as i32;
 /// Chebyshev over the room grid; the observed room is visible the next tick alone.
-pub const OBSERVER_RANGE: i32 = 10;
+pub const OBSERVER_RANGE: i32 = screeps::OBSERVER_RANGE as i32;
 pub const MELEE_RANGE: i32 = 1;
-pub const RANGED_RANGE: i32 = 3;
+pub const RANGED_RANGE: i32 = screeps::CREEP_RANGED_ACTION_RANGE as i32;
 /// The reach of upgradeController, build and repair.
 pub const UPGRADE_RANGE: i32 = 3;
 /// A keeper guards the first source, else mineral, this near its lair.
@@ -57,73 +54,73 @@ pub fn keeper_body() -> Vec<BodyPart> {
     body.extend([BodyPart::Attack, BodyPart::RangedAttack].repeat(10));
     body
 }
-/// The usernames the engine's NPCs carry.
-pub const INVADER_USER: &str = "Invader";
-pub const KEEPER_USER: &str = "Source Keeper";
-pub const ATTACK_POWER: i32 = 30;
-pub const RANGED_ATTACK_POWER: i32 = 10;
-pub const DISMANTLE_POWER: i32 = 50;
-pub const REPAIR_POWER: i32 = 100;
-pub const BUILD_POWER: i32 = 5;
-pub const HEAL_POWER: i32 = 12;
-pub const RANGED_HEAL_POWER: i32 = 4;
-pub const TOWER_POWER_ATTACK: i32 = 600;
-pub const TOWER_CAPACITY: i32 = 1000;
+pub const INVADER_USER: &str = screeps::INVADER_USERNAME;
+pub const KEEPER_USER: &str = screeps::SOURCE_KEEPER_USERNAME;
+pub const ATTACK_POWER: i32 = screeps::ATTACK_POWER as i32;
+pub const RANGED_ATTACK_POWER: i32 = screeps::RANGED_ATTACK_POWER as i32;
+pub const DISMANTLE_POWER: i32 = screeps::DISMANTLE_POWER as i32;
+pub const REPAIR_POWER: i32 = screeps::REPAIR_POWER as i32;
+pub const BUILD_POWER: i32 = screeps::BUILD_POWER as i32;
+pub const HEAL_POWER: i32 = screeps::HEAL_POWER as i32;
+pub const RANGED_HEAL_POWER: i32 = screeps::RANGED_HEAL_POWER as i32;
+pub const TOWER_POWER_ATTACK: i32 = screeps::TOWER_POWER_ATTACK as i32;
+pub const TOWER_CAPACITY: i32 = screeps::TOWER_CAPACITY as i32;
 /// A tower holding less does nothing.
-pub const TOWER_ENERGY_COST: i32 = 10;
-pub const TOWER_OPTIMAL_RANGE: i32 = 5;
-pub const TOWER_FALLOFF_RANGE: i32 = 20;
-pub const TOWER_FALLOFF: f64 = 0.75;
-pub const PART_HITS: i32 = 100;
-/// A source in a neutral room yields half.
-pub const HELD_OUTPUT_PER_TICK: i32 = 10;
-pub const NEUTRAL_OUTPUT_PER_TICK: i32 = 5;
-pub const SOURCE_REGEN_TIME: i32 = 300;
-/// UPGRADE_CONTROLLER_POWER.
-pub const UPGRADE_DRAIN_PER_WORK: i32 = 1;
-/// CONTROLLER_MAX_UPGRADE_PER_TICK at `controllerMaxLevel`, summed over every
-/// creep upgrading it; a creep past the tally upgrades and spends nothing.
-pub const MAX_UPGRADE_PER_TICK: i32 = 15;
+pub const TOWER_ENERGY_COST: i32 = screeps::TOWER_ENERGY_COST as i32;
+pub const TOWER_OPTIMAL_RANGE: i32 = screeps::TOWER_OPTIMAL_RANGE as i32;
+pub const TOWER_FALLOFF_RANGE: i32 = screeps::TOWER_FALLOFF_RANGE as i32;
+pub const TOWER_FALLOFF: f64 = screeps::TOWER_FALLOFF;
+pub const PART_HITS: i32 = screeps::CREEP_HITS_PER_PART as i32;
+pub const HELD_OUTPUT_PER_TICK: i32 =
+    (screeps::SOURCE_ENERGY_CAPACITY / screeps::ENERGY_REGEN_TIME) as i32;
+pub const NEUTRAL_OUTPUT_PER_TICK: i32 =
+    (screeps::SOURCE_ENERGY_NEUTRAL_CAPACITY / screeps::ENERGY_REGEN_TIME) as i32;
+pub const SOURCE_REGEN_TIME: i32 = screeps::ENERGY_REGEN_TIME as i32;
+pub const UPGRADE_DRAIN_PER_WORK: i32 = screeps::UPGRADE_CONTROLLER_POWER as i32;
+/// At `controllerMaxLevel`, summed over every creep upgrading it; a creep past
+/// the tally upgrades and spends nothing.
+pub const MAX_UPGRADE_PER_TICK: i32 = screeps::CONTROLLER_MAX_UPGRADE_PER_TICK as i32;
 pub const CONTROLLER_MAX_LEVEL: i32 = 8;
 /// The fatigue a weighted part makes stepping onto a road, plain and swamp.
-pub const ROAD_WEIGHT: i32 = 1;
-pub const PLAIN_WEIGHT: i32 = 2;
-pub const SWAMP_WEIGHT: i32 = 10;
-pub const ROAD_BUILD_COST: i32 = 300;
-/// CONSTRUCTION_COST_ROAD_SWAMP_RATIO: a swamp road's build, hits and decay.
-pub const ROAD_SWAMP_RATIO: i32 = 5;
-/// ROAD_DECAY_AMOUNT every ROAD_DECAY_TIME, on plain.
-pub const ROAD_DECAY_AMOUNT: i32 = 100;
-pub const ROAD_DECAY_TIME: i32 = 1000;
-/// ROAD_WEAROUT: decay-timer ticks a step brings forward, per body part.
-pub const ROAD_WEAROUT: i32 = 1;
-/// CONTAINER_DECAY every CONTAINER_DECAY_TIME, or _OWNED in an owned room.
-pub const CONTAINER_DECAY_AMOUNT: i32 = 5000;
-pub const CONTAINER_DECAY_TIME: i32 = 100;
-pub const CONTAINER_DECAY_TIME_OWNED: i32 = 500;
-pub const CONTAINER_BUILD_COST: i32 = 5000;
-pub const TOMBSTONE_DECAY_PER_PART: i32 = 5;
+pub const ROAD_WEIGHT: i32 = screeps::MOVE_COST_ROAD as i32;
+pub const PLAIN_WEIGHT: i32 = screeps::MOVE_COST_PLAIN as i32;
+pub const SWAMP_WEIGHT: i32 = screeps::MOVE_COST_SWAMP as i32;
+pub const ROAD_BUILD_COST: i32 = StructureType::Road.construction_cost().unwrap() as i32;
+/// A swamp road's build, hits and decay.
+pub const ROAD_SWAMP_RATIO: i32 = screeps::CONSTRUCTION_COST_ROAD_SWAMP_RATIO as i32;
+/// Every ROAD_DECAY_TIME, on plain.
+pub const ROAD_DECAY_AMOUNT: i32 = screeps::ROAD_DECAY_AMOUNT as i32;
+pub const ROAD_DECAY_TIME: i32 = screeps::ROAD_DECAY_TIME as i32;
+/// Decay-timer ticks a step brings forward, per body part.
+pub const ROAD_WEAROUT: i32 = screeps::ROAD_WEAROUT as i32;
+/// Every CONTAINER_DECAY_TIME, or _OWNED in an owned room.
+pub const CONTAINER_DECAY_AMOUNT: i32 = screeps::CONTAINER_DECAY as i32;
+pub const CONTAINER_DECAY_TIME: i32 = screeps::CONTAINER_DECAY_TIME as i32;
+pub const CONTAINER_DECAY_TIME_OWNED: i32 = screeps::CONTAINER_DECAY_TIME_OWNED as i32;
+pub const CONTAINER_BUILD_COST: i32 = StructureType::Container.construction_cost().unwrap() as i32;
+pub const TOMBSTONE_DECAY_PER_PART: i32 = screeps::TOMBSTONE_DECAY_PER_PART as i32;
 /// A creep aged out is buried on its last tick: its tombstone's creep has this left.
 pub const AGED_OUT_TICKS_TO_LIVE: i32 = 1;
-pub const RAMPART_DECAY_AMOUNT: i32 = 300;
-pub const RAMPART_DECAY_TIME: i32 = 100;
+pub const RAMPART_DECAY_AMOUNT: i32 = screeps::RAMPART_DECAY_AMOUNT as i32;
+pub const RAMPART_DECAY_TIME: i32 = screeps::RAMPART_DECAY_TIME as i32;
 /// REPAIR_COST: 0.01 energy a hit.
 pub const REPAIR_HITS_PER_ENERGY: i32 = 100;
-/// MAX_CONSTRUCTION_SITES, across every room.
-pub const MAX_CONSTRUCTION_SITES: i32 = 100;
-pub const ROOM_SIDE: i32 = 50;
+/// Across every room.
+pub const MAX_CONSTRUCTION_SITES: i32 = screeps::MAX_CONSTRUCTION_SITES as i32;
+pub const ROOM_SIDE: i32 = screeps::ROOM_SIZE as i32;
 
 pub fn part_cost(part: BodyPart) -> i32 {
-    match part {
-        BodyPart::Work => 100,
-        BodyPart::Carry => 50,
-        BodyPart::Move => 50,
-        BodyPart::Attack => 80,
-        BodyPart::RangedAttack => 150,
-        BodyPart::Heal => 250,
-        BodyPart::Claim => 600,
-        BodyPart::Tough => 10,
-    }
+    let engine = match part {
+        BodyPart::Work => Part::Work,
+        BodyPart::Carry => Part::Carry,
+        BodyPart::Move => Part::Move,
+        BodyPart::Attack => Part::Attack,
+        BodyPart::RangedAttack => Part::RangedAttack,
+        BodyPart::Heal => Part::Heal,
+        BodyPart::Claim => Part::Claim,
+        BodyPart::Tough => Part::Tough,
+    };
+    engine.cost() as i32
 }
 
 pub fn body_cost(body: &[BodyPart]) -> i32 {
@@ -142,29 +139,22 @@ pub fn reagents_of(compound: Compound) -> (Resource, Resource) {
 }
 
 pub fn controller_downgrade(level: i32) -> i32 {
-    match level {
-        1 => 20_000,
-        2 => 10_000,
-        3 => 20_000,
-        4 => 40_000,
-        5 => 80_000,
-        6 => 120_000,
-        7 => 150_000,
-        8 => 200_000,
-        _ => 0,
-    }
+    u8::try_from(level)
+        .ok()
+        .and_then(screeps::controller_downgrade)
+        .unwrap_or(0) as i32
 }
 
 /// The downgrade timer below which `activateSafeMode` is ERR_TIRED.
 pub fn safe_mode_downgrade_line(level: i32) -> i32 {
-    controller_downgrade(level) / 2 - 5_000
+    controller_downgrade(level) / 2 - screeps::CONTROLLER_DOWNGRADE_SAFEMODE_THRESHOLD as i32
 }
 
 pub fn mass_attack_power_at(range: i32) -> i32 {
     match range {
         0 | 1 => RANGED_ATTACK_POWER,
-        2 => 4,
-        3 => 1,
+        2 => screeps::RANGED_MASS_ATTACK_POWER_RANGE_2 as i32,
+        3 => screeps::RANGED_MASS_ATTACK_POWER_RANGE_3 as i32,
         _ => 0,
     }
 }

@@ -676,31 +676,14 @@ impl Rules {
 
     #[cfg(any(test, feature = "tools"))]
     pub fn vanilla() -> Rules {
-        let row = |r: [i32; 9]| r.to_vec();
-        let from =
-            |level: usize, n: i32| row(std::array::from_fn(|l| if l >= level { n } else { 0 }));
-        let structures = [
-            ("spawn", row([0, 1, 1, 1, 1, 1, 1, 2, 3])),
-            ("extension", row([0, 0, 5, 10, 20, 30, 40, 50, 60])),
-            ("link", row([0, 0, 0, 0, 0, 2, 3, 4, 6])),
-            ("road", from(0, 2500)),
-            ("constructedWall", from(2, 2500)),
-            ("rampart", from(2, 2500)),
-            ("storage", from(4, 1)),
-            ("tower", row([0, 0, 0, 1, 1, 2, 2, 3, 6])),
-            ("observer", from(8, 1)),
-            ("powerSpawn", from(8, 1)),
-            ("extractor", from(6, 1)),
-            ("terminal", from(6, 1)),
-            ("lab", row([0, 0, 0, 0, 0, 0, 3, 6, 10])),
-            ("container", from(0, 5)),
-            ("nuker", from(8, 1)),
-            ("factory", from(7, 1)),
-        ];
+        use screeps::StructureType;
+        let built = "spawn extension link road constructedWall rampart storage tower observer \
+                     powerSpawn extractor terminal lab container nuker factory";
+        let row = |kind: StructureType| (0..=8).map(move |l| kind.controller_structures(l) as i32);
+        let structures = (built.split_whitespace())
+            .map(|name| (name.to_string(), row(name.parse().unwrap()).collect()));
         Rules {
-            structures: (structures.into_iter())
-                .map(|(kind, row)| (kind.to_string(), row))
-                .collect(),
+            structures: structures.collect(),
         }
     }
 }

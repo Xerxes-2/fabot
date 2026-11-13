@@ -8,7 +8,7 @@ use crate::core::engine;
 use crate::core::world::{Pos, RoomName};
 
 pub const SIDE: i32 = engine::ROOM_SIDE;
-pub const COUNT: usize = 2500;
+pub const COUNT: usize = screeps::ROOM_AREA;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Tile(u16);
