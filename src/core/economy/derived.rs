@@ -1026,6 +1026,87 @@ fn stock_labs(
     }
 }
 
+/// v1's `AidDonorMargin`: over a load and its fee.
+const AID_MARGIN: i32 = 20_000;
+
+struct Taker {
+    room: RoomName,
+    level: i32,
+    held: i32,
+    reserve: i32,
+    free: i32,
+}
+
+impl Taker {
+    /// A colony spending down to its reserve is not short.
+    fn short(&self) -> Option<i32> {
+        (2 * self.held < self.reserve).then_some(self.reserve - self.held)
+    }
+}
+
+/// v1's energy aid. Held counts the terminal's, so stocking it never moves
+/// the line; each send is booked on its taker, so givers never pile on one.
+fn give_aid(colonies: &[Colony], grounds: &mut [Ground], given_up: &dyn Fn(RoomName) -> bool) {
+    let mut takers: Vec<Taker> = (colonies.iter().zip(grounds.iter()))
+        .filter(|(c, _)| !given_up(c.room))
+        .filter_map(|(c, g)| {
+            let t = g.terminal.as_ref()?;
+            let held = g.stock()? + t.store.amount_of(&Resource::Energy);
+            Some(Taker {
+                room: c.room,
+                level: c.controller.level,
+                held,
+                reserve: c.reserve,
+                free: t.store.free(),
+            })
+        })
+        .collect();
+    for g in grounds.iter_mut().take(colonies.len()) {
+        let Some(gi) = takers.iter().position(|t| t.room == g.room) else {
+            continue;
+        };
+        let owed: i32 = g.sites.iter().map(|s| s.left).sum();
+        let spare = takers[gi].held - takers[gi].reserve - AID_MARGIN - owed;
+        if g.ship_to.is_some() {
+            continue;
+        }
+        let Some(ti) = recipient(&takers[gi], &takers) else {
+            continue;
+        };
+        let to = &takers[ti];
+        let sent = spare.min(to.free).min(to.short().unwrap_or(i32::MAX));
+        if sent < engine::TERMINAL_MIN_SEND {
+            continue;
+        }
+        g.shipment = vec![(Resource::Energy, sent)];
+        g.ship_to = Some((to.room, to.free));
+        takers[gi].held -= sent;
+        takers[ti].held += sent;
+        takers[ti].free -= sent;
+    }
+}
+
+/// Never to a colony holding more, so energy never flows back up. The nearest
+/// pays the least fee.
+fn recipient(giver: &Taker, takers: &[Taker]) -> Option<usize> {
+    let top = engine::CONTROLLER_MAX_LEVEL;
+    (takers.iter().enumerate())
+        .filter(|(_, t)| t.held < giver.held)
+        .filter_map(|(i, t)| {
+            let apart = tiles::rooms_apart(giver.room, t.room);
+            let rank = if let Some(short) = t.short() {
+                (0, -short, apart)
+            } else if giver.level == top && t.level < top {
+                (1, t.level, apart)
+            } else {
+                return None;
+            };
+            Some(((rank, t.room), i))
+        })
+        .min_by_key(|(key, _)| *key)
+        .map(|(_, i)| i)
+}
+
 /// At the rate the reserver holds, not this tick's: a body lives longer
 /// than a lapse lasts. The engine refuses a harvest on another's hold.
 fn remote_of(
@@ -1194,6 +1275,8 @@ pub fn of_world(
             super::abandon::evacuate(&mut grounds[i], room, &world.creeps, to);
         }
     }
+
+    give_aid(&colonies, &mut grounds, &given_up);
 
     let bodies: Vec<Body> = creeps
         .iter()

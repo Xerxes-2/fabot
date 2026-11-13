@@ -1,0 +1,13 @@
+{
+  "why": "an RCL8 colony's stock past its reserve, a margin and its sites' cost goes by terminal to a colony below RCL8, whose upgrade spends it (owner, 2026-11-13: GCL is every room's upgrade, and RCL8's buys only GCL), and the giver's own sites are still built: three RCL8 colonies hold 200-300k beside an RCL6 and an RCL7 one, the reserve one lifetime of tower fire so the RCL8 ones hold past it. Main 364aecbe upgraded 97504 over the run, 37069 of it in W7S5, and built 128377, 191903 and 77302 in W2S8, W3S8 and W5S8",
+  "modules": ["economy"],
+  "start": { "world": "scripts/xxscreeps/worlds/young-among-colonies.json", "seed": 1, "declarations": { "reserve": 1 } },
+  "ticks": 4000,
+  "assert": [
+    { "measure": "upgrade", "min": 140000 },
+    { "measure": "upgrade", "room": "W7S5", "min": 70000 },
+    { "measure": "build", "room": "W2S8", "min": 110000 },
+    { "measure": "build", "room": "W3S8", "min": 165000 },
+    { "measure": "build", "room": "W5S8", "min": 60000 }
+  ]
+}

@@ -254,6 +254,21 @@ fn takes_of(
             0,
         );
     }
+    // Sent energy is banked, or the stock the spend is sized to never sees it.
+    let sent = |o: &Ground| {
+        o.ship_to.is_some_and(|(to, _)| to == g.room)
+            && o.shipment.iter().any(|(r, _)| r.is_energy())
+    };
+    if let Some(t) =
+        (g.terminal.as_ref()).filter(|_| g.ship_to.is_none() && derived.grounds.iter().any(sent))
+    {
+        add(
+            Task::Withdraw(t.id.clone(), Resource::Energy),
+            t.pos,
+            t.store.amount_of(&Resource::Energy),
+            dig,
+        );
+    }
     for l in g
         .links
         .iter()
@@ -708,8 +723,12 @@ impl<'a> Jobs<'a> {
         // Under it, what stands in a link or container is the reserve's too.
         let short = g.stock().is_some_and(|n| n < reserve);
         let fed = hand_fed(self.derived, g);
+        let shipping = |s: &&super::derived::StoreFact| {
+            g.ship_to.is_some() && g.terminal.as_ref().is_some_and(|t| t.id == s.id)
+        };
         for s in (g.stores.iter())
             .filter(|s| (!short || s.kind.is_remains()) && !(fed && s.kind.is_buffer()))
+            .filter(|s| !shipping(s))
         {
             let spare = s.spare(reserve);
             spots.push(Spot {

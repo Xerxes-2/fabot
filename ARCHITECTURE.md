@@ -298,7 +298,11 @@ reserve upgrades. At RCL8 the controller is fed only inside its downgrade
 deadline (owner, 2026-11-13: upgrading there only feeds GCL; sites, ramparts,
 labs and lower colonies use the energy better): no upgrader, no upgrade spend,
 every worker builds, and a load held with no slot goes to a site or the
-storage. A structure lost within a creep
+storage. Its stock past its reserve, a 20k margin and its sites' cost goes
+by terminal to the colony below RCL8 of lowest level, then the nearest
+(`derived::give_aid`), which banks it and upgrades; first, from any colony,
+to one under half its reserve, furthest short (v1's aid). Aid flows only to
+a colony holding less, so it never flows back. A structure lost within a creep
 life at its pace is mended before a builder's sites; below the reserve a home
 road at risk still casts the floor's first worker, which draws the reserve
 like the deadline's, to mend only. A home road's pace counts the wear of the
