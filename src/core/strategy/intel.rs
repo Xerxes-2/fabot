@@ -7,7 +7,7 @@ use crate::core::intents::Intent;
 use crate::core::tick::{self, Declarations, Declared};
 use crate::core::tiles;
 use crate::core::vocabulary::BodyPart;
-use crate::core::world::{Owner, Pos, RoomName, World};
+use crate::core::world::{Owner, Pos, RoomName, World, push_int};
 
 /// A room as it stood when last seen, by username: a stance is the
 /// declarations' and changes without a sight.
@@ -267,35 +267,46 @@ pub fn to_text(intel: &Intel) -> String {
     fn name(user: &Option<String>) -> &str {
         user.as_deref().unwrap_or(NONE)
     }
+    fn id_at(out: &mut String, sep: &str, id: &str, at: &Pos) {
+        out.extend([sep, id, "@"]);
+        push_int(out, at.index());
+    }
     let mut out = String::new();
     for (room, r) in intel {
-        let _ = write!(out, "{room} {} {} {} ", r.seen, name(&r.owner), r.level);
-        let _ = match &r.reservation {
-            Some((user, lapse)) => write!(out, "{user} {lapse}"),
-            None => write!(out, "{NONE} {NONE}"),
-        };
-        let _ = write!(out, " {} ", name(&r.worker));
+        let _ = write!(out, "{room} ");
+        push_int(&mut out, r.seen);
+        out.extend([" ", name(&r.owner), " "]);
+        push_int(&mut out, r.level);
+        match &r.reservation {
+            Some((user, lapse)) => {
+                out.extend([" ", user, " "]);
+                push_int(&mut out, *lapse);
+            }
+            None => out.extend([" ", NONE, " ", NONE]),
+        }
+        out.extend([" ", name(&r.worker), " "]);
         match r.lairs.as_deref() {
             None => out.push_str(NONE),
             Some([]) => out.push('.'),
             Some(posts) => {
                 for (i, (lair, resource)) in posts.iter().enumerate() {
-                    let comma = if i == 0 { "" } else { "," };
-                    let _ = write!(out, "{comma}{}.{}", lair.index(), resource.index());
+                    out.push_str(if i == 0 { "" } else { "," });
+                    push_int(&mut out, lair.index() as i32);
+                    out.push('.');
+                    push_int(&mut out, resource.index() as i32);
                 }
             }
         }
-        let _ = match &r.controller {
-            Some(c) => write!(out, " {}@{}", c.id, c.pos.index()),
-            None => write!(out, " {NONE}"),
-        };
+        match &r.controller {
+            Some(c) => id_at(&mut out, " ", &c.id, &c.pos),
+            None => out.extend([" ", NONE]),
+        }
         match r.sources.as_deref() {
             None => out.push_str(" -"),
             Some([]) => out.push_str(" ."),
             Some(sources) => {
                 for (i, s) in sources.iter().enumerate() {
-                    let sep = if i == 0 { ' ' } else { ',' };
-                    let _ = write!(out, "{sep}{}@{}", s.id, s.pos.index());
+                    id_at(&mut out, if i == 0 { " " } else { "," }, &s.id, &s.pos);
                 }
             }
         }
@@ -376,6 +387,15 @@ pub fn of_text(text: &str) -> Intel {
 mod tests {
     use super::*;
     use crate::core::tests::Dice;
+
+    #[test]
+    fn push_int_writes_as_display() {
+        for n in [i32::MIN, -10, -1, 0, 9, 10, 4096, i32::MAX] {
+            let mut out = String::new();
+            push_int(&mut out, n);
+            assert_eq!(out, n.to_string());
+        }
+    }
 
     #[test]
     fn a_row_reads_back_as_written() {

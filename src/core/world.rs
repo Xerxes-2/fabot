@@ -116,6 +116,25 @@ impl std::fmt::Display for RoomName {
     }
 }
 
+/// `write!`'s `Formatter` costs more than the digits.
+pub fn push_int(out: &mut String, n: i32) {
+    if n < 0 {
+        out.push('-');
+    }
+    let mut digits = [0u8; 10];
+    let mut at = digits.len();
+    let mut rest = n.unsigned_abs();
+    loop {
+        at -= 1;
+        digits[at] = b'0' + (rest % 10) as u8;
+        rest /= 10;
+        if rest == 0 {
+            break;
+        }
+    }
+    out.push_str(std::str::from_utf8(&digits[at..]).unwrap_or_default());
+}
+
 impl std::fmt::Debug for RoomName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "\"{self}\"")

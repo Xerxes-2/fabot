@@ -8,6 +8,7 @@ use std::fmt::Write;
 use screeps::raw_memory;
 
 use super::world::Pass;
+use crate::core::world::push_int;
 
 const RING: usize = 5;
 const FIRST: usize = 10;
@@ -42,7 +43,10 @@ fn text(time: i32, cpu_limit: f64, pass: &Pass, intel: &str) -> String {
         String::with_capacity(memory.len() + intel.len() + pass.strs.len() + pass.ints.len() * 4);
     let _ = write!(text, "{time} {cpu_limit}\0{memory}\0{intel}\0");
     for (i, n) in pass.ints.iter().enumerate() {
-        let _ = write!(text, "{}{n}", if i == 0 { "" } else { "," });
+        if i > 0 {
+            text.push(',');
+        }
+        push_int(&mut text, *n);
     }
     text.push('\0');
     text.push_str(&pass.strs);

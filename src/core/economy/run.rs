@@ -71,10 +71,11 @@ fn ring_member(derived: &Derived, task: &Task, at: &Pos) -> Option<Task> {
     let Task::Refill(id, r) = task else {
         return None;
     };
-    let g = (derived.grounds.iter()).find(|g| &super::jobs::ring_id(g.room) == id)?;
+    let room = super::jobs::ring_room(id)?;
+    let g = (derived.grounds.iter()).find(|g| g.room == room)?;
     (g.refills.iter())
         .filter(|f| !f.kind.is_tower() && f.free > 0)
-        .min_by_key(|f| (at.range(&f.pos).unwrap_or(i32::MAX), f.id.clone()))
+        .min_by_key(|&f| (at.range(&f.pos).unwrap_or(i32::MAX), &f.id))
         .map(|f| Task::Refill(f.id.clone(), r.clone()))
 }
 
@@ -676,13 +677,13 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
             continue;
         };
         if slot.closed {
-            next.insert(creep.name.clone(), format!("{}|", slot.id));
+            next.insert(creep.name.clone(), slot.id.clone() + "|");
             let wish = home(context.atlas, &derived, creep, mover, danger);
             wish_in(&mut wishes, creep.pos.room, wish);
             continue;
         }
         let held = task.as_ref().map_or(String::new(), task::task_id);
-        next.insert(creep.name.clone(), format!("{}|{held}", slot.id));
+        next.insert(creep.name.clone(), [slot.id.as_str(), "|", &held].concat());
 
         let wish = match &task {
             Some(task) => work(
@@ -700,11 +701,11 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
     }
     for b in &derived.ovens {
         if let Some(si) = assigned.get(&b.name) {
-            next.insert(b.name.clone(), format!("{}|", slots[*si].id));
+            next.insert(b.name.clone(), slots[*si].id.clone() + "|");
         }
     }
     for c in &casts {
-        next.insert(c.name.clone(), format!("{}|", c.slot));
+        next.insert(c.name.clone(), c.slot.clone() + "|");
     }
 
     let moves = (wishes.into_iter())

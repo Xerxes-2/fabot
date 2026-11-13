@@ -45,10 +45,16 @@ pub fn fee_short(ground: &Ground) -> i32 {
     0.max(kept - t.store.amount_of(&Resource::Energy))
 }
 
+const RING: &str = "ring-";
+
 /// The task id of a colony's spawn ring: `run` delivers it to the nearest of
 /// its spawn and extensions with room.
 pub fn ring_id(room: RoomName) -> String {
-    format!("ring-{room}")
+    format!("{RING}{room}")
+}
+
+pub fn ring_room(id: &str) -> Option<RoomName> {
+    RoomName::parse(id.strip_prefix(RING)?)
 }
 
 /// What the source links send the controller's link a tick, read off the

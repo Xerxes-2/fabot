@@ -50,25 +50,25 @@ pub fn task_id(task: &Task) -> String {
 }
 
 pub fn of_task_id(id: &str) -> Option<Task> {
-    let parts: Vec<&str> = id.split(':').collect();
-    match parts.as_slice() {
-        ["h", target] => Some(Task::Harvest(target.to_string())),
-        ["w", target, resource] => Some(Task::Withdraw(
+    let mut parts = id.split(':');
+    match [parts.next(), parts.next(), parts.next(), parts.next()] {
+        [Some("h"), Some(target), None, _] => Some(Task::Harvest(target.to_string())),
+        [Some("w"), Some(target), Some(resource), None] => Some(Task::Withdraw(
             target.to_string(),
             resource_of_name(resource),
         )),
-        ["p", target, resource] => {
+        [Some("p"), Some(target), Some(resource), None] => {
             Some(Task::Pickup(target.to_string(), resource_of_name(resource)))
         }
-        ["f", target, resource] => {
+        [Some("f"), Some(target), Some(resource), None] => {
             Some(Task::Refill(target.to_string(), resource_of_name(resource)))
         }
-        ["b", target] => Some(Task::Build(target.to_string())),
-        ["r", target] => Some(Task::Repair(target.to_string())),
-        ["u", target] => Some(Task::Upgrade(target.to_string())),
-        ["v", target] => Some(Task::Reserve(target.to_string())),
-        ["c", target] => Some(Task::Claim(target.to_string())),
-        ["s", room] => Some(Task::Scout(RoomName::parse(room)?)),
+        [Some("b"), Some(target), None, _] => Some(Task::Build(target.to_string())),
+        [Some("r"), Some(target), None, _] => Some(Task::Repair(target.to_string())),
+        [Some("u"), Some(target), None, _] => Some(Task::Upgrade(target.to_string())),
+        [Some("v"), Some(target), None, _] => Some(Task::Reserve(target.to_string())),
+        [Some("c"), Some(target), None, _] => Some(Task::Claim(target.to_string())),
+        [Some("s"), Some(room), None, _] => Some(Task::Scout(RoomName::parse(room)?)),
         _ => None,
     }
 }

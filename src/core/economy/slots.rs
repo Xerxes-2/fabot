@@ -287,7 +287,7 @@ impl Plan<'_> {
         room: RoomName,
         job: Job,
         seat: Pos,
-        key: &str,
+        key: impl std::fmt::Display,
         k: usize,
         body: Vec<BodyPart>,
     ) {
@@ -325,7 +325,7 @@ impl Plan<'_> {
                     colony.room,
                     Job::Fill,
                     drop,
-                    &colony.room.to_string(),
+                    colony.room,
                     0,
                     body.unwrap_or_default(),
                 );
@@ -663,7 +663,7 @@ impl Plan<'_> {
                     colony.room,
                     Job::Upgrade,
                     seat,
-                    &colony.room.to_string(),
+                    colony.room,
                     k,
                     body.clone(),
                 );
@@ -760,9 +760,8 @@ impl Plan<'_> {
         if carriers.is_empty() && storage.is_some() {
             carriers.extend(bodies::hauler(2, engine::MAX_BODY_PARTS as i32, capacity));
         }
-        let room = colony.room.to_string();
         for (k, body) in carriers.into_iter().enumerate() {
-            self.push(ci, colony.room, Job::Fill, drop, &room, k, body);
+            self.push(ci, colony.room, Job::Fill, drop, colony.room, k, body);
             let slot = self.out.last_mut().expect("pushed");
             if k >= home_carriers.max(1) {
                 slot.rank = OUTPOST_HAUL;
