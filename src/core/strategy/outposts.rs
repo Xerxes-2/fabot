@@ -6,7 +6,7 @@ use crate::core::fight::shape::{Engagement, Objective};
 use crate::core::tick::{ColonyPlan, Declarations, Derived, Outpost, REACH_HOPS};
 use crate::core::tiles;
 use crate::core::vocabulary::BodyPart;
-use crate::core::world::{Kind, Room, RoomName, World};
+use crate::core::world::{RoomName, World};
 
 /// What one intent costs the engine; a body acts about once a tick.
 const INTENT_CPU: f64 = 0.2;
@@ -28,6 +28,9 @@ struct Price {
     spawn: f64,
     cpu: f64,
 }
+
+/// Spenders' parts, their draw's carriers too, an energy a tick: measured at RCL5.
+const SPEND_PARTS: f64 = 2.0;
 
 fn price(c: &Candidate, capacity: i32) -> Price {
     use BodyPart::{Carry, Claim, Move, Work};
@@ -93,28 +96,34 @@ pub fn busy(
         .collect()
 }
 
-/// The level rush ends with RCL6's extractor and terminal; past it dig is the
-/// score, not upgrade.
-fn outpost_spawn_ticks(home: Option<&Room>) -> f64 {
-    let life = f64::from(engine::CREEP_LIFETIME);
-    let built = |is: fn(&Kind) -> bool| {
-        home.is_some_and(|r| (r.structures.iter()).any(|s| is(&s.kind) && s.owner.is_ours()))
-    };
-    if built(Kind::is_extractor) && built(Kind::is_terminal) {
-        life
-    } else {
-        life / 2.0
-    }
-}
-
 pub fn chosen(
     world: &World,
     candidates: Vec<Candidate>,
-    busy: &BTreeSet<RoomName>,
+    (busy, spare): (&BTreeSet<RoomName>, &BTreeMap<RoomName, f64>),
 ) -> Vec<Outpost> {
+    // A young home opens every room that pays at once, as The International does.
+    let stocked = |home: RoomName| {
+        world.room(home).is_some_and(|r| {
+            (r.structures.iter()).any(|s| s.kind.is_storage() && s.owner.is_ours())
+        })
+    };
+    // Before a storage the spawns' other half is the spend's.
+    let spend = |home: RoomName, net: f64| {
+        let ticks = net.max(0.0) * SPEND_PARTS * f64::from(engine::SPAWN_TICKS_PER_PART);
+        if stocked(home) { ticks } else { 0.0 }
+    };
     let mut spawn_left: BTreeMap<RoomName, f64> = BTreeMap::new();
-    for s in &world.spawns {
-        *spawn_left.entry(s.pos.room).or_default() += outpost_spawn_ticks(world.room(s.pos.room));
+    for room in world.spawns.iter().map(|s| s.pos.room) {
+        let spawns = world.spawns.iter().filter(|s| s.pos.room == room).count() as f64;
+        let half = f64::from(engine::CREEP_LIFETIME) * spawns / 2.0;
+        let dug = world.room(room).map_or(0, |r| r.sources.len() as i32);
+        let left = match spare.get(&room) {
+            Some(spare) if stocked(room) => {
+                spare - spend(room, f64::from(dug * engine::HELD_OUTPUT_PER_TICK))
+            }
+            _ => half,
+        };
+        spawn_left.insert(room, left);
     }
     let mut cpu_left = world.cpu_limit / 2.0;
     let capacity = |home: RoomName| world.room(home).map_or(0, |r| r.energy_capacity);
@@ -131,17 +140,12 @@ pub fn chosen(
             .then(value(pb).total_cmp(&value(pa)))
             .then(a.outpost.room.cmp(&b.outpost.room))
     });
-    // A young home opens every room that pays at once, as The International does.
-    let stocked = |home: RoomName| {
-        world.room(home).is_some_and(|r| {
-            (r.structures.iter()).any(|s| s.kind.is_storage() && s.owner.is_ours())
-        })
-    };
     let mut out = Vec::new();
     let mut rising: BTreeSet<RoomName> = BTreeSet::new();
     for (c, p) in priced {
         let left = spawn_left.entry(c.home).or_default();
-        let unpaid = p.net <= 0.0 || p.spawn > *left || p.cpu > cpu_left;
+        let spawn = p.spawn + spend(c.home, p.net);
+        let unpaid = p.net <= 0.0 || spawn > *left || p.cpu > cpu_left;
         let yields = busy.contains(&c.home) && !c.stands;
         if !c.declared && (unpaid || yields || rising.contains(&c.home)) {
             continue;
@@ -149,7 +153,7 @@ pub fn chosen(
         if !c.stands && stocked(c.home) {
             rising.insert(c.home);
         }
-        *left -= p.spawn;
+        *left -= spawn;
         cpu_left -= p.cpu;
         if !c.declared {
             out.push(c.outpost);

@@ -518,6 +518,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
 
     let owners = slots::owners(context.atlas, &derived);
     let slots = slots::plan(context.atlas, &derived, &owners);
+    state.spare = slots::spare(&derived, &slots);
     let (assigned, holders, retired) =
         slots::assign(&*context.atlas, &derived, &slots, &state.assignments);
     let (casts, short) = slots::casts(&*context.atlas, &derived, &slots, &holders);

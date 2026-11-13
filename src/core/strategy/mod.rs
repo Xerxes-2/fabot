@@ -91,7 +91,7 @@ pub fn plan(
     declarations: &Declarations,
     intel: &Intel,
     (engagements, casts, due): (&[Engagement], &[Cast], &BTreeSet<RoomName>),
-    layout: &BTreeMap<RoomName, Standing>,
+    (layout, spare): (&BTreeMap<RoomName, Standing>, &BTreeMap<RoomName, f64>),
     (terrain, expansion): (&dyn Fn(RoomName) -> Option<Terrain>, &mut Expansions),
 ) -> (Vec<ColonyPlan>, Vec<Outpost>, Option<Outpost>) {
     let rival = |name: &str| name != world.me && !declarations.allies.contains(name);
@@ -151,7 +151,7 @@ pub fn plan(
         (engagements, &preyed, derived),
     );
     let candidates = outposts::survey(world, derived, (declarations, &plans, claimed), intel);
-    let chosen = outposts::chosen(world, candidates, &busy);
+    let chosen = outposts::chosen(world, candidates, (&busy, spare));
     let fought: BTreeSet<RoomName> = engagements.iter().map(|e| e.room).collect();
     let around = expand::Around {
         rivals: &rivals,

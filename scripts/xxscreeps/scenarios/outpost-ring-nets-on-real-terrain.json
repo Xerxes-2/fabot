@@ -1,10 +1,10 @@
 {
-  "why": "a one-source claim on the season's real map works both declared neighbours through their Invader waves, each netting positive after its bodies (runs read 59k and 66k by t8000), and the colony still upgrades: its outposts' carriers take at most half its one spawn's time, so the spawn is not all haulers (main reads 0 upgraded). Upgrade 20k -> 15k: the slot economy reads 16.8k on seed 1 with a mean of 25.3k over seeds 1-3, against main's 18 (#791)",
+  "why": "a one-source claim on the season's real map works both declared neighbours through their Invader waves, each netting positive after its bodies, and the colony still upgrades: its outposts' carriers take only the spawn time its own bodies leave, so the spawn is not all haulers (main reads 0 upgraded). Upgrade 20k -> 15k: the slot economy reads 16.8k on seed 1 with a mean of 25.3k over seeds 1-3, against main's 18 (#791). Poorest 40k -> 20k: pricing the outposts on the spawn the home leaves (85223618 on half its life) opens a third, E24S9, from t1500, netting 27k by t8000 beside the declared 61k and 67k, upgrade 98k against 88k",
   "modules": ["economy", "strategy", "fight"],
   "start": { "world": "scripts/xxscreeps/worlds/season-outpost-ring.json", "room": "E25S9", "seed": 1, "node": "E1" },
   "ticks": 8000,
   "assert": [
-    { "measure": "poorestOutpost", "min": 40000 },
+    { "measure": "poorestOutpost", "min": 20000 },
     { "measure": "upgrade", "min": 15000 }
   ]
 }

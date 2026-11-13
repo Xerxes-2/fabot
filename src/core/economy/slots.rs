@@ -722,6 +722,7 @@ impl Plan<'_> {
             let rank = match k {
                 0 if inside_deadline(&colony.controller) => DEADLINE,
                 0 if mends && !draws => MEND,
+                0 if mends => STOCKED,
                 k if k < floor => FLOOR,
                 k if k < floor + crews => CREW,
                 _ => SPEND,
@@ -762,23 +763,14 @@ impl Plan<'_> {
         let home_carriers = haulers(&local, capacity).len();
         local.extend(remote);
         let mut carriers = haulers(&local, capacity);
-        let ticks = |b: &Vec<BodyPart>| {
-            let life = if b.contains(&BodyPart::Claim) {
-                engine::CLAIM_LIFETIME
-            } else {
-                engine::CREEP_LIFETIME
-            };
-            f64::from(engine::SPAWN_TICKS_PER_PART * b.len() as i32 * engine::CREEP_LIFETIME)
-                / f64::from(life)
-        };
         let spawn_time = f64::from(engine::CREEP_LIFETIME) * colony.spawns.len() as f64;
         let mut spent = (self.out.iter().filter(|s| s.colony == ci))
-            .map(|s| ticks(&s.body))
-            .chain(carriers.iter().take(home_carriers).map(ticks))
+            .map(|s| spawn_ticks(&s.body))
+            .chain(carriers.iter().take(home_carriers).map(|b| spawn_ticks(b)))
             .sum::<f64>();
         let far_carriers = (carriers.iter().skip(home_carriers))
             .take_while(|b| {
-                spent += ticks(b);
+                spent += spawn_ticks(b);
                 spent <= spawn_time
             })
             .count();
@@ -981,6 +973,37 @@ fn rank_of(job: &Job, own: bool) -> i32 {
         (Job::Work(_), _) => SPEND,
         (Job::Upgrade, _) => 11,
     }
+}
+
+fn spawn_ticks(body: &[BodyPart]) -> f64 {
+    let life = if body.contains(&BodyPart::Claim) {
+        engine::CLAIM_LIFETIME
+    } else {
+        engine::CREEP_LIFETIME
+    };
+    f64::from(engine::SPAWN_TICKS_PER_PART * body.len() as i32 * engine::CREEP_LIFETIME)
+        / f64::from(life)
+}
+
+/// Strategy prices the outposts and the spend their dig casts against it.
+pub fn spare(derived: &Derived, slots: &[Slot]) -> BTreeMap<RoomName, f64> {
+    let mut out: BTreeMap<RoomName, f64> = (derived.colonies.iter())
+        .map(|c| {
+            (
+                c.room,
+                f64::from(engine::CREEP_LIFETIME) * c.spawns.len() as f64,
+            )
+        })
+        .collect();
+    for s in slots {
+        // A claim's pioneers outrank the far haul, so the outposts they leave
+        // unhauled are given up until the claim stands.
+        let home = derived.colonies[s.colony].room;
+        if (s.room == home || s.rank == PIONEER) && !far(s) && !s.spends {
+            *out.entry(home).or_default() -= spawn_ticks(&s.body);
+        }
+    }
+    out
 }
 
 pub fn far(slot: &Slot) -> bool {

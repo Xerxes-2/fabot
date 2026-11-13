@@ -27,6 +27,7 @@ struct Heap {
     faults: Vec<wire::Fault>,
     /// Heap only, so empty after a reset, when each module re-derives it.
     standing: BTreeMap<RoomName, Standing>,
+    spare: BTreeMap<RoomName, f64>,
     /// Heap only: after a reset every outpost reads clear, and the first body
     /// back in one that is not sees what stands there and stands it down again.
     sightings: Sightings,
@@ -45,6 +46,7 @@ thread_local! {
     static HEAP: RefCell<Heap> = RefCell::new(Heap {
         faults: Vec::new(),
         standing: BTreeMap::new(),
+        spare: BTreeMap::new(),
         sightings: Sightings::new(),
         atlas: Atlas::empty(),
         maps: world::Maps::default(),
@@ -68,14 +70,17 @@ fn run_tick() -> Result<(), String> {
     let clock = || game_cpu::get_used();
     let mut phases: Vec<(String, f64)> = Vec::new();
 
-    let (mut sightings, mut atlas, mut faults, standing, mut maps, held, asked, metrics) = HEAP
-        .with(|heap| {
+    let (mut sightings, mut atlas, mut faults, (standing, spare), mut maps, held, asked, metrics) =
+        HEAP.with(|heap| {
             let mut heap = heap.borrow_mut();
             (
                 std::mem::take(&mut heap.sightings),
                 std::mem::replace(&mut heap.atlas, Atlas::empty()),
                 std::mem::take(&mut heap.faults),
-                std::mem::take(&mut heap.standing),
+                (
+                    std::mem::take(&mut heap.standing),
+                    std::mem::take(&mut heap.spare),
+                ),
                 std::mem::take(&mut heap.maps),
                 heap.intel.take(),
                 std::mem::replace(&mut heap.intel_asked, true),
@@ -89,6 +94,7 @@ fn run_tick() -> Result<(), String> {
     let mut memory = wire::read_memory();
     let mut state = memory.state();
     state.layout = standing;
+    state.spare = spare;
     phases.push(("memory".to_string(), clock() - start));
 
     let mut declarations: Declarations = memory
@@ -120,7 +126,7 @@ fn run_tick() -> Result<(), String> {
         &declarations,
         rows,
         (&state.engagements, &state.casts, &state.due),
-        &state.layout,
+        (&state.layout, &state.spare),
         (&|room| maps.terrain(room), &mut state.expansion),
     );
     let declarations = declarations.planned(plans);
@@ -236,6 +242,7 @@ fn run_tick() -> Result<(), String> {
         let mut heap = heap.borrow_mut();
         heap.faults = faults;
         heap.standing = standing;
+        heap.spare = std::mem::take(&mut result.state.spare);
         heap.sightings = sightings;
         heap.atlas = atlas;
         heap.maps = maps;

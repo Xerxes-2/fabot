@@ -23,6 +23,7 @@ pub struct State {
     pub scouts: Vec<Scout>,
     /// Strategy's sweep candidates this tick, the stalest seen first.
     pub preyed: Vec<RoomName>,
+    pub spare: BTreeMap<RoomName, f64>,
     pub expansion: Expansions,
 }
 
@@ -38,6 +39,7 @@ impl State {
             due: BTreeSet::new(),
             scouts: Vec::new(),
             preyed: Vec::new(),
+            spare: BTreeMap::new(),
             expansion: Expansions::default(),
         }
     }

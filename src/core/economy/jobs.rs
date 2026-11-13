@@ -208,7 +208,7 @@ fn takes_of(
         let posted = |p: &Pos| {
             o.sources
                 .iter()
-                .any(|s| s.post.is_some_and(|post| p.within(1, &post)))
+                .any(|s| p.within(1, &s.post.unwrap_or(s.pos)))
         };
         for p in o
             .piles

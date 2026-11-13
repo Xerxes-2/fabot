@@ -157,7 +157,7 @@ cold tick never spends more than ❓ 60% of the limit.
 | `Exchange` | who wins: pure fight arithmetic | bodies, terrain | — | port from `Facts.fs:2883–4056, 1038–1582`, `Fighter.fs`, `Arrival.fs`; narrow the input |
 | `Fight` | tracker, engagements (one kind per file), casting | World, Atlas, Exchange, declarations (the operator's tactic rules, §6.3), `State.Fight`, `intel.rooms` (a patrol's staleness) | fight intents, casts, declarations, `State.Fight` | **new** (§6) |
 | `Tactics` | what one fight body does this tick (§6.4): strikes, steps, the Hunt score, heals, and which tactic a kind picks (§6.3); it imports no Fight | Atlas, Move, the `Sight` and plan Fight hands down | creep intents, wishes | **new**, split from Fight |
-| `Strategy` | intel; declarations (homes, outposts, errands, avoided rooms, allies); which operations to open; force allocation across engagements | World, Derived, Exchange, `State.Intel`, `Season`, Layout's standing plans (a pile's tile), the open engagements' rooms, pending casts and `fight.due` (a colony's reserve and `owes`) | declarations (a `ColonyPlan` per colony, under the operator's rows), opens/closes engagements, `State.Intel` | **new** (§7); v1 `Operations.fs` bidding informs it |
+| `Strategy` | intel; declarations (homes, outposts, errands, avoided rooms, allies); which operations to open; force allocation across engagements | World, Derived, Exchange, `State.Intel`, `Season`, Layout's standing plans (a pile's tile), Economy's `spare` (last tick's), the open engagements' rooms, pending casts and `fight.due` (a colony's reserve and `owes`) | declarations (a `ColonyPlan` per colony, under the operator's rows), opens/closes engagements, `State.Intel` | **new** (§7); v1 `Operations.fs` bidding informs it |
 | `Season` | this season's rules: what scores, its structures, its NPCs, its map quirks | World | declarations to Strategy, season intents | **new**, disposable (§8) |
 | `Move` | per-room movement arbitration, run by `Tick` over every module's wishes, and the step functions (chase, kite, flee, formation) | Intents, Atlas | move intents | port `Resolver.fs`, drop fight precedence |
 | `Executor` | API calls | Intents | Game | port |
@@ -212,6 +212,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | `metrics` | the open window's sums; each creep's last task and load, each site's last progress and when, each colony's last controller progress, last tick's engagements and each room's last close; each body's last tile and the one before, its stuck run, the room it last left and when, its ticks to live, whether it was wounded and what last struck it and when, its last energy draw not yet delivered; the closed windows | Observe | heap | what a tick is compared against; a reset loses the open window and the bodies' tracks and restarts the sites' ages |
 | `metrics.windows` | 100-tick windows aligned on the game tick, a row a room and one for the world, the last 150 (fewer past the segment's 100 KB) | Observe | segment 3, written as a window closes | `observe metrics`, the soak's `metrics.jsonl` (§10.5) |
 | `expansion` | the claim Strategy has in flight: its room and the tick it was declared; each room an expansion failed in and when, for 100k ticks; each colony it gave up, while ours | Strategy | Memory | one at a time (owner, 2026-11-13); a claim outlives the walk its claimer takes and the stock that triggered it; a failure's penalty fades over ticks no other row keeps, and a give-up outlives the ticks its room ships and razes |
+| `spare` | colony → the spawn ticks a life its home slots leave (`slots::spare`) | Economy | heap | Strategy prices outposts against it before Economy runs; empty after a reset, when half the spawns' life stands in |
 | `scouts`, `preyed` | the declared and threat-radius rooms a scout serves, with their rows' age; the rooms an enemy owns, reserves or works, stalest first | Strategy | heap, this tick only | Economy casts scouts, Fight's sweep candidates; derived from intel each tick |
 | `sightings` | room → each armed hostile's or Invader core's id → the tick it is gone (seen tick + its ticksToLive, or the core's collapse; a deploying core's deploy plus the longest collapse) and whether it is armed; a room in sight holds only what stands there now. A level-0 core is unarmed: it keeps its core engagement open but stands nothing down | World | heap | vision grace; when a stood-down outpost is clear |
 | `standing.*` | per module: last output and the key it was decided on | each module | heap | the replay (§1) |
@@ -297,7 +298,7 @@ extension, container, storage, link, tower, extractor, terminal) every worker bu
 surplus is its: a structure pays only once complete, so a level is built out
 before it is upgraded, as Hivemind does (owner, 2026-11-12: only RCL3's tower
 and RCL6's minerals are worth rushing), and below the reserve too. Below RCL3 an outpost's sites wait for
-the tower: its dig piles on the post and is hauled from there. Other sites and repairs take half the
+the tower: its dig piles on the post, or beside the source while no container or site marks one, and is hauled from there. Other sites and repairs take half the
 income, so remote roads never stall the controller; the stock past the
 reserve upgrades. At RCL8 the controller is fed only inside its downgrade
 deadline (owner, 2026-11-13: upgrading there only feeds GCL; sites, ramparts,
@@ -310,7 +311,7 @@ to one under half its reserve, furthest short (v1's aid). Aid flows only to
 a colony holding less, so it never flows back. A structure lost within a creep
 life at its pace is mended before a builder's sites; below the reserve a home
 road at risk still casts the floor's first worker, which draws the reserve
-like the deadline's, to mend only. A home road's pace counts the wear of the
+like the deadline's, to mend only; past it that worker still builds, but is cast ahead of the outposts' haul, which held it past three roads' loss once it filled the spawn. A home road's pace counts the wear of the
 dig carried home over it (v1's road upkeep), an outpost's the wear of its own
 dig. A home's worker still mends an outpost road at its timer alone, since
 pricing that haul sent young homes' workers out to mend it; a colony with a
@@ -736,9 +737,14 @@ radius's scout) and Atlas's crossings for each colony from RCL2 up
 without outposts it banks nothing for boosts, labs or ramparts; owner): the operator's rows first, then the rooms that stand
 (intel saw a container at every source), then the most net energy a spawn
 tick (dig less the bodies' upkeep, a room another player works paying its
-bodies twice, an ally's never) while each home's spawns' half (all of it
-once its extractor and terminal stand: the level rush is over and dig is the score) and the CPU's
-half (0.2 an intent, a body acting once a tick) carry them. A home with a storage adds one
+bodies twice, an ally's never) while the spawns carry them: a home with a
+storage the spawn time its own slots left last tick (`spare`: all but its
+outposts', its scouts' and its spenders'; a claim's pioneers count, so a room their casts leave unhauled is given up until the claim stands), each room priced with
+the spenders its dig casts (two parts an energy a tick, measured at RCL5), since
+a fixed half left a quarter of the spawns idle from RCL3 to RCL6 and the whole
+life past RCL6 left the haul short; a young one half its spawns' life, the rest
+its workers' (spare-priced, a young home opened five rooms and its pile decayed
+unspent). The CPU's half (0.2 an intent, a body acting once a tick) carries them too. A home with a storage adds one
 room that does not stand at a time, so its spawns take on one room's bodies
 at once; a young one opens every room that pays at once, as The
 International's do from RCL1, since one at a time, each waiting for its

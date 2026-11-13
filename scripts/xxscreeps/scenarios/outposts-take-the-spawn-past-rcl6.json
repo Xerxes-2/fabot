@@ -1,10 +1,11 @@
 {
-  "why": "past RCL6's extractor and terminal dig is the score, so a colony's outposts take its whole spawn, and its ore miner is cast before them. Main 6d801571 held 2 outposts on half the spawn and dug 143k from them over t10000-15000; the fix holds 4 and digs 266k, its ore 22k at the end against main's 20k",
+  "why": "past RCL6 a colony's outposts take the spawn time its own bodies leave, not its whole life, so their haul keeps up, and its ore miner is cast before them. Main 85223618 held 4 outposts on the whole spawn and over t10000-15000 lost 136k of the 366k dug to decay at their sources, upgrading 71k, its ore 22k at the end; this change holds what its spawn hauls, loses 12k of 245k and upgrades 94k, its ore 26k",
   "modules": ["strategy", "economy"],
   "start": { "world": "scripts/xxscreeps/worlds/season-outpost-ring.json", "room": "E25S8", "seed": 1, "node": "R6", "ended": true },
   "ticks": 15000,
   "assert": [
-    { "measure": "outpostDug", "from": 10000, "to": 15000, "min": 200000 },
+    { "measure": "decayed", "from": 10000, "to": 15000, "max": 40000 },
+    { "measure": "upgrade", "from": 10000, "to": 15000, "min": 82000 },
     { "measure": "oresAtEnd", "room": "E25S8", "min": 15000 }
   ]
 }
