@@ -210,7 +210,7 @@ A cloud session (claude.ai/code) may push only the branch it was cloned on, so t
 ## Live game
 
 **The live server runs v2** (since 2026-10-17): `npm run deploy` builds,
-smokes and uploads `dist/main.js`. Never deploy unasked. Live declarations (outposts,
+smokes and uploads `dist/main.js` and `dist/main.wasm`. Never deploy unasked. Live declarations (outposts,
 allies, reserve) are set with `observe declare`.
 
 `npm run observe -- health` first after a deploy; `npm run observe` with no

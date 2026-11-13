@@ -20,7 +20,7 @@ rustup (it reads the same file) and `wasm-pack`. Then:
 
 ```sh
 npm test         # cargo fmt --check, line ceilings, clippy, cargo test
-npm run build    # wasm-pack → dist/main.js
+npm run build    # wasm-pack → dist/main.js, dist/main.wasm
 npm run smoke    # the bundle runs four ticks against a stub game
 npm run scenario # the scenario library on xxscreeps (needs `npm run xx -- setup`)
 npm run deploy   # build, smoke, upload to the live server

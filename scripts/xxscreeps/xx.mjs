@@ -252,7 +252,9 @@ if (bot === "standin") {
   cpSync(join(HERE, "engine/replay/main.js"), join(botDir, "main.js"));
   writeFileSync(join(botDir, "replay.js"), "module.exports = { start: 0, ticks: [] };\n");
 } else {
-  cpSync(bot === "dist" ? join(REPO, "dist/main.js") : join(bot, "main.js"), join(botDir, "main.js"));
+  const from = bot === "dist" ? join(REPO, "dist") : bot;
+  cpSync(join(from, "main.js"), join(botDir, "main.js"));
+  if (existsSync(join(from, "main.wasm"))) cpSync(join(from, "main.wasm"), join(botDir, "fabot_bg.wasm"));
 }
 
 must(node26([XXSCREEPS, "manage", "bot", "add", OUR_NAME, "./bot"], world), "manage bot add");

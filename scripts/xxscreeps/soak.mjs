@@ -201,6 +201,12 @@ if (flags["--run"] !== undefined && !/^[\w.-]+$/.test(flags["--run"])) fail("--r
 // compare against on the same room and seed.
 const bot = resolve(flags["--bot"] ?? join(REPO, "dist/main.js"));
 if (!existsSync(bot)) fail(flags["--bot"] ? `--bot: no file at ${bot}` : "no dist/main.js: npm run build first");
+// A bundle from before the binary module (`scripts/rust.mjs`) has no .wasm: it inlines it.
+const copyBundle = (bundle, dir, name) => {
+  cpSync(bundle, join(dir, name));
+  const wasm = bundle.replace(/\.js$/, ".wasm");
+  if (existsSync(wasm)) cpSync(wasm, join(dir, "fabot_bg.wasm"));
+};
 const live = flags["--world"] && JSON.parse(readFileSync(flags["--world"], "utf8"));
 const homes = (live?.rooms ?? [])
   .filter((r) => r.objects.some((o) => o.type === "controller" && o.user === live.userId) && r.objects.some((o) => o.type === "spawn" && o.user === live.userId))
@@ -335,7 +341,7 @@ writeFileSync(join(world, "package.json"), '{ "private": true }\n');
 writeFileSync(join(world, "seed.txt"), `${seed}\n`);
 mkdirSync(join(world, "bot"), { recursive: true });
 // `fabotTrace`: the bot logs its tactic trace (`#trace`), never live.
-cpSync(bot, join(world, "bot/fabot.js"));
+copyBundle(bot, join(world, "bot"), "fabot.js");
 // xxscreeps' runtime map reads every room normal, so a world's `closed` rooms
 // (an unopened area) stand in on `Game.map.getRoomStatus`.
 const closed = live?.closed?.length
@@ -437,7 +443,7 @@ for (const o of opponents) {
     const spec = specOf(o.bot);
     if (spec) copied(spec, dir);
     cpSync(join(HERE, "engine", "seat.js"), join(dir, "seat.js"));
-  } else cpSync(o.bot, join(dir, "main.js"));
+  } else copyBundle(o.bot, dir, "main.js");
   writeFileSync(join(dir, "opponent.js"), `module.exports = ${JSON.stringify({ ...o.config, seed })};\n`);
   if (from || seated) {
     node26([XXSCREEPS, "manage", "bot", "update", o.name, `./bot-${o.name}`], world);

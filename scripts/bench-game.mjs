@@ -7,7 +7,13 @@
 // `say` free.
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { createRequire } from "node:module";
+import Module, { createRequire } from "node:module";
+
+// The engine's binary module `fabot_bg` (`scripts/rust.mjs`), for every bundle this process loads.
+const nodeLoad = Module._load;
+Module._load = function (request, parent, ...rest) {
+  return request === "fabot_bg" ? readFileSync(parent.filename.replace(/\.js$/, ".wasm")) : nodeLoad.call(this, request, parent, ...rest);
+};
 
 const VERBS = ["move", "say", "harvest", "transfer", "withdraw", "pickup", "build", "repair", "dismantle", "upgradeController", "reserveController",
   "attackController", "claimController", "signController", "claimReactor", "drop", "attack", "heal", "rangedHeal", "rangedAttack", "rangedMassAttack",

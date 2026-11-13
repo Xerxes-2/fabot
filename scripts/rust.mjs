@@ -1,9 +1,8 @@
-// Build the Rust bot: `wasm-pack --target nodejs`, then the one file Screeps
-// runs. The engine gives a code package no `fs` and no `require` of a sibling
-// `.wasm`, so the module is inlined as base64 and decoded by a small JS
-// decoder. Output is `dist/main.js`.
+// Build the Rust bot with `wasm-pack --target nodejs`. The engine has no `fs`,
+// but `require` of a binary module returns its bytes: the wasm ships beside
+// the bundle, as `dist/main.wasm`, and uploads as the module `fabot_bg`.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -41,6 +40,7 @@ const version = () => {
   }
 };
 const OUT = join(REPO, "dist", "main.js");
+const WASM = join(REPO, "dist", "main.wasm");
 
 execFileSync("wasm-pack", ["build", REPO, "--target", "nodejs", "--release", "--out-dir", "pkg", "--out-name", "fabot"], {
   stdio: "inherit",
@@ -48,34 +48,15 @@ execFileSync("wasm-pack", ["build", REPO, "--target", "nodejs", "--release", "--
 });
 
 const glue = readFileSync(join(REPO, "pkg", "fabot.js"), "utf8");
-const wasm = readFileSync(join(REPO, "pkg", "fabot_bg.wasm"));
 const loader = `const wasmPath = \`\${__dirname}/fabot_bg.wasm\`;
-const wasmBytes = require('fs').readFileSync(wasmPath);`;
-if (!glue.includes(loader)) throw new Error("rust.mjs: wasm-pack's loader changed; the inline patch is stale");
+const wasmBytes = require('fs').readFileSync(wasmPath);
+const wasmModule = new WebAssembly.Module(wasmBytes);`;
+if (!glue.includes(loader)) throw new Error("rust.mjs: wasm-pack's loader changed; the loader patch is stale");
 
 const prelude = `globalThis.__FABOT_VERSION__ = ${JSON.stringify(version())};
 ${readFileSync(join(REPO, "src", "app", "read.js"), "utf8")}
 
 ${readFileSync(join(REPO, "src", "app", "text.js"), "utf8")}
-const __fabotBase64 = "${wasm.toString("base64")}";
-function __fabotWasm() {
-  const digits = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  const table = new Uint8Array(128);
-  for (let i = 0; i < 64; i++) table[digits.charCodeAt(i)] = i;
-  const text = __fabotBase64;
-  const pad = text.endsWith("==") ? 2 : text.endsWith("=") ? 1 : 0;
-  const out = new Uint8Array((text.length * 3) / 4 - pad);
-  let at = 0;
-  for (let i = 0; i < text.length; i += 4) {
-    const word =
-      (table[text.charCodeAt(i)] << 18) | (table[text.charCodeAt(i + 1)] << 12) |
-      (table[text.charCodeAt(i + 2)] << 6) | table[text.charCodeAt(i + 3)];
-    out[at++] = word >> 16;
-    if (at < out.length) out[at++] = word >> 8;
-    if (at < out.length) out[at++] = word;
-  }
-  return out;
-}
 `;
 
 // A trap (every Rust panic is one) can leave a RefCell borrowed or the heap
@@ -99,7 +80,13 @@ const recovering = `function loop() {
     }
 }`;
 
-const body = glue.replace(loader, "const wasmBytes = __fabotWasm();").replace(loop, recovering);
+// The engine caches a required module for the global's life; the compiled
+// module is all the trap recovery needs, so the bytes are let go.
+const compile = `const wasmModule = new WebAssembly.Module(require('fabot_bg'));
+if (require.cache) delete require.cache.fabot_bg;`;
+const body = glue.replace(loader, compile).replace(loop, recovering);
 mkdirSync(join(REPO, "dist"), { recursive: true });
 writeFileSync(OUT, prelude + body);
-console.log(`bundled ${OUT} (${(wasm.length / 1024).toFixed(0)} kB wasm, ${(readFileSync(OUT).length / 1024).toFixed(0)} kB)`);
+copyFileSync(join(REPO, "pkg", "fabot_bg.wasm"), WASM);
+const kB = (f) => `${(readFileSync(f).length / 1024).toFixed(0)} kB`;
+console.log(`bundled ${OUT} (${kB(OUT)}) and ${WASM} (${kB(WASM)})`);

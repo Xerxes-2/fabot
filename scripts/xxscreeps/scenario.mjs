@@ -655,7 +655,7 @@ const recipe = ({ world, room, seed, late = 0, node, invaders, wave, core, unsaf
 const codeOf = (...paths) =>
   paths
     .map((p) => resolve(REPO, p))
-    .flatMap((path) => (statSync(path).isDirectory() ? readdirSync(path).sort().map((f) => join(path, f)) : [path]))
+    .flatMap((path) => (statSync(path).isDirectory() ? readdirSync(path).sort().map((f) => join(path, f)) : [path, path.replace(/\.js$/, ".wasm")].filter(existsSync)))
     .reduce((h, f) => h.update(f).update(readFileSync(f)), createHash("sha256"))
     .digest("hex")
     .slice(0, 8);
@@ -690,7 +690,7 @@ const bundleAt = (commit) => {
     sh(`git -C '${REPO}' archive ${commit} | tar -x && ln -s '${join(REPO, "node_modules")}' node_modules`) ??
     // A commit from before the port builds the F# bundle, with its own tools.
     sh(existsSync(join(src, "src/App")) ? "dotnet tool restore && npm run build --silent" : "npm run build --silent") ??
-    sh(`mkdir -p '${dirname(out)}' && cp dist/main.js '${out}'`);
+    sh(`mkdir -p '${dirname(out)}' && { [ ! -e dist/main.wasm ] || cp dist/main.wasm '${out.replace(/\.js$/, ".wasm")}'; } && cp dist/main.js '${out}'`);
   rmSync(src, { recursive: true, force: true });
   if (broke) fail(`${commit}: ${broke} failed`);
   return out;
