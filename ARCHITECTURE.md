@@ -246,7 +246,8 @@ road. The home's carriers fetch only at home, so the ring never waits on a
 body gone to an outpost. The stock is drawn only for its sinks' room past
 the loads at home bound for them, which book first: a load never goes back
 into the store it came from. The source links feed the controller's link
-first: carriers bring it only while the upgraders drink more than the links
+first and the hub's with the rest, which carriers bank: carriers bring the
+controller's link only while the upgraders drink more than the links
 send, and while they do only upgraders draw the controller's buffer, or a
 worker's draw is carried back from the stock. A harvester drains the container
 under it into its link while the link has room. Each source's post is a **harvest

@@ -228,7 +228,9 @@ fn takes_of(
         .map(|s| s.amount)
         .sum::<i32>()
         - aboard;
-    let feed = g.feed.as_ref().map(|f| f.id.as_str());
+    let pump = (g.feed.as_ref())
+        .filter(|_| hand_fed(derived, g))
+        .map(|f| f.id.as_str());
     let linked = |id: &str| g.links.iter().any(|l| l.id == id);
     let bay = |id: &str| {
         (g.sources.iter())
@@ -272,7 +274,7 @@ fn takes_of(
     for l in g
         .links
         .iter()
-        .filter(|l| l.role.is_hub() && Some(l.id.as_str()) != feed)
+        .filter(|l| l.role.is_hub() && Some(l.id.as_str()) != pump)
     {
         add(
             Task::Withdraw(l.id.clone(), Resource::Energy),

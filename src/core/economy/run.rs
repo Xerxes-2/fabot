@@ -208,22 +208,36 @@ fn link_sends(sends: &mut Vec<Intent>, ground: &Ground) {
     let Some(receiver) = &ground.receiver else {
         return;
     };
-
-    let mut room = receiver.free;
+    let hub = (ground.links.iter()).find(|l| l.role.is_hub() && l.id != receiver.id);
+    let mut rooms: Vec<(&LinkFact, i32)> = std::iter::once(receiver)
+        .chain(hub)
+        .map(|r| (r, r.free))
+        .collect();
 
     let mut links: Vec<&LinkFact> = ground.links.iter().collect();
     links.sort_by_key(|l| !l.role.is_source());
-    for l in links {
-        let amount = room.min(l.energy) / LINK_BATCH * LINK_BATCH;
-
-        if l.id != receiver.id && l.cooldown == 0 && amount > 0 {
-            room -= amount;
+    for l in (links.into_iter()).filter(|l| l.id != receiver.id && l.cooldown == 0) {
+        let Some((to, room)) = link_to(l, &mut rooms) else {
+            continue;
+        };
+        let amount = (*room).min(l.energy) / LINK_BATCH * LINK_BATCH;
+        if amount > 0 {
+            *room -= amount;
             sends.push(Intent::Link(
                 l.id.clone(),
-                LinkAct::TransferEnergy(receiver.id.clone(), amount),
+                LinkAct::TransferEnergy(to.id.clone(), amount),
             ));
         }
     }
+}
+
+/// `link_sends` ranks the controller's link before the hub's, so it takes only
+/// what its bodies drink and the hub, whose carriers bank it, the rest.
+fn link_to<'a, 'b>(
+    from: &LinkFact,
+    rooms: &'b mut [(&'a LinkFact, i32)],
+) -> Option<&'b mut (&'a LinkFact, i32)> {
+    (rooms.iter_mut()).find(|(to, room)| to.id != from.id && *room >= LINK_BATCH)
 }
 
 /// One send a tick off cooldown: what the terminal holds of the first
