@@ -6,6 +6,7 @@
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { getHeapStatistics } from "node:v8";
+import { createContext, runInContext } from "node:vm";
 import { stand } from "./bench-game.mjs";
 import { RECORDER, unpack } from "./recorder.mjs";
 
@@ -98,6 +99,24 @@ globalThis.Game = {
   constructionSites: { cs1: found[111][0] },
   getObjectById: (id) => ({ s1: spawn, src1: found[105][0], c1: room.controller, cs1: found[111][0], p1: found[106][0] })[id] ?? null,
 };
+
+// The sandbox's text polyfill, run where no native one exists, matches Node's byte for byte.
+const sandbox = createContext({});
+runInContext(readFileSync(new URL("../src/app/text.js", import.meta.url), "utf8"), sandbox);
+const { TextEncoder: Encoder, TextDecoder: Decoder } = sandbox;
+const long = "x".repeat(20000) + "\u{1F600}" + "中".repeat(9000) + "é";
+for (const text of ["", "ascii", "é", "中文", "a\u{1F600}b", "\ud800", "\udc00x", "\ud800a", long]) {
+  const want = new TextEncoder().encode(text);
+  const got = new Encoder().encode(text);
+  if (got.join() !== want.join()) fail(`encode(${JSON.stringify(text.slice(0, 20))}) is ${got.slice(0, 20)}, not ${want.slice(0, 20)}`);
+  if (new Decoder().decode(want) !== new TextDecoder().decode(want)) fail(`decode(${JSON.stringify(text.slice(0, 20))})`);
+  for (const size of [0, 1, 2, 3, 4, 5, text.length * 3]) {
+    const [mine, theirs] = [new Uint8Array(size), new Uint8Array(size)];
+    const [a, b] = [new Encoder().encodeInto(text, mine), new TextEncoder().encodeInto(text, theirs)];
+    if (a.read !== b.read || a.written !== b.written || mine.join() !== theirs.join()) fail(`encodeInto(${JSON.stringify(text.slice(0, 20))}, ${size})`);
+  }
+}
+if (new Decoder().decode() !== "") fail("decode() is not empty");
 
 const require = createRequire(import.meta.url);
 const bundle = process.argv[2] ?? "../dist/main.js";

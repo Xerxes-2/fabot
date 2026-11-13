@@ -1,8 +1,7 @@
 // Build the Rust bot: `wasm-pack --target nodejs`, then the one file Screeps
 // runs. The engine gives a code package no `fs` and no `require` of a sibling
 // `.wasm`, so the module is inlined as base64 and decoded by a small JS
-// decoder; `TextDecoder` is absent in the engine's sandbox, so it is polyfilled
-// here. Output is `dist/main.js`.
+// decoder. Output is `dist/main.js`.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -57,41 +56,7 @@ if (!glue.includes(loader)) throw new Error("rust.mjs: wasm-pack's loader change
 const prelude = `globalThis.__FABOT_VERSION__ = ${JSON.stringify(version())};
 ${readFileSync(join(REPO, "src", "app", "read.js"), "utf8")}
 
-// The engine's sandbox has no TextDecoder and no filesystem: decode the module
-// that is our own code and decode UTF-8 the way the runtime would.
-if (typeof TextDecoder === "undefined") {
-  globalThis.TextDecoder = function TextDecoder() {};
-  globalThis.TextDecoder.prototype.decode = function (bytes) {
-    if (!bytes) return "";
-    let out = "";
-    for (let i = 0; i < bytes.length; ) {
-      const c = bytes[i++];
-      if (c < 0x80) out += String.fromCharCode(c);
-      else if (c < 0xe0) out += String.fromCharCode(((c & 0x1f) << 6) | (bytes[i++] & 0x3f));
-      else if (c < 0xf0) out += String.fromCharCode(((c & 0xf) << 12) | ((bytes[i++] & 0x3f) << 6) | (bytes[i++] & 0x3f));
-      else {
-        const cp = (((c & 7) << 18) | ((bytes[i++] & 0x3f) << 12) | ((bytes[i++] & 0x3f) << 6) | (bytes[i++] & 0x3f)) - 0x10000;
-        out += String.fromCharCode(0xd800 + (cp >> 10), 0xdc00 + (cp & 0x3ff));
-      }
-    }
-    return out;
-  };
-}
-if (typeof TextEncoder === "undefined") {
-  globalThis.TextEncoder = function TextEncoder() {};
-  globalThis.TextEncoder.prototype.encode = function (text) {
-    const out = [];
-    for (let i = 0; i < text.length; i++) {
-      let c = text.charCodeAt(i);
-      if (c >= 0xd800 && c <= 0xdbff && i + 1 < text.length) c = ((c - 0xd800) << 10) + (text.charCodeAt(++i) - 0xdc00) + 0x10000;
-      if (c < 0x80) out.push(c);
-      else if (c < 0x800) out.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f));
-      else if (c < 0x10000) out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
-      else out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 0x3f), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
-    }
-    return Uint8Array.from(out);
-  };
-}
+${readFileSync(join(REPO, "src", "app", "text.js"), "utf8")}
 const __fabotBase64 = "${wasm.toString("base64")}";
 function __fabotWasm() {
   const digits = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
