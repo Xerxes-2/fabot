@@ -1,9 +1,9 @@
 use js_sys::JsString;
 use screeps::raw_memory;
 use serde::{Serialize, Serializer};
+use wasm_bindgen::prelude::wasm_bindgen;
 use wasm_bindgen::{JsCast, JsValue};
 
-use super::js::field;
 use crate::core::memory::Memory;
 use crate::core::observe::metrics::Metrics;
 use crate::core::state::State;
@@ -29,14 +29,29 @@ pub fn write_state(memory: &mut Memory, state: &State) {
 /// Only the xxscreeps harness's wrapper sets `fabotTrace`: live, nothing is
 /// traced.
 pub fn tracing() -> bool {
-    field(&js_sys::global(), "fabotTrace").as_bool() == Some(true)
+    global().fabot_trace().as_bool() == Some(true)
 }
 
 pub fn trace(line: &str) {
-    let console = field(&js_sys::global(), "console");
-    if let Some(log) = field(&console, "log").dyn_ref::<js_sys::Function>() {
-        let _ = log.call1(&console, &JsValue::from_str(&format!("#trace {line}")));
-    }
+    let _ = console_log(&format!("#trace {line}"));
+}
+
+#[wasm_bindgen]
+extern "C" {
+    type Global;
+    #[wasm_bindgen(method, getter, js_name = fabotTrace)]
+    fn fabot_trace(this: &Global) -> JsValue;
+    #[wasm_bindgen(method, getter, js_name = __FABOT_VERSION__)]
+    fn banner(this: &Global) -> Option<String>;
+
+    #[wasm_bindgen(js_namespace = console, js_name = log, catch)]
+    fn console_log(line: &str) -> Result<(), JsValue>;
+    #[wasm_bindgen(js_namespace = console, js_name = error, catch)]
+    pub fn console_error(message: &str, error: &JsValue) -> Result<(), JsValue>;
+}
+
+fn global() -> Global {
+    js_sys::global().unchecked_into()
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -124,8 +139,5 @@ pub fn record(
 
 /// The bundle's banner, set by `scripts/rust.mjs` on the global.
 pub fn version() -> String {
-    js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("__FABOT_VERSION__"))
-        .ok()
-        .and_then(|v| v.as_string())
-        .unwrap_or_else(|| "unbuilt".to_string())
+    global().banner().unwrap_or_else(|| "unbuilt".to_string())
 }

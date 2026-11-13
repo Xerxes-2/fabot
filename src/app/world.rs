@@ -6,12 +6,14 @@ use crate::core::HashMap;
 use std::collections::BTreeSet;
 use std::str::Split;
 
-use js_sys::{Array, Int32Array, Reflect};
-use screeps::{ResourceType, game};
+use js_sys::{Array, Int32Array};
+use screeps::ResourceType;
+use screeps::game::{
+    self,
+    map::{self, RoomStatus},
+};
 use wasm_bindgen::prelude::wasm_bindgen;
 use wasm_bindgen::{JsCast, JsValue};
-
-use super::js::{self, field};
 
 use crate::core::atlas::tiles::{self, BOTTOM, LEFT, RIGHT, TOP};
 use crate::core::engine;
@@ -23,7 +25,7 @@ use crate::core::world::*;
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_name = __fabotRead)]
-    fn read(drain: JsValue) -> Array;
+    fn read(drain: Option<String>) -> Array;
 
     type Game;
     #[wasm_bindgen(static_method_of = Game, catch, js_name = getObjectById)]
@@ -46,7 +48,7 @@ fn absent(v: &JsValue) -> bool {
 #[derive(Default)]
 pub struct Maps {
     terrain: HashMap<RoomName, Option<terrain::Terrain>>,
-    status: HashMap<RoomName, Option<String>>,
+    status: HashMap<RoomName, Option<RoomStatus>>,
 }
 
 /// The rooms out of sight whose terrain is read in one tick, nearest our
@@ -85,11 +87,8 @@ impl Maps {
         }
     }
 
-    fn status(&mut self, room: RoomName) -> Option<String> {
-        self.status
-            .entry(room)
-            .or_insert_with(|| status_of(room))
-            .clone()
+    fn status(&mut self, room: RoomName) -> Option<RoomStatus> {
+        *self.status.entry(room).or_insert_with(|| status_of(room))
     }
 }
 
@@ -386,7 +385,7 @@ pub fn of_game(
     declarations: &Declarations,
     drain: Option<RoomName>,
 ) -> (World, Pass) {
-    let packed = read(drain.map_or(JsValue::UNDEFINED, js::room));
+    let packed = read(drain.map(|room| room.to_string()));
     let ints = packed.get(0).unchecked_into::<Int32Array>().to_vec();
     let text = packed.get(1).as_string().unwrap_or_default();
     let count = ints.last().map_or(0, |n| *n as usize);
@@ -458,38 +457,17 @@ pub fn of_game(
 /// `Game.map.getRoomTerrain(name).getRawBuffer()`: the map serves rooms the
 /// bot cannot see, and reading it needs no `Room` object.
 fn terrain_of(name: RoomName) -> Option<terrain::Terrain> {
-    let read = || -> Option<Vec<u8>> {
-        let game = Reflect::get(&js_sys::global(), &JsValue::from_str("Game")).ok()?;
-        let map = field(&game, "map");
-        let get_terrain = field(&map, "getRoomTerrain");
-        let arguments = Array::of1(&js::room(name));
-        let terrain = Reflect::apply(
-            get_terrain.unchecked_ref::<js_sys::Function>(),
-            &map,
-            &arguments,
-        )
-        .ok()?;
-        let get_raw = field(&terrain, "getRawBuffer");
-        let raw = Reflect::apply(
-            get_raw.unchecked_ref::<js_sys::Function>(),
-            &terrain,
-            &Array::new(),
-        )
-        .ok()?;
-        Some(js_sys::Uint8Array::new(&raw).to_vec())
-    };
-    terrain::of(read()?)
+    let raw = map::get_room_terrain(engine_name(name)?)?.get_raw_buffer();
+    terrain::of(raw.to_vec())
 }
 
 /// `None` where the map has no `getRoomStatus` (the bench), so no room reads closed.
-fn status_of(name: RoomName) -> Option<String> {
-    let game = Reflect::get(&js_sys::global(), &JsValue::from_str("Game")).ok()?;
-    let map = field(&game, "map");
-    let get = field(&map, "getRoomStatus")
-        .dyn_into::<js_sys::Function>()
-        .ok()?;
-    let status = get.call1(&map, &js::room(name)).ok()?;
-    field(&status, "status").as_string()
+fn status_of(name: RoomName) -> Option<RoomStatus> {
+    map::get_room_status(engine_name(name)?).map(|result| result.status())
+}
+
+fn engine_name(name: RoomName) -> Option<screeps::RoomName> {
+    name.to_string().parse().ok()
 }
 
 /// `Game.getObjectById` as `Executor` reads it: absent is a refusal, never an error.

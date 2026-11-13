@@ -117,16 +117,17 @@ pub fn step_table(factor: FatigueFactor) -> Vec<Option<u16>> {
 pub fn tally(what: &str, n: i32) {
     #[cfg(target_arch = "wasm32")]
     {
-        use wasm_bindgen::JsCast;
+        use wasm_bindgen::{JsCast, JsValue};
 
-        let counter = crate::app::js::field(&js_sys::global(), "__fabotCount");
-        if counter.is_function() {
-            let counter: &js_sys::Function = counter.unchecked_ref();
-            let _ = counter.call2(
-                &wasm_bindgen::JsValue::NULL,
-                &wasm_bindgen::JsValue::from_str(what),
-                &wasm_bindgen::JsValue::from(n),
-            );
+        #[wasm_bindgen::prelude::wasm_bindgen]
+        extern "C" {
+            type Global;
+            #[wasm_bindgen(method, getter, js_name = __fabotCount)]
+            fn counter(this: &Global) -> Option<js_sys::Function>;
+        }
+
+        if let Some(counter) = js_sys::global().unchecked_into::<Global>().counter() {
+            let _ = counter.call2(&JsValue::NULL, &JsValue::from_str(what), &JsValue::from(n));
         }
     }
 

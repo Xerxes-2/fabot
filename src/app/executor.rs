@@ -1,5 +1,5 @@
 //! `Executor` turns each intent into one API call (`ARCHITECTURE.md` §1).
-use js_sys::{Array, Reflect};
+use js_sys::{Array, Object};
 use wasm_bindgen::prelude::wasm_bindgen;
 use wasm_bindgen::{JsCast, JsValue};
 
@@ -81,8 +81,12 @@ extern "C" {
         this: &Actor,
         body: &Array,
         name: &str,
-        options: &JsValue,
+        options: &SpawnOptions,
     ) -> Result<f64, JsValue>;
+
+    type SpawnOptions;
+    #[wasm_bindgen(method, setter, js_name = energyStructures)]
+    fn set_energy_structures(this: &SpawnOptions, structures: &Array);
 }
 
 fn outcome(verb: &str, result: Result<f64, JsValue>) -> (String, i32) {
@@ -240,13 +244,13 @@ fn act(intent: &Intent) -> (String, i32) {
                 for part in body {
                     parts.push(&JsValue::from_str(vocabulary::part_name(*part)));
                 }
-                let options = js_sys::Object::new();
+                let options: SpawnOptions = Object::new().unchecked_into();
                 if !drawn.is_empty() {
                     let structures: Array = drawn
                         .iter()
                         .filter_map(|id| world::object_by_id(id))
                         .collect();
-                    let _ = Reflect::set(&options, &"energyStructures".into(), &structures);
+                    options.set_energy_structures(&structures);
                 }
                 outcome("spawn", actor(&spawn).spawn_creep(&parts, name, &options))
             }
