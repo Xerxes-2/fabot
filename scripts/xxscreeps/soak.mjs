@@ -71,8 +71,8 @@
 //   --ended   our room's starting safe mode ended, its stock kept to activate,
 //            opponents or not
 //   --keep   leave the run's world in the cache's worlds/ (default removed)
-//   --watch  the server's backend up on 127.0.0.1:--port (default 21025) for
-//            a client to follow, each tick held to --tick-ms (default 500),
+//   --watch  the server's backend up on every interface at --port (default 21025) for
+//            a client on this machine or the LAN to follow, each tick held to --tick-ms (default 500),
 //            the world left up after the last until Ctrl-C; prints the login
 //
 // Needs `npm run build` (dist/main.js) and `npm run xx -- setup` (the engine
@@ -84,7 +84,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { cpSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, networkInterfaces } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { node26 as nodeBin, node26Env } from "./node26.mjs";
@@ -292,7 +292,7 @@ const screepsrc = [
   "  intentAbandonTimeout: 120000",
   "runner:",
   "  concurrency: 1",
-  ...(watch ? ["backend:", `  bind: 127.0.0.1:${watch.port}`] : []),
+  ...(watch ? ["backend:", `  bind: 0.0.0.0:${watch.port}`] : []),
   "",
 ].join("\n");
 
@@ -501,13 +501,17 @@ if (watch) {
   }
   const outposts = live?.declarations?.outposts ?? (node?.outposts || node?.claims ? colony.outposts : []);
   const rooms = [...new Set([colony.room, ...outposts.map((o) => o.room), ...opponents.map((o) => o.room)])].join(",");
-  const socket = `${api.replace("http", "ws")}/socket/websocket`;
+  // The client's browser opens the socket itself, so a LAN viewer needs this host's LAN address.
+  const hosts = Object.values(networkInterfaces()).flat().filter((i) => i.family === "IPv4" && !i.internal).map((i) => i.address);
+  const host = hosts[0] ?? "127.0.0.1";
+  const socket = `ws://${host}:${watch.port}/socket/websocket`;
   console.error(
     [
       `\nwatch: ${api}, a tick every ${watch.ms} ms; user ${OUR_NAME} password ${watch.password}`,
       "  client, in another shell (MSC_PORT=… if 8080 is taken):",
-      `    MSC_API_UPSTREAM=${api} nix run github:Xerxes-2/lazycreep#gateway`,
-      "  then http://localhost:8080 → 设置 → 添加自定义 Server:",
+      `    MSC_ADDRESS=0.0.0.0 MSC_API_UPSTREAM=${api} nix run github:Xerxes-2/lazycreep#gateway`,
+      `  then http://${host}:8080 (or localhost) → 设置 → 添加自定义 Server:`,
+      ...(hosts.length > 1 ? [`    (this host's other addresses: ${hosts.slice(1).join(", ")}; use the one the viewer reaches, in both URLs)`] : []),
       `    名称 fabot-watch · API 根路径 /api · WebSocket 地址 ${socket} · 分 Shard 不勾`,
       "  then 设置 → Auth token: guest",
       `  rooms (#!/<server id>/room/shard0/<room>): ${rooms}\n`,
