@@ -97,6 +97,7 @@ struct Reader<'a> {
     ints: &'a [i32],
     at: usize,
     strs: Split<'a, char>,
+    words: Vec<&'a str>,
     maps: &'a mut Maps,
     me: String,
     declarations: &'a Declarations,
@@ -120,7 +121,12 @@ impl<'a> Reader<'a> {
     /// The engine names every room in the grammar; a name outside it reads
     /// as `sim`'s, the one room the grid has no square for, not a panic.
     fn room_name(&mut self) -> RoomName {
-        RoomName::parse(self.str()).unwrap_or(RoomName::SIM)
+        RoomName::parse(self.word()).unwrap_or(RoomName::SIM)
+    }
+
+    fn word(&mut self) -> &'a str {
+        let i = self.n();
+        self.words.get(i as usize).copied().unwrap_or_default()
     }
 
     /// A string only parsed: no copy.
@@ -134,11 +140,12 @@ impl<'a> Reader<'a> {
     }
 
     fn owner(&mut self) -> Owner {
-        let tag = self.n();
-        let name = self.s();
-        match tag {
+        match self.n() {
             1 => Owner::Ours,
-            2 => self.user(name),
+            2 => {
+                let name = self.word().to_string();
+                self.user(name)
+            }
             _ => Owner::Nobody,
         }
     }
@@ -164,7 +171,7 @@ impl<'a> Reader<'a> {
     fn store(&mut self) -> Store {
         let count = self.n();
         let held = (0..count)
-            .map(|_| (self.str(), self.n()))
+            .map(|_| (self.word(), self.n()))
             .filter(|(name, amount)| *amount > 0 && name.parse::<ResourceType>().is_ok())
             .map(|(name, amount)| (vocabulary::resource_of_name(name), amount))
             .collect();
@@ -176,9 +183,9 @@ impl<'a> Reader<'a> {
 
     fn body(&mut self) -> Vec<Part> {
         self.list(|r| {
-            let kind = vocabulary::part_of_name(r.str()).unwrap_or(BodyPart::Tough);
+            let kind = vocabulary::part_of_name(r.word()).unwrap_or(BodyPart::Tough);
             let hits = r.n();
-            let boost = r.str();
+            let boost = r.word();
             Part {
                 kind,
                 hits,
@@ -216,7 +223,7 @@ impl<'a> Reader<'a> {
             progress_total: self.n(),
             ticks_to_downgrade: self.n(),
             reservation: if self.flag() {
-                let user = self.s();
+                let user = self.word().to_string();
                 Some((self.user(user), self.n()))
             } else {
                 None
@@ -229,7 +236,7 @@ impl<'a> Reader<'a> {
     }
 
     fn structure(&mut self, room: RoomName) -> Structure {
-        let kind = Kind::of_name(self.str());
+        let kind = Kind::of_name(self.word());
         let id = self.s();
         let pos = self.pos_in(room);
         let owner = self.owner();
@@ -326,12 +333,12 @@ impl<'a> Reader<'a> {
             minerals: self.list(|r| Mineral {
                 id: r.s(),
                 pos: r.pos(),
-                resource: vocabulary::resource_of_name(r.str()),
+                resource: vocabulary::resource_of_name(r.word()),
                 amount: r.n(),
             }),
             structures: self.list(|r| r.structure(name)),
             sites: self.list(|r| Site {
-                kind: Kind::of_name(r.str()),
+                kind: Kind::of_name(r.word()),
                 id: r.s(),
                 pos: r.pos_in(name),
                 owner: r.owner(),
@@ -341,7 +348,7 @@ impl<'a> Reader<'a> {
             piles: self.list(|r| Pile {
                 id: r.s(),
                 pos: r.pos(),
-                resource: vocabulary::resource_of_name(r.str()),
+                resource: vocabulary::resource_of_name(r.word()),
                 amount: r.n(),
             }),
             remains: self.list(Reader::remains),
@@ -382,10 +389,14 @@ pub fn of_game(
     let packed = read(drain.map_or(JsValue::UNDEFINED, js::room));
     let ints = packed.get(0).unchecked_into::<Int32Array>().to_vec();
     let text = packed.get(1).as_string().unwrap_or_default();
+    let count = ints.last().map_or(0, |n| *n as usize);
+    let mut words: Vec<&str> = text.rsplit('\0').take(count).collect();
+    words.reverse();
     let mut r = Reader {
         ints: &ints,
         at: 0,
         strs: text.split('\0'),
+        words,
         maps,
         me: String::new(),
         declarations,
@@ -409,7 +420,10 @@ pub fn of_game(
         our_sites: r.n(),
         rooms_allowed: r.n(),
         rules: Rules {
-            structures: r.list(|r| (r.s(), r.list(Reader::n))).into_iter().collect(),
+            structures: r
+                .list(|r| (r.word().to_string(), r.list(Reader::n)))
+                .into_iter()
+                .collect(),
         },
         closed: BTreeSet::new(),
         attacks,
