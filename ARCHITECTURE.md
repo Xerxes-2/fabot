@@ -752,8 +752,11 @@ outposts: a siege's successors lagged behind a claim's bodies) looks over intel'
 reach: two sources, nobody's, two rooms from any of ours and from a rival's
 room. Each is scored as a priced choice would be (energy a tick: its own dig,
 half its free neighbours', less a tick a crossing from the sponsor, a
-source's dig for a mineral no colony of ours digs (no market: the boost chain
-needs every one), plus `season::worth`); a stronghold near one is no cost
+mineral's worth (`expand::mineral_worth`: the owner's ranked boosts'
+demand for it, TOUGH, HEAL, RANGED_ATTACK, then upgrade and MOVE, the most
+demanded's first copy a source's dig, each further copy worth less as
+Hivemind's 1/(held + 1); no market, so the boost chain is fed from our own
+rooms), plus `season::worth`); a stronghold near one is no cost
 (owner: its creeps and towers stay at its core, and Atlas routes round its
 room); the best one Layout can plan whole before it is claimed (The
 International's) is declared a claim, until its spawn stands, and kept in

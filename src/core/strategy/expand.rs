@@ -71,18 +71,44 @@ pub struct Facts {
     pub worth: f64,
     /// Failures in or beside it, each fading as it ages.
     pub failed: f64,
-    /// Its mineral is one no other colony of ours digs.
-    pub lacked: bool,
+    pub mineral: f64,
 }
 
-/// A simple rule shaped as its priced replacement (`AGENTS.md`). A mineral we
-/// lack weighs a source: with no market the boost chain needs every one
-/// (owner).
+/// A simple rule shaped as its priced replacement (`AGENTS.md`).
 pub fn score(f: &Facts) -> f64 {
     let held = f64::from(engine::HELD_OUTPUT_PER_TICK);
     held * f.sources as f64 + held / 2.0 * f.free_near as f64 - f64::from(f.crossings) + f.worth
         - 6.0 * held * f.failed
-        + if f.lacked { held } else { 0.0 }
+        + f.mineral
+}
+
+const ORES: usize = 7;
+
+/// The base minerals in a unit of XGHO2, XLHO2, XKHO2, XGH2O and XZHO2 (the
+/// engine's REACTIONS), by `Ore` (H O U K L Z X), and the owner's rank of the
+/// part each boosts: TOUGH, HEAL, RANGED_ATTACK, then upgrade and MOVE.
+const BOOSTS: [(i32, [i32; ORES]); 5] = [
+    (4, [1, 2, 1, 1, 1, 1, 1]),
+    (3, [1, 2, 0, 0, 1, 0, 1]),
+    (2, [1, 2, 0, 1, 0, 0, 1]),
+    (1, [2, 1, 1, 1, 1, 1, 1]),
+    (1, [1, 2, 0, 0, 0, 1, 1]),
+];
+
+fn demand(ore: usize) -> i32 {
+    BOOSTS.iter().map(|(rank, bases)| rank * bases[ore]).sum()
+}
+
+/// The most demanded mineral's first copy is a source's dig, the flat bonus
+/// it replaced; copies fall off as Hivemind's 1/(held + 1).
+pub fn mineral_worth(mineral: &Resource, held: usize) -> f64 {
+    let Resource::Ore(ore) = mineral else {
+        return 0.0;
+    };
+    let most = (0..ORES).map(demand).max().unwrap_or(1);
+    f64::from(engine::HELD_OUTPUT_PER_TICK) * f64::from(demand(ore.ordinal() as usize))
+        / f64::from(most)
+        / (held + 1) as f64
 }
 
 fn free(world: &World, row: &Row) -> bool {
@@ -253,11 +279,12 @@ pub fn step(
         n
     };
 
-    let dug_elsewhere = |mineral: &Resource, but: Option<RoomName>| {
-        (derived.colonies.iter())
+    let copies = |mineral: &Resource, but: Option<RoomName>| {
+        (derived.owned.iter())
             .filter(|c| Some(**c) != but)
             .filter_map(|c| world.room(*c))
-            .any(|r| r.minerals.iter().any(|m| &m.resource == mineral))
+            .filter(|r| r.minerals.iter().any(|m| &m.resource == mineral))
+            .count()
     };
     let mut scored: Vec<(f64, Outpost)> = Vec::new();
     for (home, tree) in derived.trees.iter().filter(|(h, _)| sponsors.contains(h)) {
@@ -289,10 +316,8 @@ pub fn step(
                     crossings,
                     worth: season::worth(name),
                     failed: failed(name),
-                    lacked: row
-                        .mineral
-                        .as_ref()
-                        .is_some_and(|m| !dug_elsewhere(m, None)),
+                    mineral: (row.mineral.as_ref())
+                        .map_or(0.0, |m| mineral_worth(m, copies(m, None))),
                 };
                 let outpost = Outpost {
                     room: name,
@@ -326,8 +351,9 @@ pub fn step(
             crossings: 0,
             worth: season::worth(room.name),
             failed: 0.0,
-            lacked: (room.minerals.first())
-                .is_some_and(|m| !dug_elsewhere(&m.resource, Some(room.name))),
+            mineral: (room.minerals.first()).map_or(0.0, |m| {
+                mineral_worth(&m.resource, copies(&m.resource, Some(room.name)))
+            }),
         })
     };
     let worst = (derived.colonies.iter().filter_map(|c| world.room(*c)))
@@ -360,6 +386,7 @@ pub fn claim(intel: &Intel, derived: &Derived, held: Option<&Expansion>) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::vocabulary::Ore;
 
     #[test]
     fn a_claim_fails_past_its_deadline_or_to_another_player() {
@@ -371,26 +398,30 @@ mod tests {
     }
 
     #[test]
-    fn a_mineral_we_lack_outbids_a_free_neighbour_source() {
+    fn a_scarce_mineral_outbids_another_copy_of_one_we_hold() {
+        let ore = |o: Ore| Resource::Ore(o);
+        let worth = |o: Ore, held: usize| mineral_worth(&ore(o), held);
+        assert!(worth(Ore::Oxygen, 0) > worth(Ore::Hydrogen, 0));
+        assert!(worth(Ore::Lemergium, 0) > worth(Ore::Utrium, 0));
+        assert!(worth(Ore::Utrium, 1) < worth(Ore::Lemergium, 0));
+        assert!(worth(Ore::Oxygen, 1) < worth(Ore::Oxygen, 0));
+        assert_eq!(
+            worth(Ore::Oxygen, 0),
+            f64::from(engine::HELD_OUTPUT_PER_TICK)
+        );
         let have = Facts {
             sources: 2,
             free_near: 3,
             crossings: 2,
             worth: 0.0,
             failed: 0.0,
-            lacked: false,
+            mineral: worth(Ore::Utrium, 1),
         };
         let lack = Facts {
-            free_near: 2,
+            mineral: worth(Ore::Lemergium, 0),
             ..have
         };
-        assert!(score(&have) > score(&lack));
-        assert!(
-            score(&Facts {
-                lacked: true,
-                ..lack
-            }) > score(&have)
-        );
+        assert!(score(&lack) > score(&have));
     }
 
     #[test]
@@ -401,7 +432,7 @@ mod tests {
             crossings: 2,
             worth: 0.0,
             failed: 0.0,
-            lacked: false,
+            mineral: 0.0,
         };
         let scoring = Facts {
             free_near: 0,
