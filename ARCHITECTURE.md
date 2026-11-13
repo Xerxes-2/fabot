@@ -871,8 +871,10 @@ to a measurement on the benchmark above, in either direction:
   ~90% of what reading the world cost over the F# reader was the number of
   calls, not the work in them (2026-10-17). So `World::of_game`, the only
   reader of the game, takes it from `app/read.js` in one pass, its numbers in
-  one `Int32Array` and its strings in one string, decoded in the order written;
-  a field goes on that pass, never a call of its own.
+  one `Int32Array` and its strings in one string, decoded in the order written,
+  a word the pass repeats (a kind, a part, a room) written once and read by
+  index (`world` −17% on the live capture, 2026-11-13); a field goes on that
+  pass, never a call of its own.
 
 ### 9.3 Counts are a gate
 
