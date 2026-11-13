@@ -14,7 +14,8 @@
 // spawn regeneration, spent on bodies, building, upgrading, repairing and
 // towers, lost to pile decay and to link sends, and the stock standing
 // (stores, carried, piles); dug + regen = spent + decayed + linked + Δstock,
-// less the residual it reports. `decay.jsonl`: each energy pile that
+// less the residual it reports; what strangers drop in or carry off shared
+// piles and containers stays in it. `decay.jsonl`: each energy pile that
 // decayed, once it is gone or the run ends, with its tile's role and the
 // tombstone or ruin it fell out of. `bodies.jsonl`: each body, ours or not,
 // once it is gone from the colony's rooms, their neighbours and the opponents' rooms or the run ends: its parts, the ticks it
@@ -285,10 +286,10 @@ let regenNext = 0;
 // One tick of the ledger, off the colony's rooms as the tick left them.
 const newLine = () => ({ dug: 0, decayed: 0, build: 0, upgrade: 0, repair: 0, bodies: 0, reserved: 0, hostile: 0, waves: 0, carriedOut: 0, leastDowngrade: Infinity });
 const lines = Object.fromEntries(roomNames.map((r) => [r, newLine()]));
-// The energy objects hold as the ledger counts it: piles, stores, and the
-// bodies of `user` (another's carry is theirs).
+// The energy objects hold as the ledger counts it: piles, ownerless stores,
+// and the bodies and structures of `user`.
 const stockOf = (objects, user = ours) =>
-  objects.reduce((n, o) => n + (o["#lookType"] === "resource" ? (o.resourceType === "energy" ? o.amount : 0) : o.body !== undefined && o["#user"] !== user ? 0 : energyIn(o)), 0);
+  objects.reduce((n, o) => n + (o["#lookType"] === "resource" ? (o.resourceType === "energy" ? o.amount : 0) : o["#user"] != null && o["#user"] !== user ? 0 : energyIn(o)), 0);
 // Strategy picks remotes as it runs. A room joins with what it held the tick
 // before as held from the start: the ledger saw none of it come in.
 async function followWorked(time) {
@@ -328,7 +329,9 @@ function account(rooms, time) {
         .filter((o) => links.has(o.id) && ctl && near(o.pos, ctl.pos, 3) && !objects.some((s) => s["#lookType"] === "source" && near(s.pos, o.pos, 2)))
         .map((o) => o.id),
     );
+    const strangers = new Set(objects.filter((o) => o["#user"] != null && o["#user"] !== ours).map((o) => o.id));
     for (const e of room["#eventLog"] ?? []) {
+      if (strangers.has(e.objectId)) continue;
       const kind = e.event ?? e._$Variant;
       if (kind === HARVEST && sources.has(e.targetId)) {
         ledger.dug += e.amount;
