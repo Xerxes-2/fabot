@@ -51,6 +51,8 @@ import { getProcessorChannel, pushIntentsForRoomNextTick, userToIntentRoomsSetKe
 import { kInvaderUserId } from "xxscreeps/mods/classic/invader/game.js";
 import { typedArrayToString } from "xxscreeps/utility/string.js";
 import { METRICS, windows } from "./metrics.mjs";
+const LETTER = { move: "m", work: "w", carry: "c", attack: "a", ranged_attack: "r", heal: "h", claim: "k", tough: "t" };
+const letters = (body) => body.map((p) => LETTER[p.type]).join("");
 
 const [ticksArg, everyArg, roomArg, username, out, wavesArg = "", opponentsPath, coresArg = "", waveArg = "melee,healer,ranged", watchArg = "0", followArg = ""] = process.argv.slice(2);
 const homes = roomArg.split(",");
@@ -421,7 +423,7 @@ function live(rooms, time) {
       if (o.body === undefined) continue;
       const key = `${o["#user"]} ${o.name}`;
       const cost = o.body.reduce((sum, p) => sum + (PART_COST[p.type] ?? 0), 0);
-      const life = lives.get(key) ?? { name: o.name, ours: o["#user"] === ours, body: o.body.map((p) => p.type[0]).join(""), cost, first: time, rooms: {}, acts: {} };
+      const life = lives.get(key) ?? { name: o.name, ours: o["#user"] === ours, body: letters(o.body), cost, first: time, rooms: {}, acts: {} };
       lives.set(key, life);
       // Ticks it stood on the tile it stood on the tick before.
       const at = `${room.name} ${o.pos.x},${o.pos.y}`;
@@ -539,10 +541,10 @@ function sample(t, time, room) {
         // processor stamps an action with the tick it leads to).
         const acts = (o["#actionLog"] ?? []).filter((a) => a.time === time).map((a) => a.type);
         if (acts.includes("upgradeController")) row.upgradeWork += o.body.filter((p) => p.type === "work" && p.hits > 0).length;
-        row.bodies.push(`${o.name}@${o.pos.x},${o.pos.y} ${o.body.map((p) => p.type[0]).join("")} e${energyIn(o)} ${acts.join("+") || "-"}`);
+        row.bodies.push(`${o.name}@${o.pos.x},${o.pos.y} ${letters(o.body)} e${energyIn(o)} ${acts.join("+") || "-"}`);
       } else {
         row.hostiles++;
-        row.foes.push(`${o.name}@${o.pos.x},${o.pos.y} ${o.body.map((p) => p.type[0]).join("")}`);
+        row.foes.push(`${o.name}@${o.pos.x},${o.pos.y} ${letters(o.body)}`);
       }
     }
   }
