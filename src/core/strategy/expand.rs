@@ -71,13 +71,18 @@ pub struct Facts {
     pub worth: f64,
     /// Failures in or beside it, each fading as it ages.
     pub failed: f64,
+    /// Its mineral is one no other colony of ours digs.
+    pub lacked: bool,
 }
 
-/// A simple rule shaped as its priced replacement (`AGENTS.md`).
+/// A simple rule shaped as its priced replacement (`AGENTS.md`). A mineral we
+/// lack weighs a source: with no market the boost chain needs every one
+/// (owner).
 pub fn score(f: &Facts) -> f64 {
     let held = f64::from(engine::HELD_OUTPUT_PER_TICK);
     held * f.sources as f64 + held / 2.0 * f.free_near as f64 - f64::from(f.crossings) + f.worth
         - 6.0 * held * f.failed
+        + if f.lacked { held } else { 0.0 }
 }
 
 fn free(world: &World, row: &Row) -> bool {
@@ -248,6 +253,16 @@ pub fn step(
         n
     };
 
+    let strongholds: Vec<RoomName> = (intel.iter())
+        .filter(|(_, r)| r.stronghold)
+        .map(|(room, _)| *room)
+        .collect();
+    let dug_elsewhere = |mineral: &Resource, but: Option<RoomName>| {
+        (derived.colonies.iter())
+            .filter(|c| Some(**c) != but)
+            .filter_map(|c| world.room(*c))
+            .any(|r| r.minerals.iter().any(|m| &m.resource == mineral))
+    };
     let mut scored: Vec<(f64, Outpost)> = Vec::new();
     for (home, tree) in derived.trees.iter().filter(|(h, _)| sponsors.contains(h)) {
         let (hx, hy) = home.coords();
@@ -268,6 +283,9 @@ pub fn step(
                     || world.closed.contains(&name)
                     || declarations.sieges.contains(&name)
                     || (rivals.iter()).any(|(t, _)| tiles::rooms_apart(*t, name) <= THREAT)
+                    || strongholds
+                        .iter()
+                        .any(|t| tiles::rooms_apart(*t, name) <= THREAT)
                     || scored.iter().any(|(_, o)| o.room == name)
                 {
                     continue;
@@ -278,6 +296,10 @@ pub fn step(
                     crossings,
                     worth: season::worth(name),
                     failed: failed(name),
+                    lacked: row
+                        .mineral
+                        .as_ref()
+                        .is_some_and(|m| !dug_elsewhere(m, None)),
                 };
                 let outpost = Outpost {
                     room: name,
@@ -311,6 +333,8 @@ pub fn step(
             crossings: 0,
             worth: season::worth(room.name),
             failed: 0.0,
+            lacked: (room.minerals.first())
+                .is_some_and(|m| !dug_elsewhere(&m.resource, Some(room.name))),
         })
     };
     let worst = (derived.colonies.iter().filter_map(|c| world.room(*c)))
@@ -354,6 +378,29 @@ mod tests {
     }
 
     #[test]
+    fn a_mineral_we_lack_outbids_a_free_neighbour_source() {
+        let have = Facts {
+            sources: 2,
+            free_near: 3,
+            crossings: 2,
+            worth: 0.0,
+            failed: 0.0,
+            lacked: false,
+        };
+        let lack = Facts {
+            free_near: 2,
+            ..have
+        };
+        assert!(score(&have) > score(&lack));
+        assert!(
+            score(&Facts {
+                lacked: true,
+                ..lack
+            }) > score(&have)
+        );
+    }
+
+    #[test]
     fn season_worth_outbids_dig() {
         let near = Facts {
             sources: 2,
@@ -361,6 +408,7 @@ mod tests {
             crossings: 2,
             worth: 0.0,
             failed: 0.0,
+            lacked: false,
         };
         let scoring = Facts {
             free_near: 0,

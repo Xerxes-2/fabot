@@ -203,7 +203,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | `switches` | name → bool: `false` skips a module, `true` opts in (`recorder`) | Main | Memory | turn a module off live |
 | `recorder` | the last ticks' read pass (`app/read.js`), Memory and intel rows, deflated; a tick over a segment spans several, so the ring keeps fewer | Main | segments 10–14 | the capture (§9.1) |
 | `economy.plan` | per colony: layout memo, census signature | Economy | segment | read on key change |
-| `intel.rooms` | room → last seen, owner and level, reserver and the tick its hold lapses, whose WORK body stood there, its keeper lairs and the resource each guards, its controller and sources and whether a container stood at each; by username, never stance | Strategy | heap, segment 2 every 100 ticks, the recorder's capture | a declared room out of sight is served as it was last seen (§7.1) |
+| `intel.rooms` | room → last seen, owner and level, reserver and the tick its hold lapses, whose WORK body stood there, its keeper lairs and the resource each guards, its controller and sources and whether a container stood at each, its mineral, whether an Invader stronghold stands; by username, never stance | Strategy | heap, segment 2 every 100 ticks, the recorder's capture | a declared room out of sight is served as it was last seen (§7.1) |
 | `engagements.log` | closed engagements with prediction vs outcome | Observe | segment | §10.1 |
 | `observe.*` | health, faults, per-module CPU, counters, this tick's tactic offers (§6.3), the metrics past their threshold | Main, then Observe | segment 1 | operator; calibrates the benchmark |
 | `metrics` | the open window's sums; each creep's last task and load, each site's last progress and when, each colony's last controller progress, last tick's engagements and each room's last close; each body's last tile and the one before, its stuck run, the room it last left and when, its ticks to live, whether it was wounded and what last struck it and when, its last energy draw not yet delivered; the closed windows | Observe | heap | what a tick is compared against; a reset loses the open window and the bodies' tracks and restarts the sites' ages |
@@ -751,8 +751,10 @@ its reserve and 30k more, that no operation holds as it holds
 outposts: a siege's successors lagged behind a claim's bodies) looks over intel's rooms in its
 reach: two sources, nobody's, two rooms from any of ours and from a rival's
 room. Each is scored as a priced choice would be (energy a tick: its own dig,
-half its free neighbours', less a tick a crossing from the sponsor, plus
-`season::worth`); the best one Layout can plan whole before it is claimed (The
+half its free neighbours', less a tick a crossing from the sponsor, a
+source's dig for a mineral no colony of ours digs (no market: the boost chain
+needs every one), plus `season::worth`; a room within two of a stronghold is
+no candidate); the best one Layout can plan whole before it is claimed (The
 International's) is declared a claim, until its spawn stands, and kept in
 `expansion` until its storage does (one young colony at a time) or another
 player takes it; the operator's claim in flight holds it off. It **fails**

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::atlas::tiles::Tile;
@@ -6,7 +7,7 @@ use crate::core::engine;
 use crate::core::intents::Intent;
 use crate::core::tick::{self, Declarations, Declared, Outpost};
 use crate::core::tiles;
-use crate::core::vocabulary::BodyPart;
+use crate::core::vocabulary::{BodyPart, Resource, resource_name, resource_of_name};
 use crate::core::world::{Controller, Owner, Pos, Room, RoomName, Source, World, push_int};
 
 /// A room as it stood when last seen, by username: a stance is the
@@ -26,6 +27,10 @@ pub struct Row {
     /// None on a row written before sources were read: unknown, not none.
     pub sources: Option<Vec<Declared>>,
     pub contained: bool,
+    /// None on a row written before minerals were read, or a room without one.
+    pub mineral: Option<Resource>,
+    /// An Invader stronghold stands: a core past level 0.
+    pub stronghold: bool,
 }
 
 pub type Intel = BTreeMap<RoomName, Row>;
@@ -76,6 +81,8 @@ pub fn step(world: &World, intel: &mut Intel) {
             contained: (room.sources.iter()).all(|s| {
                 (room.structures.iter()).any(|c| c.kind.is_container() && c.pos.within(1, &s.pos))
             }),
+            mineral: room.minerals.first().map(|m| m.resource.clone()),
+            stronghold: (room.structures.iter()).any(|s| s.kind.is_invader_core() && s.level > 0),
         };
         match intel.get_mut(&room.name) {
             Some(held) => *held = row,
@@ -308,7 +315,7 @@ pub fn sight(
 const NONE: &str = "-";
 
 /// One line a room, `room seen owner level reserver lapse worker lairs
-/// controller sources contained`, `-` for none, `lairs` each lair's tile and its
+/// controller sources contained mineral stronghold`, `-` for none, `lairs` each lair's tile and its
 /// resource's as `lair.resource,…` and `sources` each as `id@tile,…` (`.`
 /// alone for none): a segment holds thousands.
 pub fn to_text(intel: &Intel) -> String {
@@ -360,6 +367,14 @@ pub fn to_text(intel: &Intel) -> String {
             }
         }
         out.push_str(if r.contained { " 1" } else { " 0" });
+        out.extend([
+            " ",
+            r.mineral
+                .as_ref()
+                .map_or(Cow::Borrowed(NONE), resource_name)
+                .as_ref(),
+        ]);
+        out.push_str(if r.stronghold { " 1" } else { " 0" });
         out.push('\n');
     }
     out
@@ -403,7 +418,7 @@ pub fn of_text(text: &str) -> Intel {
     text.lines()
         .filter_map(|line| {
             let f: Vec<&str> = line.split(' ').collect();
-            if !(7..=11).contains(&f.len()) {
+            if !(7..=13).contains(&f.len()) {
                 return None;
             }
             let room = RoomName::parse(f[0])?;
@@ -426,6 +441,11 @@ pub fn of_text(text: &str) -> Intel {
                 controller: f.get(8).and_then(|c| site_of(room, c)),
                 sources,
                 contained: f.get(10) == Some(&"1"),
+                mineral: f
+                    .get(11)
+                    .filter(|m| **m != NONE)
+                    .map(|m| resource_of_name(m)),
+                stronghold: f.get(12) == Some(&"1"),
             };
             Some((room, row))
         })
@@ -479,6 +499,10 @@ mod tests {
                     .chance(2)
                     .then(|| (0..dice.below(3)).map(|_| site(&mut dice)).collect()),
                 contained: dice.chance(2),
+                mineral: dice
+                    .chance(2)
+                    .then(|| resource_of_name(dice.pick(&["H", "O", "U", "L", "K", "Z", "X"]))),
+                stronghold: dice.chance(2),
             };
             let intel: Intel = [(RoomName::named("W1N1"), row)].into();
             assert_eq!(of_text(&to_text(&intel)), intel);
