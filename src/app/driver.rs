@@ -204,7 +204,7 @@ fn run_tick() -> Result<(), String> {
         };
         let mut m = metrics::step(m, &seen);
         if world.time % metrics::WINDOW == 0 {
-            wire::write_segment(wire::METRICS_SEGMENT, &m.text());
+            wire::write_segment(wire::METRICS_SEGMENT, m.text());
         }
         m
     });

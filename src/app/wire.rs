@@ -78,7 +78,7 @@ fn offer_rows<S: Serializer>(offers: &[(i32, Vec<Offer>)], s: S) -> Result<S::Ok
 
 pub fn write_observe(o: &Observed) {
     let text = serde_json::to_string(o).unwrap_or_else(|_| "{}".to_string());
-    write_segment(OBSERVE_SEGMENT, &text);
+    write_segment(OBSERVE_SEGMENT, text);
 }
 
 /// The engine keeps the active list across uploads and counts every loaded
@@ -99,12 +99,12 @@ pub fn read_metrics() -> Metrics {
 }
 
 pub fn write_intel(rows: &Intel) {
-    write_segment(INTEL_SEGMENT, &intel::to_text(rows));
+    write_segment(INTEL_SEGMENT, intel::to_text(rows));
 }
 
-pub fn write_segment(id: u8, text: &str) {
+pub fn write_segment(id: u8, text: impl Into<String>) {
     let segments = raw_memory::segments();
-    segments.set(id, text.to_string());
+    segments.set(id, text.into());
 }
 
 pub fn record(
