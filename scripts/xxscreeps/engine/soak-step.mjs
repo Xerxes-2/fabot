@@ -35,7 +35,7 @@
 // at t = first, first + every, …
 // <opponents.json>: [{ name, room, raid? }], the players seated beside ours;
 // each sample's `others` holds each one's room as it stands: level, spawns,
-// creeps, and its worth and score over its room and the followed ones. A raid { first, every?, room?, bodies: [{ part: count, boosts?: {
+// creeps, and its worth and score over its room and the followed ones. A raid { first, every?, room?, inside?, bodies: [{ part: count, boosts?: {
 // part: compound } }] } stands the opponent's bodies on the edge of `room`
 // (default <room>) toward its room (`waves/`) at t = first, first + every, …
 // <cores>: room:tick,… — a level-0 Invader core (`core/`) stood in room at t = tick.
@@ -1006,7 +1006,7 @@ for (let t = 0; t < ticks; t++) {
     const into = o.raid.room ?? roomName;
     const toward = Object.entries(world.map.describeExits(into) ?? {}).filter(([, next]) => next === o.room).map(([dir]) => Number(dir));
     const bodies = o.raid.bodies.map(({ boosts = {}, ...counts }) => PARTS.flatMap((p) => Array(counts[p] ?? 0).fill({ type: p, boost: boosts[p] })));
-    await pushIntentsForRoomNextTick(shard, into, o.id, { local: { soakRaid: [[o.id, bodies, toward.length ? toward : [1, 3, 5, 7]]] }, internal: true });
+    await pushIntentsForRoomNextTick(shard, into, o.id, { local: { soakRaid: [[o.id, bodies, toward.length ? toward : [1, 3, 5, 7], o.raid.inside ?? false]] }, internal: true });
     process.stderr.write(`t${t} raid of ${o.name} in ${into} from sides ${toward.join(",")}\n`);
   }
   for (const wave of waves.filter((w) => t >= w.first && (t - w.first) % w.every === 0)) {

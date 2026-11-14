@@ -385,13 +385,13 @@ impl Plan<'_> {
             if raised {
                 // A claim without its spawn is raised by workers sent from here.
                 for k in 0..PIONEERS {
-                    self.worker(ci, g.room, k, (true, false), PIONEER, MOST);
+                    fixed += self.worker(ci, g.room, k, (true, false), PIONEER, MOST);
                 }
                 continue;
             }
             // Hivemind's mine builder.
             if !own && at_risk && storage.is_some() {
-                self.worker(ci, g.room, 0, (false, false), MENDER, MENDER_WORK);
+                fixed += self.worker(ci, g.room, 0, (false, false), MENDER, MENDER_WORK);
             }
             for s in &g.sources {
                 let body = if own {
@@ -497,7 +497,7 @@ impl Plan<'_> {
             // Past its tower's level they build: upgrading, they drank what its builders draw.
             let builds = derived.colonies[cj].controller.level >= TOWER_LEVEL;
             for k in 0..PIONEERS {
-                self.worker(
+                fixed += self.worker(
                     ci,
                     derived.colonies[cj].room,
                     k,
@@ -632,11 +632,10 @@ impl Plan<'_> {
             _ if !fed => surplus,
             _ if upgradable < i32::MAX => (surplus - f64::from(upgradable)).max(0.0),
             _ if payback > 0 => surplus,
-            _ => ((dug - fixed) / 2.0).clamp(0.0, surplus),
+            _ if storage.is_none() => ((dug - fixed) / 2.0).clamp(0.0, surplus),
+            _ => stocked.clamp(0.0, surplus),
         };
         let build = works.min(f64::from(owed) / life);
-        // Repair is its own flow: what decays a tick and what is missing over
-        // a life, out of the sites' share.
         let mended: f64 = (derived.grounds.iter().enumerate())
             .filter(|(gi, _)| owners[*gi] == Some(ci))
             .flat_map(|(gi, g)| {
@@ -793,11 +792,12 @@ impl Plan<'_> {
         (builds, spends): (bool, bool),
         rank: i32,
         work: i32,
-    ) {
+    ) -> f64 {
         let capacity = self.derived.colonies[ci].bank_capacity;
         let Some(body) = bodies::sized(Pattern::Worker, work, capacity) else {
-            return;
+            return 0.0;
         };
+        let cost = upkeep(&body);
         let seat = (self.derived.grounds.iter())
             .find(|g| g.room == room)
             .and_then(|g| g.controller.as_ref().map(|c| c.pos))
@@ -812,6 +812,7 @@ impl Plan<'_> {
         let slot = self.out.last_mut().expect("pushed");
         slot.rank = rank;
         slot.spends = spends;
+        cost
     }
 }
 

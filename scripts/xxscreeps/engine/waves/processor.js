@@ -5,11 +5,13 @@
 // xxscreeps' own goal doubles after each raid, so it gives no steady rate to
 // read a stand-down's cost off.
 // `soakRaid` stands a scripted raid (`raid/`) the same way: the owner's bodies
-// on the exit tiles of the sides given.
+// on the exit tiles of the sides given, or one tile inside them when `inside`,
+// since the engine moves a body on an exit tile to the next room.
 // `soakFull` stands a room's spawns and extensions full, the economy's refill when it is switched off.
 import { registerIntentProcessor } from "xxscreeps/engine/processor/index.js";
 import { Game } from "xxscreeps/game/index.js";
 import { FIND_EXIT } from "xxscreeps/game/constants/index.js";
+import { RoomPosition } from "xxscreeps/game/position.js";
 import { Room } from "xxscreeps/game/room/index.js";
 import { CREEP_LIFE_TIME } from "xxscreeps/mods/classic/creep/constants.js";
 import { kInvaderUserId } from "xxscreeps/mods/classic/invader/game.js";
@@ -45,11 +47,14 @@ registerIntentProcessor(Room, "soakFull", { internal: true }, (room, context) =>
     }
 });
 
-registerIntentProcessor(Room, "soakRaid", { internal: true }, (room, context, owner, bodies, open) => {
+registerIntentProcessor(Room, "soakRaid", { internal: true }, (room, context, owner, bodies, open, inside) => {
   const exits = edge(room, open);
   bodies.forEach((parts, i) => {
     if (!exits[i]) return;
-    const creep = createWithBody(exits[i], parts.map(({ type, boost }) => ({ type, hits: 100, boost })), `raid-${Game.time}-${i}`, owner);
+    const { x, y } = exits[i];
+    const [ix, iy] = [x === 0 ? 1 : x === 49 ? 48 : x, y === 0 ? 1 : y === 49 ? 48 : y];
+    const at = !inside || room.getTerrain().get(ix, iy) & 1 ? exits[i] : new RoomPosition(ix, iy, room.name);
+    const creep = createWithBody(at, parts.map(({ type, boost }) => ({ type, hits: 100, boost })), `raid-${Game.time}-${i}`, owner);
     creep["#ageTime"] = Game.time + CREEP_LIFE_TIME;
     room["#insertObject"](creep);
   });

@@ -281,7 +281,8 @@ cast for the surplus or the stock): the queue ranks the fight's ask first, but
 a spend body already spawning holds the spawn its whole spawn time when the ask
 comes (v1's hold while a defender is owed).
 
-The spend follows the **surplus**: dig less the fixed bodies' upkeep, plus
+The spend follows the **surplus**: dig less the upkeep paid at any stock (the
+fixed bodies, a claim's pioneers, the outposts' mender), plus
 the stock past the reserve over a creep life. Before a storage, an outpost's
 dig counts as far as the carriers that bring it home stand: with no reserve
 to draw down, spend sized to the rest drinks the bank that would cast them. The pile is drawn down over
@@ -299,9 +300,11 @@ extension, container, storage, link, tower, extractor, terminal) every worker bu
 surplus is its: a structure pays only once complete, so a level is built out
 before it is upgraded, as Hivemind does (owner, 2026-11-12: only RCL3's tower
 and RCL6's minerals are worth rushing), and below the reserve too. Below RCL3 an outpost's sites wait for
-the tower: its dig piles on the post, or beside the source while no container or site marks one, and is hauled from there. Other sites and repairs take half the
-income, so remote roads never stall the controller; the stock past the
-reserve upgrades. At RCL8 the controller is fed only inside its downgrade
+the tower: its dig piles on the post, or beside the source while no container or site marks one, and is hauled from there. Other sites and repairs
+wait behind the controller (owner, 2026-11-14: a lab is worth little at
+first, built when there is room): with a storage they take only the stock
+past the reserve over a life, the controller the income; before one, half
+the income, so remote roads never stall the controller. At RCL8 the controller is fed only inside its downgrade
 deadline (owner, 2026-11-13: upgrading there only feeds GCL; sites, ramparts,
 labs and lower colonies use the energy better): no upgrader, no upgrade spend,
 every worker builds, and a load held with no slot goes to a site or the

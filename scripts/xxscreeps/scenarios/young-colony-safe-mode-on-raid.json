@@ -1,5 +1,5 @@
 {
-  "why": "an armed pair a young colony past RCL2 cannot answer (no tower, its Defend unanswered) fires the safe mode RCL2 granted: its insurance until the tower stands, which expand-claims-a-neighbour bounds within the safe mode's 20000 ticks. Main fires it too (Defend's last resort); a lone 1-ATTACK raider the colony answers in 160 ticks spends nothing. A scripted raider, since only its being armed and unanswered in the young room is read",
+  "why": "an armed pair a young colony past RCL2 cannot answer (no tower, its Defend unanswered) fires the safe mode RCL2 granted: its insurance until the tower stands, which expand-claims-a-neighbour bounds within the safe mode's 20000 ticks. Main fires it too (Defend's last resort); a lone 1-ATTACK raider the colony answers in 160 ticks spends nothing. A scripted raider, since only its being armed and unanswered in the young room is read. The raid stands one tile inside W7N3 (`inside`): stood on its exit it bounced into W6N3, and a harvester of ours passing there held it off the young room (claimSafeMode 0 on a change that only moved that harvester's timing)",
   "modules": ["economy", "fight", "strategy"],
   "start": {
     "room": "W8N3",
@@ -11,7 +11,7 @@
         "bot": "scripts/xxscreeps/engine/rival",
         "room": "W6N3",
         "config": { "role": "raid" },
-        "raid": { "first": 2600, "room": "W7N3", "bodies": [{ "move": 2, "attack": 2 }, { "move": 2, "attack": 2 }] }
+        "raid": { "first": 2600, "room": "W7N3", "inside": true, "bodies": [{ "move": 2, "attack": 2 }, { "move": 2, "attack": 2 }] }
       }
     ]
   },

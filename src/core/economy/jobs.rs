@@ -291,12 +291,14 @@ fn takes_of(
             .map(|s| s.amount)
             .sum::<i32>()
     };
+    // A buffer always has room, so an empty carrier would fill it forever while the cast waits.
+    let waits = |r: &Resource| g.boost_lab.as_ref().is_some_and(|b| &b.compound == r);
     for (store, pos, r, n) in &g.ores {
         add(
             Task::Withdraw(store.clone(), r.clone()),
             *pos,
             (*n).min(wanted(r, store)),
-            1,
+            if waits(r) { -1 } else { 1 },
         );
     }
     if let Some(plan) = &g.lab_plan {

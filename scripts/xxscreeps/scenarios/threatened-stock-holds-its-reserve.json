@@ -1,0 +1,13 @@
+{
+  "why": "a threatened RCL5 colony (Hivemind three rooms off, a 60k reserve) holds its stock about its reserve: the surplus counts every body paid for at any stock (the fixed bodies, a claim's pioneers, the outposts' mender), so the surplus at the reserve is what the colony has. Main 5bed4fab left the pioneers and the mender out and settled under it (mean 44k over t40000-48000, 7200 ticks under 50k); here mean 64k, 100 ticks under 50k",
+  "modules": ["economy"],
+  "start": {
+    "world": "scripts/xxscreeps/worlds/season-outpost-ring.json",
+    "room": "E25S8",
+    "seed": 1,
+    "ended": true,
+    "opponents": [{ "name": "hivemind", "bot": "scripts/xxscreeps/engine/hivemind", "room": "E27S9" }]
+  },
+  "ticks": 48000,
+  "assert": [{ "measure": "ticksBelow", "below": 50000, "from": 40000, "to": 48000, "max": 2000 }]
+}

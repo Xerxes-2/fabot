@@ -1,0 +1,10 @@
+{
+  "why": "labs placed while the stock stands about its reserve wait behind the controller (owner, 2026-11-14: a lab is worth little at first, built when there is room): W8N3 places three at t~7000, its stock holds 11k-23k, and the controller keeps the income, 171k upgraded over t9000-15000 with all three labs unbuilt (main 5bed4fab 178k, also unbuilt, its stock under the reserve). Sites built from half the income past the reserve took the labs ahead of the controller and dropped outposts-take-the-spawn-past-rcl6's upgrade from 97k to 57k",
+  "modules": ["economy"],
+  "start": { "room": "W8N3", "seed": 1, "node": "R6" },
+  "ticks": 15000,
+  "assert": [
+    { "measure": "sitesAtEnd", "kind": "lab", "min": 3 },
+    { "measure": "upgrade", "from": 9000, "to": 15000, "min": 150000 }
+  ]
+}
