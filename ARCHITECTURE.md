@@ -357,18 +357,21 @@ rival's level fields, boosted once it has labs, capped at our level (a wall
 above it outbids the economy that holds it, and safe mode answers); the ticks
 are as long as our towers take to kill it through its quad's heals from the
 ring's far end, at most the time a colony casts its answer twice. A quiet
-colony keeps a third, as its reserve does. Each spawn, tower, storage,
-terminal and source container has its own rampart; while a rival's room is
-near and its quad out-heals our towers (`ColonyPlan.ring`) Layout also
+colony keeps Hivemind's 10k against decay, and a third of the price only at
+RCL8, where the controller takes no surplus: below it a third was mended from
+the stock ahead of the controller.
+Each spawn, tower, storage, terminal and source container has its own
+rampart; from RCL4 (owner, 2026-11-14, as Hivemind), or below it while a
+rival's room is near and its quad out-heals our towers (`ColonyPlan.ring`),
+Layout also
 builds a **ring** that seals every tile in ranged reach of them and the labs
 from the exits, a minimum vertex cut (`layout/cut.rs`, Hivemind's planner's
 idea). The cut is drawn with the plan, a one-off of its key kept in the
 standing plan, never a store of its own.
-❓ The gate is a rule on our towers' damage, not a price of the ring's upkeep
-against the losses it saves; no scenario yet seats a rival whose quad
-out-heals our towers, so the ring itself is unproven, and towers placed to
-cover it (Hivemind's) wait for that, since moving them shifts every live plan.
-A ring whose rival goes stays standing and repaired, never replaced.
+❓ No scenario yet seats a rival whose quad out-heals our towers, so the
+ring itself is unproven, and towers placed to cover it (Hivemind's) wait for
+that, since moving them shifts every live plan. A ring whose rival goes stays
+standing and repaired, never replaced.
 
 Port with these cuts:
 - No fight tasks (`Guard`, `Defend`, `Assault`, `Flee`), no Safety band. v1's

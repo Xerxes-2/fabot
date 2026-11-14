@@ -44,11 +44,17 @@ const NEAR: i32 = 3;
 /// takes to cast its answer twice, the first lost.
 const HOLD: i32 = 2 * engine::MAX_BODY_PARTS as i32 * engine::SPAWN_TICKS_PER_PART;
 
+/// Every colony walls its core from here (owner, 2026-11-14), as Hivemind does.
+const RING_LEVEL: i32 = 4;
+
+/// Hivemind's quiet rampart hits.
+const FLOOR: i32 = 10_000;
+
 /// A quad, as TooAngel and most bots send: one dismantler, three healers.
 const HEALERS: i32 = 3;
 
-/// The threat in, the hits a rampart is kept at out, and whether the ring
-/// pays (§5): only where the quad out-heals the towers.
+/// The threat in, the hits a rampart is kept at out, and whether the quad
+/// out-heals the towers, which rings a colony below `RING_LEVEL` (§5).
 pub fn wall(rules: &Rules, rival: i32, level: i32, threatened: bool) -> (i32, bool) {
     let capacity =
         engine::SPAWN_ENERGY + rules.allowed("extension", rival) * engine::extension_energy(rival);
@@ -78,8 +84,12 @@ pub fn wall(rules: &Rules, rival: i32, level: i32, threatened: bool) -> (i32, bo
         * engine::DISMANTLE_POWER
         * boost(Part::Work, ResourceType::CatalyzedZynthiumAcid)
         * held;
-    let floor = 20 * engine::RAMPART_DECAY_AMOUNT;
-    let kept = floor.max(if threatened { full } else { full / 3 });
+    let kept = match () {
+        _ if threatened => full.max(FLOOR),
+        // The controller there takes no surplus, so a quiet wall thickens instead.
+        _ if level >= engine::CONTROLLER_MAX_LEVEL => (full / 3).max(FLOOR),
+        _ => FLOOR,
+    };
     (kept, fire <= heal)
 }
 
@@ -141,7 +151,7 @@ pub fn plan(
                 target: level,
                 reserve: kept + asked,
                 rampart_hits,
-                ring: near && outheals,
+                ring: level >= RING_LEVEL || (near && outheals),
                 owes: asked > 0 || due.contains(&room.name),
                 pile,
             })
