@@ -196,6 +196,10 @@ A live firefight the user flags may be fixed in the current session without the 
   itself (pi-subagents' own `worktree: true` is a git worktree, so it is refused). The repo's WorktreeCreate hook (`.claude/hooks/worktree-create.sh`, registered in `.claude/settings.json`) gives it its own jj workspace at `.claude/worktrees/<name>` (ignored), based on `main` (`trunk()`, or `claude.worktree-base` when set), with `node_modules` linked and `.env` copied; anything machine-local goes in an untracked `.claude/worktree-setup.local.sh`. The subagent describes the workspace's own `@` (no `jj new` before its first edit, which leaves an empty change under its work) and never moves a bookmark or pushes.
 - Ship a subagent's change from the default workspace: `jj new <change>` (rebase it onto `main` first if `main` moved), then steps 3–4 with `-r <change>`. A subagent's workspace is removed when it stops with no work in it and no background task running (`subagent-stop.sh`); one holding work stays, so the agent can be resumed to amend it, until session end (`worktree-sweep.sh`); by hand, `.claude/hooks/worktree-sweep.sh --stale` forgets workspaces whose directory is gone and removes directories no workspace owns. Each removal first kills what still runs in the workspace (`kill-cwd.sh`).
 - Another live session works in its own workspace too, or stays read-only.
+- One agent at a time changes the economy's spend formula (what the surplus,
+  spawn time and workers go to); a second parks its change and takes another
+  lane: performance and bench, research, the client, tooling, or scenarios
+  that touch no spend code. Two in flight re-measure each other.
 - `/tmp` is a RAM tmpfs here, shared by every agent: a build target, bundle, extracted tree or log that outlives one command goes under the workspace's `.scratch/` (ignored, on disk), and evidence a report cites under the default checkout's. Each agent deletes what it wrote there once nothing cites it.
 
 ### Cloud sessions
