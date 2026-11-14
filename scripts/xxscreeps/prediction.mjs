@@ -5,12 +5,14 @@
 export const outcome = (a) => (a.won === true ? "won" : a.won === false ? "lost" : a.unresolved ? "unresolved" : "stood");
 
 // An engagement's outcome, off the facts `engine/soak-step.mjs` writes. Won:
-// its group dead at the close. Lost: it disengaged, or gave up (a home's
-// turned unanswered after it was answered), whatever came after. Unresolved:
+// its group dead at the close. Lost: after contact it disengaged, or gave up
+// (a home's turned unanswered after it was answered), whatever came after; one
+// that quit before contact, none of ours dead, tested no prediction. Unresolved:
 // still open and answered when the run ended. Ticks from first contact to
 // the group's last sighting, as `engine/duel-step.mjs` reads a duel.
 export function engagement(e) {
-  const won = e.disengaged || e.gaveUp ? false : e.closed !== null && !e.outlived ? true : null;
+  const quit = e.disengaged || e.gaveUp;
+  const won = quit ? (e.contact === null && e.dead === 0 ? null : false) : e.closed !== null && !e.outlived ? true : null;
   const end = won === true ? e.seen + 1 : e.closed;
   return { won, unresolved: won === null && e.closed === null && e.answered, ticks: won === null || e.contact === null || end === null ? null : end - e.contact, dead: e.dead };
 }
