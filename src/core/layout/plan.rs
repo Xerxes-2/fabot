@@ -153,8 +153,8 @@ pub fn sized() -> Vec<Kind> {
     ]
 }
 
-/// What a raid comes for.
-const KEEP: [Kind; 4] = [Kind::Spawn, Kind::Tower, Kind::Storage, Kind::Terminal];
+/// What a raid comes for: each is covered by a rampart of its own.
+const COVERED: [Kind; 4] = [Kind::Spawn, Kind::Tower, Kind::Storage, Kind::Terminal];
 
 /// The first tower: the room's first defence.
 pub fn rampart_level(rules: &Rules) -> i32 {
@@ -537,11 +537,6 @@ fn draw_with(
         spawns,
         slot_list.iter().map(|(_, t)| *t).collect(),
     );
-    let keep: Vec<Tile> = (picked.iter())
-        .filter(|(kind, _)| KEEP.contains(kind) || kind.is_lab())
-        .map(|(_, t)| *t)
-        .collect();
-    let ring = cut::ring(weights, &keep);
 
     let mut ranks: BTreeMap<Kind, i32> = BTreeMap::new();
     let mut items: Vec<Item> = Vec::new();
@@ -629,7 +624,25 @@ fn draw_with(
     }
 
     let linked = board.link(on_first, controller_seat.as_ref(), &posted);
-    board.bays(&posted);
+    let bays = board.bays(&posted);
+    // Hivemind's: the base and its links; a harvest bay's extensions serve
+    // only their source's miner, and are left out.
+    let base = sized();
+    let planned: Vec<&Item> = board.items.iter().chain(&board.extra).collect();
+    let core: Vec<(Tile, i32)> = (planned.iter())
+        .filter(|i| !bays.contains(&i.tile))
+        .filter_map(|i| match &i.kind {
+            k if k.is_link() => Some((i.tile, 0)),
+            k if base.contains(k) => Some((i.tile, engine::RANGED_RANGE)),
+            _ => None,
+        })
+        .chain(ground.controller.map(|c| (c, 1)))
+        .collect();
+    let solid: Vec<Tile> = (planned.iter())
+        .filter(|i| !i.kind.walkable())
+        .map(|i| i.tile)
+        .collect();
+    let ring = cut::ring(weights, &core, &solid);
     let lattice_roads = roads_to(&board.items, &board.taken, &*board.walk);
     for t in tiles::all() {
         board.road_level[t] = lattice_roads[t].min(board.paved[t]);
@@ -895,7 +908,7 @@ impl Board<'_> {
     /// A rampart over each kept structure, a source's container too: its
     /// harvester cannot leave it.
     fn ramparts(&self, posted: &[Posted], rock_level: i32) -> Vec<Item> {
-        let kept = (self.items.iter()).filter(|i| KEEP.contains(&i.kind));
+        let kept = (self.items.iter()).filter(|i| COVERED.contains(&i.kind));
         let covered = (kept.map(|i| (i.tile, i.level)))
             .chain(posted.iter().map(|p| (p.container, rock_level)));
 
@@ -918,7 +931,7 @@ impl Board<'_> {
 
     /// Hivemind's harvest bays (MIT, © David Franke). They rank after the
     /// first level's extensions, whose harvesters are too small to keep one.
-    fn bays(&mut self, posted: &[Posted]) {
+    fn bays(&mut self, posted: &[Posted]) -> Vec<Tile> {
         let early = self
             .rules
             .allowed(&Kind::Extension.name(), haul_level(self.rules)) as usize;
@@ -960,21 +973,17 @@ impl Board<'_> {
                 None => self.plant(&Kind::Extension, *t, level),
             }
         }
+        bays
     }
 
     fn ring(&self, cut: &[Tile]) -> Vec<Item> {
-        let mut items: Vec<Item> = (cut.iter())
+        (cut.iter())
             .map(|t| Item {
                 kind: Kind::Rampart,
                 tile: *t,
-                level: (self.items.iter().chain(&self.extra))
-                    .filter(|i| i.tile == *t && !i.kind.walkable())
-                    .map(|i| i.level)
-                    .fold(rampart_level(self.rules), i32::max),
+                level: rampart_level(self.rules),
             })
-            .collect();
-        items.sort_by_key(|i| i.level);
-        items
+            .collect()
     }
 
     fn walkable(&self, t: Tile) -> bool {
@@ -1408,6 +1417,79 @@ mod tests {
                     Some(founded) => assert!(fx::same(&plan, &founded)),
                     None => panic!("no plan from a founding spawn"),
                 },
+            }
+        }
+    }
+
+    fn source_posts(ground: &Ground, plan: &Plan) -> Vec<Tile> {
+        (plan.items.iter())
+            .filter(|i| i.kind.is_container())
+            .filter(|i| ground.sources.iter().any(|s| tiles::range(*s, i.tile) == 1))
+            .map(|i| i.tile)
+            .collect()
+    }
+
+    #[test]
+    fn no_walk_from_an_exit_past_the_ring_reaches_the_base_but_beside_an_exit() {
+        for colony in fx::samples(17).take(fx::MAX_TEST) {
+            let Some((ground, plan)) = fx::plan_of(&colony) else {
+                continue;
+            };
+            let open = |t: Tile| ground.weights[t].is_some();
+            // The engine refuses a rampart beside an exit, so the ring cannot
+            // seal those tiles; nothing else is exempt.
+            let beside_exit =
+                |t: Tile| (tiles::within(1, t).into_iter()).any(|n| tiles::on_edge(n) && open(n));
+            let ring: Vec<Tile> = plan.ring.iter().map(|i| i.tile).collect();
+            let posts = source_posts(&ground, &plan);
+            // A harvest bay stands outside the ring, beside its post (owner).
+            let bay = |i: &Item| {
+                i.kind == Kind::Extension && posts.iter().any(|p| tiles::range(*p, i.tile) == 1)
+            };
+            let shot = [
+                Kind::Spawn,
+                Kind::Extension,
+                Kind::Tower,
+                Kind::Storage,
+                Kind::Terminal,
+                Kind::Factory,
+                Kind::PowerSpawn,
+                Kind::Nuker,
+                Kind::Observer,
+                Kind::Lab,
+            ];
+            let core: Vec<(Tile, i32)> = (plan.items.iter())
+                .filter(|i| !bay(i))
+                .filter_map(|i| match &i.kind {
+                    Kind::Link => Some((i.tile, 0)),
+                    k if shot.contains(k) => Some((i.tile, engine::RANGED_RANGE)),
+                    _ => None,
+                })
+                .chain(ground.controller.map(|c| (c, 1)))
+                .collect();
+
+            let mut reached = vec![false; tiles::COUNT];
+            let mut queue: Vec<Tile> = (tiles::all())
+                .filter(|t| tiles::on_edge(*t) && open(*t))
+                .collect();
+            for t in &queue {
+                reached[*t] = true;
+            }
+            while let Some(t) = queue.pop() {
+                for &n in tiles::around(t) {
+                    if open(n) && !reached[n] && !ring.contains(&n) {
+                        reached[n] = true;
+                        queue.push(n);
+                    }
+                }
+            }
+            for (c, reach) in &core {
+                for t in tiles::within(*reach, *c) {
+                    assert!(
+                        !reached[t] || beside_exit(t),
+                        "{t} in reach of {c} outside the ring"
+                    );
+                }
             }
         }
     }

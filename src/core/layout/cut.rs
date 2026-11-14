@@ -1,7 +1,6 @@
 //! The fewest tiles that part the core from the exits: a minimum vertex cut,
 //! each tile an in and an out joined by one unit of flow. The graph is
 //! Hivemind's planner's idea (MIT, David Franke, after Saruss), written anew.
-use crate::core::engine;
 use crate::core::grid::Weight;
 use crate::core::tiles::{self, Tile};
 
@@ -12,19 +11,24 @@ fn node(t: Tile, out: bool) -> usize {
     2 * t.index() + usize::from(out)
 }
 
-/// `core` the tiles a raid comes for: every tile in ranged reach of one is
-/// inside or on the cut, as Hivemind's protected rectangles keep the tiles
-/// behind a wall too. The engine allows no rampart beside an exit, so the
-/// cut is never there.
-pub fn ring(weights: &[Weight; tiles::COUNT], core: &[Tile]) -> Vec<Tile> {
+/// `core` the tiles a raid comes for, each with the reach it is kept clear
+/// to: every tile in it is inside or on the cut, as Hivemind's protected
+/// rectangles keep the tiles behind a wall too. The engine allows no rampart
+/// beside an exit, so the cut is never there. A `solid` tile, a planned
+/// structure, is never cut while a tile off it can be.
+pub fn ring(weights: &[Weight; tiles::COUNT], core: &[(Tile, i32)], solid: &[Tile]) -> Vec<Tile> {
     let open = |t: Tile| weights[t].is_some();
     let exit = |t: Tile| tiles::on_edge(t) && open(t);
     let sink: Vec<bool> = (tiles::all())
         .map(|t| open(t) && tiles::within(1, t).into_iter().any(exit))
         .collect();
+    let mut uncut = vec![false; tiles::COUNT];
+    for t in solid {
+        uncut[*t] = !tiles::within(1, *t).into_iter().any(|n| sink[n]);
+    }
     let mut kept = vec![false; tiles::COUNT];
-    for c in core {
-        for t in tiles::within(engine::RANGED_RANGE, *c) {
+    for (c, reach) in core {
+        for t in tiles::within(*reach, *c) {
             kept[t] = open(t) && !sink[t];
         }
     }
@@ -62,7 +66,7 @@ pub fn ring(weights: &[Weight; tiles::COUNT], core: &[Tile]) -> Vec<Tile> {
                 if sink[t] {
                     return (parent, Some(at));
                 }
-                if !vertex_used[t] {
+                if !vertex_used[t] || uncut[t] {
                     visit(node(t, true), &mut queue);
                 }
                 for &m in tiles::around(t) {
@@ -84,7 +88,7 @@ pub fn ring(weights: &[Weight; tiles::COUNT], core: &[Tile]) -> Vec<Tile> {
             let from = parent[at] as usize;
             let (a, b) = (Tile::of_index(from / 2), Tile::of_index(at / 2));
             match (from % 2 == 1, a == b) {
-                (false, true) => vertex_used[a] = true,
+                (false, true) => vertex_used[a] = !uncut[a],
                 (true, true) => vertex_used[a] = false,
                 (true, false) => edge_flow[slot(a, b)] += 1,
                 (false, false) => edge_flow[slot(b, a)] -= 1,
@@ -101,6 +105,7 @@ pub fn ring(weights: &[Weight; tiles::COUNT], core: &[Tile]) -> Vec<Tile> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::engine;
     use crate::core::layout::fixtures as fx;
 
     #[test]
@@ -113,7 +118,9 @@ mod tests {
                 .filter(|i| i.kind.is_spawn() || i.kind.is_storage())
                 .map(|i| i.tile)
                 .collect();
-            let cut = ring(&ground.weights, &core);
+            let reached: Vec<(Tile, i32)> =
+                core.iter().map(|c| (*c, engine::RANGED_RANGE)).collect();
+            let cut = ring(&ground.weights, &reached, &[]);
             let open = |t: Tile| ground.weights[t].is_some();
             let off_exits = |t: Tile| {
                 tiles::within(1, t)

@@ -371,10 +371,15 @@ Each spawn, tower, storage, terminal and source container has its own
 rampart; from RCL4 (owner, 2026-11-14, as Hivemind), or below it while a
 rival's room is near and its quad out-heals our towers (`ColonyPlan.ring`),
 Layout also
-builds a **ring** that seals every tile in ranged reach of them and the labs
-from the exits, a minimum vertex cut (`layout/cut.rs`, Hivemind's planner's
-idea). The cut is drawn with the plan, a one-off of its key kept in the
-standing plan, never a store of its own.
+builds a **ring** that seals from the exits every tile in ranged reach of the
+base (each structure but roads, containers, the extractor and the harvest
+bays), each link and the controller's neighbours, as Hivemind's planner does:
+a raid outside drains no extension and razes no link. It is a minimum vertex
+cut (`layout/cut.rs`, Hivemind's idea), drawn with the plan, a one-off of its
+key kept in the standing plan, never a store of its own. The cut runs
+through a planned structure only where it stands beside the tiles beside an
+exit, and a cut tile's rampart stands from the ring's first site, never
+waiting on a later structure under it.
 ❓ No scenario yet seats a rival whose quad out-heals our towers, so the
 ring itself is unproven, and towers placed to cover it (Hivemind's) wait for
 that, since moving them shifts every live plan. A ring whose rival goes stays

@@ -286,7 +286,8 @@ pub fn place(
 
     let mut planned = [0u8; tiles::COUNT];
     let mut solid = [0u8; tiles::COUNT];
-    // A rampart over a planned structure waits for it to stand.
+    // A rampart over a structure due by this level waits for it to stand; a
+    // later one would hold a ring tile open until it stands.
     let mut under = [0u8; tiles::COUNT];
 
     for i in &plan.items {
@@ -295,7 +296,7 @@ pub fn place(
         if !i.kind.walkable() {
             solid[i.tile] = 1;
         }
-        if !i.kind.is_road() && !i.kind.is_rampart() {
+        if !i.kind.is_road() && !i.kind.is_rampart() && i.level <= level {
             under[i.tile] = 1;
         }
     }
@@ -625,6 +626,49 @@ mod tests {
                         && i.kind.name() == p.kind.name()
                         && i.level <= case.level
                 }));
+            }
+        }
+    }
+
+    #[test]
+    fn every_ring_tile_holds_a_rampart_from_the_lowest_ring_level_and_no_extension() {
+        let rules = Rules::vanilla();
+        let level = crate::core::layout::plan::rampart_level(&rules);
+        for colony in fx::samples(14).take(fx::MAX_TEST) {
+            let Some((ground, mut plan)) = fx::plan_of(&colony) else {
+                continue;
+            };
+            let ring: Vec<Tile> = plan.ring.iter().map(|i| i.tile).collect();
+            plan.items.append(&mut plan.ring);
+            let mut room = colony.room.clone();
+            loop {
+                let placed = place(&rules, &census_of(&room, &[]), level, &plan, i32::MAX);
+                if placed.is_empty() {
+                    break;
+                }
+                for p in placed {
+                    let t = tiles::index(p.x, p.y);
+                    room.structures.push(fx::structure(
+                        &format!("s{t}{}", p.kind.name()),
+                        p.kind,
+                        Owner::Ours,
+                        t,
+                    ));
+                }
+            }
+            for t in ring {
+                assert!(
+                    (room.structures.iter())
+                        .any(|s| s.kind.is_rampart() && tiles::of_pos(&s.pos) == t),
+                    "{t} open"
+                );
+                // Only a structure beside an exit's band must be cut itself.
+                let forced = (tiles::within(2, t).into_iter())
+                    .any(|n| tiles::on_edge(n) && ground.weights[n].is_some());
+                assert!(
+                    forced || (plan.items.iter()).all(|i| i.tile != t || i.kind != Kind::Extension),
+                    "{t} cut under an extension"
+                );
             }
         }
     }
