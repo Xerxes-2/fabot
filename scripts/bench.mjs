@@ -46,6 +46,8 @@ async function* replay() {
   for await (const tick of ticksOf(files)) {
     const i = last && last.time === tick.time - 1 ? last.i + 1 : 0;
     last = { time: tick.time, i };
+    // A capture is taken with the recorder on, which live runs only to capture.
+    tick.memory = tick.memory?.replace('"recorder":true', '"recorder":false');
     yield [tick, i];
   }
 }

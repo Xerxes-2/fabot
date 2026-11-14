@@ -839,7 +839,8 @@ benchmark meets three requirements:
 1. **Input is a live capture.** A recorder in the bot (a switch) writes what
    `World.ofGame` read and the Memory string for N consecutive ticks to
    segments; `npm run observe -- capture` pulls them and the harness replays them
-   through the built bundle. v1's `capture-tick` read room history after the
+   through the built bundle, the recorder switched off in its Memory (a
+   `record` row in the bench's table says the switch was missed). v1's `capture-tick` read room history after the
    fact; that is not what the bot saw. No synthetic scenario is a benchmark.
 2. **The cost model is the engine's.** Memory is `JSON.parse`d from the real
    string on first access and `JSON.stringify`ed at the tick's end, unless
