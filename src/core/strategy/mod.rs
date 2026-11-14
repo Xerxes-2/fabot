@@ -115,7 +115,7 @@ pub fn plan(
         .map(|(room, row)| (*room, row.level))
         .collect();
     let fought = |room: RoomName| engagements.iter().any(|e| e.room == room);
-    let plans: Vec<ColonyPlan> = (derived.owned.iter().filter_map(|r| world.room(*r)))
+    let mut plans: Vec<ColonyPlan> = (derived.owned.iter().filter_map(|r| world.room(*r)))
         .filter_map(|room| {
             let level = room.controller.as_ref()?.level;
             let threat = (rivals.iter())
@@ -183,6 +183,7 @@ pub fn plan(
         terrain,
         expansion,
     );
+    expand::book(world, derived, &mut plans, &busy);
     let claim = expand::claim(intel, derived, expansion.in_flight.as_ref());
     (plans, chosen, claim)
 }

@@ -120,23 +120,33 @@ fn free(world: &World, row: &Row) -> bool {
         && !row.worker.as_ref().is_some_and(theirs)
 }
 
-/// A colony an operation holds (`outposts::busy`) sponsors nothing: a siege's
-/// successors lagged behind a claim's bodies.
+/// One an operation holds (`outposts::busy`) sponsors nothing: a siege's successors lagged.
+fn spare(world: &World, p: &ColonyPlan, busy: &BTreeSet<RoomName>) -> Option<i32> {
+    let r = world.room(p.room)?;
+    let level = r.controller.as_ref().map_or(0, |c| c.level);
+    let storage = (r.structures.iter()).find(|s| s.kind.is_storage() && s.owner.is_ours())?;
+    (p.stage == Stage::Exploit && !busy.contains(&p.room) && level >= SPONSOR_LEVEL)
+        .then(|| storage.store.amount_of(&Resource::Energy) - p.reserve)
+}
+
 fn sponsors(world: &World, plans: &[ColonyPlan], busy: &BTreeSet<RoomName>) -> Vec<RoomName> {
     (plans.iter())
-        .filter(|p| p.stage == Stage::Exploit && !busy.contains(&p.room))
-        .filter(|p| {
-            world.room(p.room).is_some_and(|r| {
-                let level = r.controller.as_ref().map_or(0, |c| c.level);
-                let stock: i32 = (r.structures.iter())
-                    .filter(|s| s.kind.is_storage() && s.owner.is_ours())
-                    .map(|s| s.store.amount_of(&Resource::Energy))
-                    .sum();
-                level >= SPONSOR_LEVEL && stock >= p.reserve + MARGIN
-            })
-        })
+        .filter(|p| spare(world, p, busy).is_some_and(|s| s >= MARGIN))
         .map(|p| p.room)
         .collect()
+}
+
+/// A refill past the gate keeps the stock off its line between due ticks (§5).
+pub fn book(world: &World, derived: &Derived, plans: &mut [ColonyPlan], busy: &BTreeSet<RoomName>) {
+    if derived.capped {
+        return;
+    }
+    let richest = (plans.iter_mut())
+        .filter_map(|p| Some((spare(world, p, busy)?, std::cmp::Reverse(p.room), p)))
+        .max_by_key(|(s, room, _)| (*s, *room));
+    if let Some((_, _, p)) = richest {
+        p.reserve += MARGIN + world.room(p.room).map_or(0, |r| r.energy_capacity);
+    }
 }
 
 /// Layout plans the room before it is claimed: one it cannot fit is never
@@ -245,7 +255,7 @@ pub fn step(
     if world.time % DUE != 0 || raising || world.bucket < BUCKET {
         return;
     }
-    let capped = derived.owned.len() as i32 >= world.rooms_allowed;
+    let capped = derived.capped;
     // Any failure or give-up holds the next give-up off (Hivemind's abandonWeakRooms).
     if capped && (expansion.failed.iter()).any(|f| world.time - f.since < FORGET) {
         return;

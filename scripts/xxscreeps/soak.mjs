@@ -23,7 +23,8 @@
 //            E2 is N5 with the first of them declared a claim (`claims`),
 //            C2 with both, G2 E2 with no GCL level spare for it;
 //            X2 is N5 with a GCL level spare and nothing declared, F2 X2
-//            with its expansion to the first of them in flight since long ago;
+//            with its expansion to the first of them in flight since long ago,
+//            Y2 X2 with R6's stock;
 //            L5 is N5 with H, O and U stocked and its labs the cluster (`labs`);
 //            N6 and N7 are RCL7 and RCL8 with their bodies standing; R8 is
 //            RCL8 on RCL7's plan, roads on the extension tiles RCL8 adds, and
@@ -93,7 +94,7 @@ import { patchRuntimeCache } from "./runtime-cache.mjs";
 // Where the run's wall time went, written to timing.json (`scenario.mjs` sums them).
 const began = Date.now();
 const marks = { node26: 0, node26Calls: 0 };
-const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|T3|N4|T4|N5|R6|T7|N6|N7|R8|A7|E0|E1|E2|C2|G2|X2|F2|L5] [--invaders room:every[:first],…] [--wave role[:size],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--world <capture.json>] [--follow room,…] [--unsafe] [--ended] [--keep] [--fetch] [--watch [--tick-ms N] [--port N]]";
+const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|T3|N4|T4|N5|R6|T7|N6|N7|R8|A7|E0|E1|E2|C2|G2|X2|F2|Y2|L5] [--invaders room:every[:first],…] [--wave role[:size],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--world <capture.json>] [--follow room,…] [--unsafe] [--ended] [--keep] [--fetch] [--watch [--tick-ms N] [--port N]]";
 const fail = (message) => {
   console.error(message);
   process.exit(1);
@@ -150,6 +151,7 @@ const NODES = {
   G2: { level: 6, stored: 100000, without: ["rampart"], claims: 1, short: true },
   X2: { level: 6, stored: 100000, without: ["rampart"], spare: 1 },
   F2: { level: 6, stored: 100000, without: ["rampart"], spare: 1, stale: true },
+  Y2: { level: 6, stored: 20000, without: ["rampart"], spare: 1 },
   // N5 with the ore for the UH line stocked and its labs declared the cluster.
   L5: { level: 6, stored: "100000,H:6000,O:6000,U:6000", without: ["rampart"], labs: { UH2O: 3000 } },
   // L5 without its tower, its first lab holding what a body is boosted with:

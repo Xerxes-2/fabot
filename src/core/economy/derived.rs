@@ -1258,7 +1258,7 @@ pub fn of_world(
     let claims: Vec<Controller> = declarations
         .claims
         .iter()
-        .filter(|_| (ours.owned.len() as i32) < world.rooms_allowed)
+        .filter(|_| !ours.capped)
         .filter_map(|claim| match world.room(claim.room) {
             Some(room) => room.controller.clone(),
             None => intel::blind(claim, intel, world, declarations).controller,

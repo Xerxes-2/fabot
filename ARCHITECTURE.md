@@ -340,7 +340,14 @@ cast it owes) it is every tower the level allows firing for n creep lifetimes
 (towers × TOWER_ENERGY_COST × CREEP_LIFE_TIME × n), n declared live by the
 operator (`observe declare reserve n`), 2 by default (30k at RCL4, 180k at
 RCL8); otherwise a third of it. The fight casts it owes are added: a committed
-cast is paid before any surplus, as the old bank's order had it. Owner, 2026-11-10: the full reserve cost a
+cast is paid before any surplus, as the old bank's order had it. While GCL
+leaves a room, the one colony that could sponsor (§7) with the most stock
+past its reserve adds the sponsor's 30k margin and one refill
+(`expand::book`): the controller takes every stock past the reserve, so a
+margin left out of it never stands, and the refill keeps the stock off the
+gate's line between due ticks; every colony booking it cost a lower
+colony's upgrade and a siege's successors. Terminal aid reads the booked
+reserve, so the colonies' pooled stock funds the expansion. Owner, 2026-11-10: the full reserve cost a
 quiet young colony a lifetime of upgrading (main kept its RCL4 stock under
 it anyway), and the season's fights come from neighbours, which intel sees.
 Open-source bots keep 75k–150k at RCL7–8. While a site
@@ -769,7 +776,7 @@ always wins** and Strategy fills only rooms the operator left undeclared
 flight; from a survey of Hivemind, Overmind, TooAngel and The International).
 On a due tick, while GCL leaves a room, the bucket is near full (Hivemind's CPU
 headroom) and no claim is in flight, a **sponsor** (RCL4 with a storage holding
-its reserve and 30k more, that no operation holds as it holds
+its reserve and 30k more, booked into the reserve (§5), that no operation holds as it holds
 outposts: a siege's successors lagged behind a claim's bodies) looks over intel's rooms in its
 reach: two sources, nobody's, two rooms from any of ours and from a rival's
 room. Each is scored as a priced choice would be (energy a tick: its own dig,
@@ -791,7 +798,9 @@ with no tower up: RCL2 grants a young colony one (the engine adds one a
 level), a home's unanswered Defend spends it where no tower stands (§6.2),
 and nothing holds the room once it ends. A fresh failure costs every room
 within one of it more than any room scores, fading to nothing over 100k ticks
-(Hivemind's), and a room that scores nothing is never declared.
+(Hivemind's), and a room that scores nothing is never declared. The margin is booked even when
+no room is free to take: candidates are scored only for a sponsor, on a due
+tick, a Layout draw each, and a booking with none costs one stock, not a flow.
 
 **Abandon** (owner, 2026-11-13; S11's leaders cycled claim, RCL6, mine,
 abandon). Strategy declares a colony `abandon` (§5) and keeps it in

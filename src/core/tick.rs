@@ -325,6 +325,8 @@ pub fn nearest<'t>(
 
 pub struct Derived {
     pub owned: BTreeSet<RoomName>,
+    /// Every room GCL allows is owned.
+    pub capped: bool,
     /// The owned rooms a spawn stands in, in `World.rooms`' order.
     pub colonies: Vec<RoomName>,
     /// The declared outposts and raised claims a colony reaches, whose work
@@ -393,6 +395,7 @@ pub fn derive(
         .collect();
     let mut derived = Derived {
         danger: danger(world, &owned),
+        capped: owned.len() as i32 >= world.rooms_allowed,
         owned,
         colonies,
         worked: Vec::new(),
