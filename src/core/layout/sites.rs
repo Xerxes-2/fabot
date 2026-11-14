@@ -45,6 +45,7 @@ pub struct Census {
     /// Tiles whose container's rock, else controller, has one already: one
     /// standing off the plan's tile is kept, never doubled.
     pub served: [u8; tiles::COUNT],
+    pub rocked: Vec<(Tile, Tile)>,
     /// None once a link serves the source: one standing off the plan's tile is
     /// kept, never doubled.
     pub posts: Vec<Post>,
@@ -151,8 +152,10 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
         }
     }
 
+    let mut rocked: Vec<(Tile, Tile)> = Vec::new();
     for rock in &rocks {
-        if containers.iter().any(|p| p.within(1, rock)) {
+        for p in containers.iter().filter(|p| p.within(1, rock)) {
+            rocked.push((tiles::of_pos(rock), tiles::of_pos(p)));
             for t in tiles::within(1, tiles::of_pos(rock)) {
                 served[t] = 1;
             }
@@ -215,6 +218,7 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
         occupied,
         walkable,
         served,
+        rocked,
         posts,
         buffer: buffer
             .filter(|(_, b)| b.kind.is_container())
@@ -266,6 +270,20 @@ pub fn may_place(rules: &Rules, census: &Census, level: i32) -> bool {
         || kinds
             .iter()
             .any(|kind| held_of(census, kind) < rules.allowed(&kind.name(), level))
+}
+
+pub fn posted(plan: &Plan, t: Tile) -> bool {
+    (plan.items.iter()).any(|i| i.kind.is_container() && i.tile == t)
+}
+
+/// Each rock and our container beside it off the plan's post: seated before
+/// the room had a plan, it gives way to the post the bays and the link stand
+/// around.
+pub fn astray(plan: &Plan, census: &Census) -> Vec<(Tile, Tile)> {
+    (census.rocked.iter())
+        .filter(|(_, c)| !posted(plan, *c))
+        .copied()
+        .collect()
 }
 
 /// The engine stacks a road only with a rampart, any other kind only with a
@@ -363,6 +381,16 @@ pub fn place(
         }
     };
 
+    let astray = astray(plan, census);
+    // Past the container's own level a room keeps what stands rather than
+    // rebuild it.
+    let replaces = |t: Tile| {
+        level <= haul_level(rules)
+            && (census.rocked.iter())
+                .filter(|(rock, _)| tiles::range(*rock, t) == 1)
+                .all(|rc| astray.contains(rc))
+    };
+
     for item in plan.items.iter().filter(|i| i.level <= level) {
         match tile_of(item) {
             Some(t)
@@ -380,7 +408,7 @@ pub fn place(
                     })
                     && (standable(&item.kind) || census.occupied[t] == 0)
                     && !taken.contains(&t)
-                    && (!item.kind.is_container() || census.served[t] == 0)
+                    && (!item.kind.is_container() || census.served[t] == 0 || replaces(t))
                     && (!item.kind.is_road() || census.road[t] == 0)
                     && held_of(census, &item.kind) + added_of(&added, &item.kind)
                         < rules.allowed(&item.kind.name(), level) =>
@@ -669,6 +697,39 @@ mod tests {
                     forced || (plan.items.iter()).all(|i| i.tile != t || i.kind != Kind::Extension),
                     "{t} cut under an extension"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn a_container_off_the_plans_post_gives_way_to_the_plans_own() {
+        let rules = Rules::vanilla();
+        for colony in fx::samples(16).take(fx::MAX_TEST) {
+            let Some((ground, plan)) = fx::plan_of(&colony) else {
+                continue;
+            };
+            for rock in &ground.sources {
+                let Some(post) = (plan.items.iter())
+                    .find(|i| i.kind.is_container() && tiles::range(i.tile, *rock) == 1)
+                else {
+                    continue;
+                };
+                let Some(stray) = tiles::around(*rock).iter().copied().find(|t| {
+                    ground.weights[*t].is_some() && !tiles::on_edge(*t) && !posted(&plan, *t)
+                }) else {
+                    continue;
+                };
+                let mut room = colony.room.clone();
+                room.structures.push(fx::structure(
+                    "stray",
+                    Kind::Container,
+                    Owner::Nobody,
+                    stray,
+                ));
+                let mut one = plan.clone();
+                one.items = vec![post.clone()];
+                let placed = place(&rules, &census_of(&room, &[]), haul_level(&rules), &one, 1);
+                assert_eq!(placed.len(), 1, "{} beside {rock} not placed", post.tile);
             }
         }
     }

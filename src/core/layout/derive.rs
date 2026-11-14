@@ -23,6 +23,7 @@ pub struct Colony {
     pub ours: Vec<Creep>,
     pub ramparts: Vec<Structure>,
     pub buried: Vec<String>,
+    pub astray: Vec<String>,
 }
 
 fn spawns_in(world: &World, room: RoomName) -> Vec<Tile> {
@@ -107,11 +108,23 @@ pub fn colonies(
 
         towers.sort_by(|a, b| a.id.cmp(&b.id));
 
+        let census = sites::census_of(room, &ours);
+        let astray: Vec<Tile> = match &plan {
+            Some(plan) => (sites::astray(plan, &census).into_iter())
+                .filter(|(rock, _)| {
+                    (census.rocked.iter())
+                        .any(|(r, p)| r == rock && sites::posted(plan, *p) && census.site[*p] == 0)
+                })
+                .map(|(_, c)| c)
+                .collect(),
+            None => Vec::new(),
+        };
+
         found.push(Colony {
             room: room.name,
             target: colony.target,
             plan,
-            census: sites::census_of(room, &ours),
+            census,
             towers,
             hostiles: room.hostiles().cloned().collect(),
             struck: room
@@ -134,6 +147,10 @@ pub fn colonies(
                         .any(|s| s.pos == r.pos && s.owner.is_ours() && !s.walkable)
                 })
                 .map(|r| r.id.clone())
+                .collect(),
+            astray: (room.structures.iter())
+                .filter(|c| c.kind.is_container() && astray.contains(&tiles::of_pos(&c.pos)))
+                .map(|c| c.id.clone())
                 .collect(),
         });
     }

@@ -940,6 +940,7 @@ impl Board<'_> {
             .map(|i| i.tile)
             .collect();
         let mut bays: Vec<Tile> = Vec::new();
+        let mut planted = 0;
         for p in posted {
             let entry = (p.path.iter()).find(|t| tiles::range(**t, p.container) == 1);
             let mut open: Vec<Tile> = (tiles::around(p.container).iter().copied())
@@ -952,14 +953,21 @@ impl Board<'_> {
             {
                 open.remove(i);
             }
+            // The harvester fills a lattice extension here as it does a bay's.
+            for n in tiles::around(p.container) {
+                if let Some(at) = lattice.iter().position(|t| t == n) {
+                    bays.push(lattice.remove(at));
+                }
+            }
             for n in open {
-                if early + bays.len() < lattice.len() {
+                if early + planted < lattice.len() {
                     self.taken[n] = true;
                     bays.push(n);
+                    planted += 1;
                 }
             }
         }
-        for t in lattice.drain(lattice.len() - bays.len()..) {
+        for t in lattice.drain(lattice.len() - planted..) {
             self.taken[t] = false;
         }
         self.items
@@ -1490,6 +1498,31 @@ mod tests {
                         "{t} in reach of {c} outside the ring"
                     );
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn every_extension_beside_a_source_container_ranks_with_the_bays() {
+        let rules = Rules::vanilla();
+        let early = rules.allowed(&Kind::Extension.name(), haul_level(&rules));
+        for colony in fx::samples(15).take(fx::MAX_TEST) {
+            let Some((ground, plan)) = fx::plan_of(&colony) else {
+                continue;
+            };
+            let ramparted =
+                |t: &Tile| (plan.items.iter()).any(|r| r.kind.is_rampart() && r.tile == *t);
+            let posts: Vec<Tile> = source_posts(&ground, &plan)
+                .into_iter()
+                .filter(ramparted)
+                .collect();
+            let bays: Vec<&Item> = (plan.items.iter())
+                .filter(|i| i.kind == Kind::Extension)
+                .filter(|i| posts.iter().any(|p| tiles::range(*p, i.tile) == 1))
+                .collect();
+            let last = level_of(&rules, &Kind::Extension, early + bays.len() as i32 - 1);
+            for b in bays {
+                assert!(b.level <= last, "{} at level {}", b.tile, b.level);
             }
         }
     }
