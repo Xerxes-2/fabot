@@ -1,0 +1,10 @@
+{
+  "why": "the seventeen bodies an outpost Defend leaves free wait on the colony's muster, off the spawn's exits, so the next body the spawn makes walks out within 10 ticks of its spawn time. Main packed them on the exits: a worker stood in the spawn 1044 ticks, the haulers fell 6 to 1 and the stock 50k to 400",
+  "modules": ["fight", "layout", "mv", "strategy", "tactics"],
+  "start": { "room": "W8N3", "seed": 1, "node": "E1", "wave": "healer:big,melee,ranged" },
+  "ticks": 4000,
+  "assert": [
+    { "measure": "spawnStuck", "max": 10 },
+    { "measure": "bodiesLost", "max": 0 }
+  ]
+}

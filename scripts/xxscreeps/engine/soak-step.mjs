@@ -431,6 +431,7 @@ function live(rooms, time) {
       // Ticks it stood on the tile it stood on the tick before.
       const at = `${room.name} ${o.pos.x},${o.pos.y}`;
       if (life.at === at && life.last === time - 1) life.still = (life.still ?? 0) + 1;
+      if (life.at !== undefined && life.at !== at) life.left ??= time;
       if (!life.at?.startsWith(`${room.name} `)) (life.entered ??= []).push([room.name, time]);
       life.at = at;
       life.last = time;

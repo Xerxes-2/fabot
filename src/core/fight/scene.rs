@@ -55,6 +55,7 @@ pub(super) struct Scene<'a> {
     pub(super) rules: &'a [TacticRule],
     pub(super) walks: BTreeMap<(RoomName, i32), Tree>,
     pub(super) homes: BTreeSet<RoomName>,
+    pub(super) musters: Vec<Pos>,
     pub(super) worked: BTreeSet<RoomName>,
     pub(super) foes: BTreeMap<RoomName, Vec<Creep>>,
     pub(super) cores: BTreeSet<String>,

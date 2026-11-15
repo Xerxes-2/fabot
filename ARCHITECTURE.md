@@ -157,7 +157,7 @@ cold tick never spends more than ❓ 60% of the limit.
 | `Exchange` | who wins: pure fight arithmetic | bodies, terrain | — | port from `Facts.fs:2883–4056, 1038–1582`, `Fighter.fs`, `Arrival.fs`; narrow the input |
 | `Fight` | tracker, engagements (one kind per file), casting | World, Atlas, Exchange, declarations (the operator's tactic rules, §6.3), `State.Fight`, `intel.rooms` (a patrol's staleness) | fight intents, casts, declarations, `State.Fight` | **new** (§6) |
 | `Tactics` | what one fight body does this tick (§6.4): strikes, steps, the Hunt score, heals, and which tactic a kind picks (§6.3); it imports no Fight | Atlas, Move, the `Sight` and plan Fight hands down | creep intents, wishes | **new**, split from Fight |
-| `Strategy` | intel; declarations (homes, outposts, errands, avoided rooms, allies); which operations to open; force allocation across engagements | World, Derived, Exchange, `State.Intel`, `Season`, Layout's standing plans (a pile's tile), Economy's `spare` (last tick's), the open engagements' rooms, pending casts and `fight.due` (a colony's reserve and `owes`) | declarations (a `ColonyPlan` per colony, under the operator's rows), opens/closes engagements, `State.Intel` | **new** (§7); v1 `Operations.fs` bidding informs it |
+| `Strategy` | intel; declarations (homes, outposts, errands, avoided rooms, allies); which operations to open; force allocation across engagements | World, Derived, Exchange, `State.Intel`, `Season`, Layout's standing plans (a pile's tile, a muster), Economy's `spare` (last tick's), the open engagements' rooms, pending casts and `fight.due` (a colony's reserve and `owes`) | declarations (a `ColonyPlan` per colony, under the operator's rows), opens/closes engagements, `State.Intel` | **new** (§7); v1 `Operations.fs` bidding informs it |
 | `Season` | this season's rules: what scores, its structures, its NPCs, its map quirks | World | declarations to Strategy, season intents | **new**, disposable (§8) |
 | `Move` | per-room movement arbitration, run by `Tick` over every module's wishes, and the step functions (chase, kite, flee, formation) | Intents, Atlas | move intents | port `Resolver.fs`, drop fight precedence |
 | `Executor` | API calls | Intents | Game | port |
@@ -202,7 +202,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | `fight.groups` | id → Group (§6.1) | Fight | Memory | hostile identity across ticks |
 | `fight.casts` | pending casts by engagement | Fight | Memory | never cast twice |
 | `fight.due` | the colonies a siege member's successor falls due at within a body's spawn time | Fight | Memory | Strategy's `owes` (§5) |
-| `declarations` | homes, outposts, errands, avoided rooms, allies, enemies, claims, the operator's tactic rules; a `ColonyPlan` per colony (stage, build target, reserve, rampart hits and ring, whether it owes a fight cast, its pile) and `flows` (the lab colony's compound stocks), where abandon and labs live, so a colony's lifecycle and what moves between rooms are one plan Economy and Layout read rather than per-purpose fields | Strategy | Memory (the operator's); Strategy's plans rebuilt each tick | what the world is for us, as data |
+| `declarations` | homes, outposts, errands, avoided rooms, allies, enemies, claims, the operator's tactic rules; a `ColonyPlan` per colony (stage, build target, reserve, rampart hits and ring, whether it owes a fight cast, its pile, its muster) and `flows` (the lab colony's compound stocks), where abandon and labs live, so a colony's lifecycle and what moves between rooms are one plan Economy and Layout read rather than per-purpose fields | Strategy | Memory (the operator's); Strategy's plans rebuilt each tick | what the world is for us, as data |
 | `switches` | name → bool: `false` skips a module, `true` opts in (`recorder`) | Main | Memory | turn a module off live |
 | `recorder` | the last ticks' read pass (`app/read.js`), Memory and intel rows, deflated; a tick over a segment spans several, so the ring keeps fewer | Main | segments 10–14 | the capture (§9.1) |
 | `economy.plan` | per colony: layout memo, census signature | Economy | segment | read on key change |
@@ -651,7 +651,7 @@ five from v1's step functions, the rest come with their kinds:
 | Close | `Resolver.chaseStep` + glue |
 | Hold | stand on rampart / `Atlas` seat |
 | Pursue | `Resolver.chaseStep` over seams |
-| Retreat | `Resolver.fleeStep` toward home |
+| Retreat | `Resolver.fleeStep` toward home's muster (`ColonyPlan.muster`: off the plan's roads and structures, so a free set shuts no spawn exit or core way; it waits there as a body with no work) |
 | Formation | new: `Move` steps a 2×2 footprint as one body |
 | Dismantle | v1 `actionIntents` sapper branch: dismantle the plan's target; the medics seat beside the body his towers struck last tick, as seen, not an assumed focus |
 | Drain | new: the pair bounces through the gate (§6.2) |

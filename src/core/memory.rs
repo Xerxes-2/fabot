@@ -111,6 +111,7 @@ impl Memory {
                     ring: false,
                     owes: false,
                     pile: None,
+                    muster: None,
                 })
                 .collect(),
             avoid: list(declared, "avoid"),

@@ -142,9 +142,9 @@ pub fn plan<'t>(
             let (rampart_hits, outheals) =
                 wall(&world.rules, threat.unwrap_or(level), level, threatened);
             let stored = (room.structures.iter()).any(|s| s.kind.is_storage() && s.owner.is_ours());
-            let pile = (level >= 2 && !stored)
-                .then(|| layout.get(&room.name)?.plan.as_ref()?.pile())
-                .flatten();
+            let plan = layout.get(&room.name).and_then(|s| s.plan.as_ref());
+            let pile = (level >= 2 && !stored).then(|| plan?.pile()).flatten();
+            let muster = plan.and_then(|p| p.muster);
             Some(ColonyPlan {
                 room: room.name,
                 stage: if expansion.abandoning(room.name) {
@@ -158,6 +158,7 @@ pub fn plan<'t>(
                 ring: level >= RING_LEVEL || (near && outheals),
                 owes: asked > 0 || due.contains(&room.name),
                 pile,
+                muster,
             })
         })
         .collect();

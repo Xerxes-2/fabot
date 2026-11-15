@@ -212,6 +212,11 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
             ((room, hops), tree)
         })
         .collect();
+    let muster = |r: RoomName| declarations.colonies.iter().find(|c| c.room == r)?.muster;
+    let spawn = |r: RoomName| world.spawns.iter().find(|s| s.pos.room == r).map(|s| s.pos);
+    let musters = (homes.iter())
+        .filter_map(|r| muster(*r).or_else(|| spawn(*r)))
+        .collect();
     let scene = Scene {
         world,
         sightings,
@@ -219,6 +224,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
         rules: &declarations.tactics,
         walks,
         homes,
+        musters,
         worked,
         foes,
         cores,

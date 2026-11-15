@@ -1,5 +1,7 @@
 use std::borrow::Cow;
 
+use crate::core::grid::Weight;
+use crate::core::tick::MUSTER_RANGE;
 /// Ahead of `State` so `State` can hold the standing plan.
 use crate::core::tiles::{self, Tile};
 use crate::core::world::{Kind, Pos, RoomName};
@@ -22,6 +24,8 @@ pub struct Plan {
     /// Built only while Strategy declares it (`ColonyPlan.ring`).
     pub ring: Vec<Item>,
     pub unfit: Vec<Cow<'static, str>>,
+    /// Where a free fight set waits (`muster`).
+    pub muster: Option<Pos>,
 }
 
 impl Plan {
@@ -38,4 +42,47 @@ impl Plan {
 pub struct Standing {
     pub key: String,
     pub plan: Option<Plan>,
+}
+
+/// The towers, planned beside the anchor, still fire at two thirds this far off.
+const MUSTER_REACH: i32 = 10;
+/// A body held at the muster stays off the exit tiles, which carry it across.
+const MUSTER_EDGE: i32 = MUSTER_RANGE + 1;
+
+/// None where every tile near the anchor has a road or a spawn's door within
+/// reach: the bodies then wait by a spawn.
+pub fn muster(
+    room: RoomName,
+    anchor: Tile,
+    planned: &[&Item],
+    weights: &[Weight; tiles::COUNT],
+) -> Option<Pos> {
+    let mut taken = [false; tiles::COUNT];
+    let mut barred = [false; tiles::COUNT];
+    for i in planned {
+        taken[i.tile] = true;
+        if i.kind.is_road() {
+            barred[i.tile] = true;
+        }
+        if i.kind.is_spawn() {
+            for n in tiles::within(1, i.tile) {
+                barred[n] = true;
+            }
+        }
+    }
+    let inside = |t: Tile| {
+        let span = MUSTER_EDGE..tiles::SIDE - MUSTER_EDGE;
+        span.contains(&tiles::x_of(t)) && span.contains(&tiles::y_of(t))
+    };
+    let square = |t: Tile| tiles::within(MUSTER_RANGE, t).into_iter();
+    (tiles::within(MUSTER_REACH, anchor).into_iter())
+        .filter(|t| inside(*t) && weights[*t].is_some() && !taken[*t])
+        .filter(|t| square(*t).all(|n| !barred[n]))
+        .min_by_key(|t| {
+            let crowd = square(*t)
+                .filter(|n| taken[*n] || weights[*n].is_none())
+                .count();
+            (crowd, tiles::range(*t, anchor), *t)
+        })
+        .map(|t| tiles::to_pos(room, t))
 }

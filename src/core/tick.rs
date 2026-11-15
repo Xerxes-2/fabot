@@ -127,6 +127,8 @@ pub struct ColonyPlan {
     pub owes: bool,
     /// Where its haul is banked while no storage stands (`ARCHITECTURE.md` §5).
     pub pile: Option<Pos>,
+    /// Where its free fight bodies wait (`Plan::muster`).
+    pub muster: Option<Pos>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -269,6 +271,9 @@ pub const REACH_HOPS: i32 = 3;
 
 /// A declared siege's room stands further off than any room worked.
 pub const SIEGE_HOPS: i32 = 10;
+
+/// A free fight body holds within this of its colony's muster.
+pub const MUSTER_RANGE: i32 = 2;
 
 pub fn target_at(pos: &Pos, range: i32) -> Target {
     Target {

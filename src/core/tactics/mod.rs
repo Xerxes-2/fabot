@@ -81,7 +81,7 @@ pub struct Sight<'a> {
     pub struck: BTreeSet<String>,
     pub spared: BTreeMap<RoomName, Vec<Pos>>,
     pub ramparts: BTreeMap<RoomName, Vec<Pos>>,
-    pub homes: Vec<Pos>,
+    pub musters: Vec<Pos>,
     pub avoid: &'a BTreeSet<RoomName>,
 }
 
@@ -743,38 +743,23 @@ pub fn rampart(sight: &mut Sight, creep: &Creep) -> Wish {
 
 pub fn retreat(sight: &mut Sight, creep: &Creep) -> Wish {
     let room = creep.pos.room;
-    let here: Vec<Pos> = sight
-        .homes
-        .iter()
-        .filter(|p| p.room == room)
-        .copied()
-        .collect();
-
-    let home: Option<Pos> = if here.is_empty() {
-        let onto: Vec<RoomName> = sight.homes.iter().map(|p| p.room).collect();
-        let tree = sight
-            .atlas
-            .tree_to(&BTreeSet::new(), tick::SIEGE_HOPS, room, &onto);
-        let routed: Vec<(i32, Pos)> = sight
-            .homes
-            .iter()
+    let here = (sight.musters.iter()).filter(|p| p.room == room);
+    let home = here.min_by_key(|p| (p.x, p.y)).copied().or_else(|| {
+        let onto: Vec<RoomName> = sight.musters.iter().map(|p| p.room).collect();
+        let tree = (sight.atlas).tree_to(&BTreeSet::new(), tick::SIEGE_HOPS, room, &onto);
+        (sight.musters.iter())
             .filter_map(|p| tree.crossings(room, p.room).map(|n| (n, *p)))
-            .collect();
-
-        routed
-            .into_iter()
-            .min_by(|(a_hops, a), (b_hops, b)| {
-                (a_hops, &a.room, a.x, a.y).cmp(&(b_hops, &b.room, b.x, b.y))
-            })
+            .min_by_key(|(hops, p)| (*hops, p.room, p.x, p.y))
             .map(|(_, p)| p)
-    } else {
-        here.into_iter().min_by_key(|p| (p.x, p.y))
+    });
+    let Some(home) = home else {
+        return hold(sight, creep);
     };
-
-    match home {
-        Some(p) => toward(sight, creep, &p, 2),
-        None => hold(sight, creep),
+    // Waits as a body with no work, so any walker shoves it.
+    if !creep.pos.within(tick::MUSTER_RANGE, &home) {
+        return toward(sight, creep, &home, tick::MUSTER_RANGE);
     }
+    hold(sight, creep)
 }
 
 /// v1's heal reflex: a hurt healer heals itself, else the deepest wound beside

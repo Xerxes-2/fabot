@@ -12,7 +12,7 @@ use crate::core::world::{Kind, Rules};
 
 use super::cut;
 use super::ground::{self, Ground, SPAWN_OFFSETS};
-use super::shape::{Item, Plan};
+use super::shape::{self, Item, Plan};
 
 /// Leaves cells of five tiles, each beside a road. A design constant, not an
 /// engine fact.
@@ -668,6 +668,8 @@ fn draw_with(
     let buffer = controller_seat.as_ref().map(|(_, t, _)| *t);
     let items = in_build_order(all, &posted, board.weights, buffer);
 
+    let planned: Vec<&Item> = items.iter().chain(&ring).collect();
+    let muster = shape::muster(ground.room, anchor, &planned, weights);
     (
         Plan {
             room: ground.room,
@@ -675,6 +677,7 @@ fn draw_with(
             items,
             ring,
             unfit,
+            muster,
         },
         linked,
     )
@@ -1244,6 +1247,32 @@ mod tests {
                         seated
                     );
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn a_muster_holds_no_planned_road_and_no_spawns_door_within_its_reach() {
+        for colony in fx::samples(4).take(fx::MAX_TEST) {
+            let Some((_, plan)) = fx::plan_of(&colony) else {
+                continue;
+            };
+            let Some(muster) = plan.muster else {
+                continue;
+            };
+            let at = tiles::of_pos(&muster);
+            for i in plan.items.iter().chain(&plan.ring) {
+                let reach = tiles::range(i.tile, at);
+                assert!(
+                    !(i.kind.is_road() && reach <= crate::core::tick::MUSTER_RANGE),
+                    "road at {}",
+                    i.tile
+                );
+                assert!(
+                    !(i.kind.is_spawn() && reach <= crate::core::tick::MUSTER_RANGE + 1),
+                    "spawn at {}",
+                    i.tile
+                );
             }
         }
     }

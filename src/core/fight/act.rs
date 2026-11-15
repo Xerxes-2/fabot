@@ -58,12 +58,7 @@ pub(super) fn act(
                 (r.name, ours.map(|s| s.pos).collect())
             })
             .collect(),
-        homes: world
-            .spawns
-            .iter()
-            .filter(|s| scene.homes.contains(&s.pos.room))
-            .map(|s| s.pos)
-            .collect(),
+        musters: scene.musters.clone(),
         avoid: scene.avoid,
     };
 

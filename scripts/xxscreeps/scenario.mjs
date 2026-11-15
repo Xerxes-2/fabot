@@ -200,6 +200,11 @@ const windowsOf = (dir, a) =>
 // A spend category the ledger moved less than this in a run is too small to
 // read a percent off.
 const LEDGER_LEAST = 1000;
+// A body seen this soon after the tick in its name was spawned in the run,
+// not stood in the world it started from.
+const SEEN_AFTER_CAST = 2;
+// The engine's CREEP_SPAWN_TIME.
+const SPAWN_TIME_PER_PART = 3;
 // `AGED` in `src/core/observe/metrics.rs`: fewer ticks to live, a body died of age.
 const AGED = 5;
 const firstClaimed = (samples, met) => samples.find((s) => Object.keys(s.claimed ?? {}).length && Object.values(s.claimed).every(met))?.t ?? Infinity;
@@ -272,6 +277,15 @@ const measures = {
   claimsOwned: (samples, a) => Object.values(at(samples, a.to ?? Infinity).claimed ?? {}).filter((c) => c.level > 0).length,
   claimLevel: (samples, a) => Math.min(...Object.values(at(samples, a.to ?? Infinity).claimed ?? {}).map((c) => c.level)),
   claimCharged: (samples) => firstClaimed(samples, (c) => c.fire >= 1000),
+  // The most ticks a body of ours stood in its spawn past its spawn time: the
+  // engine holds it there while every tile beside the spawn is taken.
+  spawnStuck: (_, __, dir) =>
+    Math.max(
+      0,
+      ...livesOf(dir)
+        .filter((b) => b.ours && b.first <= Number(b.name.split("-")[1]) + SEEN_AFTER_CAST)
+        .map((b) => (b.left ?? b.last + 1) - b.first - SPAWN_TIME_PER_PART * b.body.length),
+    ),
   // Scouts cast, the most ticks one stood still (a scout never idles), and
   // the ticks scouts stood in `room`.
   scoutsCast: (_, __, dir) => new Set(scoutsOf(dir).map((b) => b.name)).size,
