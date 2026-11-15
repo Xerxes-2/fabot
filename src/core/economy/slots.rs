@@ -1275,12 +1275,9 @@ pub fn casts(
                 *short.entry((colony.room, s.job.pattern())).or_default() += 1;
                 continue;
             }
-            // The colony's own carriers refill the bank a fight's cast is paid
-            // from: while it stands under half they queue ahead of the cast,
-            // or neither is ever cast.
-            let floor = s.job == Job::Fill
-                && s.rank == rank_of(&Job::Fill, true)
-                && 2 * colony.bank < colony.bank_capacity;
+            // The colony's own dig and carriers fill the bank a fight's cast is
+            // paid from, so they queue ahead of it at any bank.
+            let floor = s.rank <= rank_of(&Job::Fill, true);
             casts.push(cast(s, s.body.clone(), floor, &mut idle, &mut bank));
         }
     }

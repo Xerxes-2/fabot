@@ -1,8 +1,8 @@
 {
-  "why": "at RCL8 a colony's sites are built, its controller fed only inside its downgrade deadline: R8 reaches RCL8 on RCL7's plan with 50k stored under its 60k reserve. Main 9154fa4f upgraded with the stock held just under the reserve, where builders never draw, left its 5 rampart sites unbuilt and so placed no observer, power spawn, nuker or lab past the sixth",
+  "why": "at RCL8 a colony's sites are built, its controller fed only inside its downgrade deadline: R8 reaches RCL8 on RCL7's plan with 50k stored under its 60k reserve. Main 9154fa4f upgraded with the stock held just under the reserve, where builders never draw, left its 5 rampart sites unbuilt and so placed no observer, power spawn, nuker or lab past the sixth. The observer stands at 27700, so the run is 29100 ticks, 26000's share over 24800, when it stood before the dig and carriers queued ahead of every fight cast and the ring was walked as one",
   "modules": ["economy", "layout"],
   "start": { "world": "scripts/xxscreeps/worlds/season-outpost-ring.json", "room": "E25S8", "seed": 1, "node": "R8", "ended": true },
-  "ticks": 26000,
+  "ticks": 29100,
   "assert": [
     { "measure": "builtAtEnd", "kind": "observer", "min": 1 },
     { "measure": "builtAtEnd", "kind": "powerSpawn", "min": 1 },
