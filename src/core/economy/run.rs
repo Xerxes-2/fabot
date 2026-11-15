@@ -12,7 +12,7 @@ use crate::core::vocabulary::{Part, Resource};
 use crate::core::world::{Creep, Pos, RoomName};
 
 use super::bodies;
-use super::derived::{self, Body, Derived, Ground, LinkFact};
+use super::derived::{self, Body, Derived, Ground, LinkFact, RefillFact};
 use super::jobs::Jobs;
 use super::slots::{self, Job, Slot, distance};
 use super::task::{self, Task};
@@ -67,16 +67,19 @@ fn scouting(atlas: &Atlas, derived: &Derived, held: &Assignments) -> Assignments
         .collect()
 }
 
-fn ring_member(derived: &Derived, task: &Task, at: &Pos) -> Option<Task> {
-    let Task::Refill(id, r) = task else {
-        return None;
+fn ring_members<'a>(derived: &'a Derived, task: &Task, at: &Pos) -> Vec<&'a RefillFact> {
+    let Some(room) = (match task {
+        Task::Refill(id, _) => super::jobs::ring_room(id),
+        _ => None,
+    }) else {
+        return Vec::new();
     };
-    let room = super::jobs::ring_room(id)?;
-    let g = (derived.grounds.iter()).find(|g| g.room == room)?;
-    (g.refills.iter())
+    let g = (derived.grounds.iter()).find(|g| g.room == room);
+    let mut members: Vec<&RefillFact> = (g.iter().flat_map(|g| &g.refills))
         .filter(|f| !f.kind.is_tower() && f.free > 0)
-        .min_by_key(|&f| (at.range(&f.pos).unwrap_or(i32::MAX), &f.id))
-        .map(|f| Task::Refill(f.id.clone(), r.clone()))
+        .collect();
+    members.sort_by_key(|f| (at.range(&f.pos).unwrap_or(i32::MAX), &f.id));
+    members
 }
 
 fn spot_of(derived: &Derived, task: &Task) -> Option<Pos> {
@@ -431,12 +434,20 @@ fn work(
     ready: &dyn Fn(&Task) -> bool,
     acts: &mut Vec<Intent>,
 ) -> Wish {
-    let ring = ring_member(derived, task, &creep.pos);
+    let members = ring_members(derived, task, &creep.pos);
+    let ring = match (task, members.first()) {
+        (Task::Refill(_, r), Some(f)) => Some(Task::Refill(f.id.clone(), r.clone())),
+        _ => None,
+    };
     let task = ring.as_ref().unwrap_or(task);
     let Some(at) = spot_of(derived, task) else {
         return plan::stay(&*atlas, creep, mover.factor, 1);
     };
-    let (target, seats) = target_of(&*atlas, derived, (slot, task, at), stood, creep);
+    let (mut target, seats) = target_of(&*atlas, derived, (slot, task, at), stood, creep);
+    // v1's refill cluster.
+    if !members.is_empty() {
+        target.tiles = members.iter().map(|f| tiles::of_pos(&f.pos)).collect();
+    }
     let buffer = (derived.grounds.iter())
         .filter(|g| g.room == creep.pos.room)
         .find_map(|g| g.buffer.as_ref());

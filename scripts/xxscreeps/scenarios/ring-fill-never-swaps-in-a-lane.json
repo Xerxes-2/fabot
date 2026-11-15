@@ -1,0 +1,7 @@
+{
+  "why": "two loaded carriers bound for the refill ring meet in a one-wide lane whose ends lead to a member each: each walks to every hungry member at once and pours into the one it arrives beside, so neither turns back and neither swings. Main walked each to the member nearest by range from where it stood and swapped them 6667 times a window; 100 leaves the few swaps bodies passing in the open make",
+  "modules": ["economy"],
+  "start": { "world": "scripts/xxscreeps/worlds/ring-lane.json", "seed": 1 },
+  "ticks": 300,
+  "assert": [{ "metric": "move.swings", "max": 100 }]
+}
