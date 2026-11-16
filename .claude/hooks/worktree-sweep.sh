@@ -17,7 +17,7 @@ reg="$worktrees/.sessions"
 remove="$main/.claude/hooks/worktree-remove.sh"
 
 stale() {
-  local ws dir
+  local ws dir names
   while IFS=$'\t' read -r ws dir; do
     [[ "$ws" == cc-* ]] || continue
     if [ ! -d "$dir" ]; then
@@ -25,10 +25,12 @@ stale() {
       jj -R "$main" --ignore-working-copy workspace forget "$ws" >&2 && echo "forgot $ws (no directory)" >&2
     fi
   done < <(jj -R "$main" --ignore-working-copy workspace list -T 'name ++ "\t" ++ self.root() ++ "\n"' 2>/dev/null)
+  # A pipe into grep -q can SIGPIPE jj, and pipefail would read an owned directory as unowned.
+  names=$(jj -R "$main" --ignore-working-copy workspace list -T 'name ++ "\n"') || return
   for dir in "$worktrees"/*/; do
     [ -d "$dir" ] || continue
     dir=${dir%/}
-    jj -R "$main" --ignore-working-copy workspace list -T 'name ++ "\n"' | grep -qx "cc-$(basename "$dir")" \
+    grep -qx "cc-$(basename "$dir")" <<<"$names" \
       || { rm -rf "$dir" && echo "removed $dir (no workspace)" >&2; }
   done
 }

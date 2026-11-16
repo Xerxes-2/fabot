@@ -21,7 +21,9 @@ name=$(basename "$p")
 ws="cc-$name"
 
 j() { jj -R "$main" --ignore-working-copy "$@"; }
-if j workspace list -T 'name ++ "\n"' 2>/dev/null | grep -qx "$ws"; then
+# A pipe into grep -q can SIGPIPE jj, and pipefail would read an owned workspace as gone.
+names=$(j workspace list -T 'name ++ "\n"') || exit 1
+if grep -qx "$ws" <<<"$names"; then
   jj -R "$p" status >/dev/null 2>&1 # snapshot the subagent's edits
   own_base="$ws@- & description(regex:\"^cc-base: \") & mutable() & ~parents(children($ws@-) ~ $ws@)"
   ids=$(j log -r "$ws@ | ($own_base)" --no-graph -T 'commit_id ++ " "')
