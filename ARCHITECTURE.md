@@ -76,7 +76,7 @@ tick arrives; otherwise its standing output is replayed:
 
 | Module | Decision | Key |
 |---|---|---|
-| Layout | the plan | census signature |
+| Layout | the plan | the ground: terrain, rocks and another's obstacles |
 | Economy | the slots | none — slots are re-derived each tick; a body keeps its slot and its task |
 | Fight | an engagement's plan | an engagement event (§6.2) |
 | Strategy | open/close operations, declarations | intel changed, an engagement closed, a due tick |
@@ -243,7 +243,9 @@ dig, one carrier pool for its own and its outposts' dig, the ring, the
 controller's drink and the ore, a reserver per outpost, workers for its sites
 and repairs, and upgraders on the buffer's seats. Casts are slots less the
 bodies that stand; a body keeps its slot until the slot goes or the body
-dies, so an arriving body never re-matches the others. A hauler is 2:1 or
+dies, so an arriving body never re-matches the others. While the pool's
+CARRY falls short, a hauler under half the cast shape (cast on an empty bank)
+holds a slot of its own. A hauler is 2:1 or
 1:1 CARRY:MOVE, whichever delivers more over a life per energy on its route
 (`bodies::carry_per_move`): any ratio between moves no faster than 1:1 off
 road. The home's carriers fetch only at home, so the ring never waits on a
@@ -255,11 +257,10 @@ controller's link only while the upgraders drink more than the links
 send, and while they do only upgraders draw the controller's buffer, or a
 worker's draw is carried back from the stock. A harvester drains the container
 under it into its link while the link has room. Each source's post is a **harvest
-bay** (Hivemind's): its free neighbours past the link hold extensions, as many
-fewer on the lattice (its farthest). They rank after the first level's
-extensions: that level's harvester is too small to keep them. One neighbour
-beside the road in stays open, so a second carrier draws beside the first, not
-behind it. Its harvester refills them before the
+bay** (Hivemind's): every neighbour Hivemind may build on but the road in holds
+its link and extensions (a spawn too in the variation that seats one), built
+from RCL3, ahead of the extension bays: RCL2's harvester is too small to keep
+them. Its harvester refills them before the
 link, from a container the carriers leave a full bay's worth in, and a spawn
 draws them first, so the energy they hold is never hauled; a bay with no
 harvester beside it is the carriers'. A remote is served by the
@@ -371,23 +372,51 @@ ring's far end, at most the time a colony casts its answer twice. A quiet
 colony keeps Hivemind's 10k against decay, and a third of the price only at
 RCL8, where the controller takes no surplus: below it a third was mended from
 the stock ahead of the controller.
-Each spawn, tower, storage, terminal and source container has its own
-rampart; from RCL4 (owner, 2026-11-14, as Hivemind), or below it while a
-rival's room is near and its quad out-heals our towers (`ColonyPlan.ring`),
-Layout also
-builds a **ring** that seals from the exits every tile in ranged reach of the
-base (each structure but roads, containers, the extractor and the harvest
-bays), each link and the controller's neighbours, as Hivemind's planner does:
-a raid outside drains no extension and razes no link. It is a minimum vertex
-cut (`layout/cut.rs`, Hivemind's idea), drawn with the plan, a one-off of its
-key kept in the standing plan, never a store of its own. The cut runs
-through a planned structure only where it stands beside the tiles beside an
-exit, and a cut tile's rampart stands from the ring's first site, never
-waiting on a later structure under it.
-❓ No scenario yet seats a rival whose quad out-heals our towers, so the
-ring itself is unproven, and towers placed to cover it (Hivemind's) wait for
-that, since moving them shifts every live plan. A ring whose rival goes stays
-standing and repaired, never replaced.
+Each spawn, tower, storage and terminal has its own rampart from RCL4, sited
+ahead of the plan's roads: the ring's sites queue behind some 150 roads, and a
+kept room's soak stood none 6000 ticks past RCL4 without them.
+From RCL4 (owner, 2026-11-14, as Hivemind), or below it while a rival's
+room is near and its quad out-heals our towers (`ColonyPlan.ring`), Layout
+builds the plan's **ring**: Hivemind's ramparts, the min cut of the
+rectangles 4 tiles round every spawn, core structure, lab, power spawn, nuker,
+observer and extension bay, 1 round the controller and 0 round its link and
+road; a harvest bay without a spawn is left outside,
+with the on-ramps on the roads behind it and its quad-breaker and decorative
+walls. It seals from the exits every tile in ranged reach of the base, so a
+raid outside drains no extension and razes no link: where Hivemind drops a cut
+tile no walk from the core reaches (a pocket behind a wall, still in ranged
+reach), ours keeps it, unroaded. Hivemind cuts the terrain alone: a road it
+tunnels through a wall is not walled. A cut tile's rampart stands from the
+ring's first site, never waiting on a later structure under it.
+❓ No scenario yet seats a rival whose quad out-heals our towers,
+so the ring itself is unproven. A ring whose rival goes stays standing and
+repaired, never replaced.
+
+**The plan is Hivemind's room planner** (`layout/{build,place,score,cut,path}.rs`,
+MIT, © David Franke), ported step for step with the pathfinder it ran on in
+xxscreeps (its A* and jump point search over a Dial heap, no ops limit):
+every room centre and harvest-bay spawn it tries, scored as it scores them,
+the first best taken, so the same room gives Hivemind's plan tile for tile
+(owner, 2026-11-15: partial ports kept missing its order). It reads the
+ground alone, never our structures: a claim's first spawn stands on the
+plan's first, as a soak's fresh colony does. The search runs four variations
+a tick in the standing plan, as Hivemind spreads its own (some 5 ms each in
+WASM, forty a room), so a reset leaves a room without a plan for about ten
+ticks. Each structure's level is the RCL Hivemind's room manager first builds
+it at (towers, spawns, the harvest bays from RCL3, then the extension bays in
+order; plain roads at RCL4 behind the storage, swamp ones to the sources and
+controller from RCL2), and items go in its manager's order. Departures:
+where a source has no tile 6 from an exit Hivemind throws and plans no bay
+for it nor any mineral, ours takes one 3 from the exit; a harvest bay's spawn is built after the extension bays', since our pioneers
+dig from any tile beside a source; the scorer weighs each source's and the
+controller's walk to that first-built spawn at 0.02, not to Hivemind's
+nearest spawn at 0.003 and 0.002 (owner, 2026-11-16: until RCL7 that one
+spawn's haul is the economy; at Hivemind's weights W8N3's base stood 20
+tiles off both and its soak lost 95k); the ring's pockets above; a crafted
+room with no exit reads as far from one, where Hivemind plans nothing; the
+nuker is built last, as it pays only loaded and fired; and a source's link
+that would part the walkable tiles round its post, as on a one-wide corridor,
+is moved beside the post or left out, as `Sites` does on any post.
 
 Port with these cuts:
 - No fight tasks (`Guard`, `Defend`, `Assault`, `Flee`), no Safety band. v1's

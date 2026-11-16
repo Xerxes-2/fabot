@@ -153,7 +153,7 @@ pub fn book(world: &World, derived: &Derived, plans: &mut [ColonyPlan], busy: &B
 fn fits(world: &World, outpost: &Outpost, intel: &Intel, terrain: &LocalRoomTerrain) -> bool {
     let mut room = intel::blind(outpost, intel, world, &undeclared());
     room.terrain = Some(terrain);
-    (ground::of_room(&room).and_then(|g| plan::of_ground(&world.rules, &g, &[])))
+    (ground::of_room(&room).and_then(|g| plan::first_of(&world.rules, &g)))
         .is_some_and(|p| p.unfit.is_empty())
 }
 

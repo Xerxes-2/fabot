@@ -1013,10 +1013,15 @@ fn home_walk(atlas: &Atlas, derived: &Derived, slot: &Slot) -> i32 {
         .unwrap_or(0)
 }
 
-/// Home dig is worth a recast: the bank that cast this body has grown.
+/// Home dig is worth a recast: the bank that cast this body has grown; and a
+/// home carrier under half its slot's shape, one cast on an empty bank.
 fn outgrown(derived: &Derived, body: &Body, slot: &Slot) -> bool {
+    let home = slot.room == derived.colonies[slot.colony].room;
     let Job::Dig(id) = &slot.job else {
-        return false;
+        return matches!(slot.job, Job::Fill)
+            && home
+            && body.pattern.is_hauler()
+            && 2 * body.carry < part_count_in(&slot.body, Part::Carry);
     };
     let rate = (derived.grounds.iter())
         .filter(|g| g.room == slot.room)
@@ -1025,7 +1030,7 @@ fn outgrown(derived: &Derived, body: &Body, slot: &Slot) -> bool {
         .map_or(0, |s| s.rate);
     let dug = |work: i32| (work * engine::HARVEST_PER_WORK).min(rate);
     body.pattern.is_harvester()
-        && slot.room == derived.colonies[slot.colony].room
+        && home
         && dug(body.work) < dug(part_count_in(&slot.body, Part::Work))
 }
 

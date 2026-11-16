@@ -51,16 +51,15 @@ const cold = Number(flags["--cold"] ?? 10);
 const tag = flags["--tag"] ?? "ab";
 const bots = { A: resolve(flags["--a"]), B: resolve(flags["--b"]) };
 
-// A node's plan is built once here, not by every run at once.
-const node = soakFlags.includes("--node");
-if (node && spawnSync("cargo", ["build", "--release", "--quiet", "--features", "tools", "--bin", "plan", "--manifest-path", join(REPO, "Cargo.toml")], { stdio: "inherit" }).status !== 0)
+// The plan tool is built once here, not by every run at once.
+if (spawnSync("cargo", ["build", "--release", "--quiet", "--features", "tools", "--bin", "plan", "--manifest-path", join(REPO, "Cargo.toml")], { stdio: "inherit" }).status !== 0)
   fail("the plan tool did not build");
 
 const soak = (side, round) =>
   new Promise((done, failed) => {
     const run = `${tag}-${side}-r${round}`;
     const child = spawn("node", [join(HERE, "soak.mjs"), "--bot", bots[side], "--run", run, ...soakFlags], {
-      env: { ...process.env, ...(node ? { FABOT_PLAN_BUILT: "1" } : {}) },
+      env: { ...process.env, FABOT_PLAN_BUILT: "1" },
       stdio: ["ignore", "ignore", "ignore"],
     });
     child.on("exit", (code) => (code === 0 ? done(ran(side, round)) : failed(new Error(`${run} exited ${code}`))));

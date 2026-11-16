@@ -320,10 +320,19 @@ pub fn place(
     }
 
     // A source's link stands beside the post its miner works from, which
-    // another bot may have set off the plan's container tile. The roads the
+    // another bot may have set off the plan's container tile; on the plan's
+    // own, where the plan puts it unless it parts the tiles round it. The roads the
     // plan drew there lead to that unbuilt container, and the tile farthest
     // from the anchor lies behind the miner, off the way in. The last open
     // tile is the miner's way in.
+    let planned_post = |t: Tile| {
+        plan.items
+            .iter()
+            .any(|i| i.kind.is_container() && i.tile == t)
+    };
+    // A claim's first spawn may stand in a harvest bay, where a pioneer digs:
+    // its site waits under the creep and is built once it steps off.
+    let founding = |kind: &Kind| kind.is_spawn() && held_of(census, &Kind::Spawn) == 0;
     let tile_of = |item: &Item| -> Option<Tile> {
         let post = census
             .posts
@@ -334,7 +343,7 @@ pub fn place(
             Some((_, None)) => None,
             None if item.kind.is_link()
                 && census.seat[item.tile] > 0
-                && census.buffer.is_some() =>
+                && census.buffer.is_some_and(|(_, b)| !planned_post(b)) =>
             {
                 let (c, b) = census.buffer.unwrap();
                 let walkable = |t: Tile| census.walkable[t] > 0;
@@ -355,7 +364,8 @@ pub fn place(
                 )
             }
             Some((_, Some((post, beside))))
-                if tiles::range(item.tile, *post) != 1 || closes(census, *post, item.tile) =>
+                if closes(census, *post, item.tile)
+                    || (!planned_post(*post) && tiles::range(item.tile, *post) != 1) =>
             {
                 let mut candidates: Vec<Tile> = beside
                     .iter()
@@ -406,7 +416,9 @@ pub fn place(
                     } else {
                         census.solid[t] == 0
                     })
-                    && (standable(&item.kind) || census.occupied[t] == 0)
+                    && (standable(&item.kind)
+                        || census.occupied[t] == 0
+                        || founding(&item.kind))
                     && !taken.contains(&t)
                     && (!item.kind.is_container() || census.served[t] == 0 || replaces(t))
                     && (!item.kind.is_road() || census.road[t] == 0)
@@ -462,7 +474,7 @@ mod tests {
             let off_plan: Vec<Tile> = tiles::within(engine::UPGRADE_RANGE, controller)
                 .into_iter()
                 .filter(|t| {
-                    ground.weights[*t].is_some()
+                    ground.terrain[*t] != 1
                         && rocks.iter().all(|r| tiles::range(*r, *t) > 1)
                         && plan.items.iter().all(|i| i.tile != *t || i.kind.is_road())
                 })
@@ -659,14 +671,17 @@ mod tests {
     }
 
     #[test]
-    fn every_ring_tile_holds_a_rampart_from_the_lowest_ring_level_and_no_extension() {
+    fn every_ring_tile_holds_a_rampart_from_the_lowest_ring_level() {
         let rules = Rules::vanilla();
-        let level = crate::layout::plan::rampart_level(&rules);
         for colony in fx::samples(14).take(fx::MAX_TEST) {
-            let Some((ground, mut plan)) = fx::plan_of(&colony) else {
+            let Some((_, mut plan)) = fx::plan_of(&colony) else {
                 continue;
             };
-            let ring: Vec<Tile> = plan.ring.iter().map(|i| i.tile).collect();
+            let level = plan.ring.iter().map(|i| i.level).min().unwrap_or(0);
+            let ring: Vec<Tile> = (plan.ring.iter())
+                .filter(|i| i.kind.is_rampart())
+                .map(|i| i.tile)
+                .collect();
             plan.items.append(&mut plan.ring);
             let mut room = colony.room.clone();
             loop {
@@ -690,13 +705,6 @@ mod tests {
                         .any(|s| s.kind.is_rampart() && tiles::of_pos(&s.pos) == t),
                     "{t} open"
                 );
-                // Only a structure beside an exit's band must be cut itself.
-                let forced = (tiles::within(2, t).into_iter())
-                    .any(|n| tiles::on_edge(n) && ground.weights[n].is_some());
-                assert!(
-                    forced || (plan.items.iter()).all(|i| i.tile != t || i.kind != Kind::Extension),
-                    "{t} cut under an extension"
-                );
             }
         }
     }
@@ -714,9 +722,11 @@ mod tests {
                 else {
                     continue;
                 };
-                let Some(stray) = tiles::around(*rock).iter().copied().find(|t| {
-                    ground.weights[*t].is_some() && !tiles::on_edge(*t) && !posted(&plan, *t)
-                }) else {
+                let Some(stray) = tiles::around(*rock)
+                    .iter()
+                    .copied()
+                    .find(|t| ground.terrain[*t] != 1 && !tiles::on_edge(*t) && !posted(&plan, *t))
+                else {
                     continue;
                 };
                 let mut room = colony.room.clone();

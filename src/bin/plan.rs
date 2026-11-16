@@ -1,7 +1,7 @@
 //! A soak node's structures (`ARCHITECTURE.md` §10.2): the Layout's plan for
 //! a room, built at a level the way the bot's sites would build it with every
 //! site finished at once. Reads the room on stdin as JSON
-//! `{ room, terrain, sources: [[x, y]], minerals: [[x, y]], controller: [x, y], level }`
+//! `{ room, terrain, sources: [[x, y]], minerals: [[x, y]], controller: [x, y], level, ring? }`
 //! (terrain: 2500 digits, the raw buffer's), writes `[{ kind, x, y }]` in
 //! build order, the first spawn first.
 use std::io::Read;
@@ -85,14 +85,11 @@ fn main() {
 
     let rules = Rules::vanilla();
     let ground = ground::of_room(&room).unwrap();
-    let first_spawn = plan::of_ground(&rules, &ground, &[])
-        .unwrap()
-        .items
-        .into_iter()
+    let plan = plan::of_ground(&rules, &ground).unwrap();
+    let first_spawn = (plan.items.iter())
         .find(|i| i.kind == Kind::Spawn)
-        .unwrap();
-    // The plan the bot draws once its first spawn stands.
-    let plan = plan::of_ground(&rules, &ground, &[first_spawn.tile]).unwrap();
+        .unwrap()
+        .clone();
 
     let mut built: Vec<Structure> = Vec::new();
     let build = |built: &mut Vec<Structure>, kind: Kind, tile: Tile| {
@@ -130,6 +127,11 @@ fn main() {
         }
     }
 
+    // `"ring": true` stands the ring too, as a kept room's from its level.
+    let ring = input["ring"].as_bool().unwrap_or(false);
+    for i in plan.ring.iter().filter(|i| ring && i.level <= level) {
+        build(&mut built, i.kind.clone(), i.tile);
+    }
     let out: Vec<Value> = built
         .iter()
         .map(|s| json!({ "kind": s.kind.name(), "x": s.pos.x, "y": s.pos.y }))

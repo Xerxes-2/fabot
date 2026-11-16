@@ -544,8 +544,16 @@ function sample(t, time, room, user = ours) {
   const roads = objects.filter((o) => o.structureType === "road" && o["#lookType"] !== "constructionSite");
   const solid = objects.filter((o) => o["#lookType"] === "structure" && o["#user"] === user && !["road", "container", "rampart", "controller"].includes(o.structureType));
   row.buried = roads.filter((r) => solid.some((o) => o.pos.x === r.pos.x && o.pos.y === r.pos.y)).length;
-  // A bay's extension is its harvester's, filled from the container beside it.
-  row.unroaded = solid.filter((o) => o.structureType === "extension" && !sourceContainers.some((c) => near(c.pos, o.pos, 1)) && !roads.some((r) => near(r.pos, o.pos, 1) && !solid.some((s) => s.pos.x === r.pos.x && s.pos.y === r.pos.y))).length;
+  // A harvest bay's extension is its harvester's, filled from the container
+  // beside it; an extension bay's (Hivemind's) is filled from the open tile
+  // five or more of them ring.
+  const extensions = solid.filter((o) => o.structureType === "extension");
+  const bayCentre = (o) =>
+    [-1, 0, 1].some((dx) => [-1, 0, 1].some((dy) => {
+      const [x, y] = [o.pos.x + dx, o.pos.y + dy];
+      return (dx || dy) && !(world.map.getRoomTerrain(room.name).get(x, y) & 1) && !solid.some((s) => s.pos.x === x && s.pos.y === y) && extensions.filter((e) => Math.max(Math.abs(e.pos.x - x), Math.abs(e.pos.y - y)) === 1).length >= 5;
+    }));
+  row.unroaded = extensions.filter((o) => !sourceContainers.some((c) => near(c.pos, o.pos, 1)) && !bayCentre(o) && !roads.some((r) => near(r.pos, o.pos, 1) && !solid.some((s) => s.pos.x === r.pos.x && s.pos.y === r.pos.y))).length;
   row.postedLinks = objects.filter((o) => o.structureType === "link" && o["#lookType"] !== "constructionSite" && sourceContainers.some((c) => near(c.pos, o.pos, 1))).length;
   row.mineralAmount = objects.find((o) => o["#lookType"] === "mineral")?.mineralAmount ?? null;
   return row;

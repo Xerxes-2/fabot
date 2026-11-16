@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::engine;
 use super::fight::shape::{Cast, Engagement};
-use super::layout::Standing;
+use super::layout::{RING_LEVEL, Standing};
 use super::tick::{ColonyPlan, Context, Declarations, Derived, Outpost, Stage};
 use super::tiles;
 use super::vocabulary::{Part, ResourceType, multiple};
@@ -44,9 +44,6 @@ const NEAR: i32 = 3;
 /// The longest a rampart holds, as v1's floor priced it: the ticks a colony
 /// takes to cast its answer twice, the first lost.
 const HOLD: i32 = 2 * engine::MAX_BODY_PARTS as i32 * engine::SPAWN_TICKS_PER_PART;
-
-/// Every colony walls its core from here (owner, 2026-11-14), as Hivemind does.
-const RING_LEVEL: i32 = 4;
 
 /// Hivemind's quiet rampart hits.
 const FLOOR: i32 = 10_000;

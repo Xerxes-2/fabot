@@ -28,8 +28,10 @@ pub fn decide_over(rules: &Rules, colonies: &[derive::Colony], budget: i32) -> V
             }
         }
 
+        // The engine refuses a destroy while a hostile creep is in the room.
         intents.extend(
             (colony.buried.iter().chain(&colony.astray))
+                .filter(|_| colony.hostiles.is_empty())
                 .map(|id| Intent::Room(colony.room, RoomAct::Destroy(id.clone()))),
         );
         intents.extend(towers::fire(

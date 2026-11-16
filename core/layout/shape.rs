@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 
-use crate::grid::Weight;
 use crate::tick::MUSTER_RANGE;
 /// Ahead of `State` so `State` can hold the standing plan.
 use crate::tiles::{self, Tile};
@@ -38,10 +37,12 @@ impl Plan {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Standing {
     pub key: String,
     pub plan: Option<Plan>,
+    /// The search a plan is still being drawn by.
+    pub drawing: Option<super::plan::Drawing>,
 }
 
 /// The towers, planned beside the anchor, still fire at two thirds this far off.
@@ -55,7 +56,7 @@ pub fn muster(
     room: RoomName,
     anchor: Tile,
     planned: &[&Item],
-    weights: &[Weight; tiles::COUNT],
+    open: impl Fn(Tile) -> bool,
 ) -> Option<Pos> {
     let mut taken = [false; tiles::COUNT];
     let mut barred = [false; tiles::COUNT];
@@ -76,12 +77,10 @@ pub fn muster(
     };
     let square = |t: Tile| tiles::within(MUSTER_RANGE, t).into_iter();
     (tiles::within(MUSTER_REACH, anchor).into_iter())
-        .filter(|t| inside(*t) && weights[*t].is_some() && !taken[*t])
+        .filter(|t| inside(*t) && open(*t) && !taken[*t])
         .filter(|t| square(*t).all(|n| !barred[n]))
         .min_by_key(|t| {
-            let crowd = square(*t)
-                .filter(|n| taken[*n] || weights[*n].is_none())
-                .count();
+            let crowd = square(*t).filter(|n| taken[*n] || !open(*n)).count();
             (crowd, tiles::range(*t, anchor), *t)
         })
         .map(|t| tiles::to_pos(room, t))

@@ -161,7 +161,7 @@ for (const s of scenarios) {
 }
 
 // Built once here: parallel builds of one project collide.
-if ([...runs.values()].some((r) => r.start.node) && spawnSync("cargo", ["build", "--release", "--quiet", "--features", "tools", "--bin", "plan", "--manifest-path", join(REPO, "Cargo.toml")], { stdio: "inherit" }).status !== 0)
+if (runs.size && spawnSync("cargo", ["build", "--release", "--quiet", "--features", "tools", "--bin", "plan", "--manifest-path", join(REPO, "Cargo.toml")], { stdio: "inherit" }).status !== 0)
   fail("the plan tool did not build");
 // Built in `.scratch/`, on disk (`/tmp` is RAM), with a `jj` that fails: the
 // real one would name the build after the workspace above it, not "unknown".

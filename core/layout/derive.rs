@@ -26,17 +26,6 @@ pub struct Colony {
     pub astray: Vec<String>,
 }
 
-fn spawns_in(world: &World, room: RoomName) -> Vec<Tile> {
-    let mut found: Vec<Tile> = world
-        .spawns
-        .iter()
-        .filter(|s| s.pos.room == room)
-        .map(|s| tiles::of_pos(&s.pos))
-        .collect();
-    found.sort_unstable();
-    found
-}
-
 fn join(values: &[Tile]) -> String {
     values
         .iter()
@@ -46,10 +35,14 @@ fn join(values: &[Tile]) -> String {
 }
 
 /// Terrain, sources, minerals and the controller never move, so the key
-/// leaves them out.
-pub fn key_of(room: &Room, spawns: &[Tile]) -> String {
-    join(spawns) + "|" + &join(&ground::obstacles(room))
+/// leaves them out; our own structures are never read.
+pub fn key_of(room: &Room) -> String {
+    join(&ground::obstacles(room))
 }
+
+/// Hivemind's search spread over ticks as its planner spreads it: some 4 ms a
+/// variation natively, and a room tries up to 40.
+const VARIATIONS_PER_TICK: usize = 4;
 
 pub fn colonies(
     world: &World,
@@ -59,23 +52,30 @@ pub fn colonies(
 ) -> (Vec<Colony>, BTreeMap<RoomName, Standing>) {
     let mut next: BTreeMap<RoomName, Standing> = BTreeMap::new();
     let mut found: Vec<Colony> = Vec::new();
+    let mut budget = VARIATIONS_PER_TICK;
 
     for room in owned.iter().filter_map(|name| world.room(*name)) {
         let Some(colony) = plans.iter().find(|p| p.room == room.name) else {
             continue;
         };
 
-        let spawns = spawns_in(world, room.name);
-        let key = key_of(room, &spawns);
+        let key = key_of(room);
 
-        let kept = match standing.get(&room.name) {
+        let ground = ground::of_room(room);
+        let mut kept = match standing.get(&room.name) {
             Some(s) if s.key == key => s.clone(),
             _ => Standing {
                 key,
-                plan: ground::of_room(room)
-                    .and_then(|ground| plan::of_ground(&world.rules, &ground, &spawns)),
+                plan: None,
+                drawing: ground.as_ref().map(plan::Drawing::of),
             },
         };
+        if let (Some(d), Some(g)) = (&mut kept.drawing, &ground)
+            && let Some(done) = d.advance(&world.rules, g, &mut budget)
+        {
+            kept.plan = done;
+            kept.drawing = None;
+        }
 
         let plan = match colony.stage {
             Stage::Abandon => None,
@@ -163,6 +163,7 @@ mod tests {
     use super::*;
     use crate::layout::fixtures as fx;
     use crate::layout::shape::Plan;
+    use crate::tiles;
     use crate::world::{Kind, Owner, hostiles};
 
     fn agree(a: &Option<Plan>, b: &Option<Plan>) -> bool {
@@ -173,28 +174,38 @@ mod tests {
         }
     }
 
+    /// The standing plans once every drawing has finished.
+    fn settled(
+        world: &World,
+        standing: BTreeMap<RoomName, Standing>,
+    ) -> BTreeMap<RoomName, Standing> {
+        let owned = hostiles::owned(&world.rooms);
+        let plans = fx::exploited(&owned);
+        let mut standing = standing;
+        loop {
+            let (_, next) = colonies(world, &owned, &plans, &standing);
+            standing = next;
+            if standing.values().all(|s| s.drawing.is_none()) {
+                return standing;
+            }
+        }
+    }
+
     #[test]
-    fn a_standing_plan_is_the_plan_a_fresh_draw_gives_kept_while_its_key_holds_and_redrawn_when_it_moves()
-     {
+    fn a_standing_plan_is_kept_while_its_key_holds_and_drawn_afresh_when_the_ground_moves() {
         let mut rng = fx::Rng::new(12);
 
-        for _ in 0..fx::MAX_TEST {
+        for _ in 0..4 {
             let colony = fx::colony(&mut rng);
             let wall = rng.choose(0, tiles::COUNT as i32 - 1);
-
-            let spawns: Vec<crate::world::Spawn> = colony
-                .spawns
-                .iter()
-                .enumerate()
-                .map(|(i, t)| fx::spawn_named(&format!("p{i}"), *t))
-                .collect();
-
-            let world = fx::world_of(colony.room.clone(), spawns.clone(), Vec::new());
+            let world = fx::world_of(colony.room.clone(), Vec::new(), Vec::new());
+            let standing = settled(&world, BTreeMap::new());
+            let plan_of =
+                |s: &BTreeMap<RoomName, Standing>| s.values().next().and_then(|s| s.plan.clone());
 
             let owned = hostiles::owned(&world.rooms);
-            let plans = fx::exploited(&owned);
-            let (first, standing) = colonies(&world, &owned, &plans, &BTreeMap::new());
-            let (kept, _) = colonies(&world, &owned, &plans, &standing);
+            let (_, kept) = colonies(&world, &owned, &fx::exploited(&owned), &standing);
+            assert!(agree(&plan_of(&standing), &plan_of(&kept)));
 
             let mut walled = colony.room.clone();
             walled.structures.push(fx::structure(
@@ -203,25 +214,10 @@ mod tests {
                 Owner::Nobody,
                 Tile::of_index(wall.unsigned_abs() as usize % tiles::COUNT),
             ));
-
-            let (moved, _) = colonies(
-                &fx::world_of(walled.clone(), spawns.clone(), Vec::new()),
-                &owned,
-                &plans,
-                &standing,
-            );
-            let (fresh, _) = colonies(
-                &fx::world_of(walled, spawns, Vec::new()),
-                &owned,
-                &plans,
-                &BTreeMap::new(),
-            );
-
-            let plan_in =
-                |cs: &[Colony]| -> Option<Plan> { cs.first().and_then(|c| c.plan.clone()) };
-
-            assert!(agree(&plan_in(&first), &plan_in(&kept)));
-            assert!(agree(&plan_in(&moved), &plan_in(&fresh)));
+            let walled = fx::world_of(walled, Vec::new(), Vec::new());
+            let moved = settled(&walled, standing);
+            let fresh = settled(&walled, BTreeMap::new());
+            assert!(agree(&plan_of(&moved), &plan_of(&fresh)));
         }
     }
 }

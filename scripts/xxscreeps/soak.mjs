@@ -1,5 +1,6 @@
-// The economy's soak (ARCHITECTURE.md §10.2): our built bot from one spawn and
-// no creeps, as a respawn, for thousands of ticks of the vanilla engine.
+// The economy's soak (ARCHITECTURE.md §10.2): our built bot from one spawn, on
+// the tile Layout's plan puts its first, and no creeps, as a respawn, for
+// thousands of ticks of the vanilla engine.
 //
 // Usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>]
 //        npm run soak -- --list      the rooms a soak can stand in, as JSON
@@ -382,18 +383,21 @@ const out = join(REPO, "soak-runs", run);
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 let built = null;
+// A fresh colony's first spawn stands where Layout's plan puts it, as a claim's does.
+const fresh = !seated && !from;
+const ground = fresh && node26([XXSCREEPS, script("node.mjs"), "ground", colony.room], world, true).trim().split("\n").at(-1);
+// FABOT_PLAN_BUILT: the caller built it once (soak-many's parallel runs).
+if (fresh && !process.env.FABOT_PLAN_BUILT) {
+  const res = spawnSync("cargo", ["build", "--release", "--quiet", "--features", "tools", "--bin", "plan", "--manifest-path", join(REPO, "Cargo.toml")], { stdio: ["ignore", "ignore", "inherit"] });
+  if (res.status !== 0) fail("the plan tool did not build");
+}
+const planned = (level) => {
+  const res = spawnSync(join(REPO, "target/release/plan"), { input: JSON.stringify({ ...JSON.parse(ground), level }), encoding: "utf8" });
+  if (res.status !== 0) fail(`the plan tool failed: ${res.stderr}`);
+  return JSON.parse(res.stdout);
+};
+if (fresh && !(node && node.level > 1)) [colony.x, colony.y] = [planned(1)[0].x, planned(1)[0].y];
 if (node && node.level > 1) {
-  // FABOT_PLAN_BUILT: the caller built it once (soak-many's parallel runs).
-  if (!process.env.FABOT_PLAN_BUILT) {
-    const res = spawnSync("cargo", ["build", "--release", "--quiet", "--features", "tools", "--bin", "plan", "--manifest-path", join(REPO, "Cargo.toml")], { stdio: ["ignore", "ignore", "inherit"] });
-    if (res.status !== 0) fail("the plan tool did not build");
-  }
-  const ground = node26([XXSCREEPS, script("node.mjs"), "ground", colony.room], world, true).trim().split("\n").at(-1);
-  const planned = (level) => {
-    const res = spawnSync(join(REPO, "target/release/plan"), { input: JSON.stringify({ ...JSON.parse(ground), level }), encoding: "utf8" });
-    if (res.status !== 0) fail(`the plan tool failed: ${res.stderr}`);
-    return JSON.parse(res.stdout);
-  };
   built = planned(node.built ?? node.level).filter((s) => !node.without.includes(s.kind));
   if (node.buried) {
     const held = new Set(built.map((s) => s.y * 50 + s.x));

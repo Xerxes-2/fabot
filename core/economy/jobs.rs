@@ -645,11 +645,12 @@ impl<'a> Jobs<'a> {
                 .any(|g| (g.sources.iter()).any(|s| s.post == Some(*p) && s.seats.unwrap_or(0) > 1))
         };
         let first = |s: &super::derived::SiteFact| match s.kind {
-            Kind::Spawn => 0,
+            // A rampart's site costs 1: built in a tick, it never waits on a level.
+            Kind::Spawn | Kind::Rampart => 0,
             Kind::Container if buffer(&s.pos) => 0,
-            Kind::Extension | Kind::Link => 1,
+            Kind::Tower | Kind::Extension | Kind::Link => 1,
             Kind::Container if crowded(&s.pos) => 1,
-            Kind::Container | Kind::Tower => 2,
+            Kind::Container => 2,
             _ if s.kind.pays_back() => 3,
             _ => 4,
         };

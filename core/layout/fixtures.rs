@@ -1,11 +1,10 @@
 //! The rooms Layout's suites draw their cases from: walled blobs and swamp over
 //! open ground, with a few walls of another owner, one or two sources, a
-//! mineral, a controller and none, one or two spawns.
+//! mineral, a controller and none, one or two spawns of ours.
 use std::collections::BTreeSet;
 
 use crate::layout::ground::{self, Ground};
 use crate::layout::plan;
-use crate::layout::shape::Item;
 use crate::layout::shape::Plan;
 use crate::tick::{ColonyPlan, Stage};
 use crate::tiles::{self, Tile};
@@ -79,11 +78,10 @@ pub fn structure(id: &str, kind: Kind, owner: Owner, tile: Tile) -> Structure {
     }
 }
 
-/// A generated colony room and the tiles of the spawns standing in it.
+/// A generated colony room; the spawns of ours standing in it are not read.
 #[derive(Clone)]
 pub struct Colony {
     pub room: Room<'static>,
-    pub spawns: Vec<Tile>,
 }
 
 fn slice(picks: &[Tile], a: usize, b: usize) -> Vec<Tile> {
@@ -167,6 +165,10 @@ fn colony_of(rng: &mut Rng, blobs: i32) -> Option<Colony> {
             .map(|(i, t)| structure(&format!("w{i}"), Kind::Wall, Owner::Nobody, *t)),
     );
 
+    // The engine stands rocks and the controller on wall.
+    for t in source_tiles.iter().chain([&controller, &mineral]) {
+        terrain[*t] = terrain::WALL;
+    }
     let room = Room {
         name: ROOM,
         terrain: terrain::leak(terrain),
@@ -210,10 +212,7 @@ fn colony_of(rng: &mut Rng, blobs: i32) -> Option<Colony> {
         others: Vec::new(),
     };
 
-    Some(Colony {
-        room,
-        spawns: spawn_tiles,
-    })
+    Some(Colony { room })
 }
 
 /// Open rooms and cramped ones, where no square of clearance 5 is left.
@@ -236,21 +235,16 @@ pub fn samples(seed: u64) -> impl Iterator<Item = Colony> {
     std::iter::from_fn(move || Some(colony(&mut rng)))
 }
 
+/// The first variation's plan: every invariant holds of each variation, and
+/// the whole search is forty of them.
 pub fn plan_of(colony: &Colony) -> Option<(Ground, Plan)> {
     let ground = ground::of_room(&colony.room)?;
-    let plan = plan::of_ground(&Rules::vanilla(), &ground, &colony.spawns)?;
+    let plan = plan::first_of(&Rules::vanilla(), &ground)?;
     Some((ground, plan))
 }
 
 pub fn walkable(kind: &Kind) -> bool {
     kind.is_road() || kind.is_container() || kind.is_rampart()
-}
-
-pub fn count_of(kind: &Kind, items: &[Item]) -> i32 {
-    items
-        .iter()
-        .filter(|i| i.kind.name() == kind.name())
-        .count() as i32
 }
 
 pub fn distinct<T: PartialEq + Copy>(values: &[T]) -> Vec<T> {
@@ -266,14 +260,12 @@ pub fn distinct<T: PartialEq + Copy>(values: &[T]) -> Vec<T> {
 /// The tiles reached on foot from the anchor, every planned structure no creep
 /// crosses standing.
 pub fn reached(ground: &Ground, plan: &Plan) -> Vec<bool> {
-    let mut blocked: Vec<bool> = (0..tiles::COUNT)
-        .map(|t| ground.weights[t].is_none())
-        .collect();
-
+    let mut blocked: Vec<bool> = (ground.terrain.iter()).map(|t| *t == 1).collect();
+    for t in (ground.sources.iter().chain(&ground.minerals)).chain(&ground.controller) {
+        blocked[*t] = true;
+    }
     for i in &plan.items {
-        if !walkable(&i.kind) {
-            blocked[i.tile] = true;
-        }
+        blocked[i.tile] = !walkable(&i.kind) || (blocked[i.tile] && !i.kind.is_road());
     }
 
     let mut seen = vec![false; tiles::COUNT];
@@ -300,14 +292,6 @@ pub fn shuffled(colony: &Colony, seed: u64) -> Colony {
     rng.shuffle(&mut next.room.sources);
     rng.shuffle(&mut next.room.minerals);
     rng.shuffle(&mut next.room.structures);
-    next
-}
-
-/// The colony with no spawn standing.
-pub fn bare(colony: &Colony) -> Colony {
-    let mut next = colony.clone();
-    next.spawns = Vec::new();
-    next.room.structures.retain(|s| !s.kind.is_spawn());
     next
 }
 
@@ -379,15 +363,6 @@ pub fn exploited(owned: &BTreeSet<RoomName>) -> Vec<ColonyPlan> {
             muster: None,
         })
         .collect()
-}
-
-pub fn spawn_named(id: &str, tile: Tile) -> Spawn {
-    Spawn {
-        id: id.to_string(),
-        name: id.to_string(),
-        pos: at(tile),
-        spawning: None,
-    }
 }
 
 pub fn site(id: &str, kind: Kind, tile: Tile) -> Site {

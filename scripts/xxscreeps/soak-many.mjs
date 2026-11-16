@@ -121,7 +121,7 @@ const scriptsHash = hash(
     .sort()
     .map((f) => readFileSync(f)),
 );
-// A node is built from the plan of this tree's Layout, whatever the bundle.
+// A node, and a fresh colony's first spawn, stand on the plan of this tree's Layout, whatever the bundle.
 const planHash = hash(...[join(REPO, "src/bin/plan.rs"), ...readdirSync(join(REPO, "core/layout")).sort().map((f) => join(REPO, "core/layout", f))].map((f) => readFileSync(f)));
 const wasmOf = (file) => [file.replace(/\.js$/, ".wasm")].filter(existsSync).map((f) => readFileSync(f));
 for (const b of bots) b.code = hash(readFileSync(b.file, "utf8").replace(/^(?:var |globalThis\.)__FABOT_VERSION__ = .*$/m, ""), ...wasmOf(b.file));
@@ -133,7 +133,7 @@ const runs = bots.flatMap((bot) =>
       seed,
       start,
       name: `${tag}-${bot.name}-s${seed.seed}${seed.late ? `l${seed.late}` : ""}-${start.label.replace(/[:@+]/g, "-")}`,
-      key: hash(bot.code, start.room, start.rival ? `${start.rival.name}:${start.rival.room}` : "", start.node ? planHash + start.node : "", start.world ? readFileSync(start.world) : "", String(seed.seed), String(seed.late), String(start.ticks), scriptsHash),
+      key: hash(bot.code, start.room, start.rival ? `${start.rival.name}:${start.rival.room}` : "", planHash + start.node, start.world ? readFileSync(start.world) : "", String(seed.seed), String(seed.late), String(start.ticks), scriptsHash),
     })),
   ),
 );
@@ -162,7 +162,7 @@ function soak(run) {
 }
 
 // Built once here: parallel builds of one project collide.
-if (todo.some((r) => r.start.node) && spawnSync("cargo", ["build", "--release", "--quiet", "--features", "tools", "--bin", "plan", "--manifest-path", join(REPO, "Cargo.toml")], { stdio: "inherit" }).status !== 0)
+if (todo.length && spawnSync("cargo", ["build", "--release", "--quiet", "--features", "tools", "--bin", "plan", "--manifest-path", join(REPO, "Cargo.toml")], { stdio: "inherit" }).status !== 0)
   fail("the plan tool did not build");
 const codes = {};
 const queue = [...todo];
