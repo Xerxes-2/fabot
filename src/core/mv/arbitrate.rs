@@ -44,7 +44,7 @@ fn above(s: i32, h: i32, s0: i32, h0: i32) -> bool {
 pub struct Scratch {
     blocked: [bool; tiles::COUNT],
     steps_onto: [Option<Tile>; tiles::COUNT],
-    holder: [Option<usize>; tiles::COUNT],
+    holder: [Option<u16>; tiles::COUNT],
     changed_at: [i32; tiles::COUNT],
 }
 
@@ -95,7 +95,7 @@ pub fn resolve(
     let mut placed: Vec<&Wish> = Vec::new();
     for wish in movable {
         if !blocked[wish.at] && holder[wish.at].is_none() {
-            holder[wish.at] = Some(placed.len());
+            holder[wish.at] = Some(placed.len() as u16);
             placed.push(wish);
         }
     }
@@ -214,11 +214,11 @@ pub fn resolve(
                     for &(m, tile) in &chain {
                         search.changed_at[tile] = clock;
                         search.tile_of[m] = tile;
-                        search.holder[tile] = Some(m);
+                        search.holder[tile] = Some(m as u16);
                     }
                     changed = true;
                 } else {
-                    search.holder[from] = Some(i);
+                    search.holder[from] = Some(i as u16);
                 }
             }
         }
@@ -244,7 +244,7 @@ struct Search<'a> {
     order: &'a [&'a Wish],
     candidates: &'a [Vec<Tile>],
     tile_of: Vec<Tile>,
-    holder: [Option<usize>; tiles::COUNT],
+    holder: [Option<u16>; tiles::COUNT],
     changed_at: [i32; tiles::COUNT],
     on_path: Vec<bool>,
     label_stamp: Vec<i32>,
@@ -319,7 +319,7 @@ impl<'a> Search<'a> {
         let h = home + i32::from(tile == wish.at) - leaving_home;
         self.path.push((i, tile));
 
-        if let Some(occupant) = self.holder[tile] {
+        if let Some(occupant) = self.holder[tile].map(usize::from) {
             if !self.on_path[occupant]
                 && (self.label_stamp[occupant] != self.stamp
                     || above(s, h, self.label_score[occupant], self.label_home[occupant]))
