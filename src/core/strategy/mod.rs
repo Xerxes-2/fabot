@@ -12,9 +12,10 @@ use super::layout::Standing;
 use super::tick::{ColonyPlan, Context, Declarations, Derived, Outpost, Stage};
 use super::tiles;
 use super::vocabulary::{Part, ResourceType, multiple};
-use super::world::{RoomName, Rules, World, sightings, terrain::Terrain};
+use super::world::{RoomName, Rules, World, sightings};
 use expand::Expansions;
 use intel::Intel;
+use screeps::LocalRoomTerrain;
 
 pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, String> {
     let mut preyed = intel::preyed(context.intel, context.declarations, context.world.time);
@@ -100,14 +101,17 @@ pub fn reserve(rules: &Rules, lifetimes: f64, level: i32, threatened: bool) -> i
     if threatened { full } else { full / 3 }
 }
 
-pub fn plan(
+pub fn plan<'t>(
     world: &World,
     derived: &Derived,
     declarations: &Declarations,
     intel: &Intel,
     (engagements, casts, due): (&[Engagement], &[Cast], &BTreeSet<RoomName>),
     (layout, spare): (&BTreeMap<RoomName, Standing>, &BTreeMap<RoomName, f64>),
-    (terrain, expansion): (&dyn Fn(RoomName) -> Option<Terrain>, &mut Expansions),
+    (terrain, expansion): (
+        &dyn Fn(RoomName) -> Option<&'t LocalRoomTerrain>,
+        &mut Expansions,
+    ),
 ) -> (Vec<ColonyPlan>, Vec<Outpost>, Option<Outpost>) {
     let rival = |name: &str| name != world.me && !declarations.allies.contains(name);
     let rivals: Vec<(RoomName, i32)> = (intel.iter())

@@ -31,7 +31,7 @@ fn main() {
 
     let room = Room {
         name,
-        terrain: terrain::of(
+        terrain: terrain::leak(
             input["terrain"]
                 .as_str()
                 .unwrap()

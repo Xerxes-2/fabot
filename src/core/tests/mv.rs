@@ -236,7 +236,7 @@ fn duel(crowd: &Crowd) -> Vec<Wish> {
         .collect()
 }
 
-fn world_of(errand: &Errand) -> World {
+fn world_of(errand: &Errand) -> World<'static> {
     World {
         time: 1,
         me: String::new(),
@@ -244,7 +244,7 @@ fn world_of(errand: &Errand) -> World {
         bucket: 10_000,
         rooms: vec![Room {
             name: ROOM,
-            terrain: terrain::of(errand.terrain.clone()),
+            terrain: terrain::leak(errand.terrain.clone()),
             controller: None,
             energy_available: 0,
             energy_capacity: 0,

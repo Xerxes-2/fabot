@@ -7,11 +7,11 @@ use std::collections::BTreeSet;
 use std::str::Split;
 
 use js_sys::{Array, Int32Array};
-use screeps::ResourceType;
 use screeps::game::{
     self,
     map::{self, RoomStatus},
 };
+use screeps::{LocalRoomTerrain, ResourceType};
 use wasm_bindgen::prelude::wasm_bindgen;
 use wasm_bindgen::{JsCast, JsValue};
 
@@ -47,7 +47,7 @@ fn absent(v: &JsValue) -> bool {
 /// `ARCHITECTURE.md` §4's `terrain` row.
 #[derive(Default)]
 pub struct Maps {
-    terrain: HashMap<RoomName, Option<terrain::Terrain>>,
+    terrain: HashMap<RoomName, Option<LocalRoomTerrain>>,
     status: HashMap<RoomName, Option<RoomStatus>>,
 }
 
@@ -57,11 +57,11 @@ const READS_A_TICK: usize = 10;
 
 impl Maps {
     pub fn terrains(&self) -> impl Iterator<Item = (RoomName, &[u8; tiles::COUNT])> {
-        (self.terrain.iter()).filter_map(|(room, t)| Some((*room, &**t.as_ref()?)))
+        (self.terrain.iter()).filter_map(|(room, t)| Some((*room, t.as_ref()?.get_bits())))
     }
 
-    pub fn terrain(&self, room: RoomName) -> Option<terrain::Terrain> {
-        self.terrain.get(&room)?.clone()
+    pub fn terrain(&self, room: RoomName) -> Option<&LocalRoomTerrain> {
+        self.terrain.get(&room)?.as_ref()
     }
 
     /// Kept when empty too, so a room the map lacks is asked once.
@@ -298,19 +298,15 @@ impl<'a> Reader<'a> {
         }
     }
 
-    fn room(&mut self) -> Room {
+    fn room(&mut self) -> Room<'static> {
         let name = self.room_name();
-        let terrain = if let Some(Some(terrain)) = self.maps.terrain.get(&name) {
-            Some(terrain.clone())
-        } else {
-            let terrain = terrain_of(name);
-            if terrain.is_some() {
-                self.maps.terrain.insert(name, terrain.clone());
-            }
-            terrain
-        };
+        if !matches!(self.maps.terrain.get(&name), Some(Some(_)))
+            && let Some(terrain) = terrain_of(name)
+        {
+            self.maps.terrain.insert(name, Some(terrain));
+        }
         Room {
-            terrain,
+            terrain: None,
             energy_available: self.n(),
             energy_capacity: self.n(),
             controller: if self.flag() {
@@ -380,7 +376,7 @@ pub fn of_game(
     maps: &mut Maps,
     declarations: &Declarations,
     drain: Option<RoomName>,
-) -> (World, Pass) {
+) -> (World<'static>, Pass) {
     let packed = read(drain.map(|room| room.to_string()));
     let ints = packed.get(0).unchecked_into::<Int32Array>().to_vec();
     let text = packed.get(1).as_string().unwrap_or_default();
@@ -450,11 +446,9 @@ pub fn of_game(
     (world, Pass { ints, strs: text })
 }
 
-/// `Game.map.getRoomTerrain(name).getRawBuffer()`: the map serves rooms the
-/// bot cannot see, and reading it needs no `Room` object.
-fn terrain_of(name: RoomName) -> Option<terrain::Terrain> {
-    let raw = map::get_room_terrain(engine_name(name)?)?.get_raw_buffer();
-    terrain::of(raw.to_vec())
+/// The map serves rooms the bot cannot see, and reading it needs no `Room` object.
+fn terrain_of(name: RoomName) -> Option<LocalRoomTerrain> {
+    map::get_room_terrain(engine_name(name)?).map(LocalRoomTerrain::from)
 }
 
 /// `None` where the map has no `getRoomStatus` (the bench), so no room reads closed.

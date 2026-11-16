@@ -94,7 +94,7 @@ globalThis.Game = {
   time: 100,
   cpu: { limit: 20, bucket: 10000, getUsed: () => (used += 0.25) },
   rooms: { W1N1: room },
-  map: { getRoomTerrain: () => ({ getRawBuffer: () => terrain }) },
+  map: { getRoomTerrain: () => ({ getRawBuffer: (into = new Uint8Array(2500)) => (into.set(terrain), into) }) },
   spawns: { Spawn1: spawn },
   creeps: { a: creep },
   gcl: { level: 1 },

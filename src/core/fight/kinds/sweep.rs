@@ -24,7 +24,7 @@ pub struct Facts {
     pub patrol: Option<RoomName>,
 }
 
-pub fn prey(room: &Room) -> Vec<&Creep> {
+pub fn prey<'a>(room: &'a Room) -> Vec<&'a Creep> {
     room.hostiles()
         .filter(|h| matches!(h.owner, Owner::Enemy(_)))
         .filter(|h| {

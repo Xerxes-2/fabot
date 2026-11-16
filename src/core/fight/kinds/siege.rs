@@ -84,7 +84,7 @@ pub fn taken(s: &Structure, sources: &[Pos]) -> i32 {
 /// The rival's structure razed next: the one its charged towers strike
 /// least, so the set the bank buys is the cheapest (owner: a tower is razed
 /// whenever that is cheap); then the dearest to him, then the nearest `walk`.
-pub fn next_razed(room: &Room, walk: impl Fn(&Structure) -> i32) -> Option<&Structure> {
+pub fn next_razed<'a>(room: &'a Room, walk: impl Fn(&Structure) -> i32) -> Option<&'a Structure> {
     let structures = &room.structures;
     let sources: Vec<Pos> = room.sources.iter().map(|s| s.pos).collect();
     let theirs = || structures.iter().filter(|s| s.owner.is_theirs());
@@ -110,7 +110,7 @@ pub fn next_razed(room: &Room, walk: impl Fn(&Structure) -> i32) -> Option<&Stru
     })
 }
 
-fn declaimed(room: &Room) -> Option<&Controller> {
+fn declaimed<'a>(room: &'a Room) -> Option<&'a Controller> {
     (room.controller.as_ref()).filter(|c| matches!(c.owner, Owner::Enemy(_)))
 }
 
@@ -211,7 +211,7 @@ pub fn replanned(time: i32, held: bool, e: &Engagement) -> Engagement {
     }
 }
 
-pub fn barrier_at(room: &Room) -> BTreeMap<&str, &Structure> {
+pub fn barrier_at<'a>(room: &'a Room) -> BTreeMap<&'a str, &'a Structure> {
     room.structures
         .iter()
         .filter(|s| !s.owner.is_ours() && (s.kind.is_rampart() || s.kind.is_wall()))

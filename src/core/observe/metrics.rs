@@ -367,7 +367,7 @@ pub struct Metrics {
 }
 
 pub struct Seen<'a> {
-    pub world: &'a World,
+    pub world: &'a World<'a>,
     pub assignments: &'a BTreeMap<String, String>,
     pub engagements: &'a [Engagement],
     pub casts: &'a [Cast],

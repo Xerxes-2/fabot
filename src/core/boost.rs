@@ -37,7 +37,7 @@ pub fn booster<'a>(
         .or_else(|| labs_in(world, room).max_by(most))
 }
 
-fn labs_in(world: &World, room: RoomName) -> impl Iterator<Item = &world::Structure> {
+fn labs_in<'a>(world: &'a World, room: RoomName) -> impl Iterator<Item = &'a world::Structure> {
     (world.rooms.iter())
         .filter(move |r| r.name == room)
         .flat_map(|r| r.structures.iter())

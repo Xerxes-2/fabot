@@ -104,7 +104,8 @@ fn run_tick() -> Result<(), String> {
     let drain = (state.engagements.iter())
         .find(|e| e.phase == crate::core::fight::shape::Phase::Draining)
         .map(|e| e.room);
-    let (world, pass) = world::of_game(&mut maps, &declarations, drain);
+    let (mut world, pass) = world::of_game(&mut maps, &declarations, drain);
+    (world.rooms.iter_mut()).for_each(|r| r.terrain = maps.terrain(r.name));
     let refused = declarations.refuse(&world.closed);
     sightings = crate::core::world::sightings::step(&world, sightings);
     let mut unread = Intel::new();

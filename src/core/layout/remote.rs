@@ -241,7 +241,7 @@ pub fn sites(
                                     && !tiles::on_edge(t)
                                     && !open_tiles.contains(t)
                                     && !terrain::is_wall(
-                                        room.terrain.as_deref(),
+                                        room.terrain,
                                         tiles::x_of(t),
                                         tiles::y_of(t),
                                     )

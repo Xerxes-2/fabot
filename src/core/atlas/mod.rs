@@ -371,7 +371,7 @@ impl Atlas {
         room.sources.iter().any(|s| s.pos.within(2, pos))
     }
 
-    pub fn controller_link(room: &Room) -> Option<&super::world::Structure> {
+    pub fn controller_link<'a>(room: &'a Room) -> Option<&'a super::world::Structure> {
         let c = room.controller.as_ref()?;
         let mut links: Vec<&super::world::Structure> = room
             .structures
@@ -387,7 +387,7 @@ impl Atlas {
         links.into_iter().next()
     }
 
-    pub fn buffer(room: &Room) -> Option<&super::world::Structure> {
+    pub fn buffer<'a>(room: &'a Room) -> Option<&'a super::world::Structure> {
         Atlas::controller_link(room).or_else(|| {
             room.structures
                 .iter()
@@ -557,8 +557,8 @@ impl Atlas {
                 strikers.push(striker(tiles::of_pos(&lair.pos), f));
             }
         }
-        match &room.terrain {
-            Some(terrain) => Atlas::strikes(&terrain[..], &strikers),
+        match room.terrain {
+            Some(terrain) => Atlas::strikes(terrain.get_bits(), &strikers),
             None => Vec::new(),
         }
     }
@@ -625,9 +625,9 @@ impl Atlas {
         let mut rooms: HashMap<Coords, RoomGrid> = HashMap::default();
 
         for (c, room, terrain) in
-            (world.rooms.iter()).filter_map(|r| Some((r.name.coords(), r, r.terrain.as_deref()?)))
+            (world.rooms.iter()).filter_map(|r| Some((r.name.coords(), r, r.terrain?)))
         {
-            let mut weights = Atlas::ground(terrain);
+            let mut weights = Atlas::ground(terrain.get_bits());
 
             for s in &room.structures {
                 if s.kind == Kind::Road {

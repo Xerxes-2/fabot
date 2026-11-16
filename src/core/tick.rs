@@ -246,7 +246,7 @@ pub fn undeclared() -> Declarations {
 }
 
 pub struct Context<'a> {
-    pub world: &'a World,
+    pub world: &'a World<'a>,
     pub atlas: &'a mut Atlas,
     pub declarations: &'a Declarations,
     pub sightings: &'a Sightings,

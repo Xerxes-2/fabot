@@ -82,7 +82,7 @@ pub fn structure(id: &str, kind: Kind, owner: Owner, tile: Tile) -> Structure {
 /// A generated colony room and the tiles of the spawns standing in it.
 #[derive(Clone)]
 pub struct Colony {
-    pub room: Room,
+    pub room: Room<'static>,
     pub spawns: Vec<Tile>,
 }
 
@@ -169,7 +169,7 @@ fn colony_of(rng: &mut Rng, blobs: i32) -> Option<Colony> {
 
     let room = Room {
         name: ROOM,
-        terrain: terrain::of(terrain),
+        terrain: terrain::leak(terrain),
         controller: Some(Controller {
             id: "c".to_string(),
             pos: at(controller),

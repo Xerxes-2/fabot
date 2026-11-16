@@ -94,7 +94,12 @@ pub fn step(world: &World, intel: &mut Intel) {
 }
 
 /// A room out of sight stands as it was last seen, or as nobody's.
-pub fn blind(outpost: &Outpost, intel: &Intel, world: &World, declarations: &Declarations) -> Room {
+pub fn blind(
+    outpost: &Outpost,
+    intel: &Intel,
+    world: &World,
+    declarations: &Declarations,
+) -> Room<'static> {
     let time = world.time;
     let row = intel.get(&outpost.room);
     let owner = |user: &String| Owner::of_user(user.clone(), &world.me, declarations);

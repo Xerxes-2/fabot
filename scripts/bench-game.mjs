@@ -186,7 +186,7 @@ function Terrain(name) {
   const array = tick.rooms.find((r) => r.name === name)?.terrain ?? cached.get(name);
   if (array === undefined) throw new Error(`no terrain for ${name}`);
   this.get = (x, y) => array[y * 50 + x];
-  this.getRawBuffer = () => new Uint8Array(array);
+  this.getRawBuffer = (into = new Uint8Array(2500)) => (into.set(array), into);
 }
 
 const require = createRequire(import.meta.url);

@@ -53,10 +53,10 @@ impl Ground {
     }
 }
 
-fn room_of(name: RoomName, terrain: Vec<u8>, structures: Vec<Structure>) -> Room {
+fn room_of(name: RoomName, terrain: Vec<u8>, structures: Vec<Structure>) -> Room<'static> {
     Room {
         name,
-        terrain: terrain::of(terrain),
+        terrain: terrain::leak(terrain),
         controller: None,
         energy_available: 0,
         energy_capacity: 0,
@@ -88,7 +88,7 @@ fn world_of_rooms(rooms: Vec<Room>) -> World {
     }
 }
 
-fn world_of(ground: &Ground) -> World {
+fn world_of(ground: &Ground) -> World<'static> {
     let structures = ground
         .roads
         .iter()
@@ -668,7 +668,7 @@ fn every_tile_a_keeper_strikes_is_walled_and_a_room_of_keepers_not_due_walls_non
 /// Three rooms square, each open inside and to the next only where both
 /// open a stretch of their shared border, ringed by closed rooms; a stretch
 /// is walled on one side at times, a dead end only its terrain shows.
-fn walled_rooms(dice: &mut Dice) -> World {
+fn walled_rooms(dice: &mut Dice) -> World<'static> {
     let mut rooms = Vec::new();
     let mut borders: std::collections::BTreeMap<(i32, i32, i32), std::ops::Range<i32>> =
         Default::default();

@@ -48,7 +48,7 @@ pub(super) struct Hunting {
 
 /// What this tick's world says, read once and handed down.
 pub(super) struct Scene<'a> {
-    pub(super) world: &'a World,
+    pub(super) world: &'a World<'a>,
     pub(super) sightings: &'a Sightings,
     pub(super) avoid: &'a BTreeSet<RoomName>,
     /// The operator's tactic rules (§6.3), filtered per engagement.
@@ -90,7 +90,7 @@ impl<'a> Scene<'a> {
             .is_some_and(|c| !c.owner.is_ours() && c.safe_mode > 0)
     }
 
-    pub(super) fn in_sight(&self, room: RoomName) -> Option<&'a Room> {
+    pub(super) fn in_sight(&self, room: RoomName) -> Option<&'a Room<'a>> {
         self.world.rooms.iter().find(|r| r.name == room)
     }
 
@@ -262,7 +262,7 @@ impl<'a> Scene<'a> {
         }
     }
 
-    pub(super) fn charged(&self, room: &'a Room) -> Vec<Pos> {
+    pub(super) fn charged(&self, room: &'a Room<'a>) -> Vec<Pos> {
         self.towers_in(room)
             .into_iter()
             .filter(|s| s.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST)
@@ -270,7 +270,7 @@ impl<'a> Scene<'a> {
             .collect()
     }
 
-    pub(super) fn towers_in(&self, room: &'a Room) -> Vec<&'a Structure> {
+    pub(super) fn towers_in(&self, room: &'a Room<'a>) -> Vec<&'a Structure> {
         room.structures
             .iter()
             .filter(|s| s.kind.is_tower() && !s.owner.is_ours())
@@ -313,7 +313,7 @@ impl<'a> Scene<'a> {
     }
 
     /// A home's Defend is the home's alone.
-    pub(super) fn colonies_of(&self, atlas: &Atlas, e: &Engagement) -> Vec<&'a Room> {
+    pub(super) fn colonies_of(&self, atlas: &Atlas, e: &Engagement) -> Vec<&'a Room<'a>> {
         let world = self.world;
 
         world

@@ -142,7 +142,7 @@ fn near(members: &[&Creep], at: &Pos) -> i32 {
 /// The structure the set is priced on: the one his towers and armed bodies
 /// strike hardest a body beside it, since they strike the same set whether it
 /// razes that one first or last.
-pub fn hardest(room: &Room) -> Option<&Structure> {
+pub fn hardest<'a>(room: &'a Room) -> Option<&'a Structure> {
     let towers = charged(room);
     let guards = guards(room);
 

@@ -9,7 +9,8 @@ use crate::core::tick::{
 };
 use crate::core::tiles;
 use crate::core::vocabulary::Resource;
-use crate::core::world::{Room, RoomName, World, terrain::Terrain};
+use crate::core::world::{Room, RoomName, World};
+use screeps::LocalRoomTerrain;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Expansion {
@@ -151,7 +152,7 @@ pub fn book(world: &World, derived: &Derived, plans: &mut [ColonyPlan], busy: &B
 
 /// Layout plans the room before it is claimed: one it cannot fit is never
 /// taken (The International's).
-fn fits(world: &World, outpost: &Outpost, intel: &Intel, terrain: Terrain) -> bool {
+fn fits(world: &World, outpost: &Outpost, intel: &Intel, terrain: &LocalRoomTerrain) -> bool {
     let mut room = intel::blind(outpost, intel, world, &undeclared());
     room.terrain = Some(terrain);
     (ground::of_room(&room).and_then(|g| plan::of_ground(&world.rules, &g, &[])))
@@ -179,13 +180,13 @@ fn fate(age: i32, owned: bool, lost: bool, stored: bool) -> Fate {
 }
 
 /// One claim in flight at a time (owner, 2026-11-13); `held` the last tick's.
-pub fn step(
+pub fn step<'t>(
     world: &World,
     derived: &Derived,
     (declarations, plans): (&Declarations, &[ColonyPlan]),
     around: &Around,
     intel: &Intel,
-    terrain: &dyn Fn(RoomName) -> Option<Terrain>,
+    terrain: &dyn Fn(RoomName) -> Option<&'t LocalRoomTerrain>,
     expansion: &mut Expansions,
 ) {
     let Around {

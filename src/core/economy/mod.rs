@@ -124,7 +124,7 @@ pub(crate) mod dice {
         }
     }
 
-    pub fn room_gen(dice: &mut Dice, i: usize) -> (Room, Vec<Spawn>) {
+    pub fn room_gen(dice: &mut Dice, i: usize) -> (Room<'static>, Vec<Spawn>) {
         let name = RoomName::new(i as i32, 0);
         let owned = dice.below(3) < 2;
         let reserved = dice.chance(2);
@@ -202,7 +202,7 @@ pub(crate) mod dice {
 
         let room = Room {
             name,
-            terrain: crate::core::world::terrain::of(vec![0; 2500]),
+            terrain: crate::core::world::terrain::leak(vec![0; 2500]),
             controller: Some(controller),
             energy_available: if owned { bank } else { 0 },
             energy_capacity: if owned { bank_capacity } else { 0 },
@@ -273,7 +273,7 @@ pub(crate) mod dice {
 
     /// A world of up to four rooms, the unowned ones declared worked or claimed.
     pub struct Generated {
-        pub world: World,
+        pub world: World<'static>,
         pub worked: Vec<Outpost>,
         pub claims: Vec<Outpost>,
     }

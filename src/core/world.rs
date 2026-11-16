@@ -1,3 +1,4 @@
+use screeps::LocalRoomTerrain;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
@@ -593,11 +594,11 @@ pub struct Remains {
     pub fallen: Option<Fallen>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Room {
+#[derive(Clone, Debug)]
+pub struct Room<'a> {
     pub name: RoomName,
-    /// `Game.map.getRoomTerrain(name).getRawBuffer()`, `None` where unread.
-    pub terrain: Option<terrain::Terrain>,
+    /// `Game.map.getRoomTerrain(name)`, `None` where unread.
+    pub terrain: Option<&'a LocalRoomTerrain>,
     pub controller: Option<Controller>,
     /// 0 in a room without spawns.
     pub energy_available: i32,
@@ -614,7 +615,7 @@ pub struct Room {
     pub others: Vec<Creep>,
 }
 
-impl Room {
+impl Room<'_> {
     pub fn hostiles(&self) -> impl Iterator<Item = &Creep> {
         self.others.iter().filter(|c| !c.owner.is_ally())
     }
@@ -635,15 +636,15 @@ pub struct Spawn {
     pub spawning: Option<Oven>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct World {
+#[derive(Clone, Debug)]
+pub struct World<'a> {
     pub time: i32,
     /// Empty while we own nothing.
     pub me: String,
     pub cpu_limit: f64,
     pub bucket: i32,
     /// Visible rooms.
-    pub rooms: Vec<Room>,
+    pub rooms: Vec<Room<'a>>,
     /// Ours.
     pub spawns: Vec<Spawn>,
     /// Ours, standing (still in an oven excluded).
@@ -689,30 +690,27 @@ impl Rules {
 }
 
 pub mod terrain {
-    use crate::core::atlas::tiles::COUNT;
-    use std::rc::Rc;
+    use screeps::LocalRoomTerrain;
 
     pub const WALL: u8 = screeps::Terrain::Wall as u8;
     pub const SWAMP: u8 = screeps::Terrain::Swamp as u8;
 
-    /// A whole room's raw buffer, shared between the map cache and each tick's rooms.
-    pub type Terrain = Rc<[u8; COUNT]>;
-
-    /// The engine's buffer is short for a room the map doesn't hold: unread,
-    /// which an all-plain room must not pass for.
-    pub fn of(raw: Vec<u8>) -> Option<Terrain> {
-        Some(Rc::new(<[u8; COUNT]>::try_from(raw).ok()?))
+    /// For tests and tools, which hold no map cache for a room to borrow from.
+    #[cfg(any(test, feature = "tools"))]
+    pub fn leak(bits: Vec<u8>) -> Option<&'static LocalRoomTerrain> {
+        let bits = bits.into_boxed_slice().try_into().ok()?;
+        Some(Box::leak(Box::new(LocalRoomTerrain::new_from_bits(bits))))
     }
 
     /// An unread room is neither wall nor swamp: its callers (layout, a
     /// fight's casting) walk rooms in sight, and a guess beats a panic there.
-    pub fn is_wall(terrain: Option<&[u8; COUNT]>, x: i32, y: i32) -> bool {
-        terrain.is_some_and(|t| t[(y * 50 + x) as usize] & WALL != 0)
+    pub fn is_wall(terrain: Option<&LocalRoomTerrain>, x: i32, y: i32) -> bool {
+        terrain.is_some_and(|t| t.get_bits()[(y * 50 + x) as usize] & WALL != 0)
     }
 
-    pub fn is_swamp(terrain: Option<&[u8; COUNT]>, x: i32, y: i32) -> bool {
+    pub fn is_swamp(terrain: Option<&LocalRoomTerrain>, x: i32, y: i32) -> bool {
         terrain.is_some_and(|t| {
-            let t = t[(y * 50 + x) as usize];
+            let t = t.get_bits()[(y * 50 + x) as usize];
             t & WALL == 0 && t & SWAMP != 0
         })
     }
@@ -863,8 +861,8 @@ impl Creep {
     }
 }
 
-impl World {
-    pub fn room(&self, name: RoomName) -> Option<&Room> {
+impl World<'_> {
+    pub fn room(&self, name: RoomName) -> Option<&Room<'_>> {
         self.rooms.iter().find(|r| r.name == name)
     }
 }

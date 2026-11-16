@@ -431,7 +431,7 @@ pub fn dug_at(capacity: i32, home: bool, rate: i32, posted: bool, seats: Option<
 pub const RAMPART_SAFE: i32 = 10 * engine::RAMPART_DECAY_AMOUNT;
 
 fn swamp(room: &Room, pos: &Pos) -> bool {
-    terrain::is_swamp(room.terrain.as_deref(), pos.x, pos.y)
+    terrain::is_swamp(room.terrain, pos.x, pos.y)
 }
 
 /// What keeping `s` standing costs, where it is below the hits we hold it at.
