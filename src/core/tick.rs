@@ -4,13 +4,18 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::HashMap;
 
+use screeps::LocalRoomTerrain;
+
 use super::atlas::{Atlas, Mover, Target, Tree};
 use super::engine;
 use super::grid::{self, Footprint};
 use super::intents::{Ask, CreepAct, Intent, Rank, SpawnAct};
 use super::mv;
 use super::state::State;
-use super::strategy::intel::Intel;
+use super::strategy::{
+    self,
+    intel::{self, Intel},
+};
 use super::tactics::{self, Tactic};
 use super::tiles::{self, Tile, TileSet};
 use super::vocabulary::{Compound, Part, Resource};
@@ -722,6 +727,79 @@ pub fn run(
         intents: settled,
         state,
         reports,
+    }
+}
+
+/// A tick decided: what the driver executes and writes, and what it keeps.
+pub struct Decided {
+    pub result: TickResult,
+    pub declarations: Declarations,
+    pub derived: Derived,
+    pub refused: Refused,
+    pub sightings: Sightings,
+    pub atlas: Atlas,
+}
+
+/// From the world read to the intents settled. `began` is when the `world`
+/// phase began, before the driver read it.
+pub fn decide<'t>(
+    (clock, began): (impl Fn() -> f64, f64),
+    phases: &mut Vec<(String, f64)>,
+    (world, trace): (&World, bool),
+    (mut declarations, state): (Declarations, State),
+    (sightings, atlas): (Sightings, Atlas),
+    intel: &'t mut Intel,
+    (terrain, terrains): (
+        &dyn Fn(RoomName) -> Option<&'t LocalRoomTerrain>,
+        impl IntoIterator<Item = (RoomName, &'t [u8; tiles::COUNT])>,
+    ),
+) -> Decided {
+    let mut state = state;
+    let refused = declarations.refuse(&world.closed);
+    let sightings = super::world::sightings::step(world, sightings);
+    intel::step(world, intel);
+    phases.push(("world".to_string(), clock() - began));
+
+    let start = clock();
+    let seen = (intel.iter()).map(|(room, row)| (*room, row.lairs.as_deref(), row.stronghold));
+    let mut atlas = Atlas::following(atlas, world, seen, terrains);
+    phases.push(("atlas".to_string(), clock() - start));
+
+    let start = clock();
+    let mut derived = derive(world, &mut atlas, &declarations, &sightings);
+    phases.push(("derive".to_string(), clock() - start));
+    let plans = strategy::plan(
+        world,
+        &derived,
+        &declarations,
+        intel,
+        (&state.engagements, &state.casts, &state.due),
+        (&state.layout, &state.spare),
+        (terrain, &mut state.expansion),
+    );
+    let declarations = declarations.planned(plans);
+    derived.worked = worked(world, &sightings, &declarations, &derived);
+
+    let mut context = Context {
+        world,
+        atlas: &mut atlas,
+        declarations: &declarations,
+        sightings: &sightings,
+        intel,
+        derived: &derived,
+        trace,
+    };
+    let result = run(clock, &MODULES, &mut context, state);
+    for report in &result.reports {
+        phases.push((report.module.to_string(), report.cpu));
+    }
+    Decided {
+        result,
+        declarations,
+        derived,
+        refused,
+        sightings,
+        atlas,
     }
 }
 

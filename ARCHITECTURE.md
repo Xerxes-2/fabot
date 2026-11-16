@@ -53,8 +53,9 @@ Game ──World.ofGame──▶ World ──decide──▶ Intents ──Execu
 
 - `World.ofGame` reads the API once; nothing below it touches `Game`.
 - `decide : State -> World -> Intents * State'` is pure at this boundary and
-  **deterministic**: no clock, no unseeded random, no reference to anything
-  but its arguments. A recorded (State, World) replays the exact decision
+  **deterministic**: no unseeded random, no reference to anything but its
+  arguments, and a clock read only to time its phases, which nothing decided
+  reads. A recorded (State, World) replays the exact decision
   locally; that is the debugger (§10.4) and the benchmark (§9.1) at once.
   Inside, it is written imperatively (§9.2).
 - Modules emit spawn asks and move wishes as Intents; `Tick` settles them

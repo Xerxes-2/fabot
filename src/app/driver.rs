@@ -7,15 +7,11 @@ use wasm_bindgen::prelude::*;
 use crate::app::wire;
 use crate::app::world;
 use crate::core::atlas::Atlas;
-use crate::core::economy::abandon;
 use crate::core::intents::Refusal;
 use crate::core::layout::shape::Standing;
-use crate::core::observe::metrics::{self, Metrics, Seen};
-use crate::core::strategy::{
-    self,
-    intel::{self, Intel},
-};
-use crate::core::tick::{self, Context, Declarations, Stage};
+use crate::core::observe::metrics::{self, Metrics};
+use crate::core::strategy::intel::Intel;
+use crate::core::tick::{self, Declarations};
 use crate::core::world::{RoomName, Sightings};
 
 const FAULTS_KEPT: usize = 20;
@@ -70,8 +66,8 @@ fn run_tick() -> Result<(), String> {
     let clock = || game_cpu::get_used();
     let mut phases: Vec<(String, f64)> = Vec::new();
 
-    let (mut sightings, mut atlas, mut faults, (standing, spare), mut maps, held, asked, metrics) =
-        HEAP.with(|heap| {
+    let (sightings, atlas, mut faults, (standing, spare), mut maps, held, asked, metrics) = HEAP
+        .with(|heap| {
             let mut heap = heap.borrow_mut();
             (
                 std::mem::take(&mut heap.sightings),
@@ -97,7 +93,7 @@ fn run_tick() -> Result<(), String> {
     state.spare = spare;
     phases.push(("memory".to_string(), clock() - start));
 
-    let mut declarations: Declarations = memory
+    let declarations: Declarations = memory
         .declarations()
         .besieging(intel.as_ref().unwrap_or(&Intel::new()));
     let start = clock();
@@ -106,58 +102,30 @@ fn run_tick() -> Result<(), String> {
         .map(|e| e.room);
     let (mut world, pass) = world::of_game(&mut maps, &declarations, drain);
     (world.rooms.iter_mut()).for_each(|r| r.terrain = maps.terrain(r.name));
-    let refused = declarations.refuse(&world.closed);
-    sightings = crate::core::world::sightings::step(&world, sightings);
     let mut unread = Intel::new();
     let rows = intel.as_mut().unwrap_or(&mut unread);
-    intel::step(&world, rows);
-    phases.push(("world".to_string(), clock() - start));
-
-    let start = clock();
-    let seen = (rows.iter()).map(|(room, row)| (*room, row.lairs.as_deref(), row.stronghold));
-    atlas = Atlas::following(atlas, &world, seen, maps.terrains());
-    phases.push(("atlas".to_string(), clock() - start));
-
-    let start = clock();
-    let mut derived = tick::derive(&world, &mut atlas, &declarations, &sightings);
-    phases.push(("derive".to_string(), clock() - start));
-    let plans = strategy::plan(
-        &world,
-        &derived,
-        &declarations,
+    let decided = tick::decide(
+        (clock, start),
+        &mut phases,
+        (&world, wire::tracing()),
+        (declarations, state),
+        (sightings, atlas),
         rows,
-        (&state.engagements, &state.casts, &state.due),
-        (&state.layout, &state.spare),
-        (&|room| maps.terrain(room), &mut state.expansion),
+        (&|room| maps.terrain(room), maps.terrains()),
     );
-    let declarations = declarations.planned(plans);
-    derived.worked = tick::worked(&world, &sightings, &declarations, &derived);
 
-    let mut context = Context {
-        world: &world,
-        atlas: &mut atlas,
-        declarations: &declarations,
-        sightings: &sightings,
-        intel: rows,
-        derived: &derived,
-        trace: wire::tracing(),
-    };
-
-    let mut result = tick::run(clock, &tick::MODULES, &mut context, state);
-
-    for report in &result.reports {
-        phases.push((report.module.to_string(), report.cpu));
+    for report in &decided.result.reports {
         if let tick::Outcome::Faulted(message) = &report.outcome {
             record_fault(&mut faults, report.module, message);
         }
     }
 
     let start = clock();
-    let refusals: Vec<Refusal> = executor::run(&result.intents);
+    let refusals: Vec<Refusal> = executor::run(&decided.result.intents);
     let execute_cpu = clock() - start;
 
     let start = clock();
-    wire::write_state(&mut memory, &result.state);
+    wire::write_state(&mut memory, &decided.result.state);
     if let Some(rows) = &intel
         && world.time % INTEL_WRITTEN_EVERY == 0
     {
@@ -177,46 +145,22 @@ fn run_tick() -> Result<(), String> {
         phases.push(("record".to_string(), clock() - start));
     }
 
-    let mut counts = vec![
-        ("atlasHits".to_string(), atlas.hits()),
-        ("atlasMisses".to_string(), atlas.misses()),
-        ("flood".to_string(), atlas.relaxed()),
-    ];
-    let abandoning = (declarations.colonies.iter()).filter(|p| p.stage == Stage::Abandon);
-    for room in abandoning.filter_map(|p| world.room(p.room)) {
-        counts.push((format!("abandon:{}", room.name), abandon::left(room)));
-    }
-    for room in &refused.rooms {
-        counts.push((format!("closed:{room}"), 1));
-    }
-    for rule in &refused.rules {
-        counts.push((format!("refused:{rule}"), 1));
-    }
-    for intent in &result.intents {
-        if let crate::core::intents::Intent::Count(name, n) = intent {
-            counts.push((name.to_string(), *n));
-        }
-    }
+    let counts = metrics::counts(&world, &decided);
     let start = clock();
     let metrics = metrics.map(|m| {
-        let seen = Seen {
-            world: &world,
-            assignments: &result.state.assignments,
-            engagements: &result.state.engagements,
-            casts: &result.state.casts,
-            intents: &result.intents,
-            refusals: &refusals,
-            phases: &phases,
-            declarations: &declarations,
-            derived: &derived,
-        };
-        let mut m = metrics::step(m, &seen);
+        let mut m = metrics::measure(m, &world, &decided, &refusals, &phases);
         if world.time % metrics::WINDOW == 0 {
             wire::write_segment(wire::METRICS_SEGMENT, m.text());
         }
         m
     });
     phases.push(("metrics".to_string(), clock() - start));
+    let tick::Decided {
+        mut result,
+        sightings,
+        atlas,
+        ..
+    } = decided;
 
     let observed = wire::Observed {
         tick: world.time,

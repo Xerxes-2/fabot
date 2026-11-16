@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write;
 
 use crate::core::HashMap;
+use crate::core::economy::abandon;
 use crate::core::economy::bodies::{self, Pattern};
 use crate::core::economy::slots;
 use crate::core::engine;
@@ -1178,6 +1179,55 @@ fn to_text(ring: &VecDeque<Window>) -> String {
         }
     }
     out
+}
+
+/// The per-tick counts the observe segment reports (`ARCHITECTURE.md` §9.3).
+pub fn counts(world: &World, decided: &tick::Decided) -> Vec<(String, i32)> {
+    let atlas = &decided.atlas;
+    let mut counts = vec![
+        ("atlasHits".to_string(), atlas.hits()),
+        ("atlasMisses".to_string(), atlas.misses()),
+        ("flood".to_string(), atlas.relaxed()),
+    ];
+    let abandoning =
+        (decided.declarations.colonies.iter()).filter(|p| p.stage == tick::Stage::Abandon);
+    for room in abandoning.filter_map(|p| world.room(p.room)) {
+        counts.push((format!("abandon:{}", room.name), abandon::left(room)));
+    }
+    for room in &decided.refused.rooms {
+        counts.push((format!("closed:{room}"), 1));
+    }
+    for rule in &decided.refused.rules {
+        counts.push((format!("refused:{rule}"), 1));
+    }
+    for intent in &decided.result.intents {
+        if let Intent::Count(name, n) = intent {
+            counts.push((name.to_string(), *n));
+        }
+    }
+    counts
+}
+
+pub fn measure(
+    m: Metrics,
+    world: &World,
+    decided: &tick::Decided,
+    refusals: &[Refusal],
+    phases: &[(String, f64)],
+) -> Metrics {
+    let state = &decided.result.state;
+    let seen = Seen {
+        world,
+        assignments: &state.assignments,
+        engagements: &state.engagements,
+        casts: &state.casts,
+        intents: &decided.result.intents,
+        refusals,
+        phases,
+        declarations: &decided.declarations,
+        derived: &decided.derived,
+    };
+    step(m, &seen)
 }
 
 #[cfg(test)]
