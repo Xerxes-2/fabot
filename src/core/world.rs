@@ -689,6 +689,354 @@ impl Rules {
     }
 }
 
+/// `read.js`'s pass decoded in the order it wrote it: the world bar what
+/// only the engine's globals answer (the CPU limit, terrain, room status).
+pub mod read {
+    use std::collections::BTreeSet;
+    use std::str::Split;
+
+    use screeps::ResourceType;
+    use screeps::game::map::RoomStatus;
+
+    use crate::core::atlas::tiles::{self, BOTTOM, LEFT, RIGHT, TOP};
+
+    use super::*;
+    use crate::core::engine;
+    use crate::core::tick::Declarations;
+    use crate::core::vocabulary::{self, Part};
+
+    struct Reader<'a> {
+        ints: &'a [i32],
+        at: usize,
+        strs: Split<'a, char>,
+        words: Vec<&'a str>,
+        me: String,
+        declarations: &'a Declarations,
+    }
+
+    impl<'a> Reader<'a> {
+        fn n(&mut self) -> i32 {
+            self.at += 1;
+            self.ints[self.at - 1]
+        }
+
+        fn flag(&mut self) -> bool {
+            self.n() != 0
+        }
+
+        fn s(&mut self) -> String {
+            self.str().to_string()
+        }
+
+        /// The engine names every room in the grammar; a name outside it reads
+        /// as `sim`'s, the one room the grid has no square for, not a panic.
+        fn room_name(&mut self) -> RoomName {
+            RoomName::parse(self.word()).unwrap_or(RoomName::SIM)
+        }
+
+        fn word(&mut self) -> &'a str {
+            let i = self.n();
+            self.words.get(i as usize).copied().unwrap_or_default()
+        }
+
+        /// A string only parsed: no copy.
+        fn str(&mut self) -> &'a str {
+            self.strs.next().unwrap_or_default()
+        }
+
+        fn list<T>(&mut self, mut each: impl FnMut(&mut Self) -> T) -> Vec<T> {
+            let count = self.n();
+            (0..count).map(|_| each(self)).collect()
+        }
+
+        fn owner(&mut self) -> Owner {
+            match self.n() {
+                1 => Owner::Ours,
+                2 => {
+                    let name = self.word().to_string();
+                    self.user(name)
+                }
+                _ => Owner::Nobody,
+            }
+        }
+
+        fn user(&self, name: String) -> Owner {
+            Owner::of_user(name, &self.me, self.declarations)
+        }
+
+        fn pos(&mut self) -> Pos {
+            let room = self.room_name();
+            let x = self.n();
+            let y = self.n();
+            Pos::new(room, x, y)
+        }
+
+        fn pos_in(&mut self, room: RoomName) -> Pos {
+            let x = self.n();
+            let y = self.n();
+            Pos::new(room, x, y)
+        }
+
+        /// Only the resources `screeps-game-api` names count, as its `store_types` read them.
+        fn store(&mut self) -> Store {
+            let count = self.n();
+            let held = (0..count)
+                .map(|_| (self.word(), self.n()))
+                .filter(|(name, amount)| *amount > 0 && name.parse::<ResourceType>().is_ok())
+                .map(|(name, amount)| (vocabulary::resource_of_name(name), amount))
+                .collect();
+            Store {
+                held,
+                capacity: self.n(),
+            }
+        }
+
+        fn body(&mut self) -> Vec<BodyPart> {
+            self.list(|r| {
+                let kind = r.word().parse().unwrap_or(Part::Tough);
+                let hits = r.n();
+                let boost = r.word();
+                BodyPart {
+                    kind,
+                    hits,
+                    boost: boost.parse().ok(),
+                }
+            })
+        }
+
+        fn creep(&mut self) -> Creep {
+            Creep {
+                id: self.s(),
+                name: self.s(),
+                owner: self.owner(),
+                pos: self.pos(),
+                body: self.body(),
+                hits: self.n(),
+                hits_max: self.n(),
+                ticks_to_live: self.n(),
+                fatigue: self.n(),
+                store: self.store(),
+            }
+        }
+
+        fn controller(&mut self) -> Controller {
+            Controller {
+                id: self.s(),
+                pos: self.pos(),
+                owner: self.owner(),
+                level: self.n(),
+                progress: self.n(),
+                progress_total: self.n(),
+                ticks_to_downgrade: self.n(),
+                reservation: if self.flag() {
+                    let user = self.word().to_string();
+                    Some((self.user(user), self.n()))
+                } else {
+                    None
+                },
+                safe_mode: self.n(),
+                safe_mode_available: self.n(),
+                safe_mode_cooldown: self.n(),
+                upgrade_blocked: self.n(),
+            }
+        }
+
+        fn structure(&mut self, room: RoomName) -> Structure {
+            let kind = Kind::of_name(self.word());
+            let id = self.s();
+            let pos = self.pos_in(room);
+            let owner = self.owner();
+            let hits = self.n();
+            let hits_max = self.n();
+            let store = if kind.has_store() {
+                self.store()
+            } else {
+                Store::empty()
+            };
+            let cooldown = if kind.has_cooldown() { self.n() } else { 0 };
+            let spawn = kind.is_keeper_lair().then(|| self.n()).filter(|t| *t >= 0);
+            let (collapse, level) = if kind.is_invader_core() {
+                let running = self.flag();
+                let ticks = self.n();
+                let collapse = if running {
+                    ticks
+                } else {
+                    ticks + engine::STRONGHOLD_LONGEST_COLLAPSE
+                };
+                (collapse, self.n())
+            } else {
+                (0, 0)
+            };
+            let walkable = if kind.is_rampart() {
+                let public = self.flag();
+                owner.is_ours() || public
+            } else {
+                kind.walkable()
+            };
+            Structure {
+                id,
+                kind,
+                pos,
+                owner,
+                hits,
+                hits_max,
+                store,
+                cooldown,
+                collapse,
+                level,
+                spawn,
+                walkable,
+            }
+        }
+
+        /// A tombstone's creep keeps no hits or fatigue.
+        fn remains(&mut self) -> Remains {
+            Remains {
+                id: self.s(),
+                pos: self.pos(),
+                store: self.store(),
+                fallen: if self.flag() {
+                    let mut creep = self.creep();
+                    creep.hits = 0;
+                    creep.fatigue = 0;
+                    Some(Fallen {
+                        creep,
+                        died: self.n(),
+                    })
+                } else {
+                    None
+                },
+            }
+        }
+
+        fn room(&mut self) -> Room<'static> {
+            let name = self.room_name();
+            Room {
+                terrain: None,
+                energy_available: self.n(),
+                energy_capacity: self.n(),
+                controller: if self.flag() {
+                    Some(self.controller())
+                } else {
+                    None
+                },
+                sources: self.list(|r| Source {
+                    id: r.s(),
+                    pos: r.pos(),
+                    energy: r.n(),
+                    energy_capacity: r.n(),
+                    ticks_to_regeneration: r.n(),
+                }),
+                minerals: self.list(|r| Mineral {
+                    id: r.s(),
+                    pos: r.pos(),
+                    resource: vocabulary::resource_of_name(r.word()),
+                    amount: r.n(),
+                }),
+                structures: self.list(|r| r.structure(name)),
+                sites: self.list(|r| Site {
+                    kind: Kind::of_name(r.word()),
+                    id: r.s(),
+                    pos: r.pos_in(name),
+                    owner: r.owner(),
+                    progress: r.n(),
+                    progress_total: r.n(),
+                }),
+                piles: self.list(|r| Pile {
+                    id: r.s(),
+                    pos: r.pos(),
+                    resource: vocabulary::resource_of_name(r.word()),
+                    amount: r.n(),
+                }),
+                remains: self.list(Reader::remains),
+                others: self.list(Reader::creep),
+                name,
+            }
+        }
+
+        fn spawn(&mut self) -> Spawn {
+            Spawn {
+                id: self.s(),
+                name: self.s(),
+                pos: self.pos(),
+                spawning: if self.flag() {
+                    Some(Oven {
+                        name: self.s(),
+                        remaining: self.n(),
+                        body: self.body(),
+                    })
+                } else {
+                    None
+                },
+            }
+        }
+    }
+
+    pub fn world(ints: &[i32], text: &str, declarations: &Declarations) -> World<'static> {
+        let count = ints.last().map_or(0, |n| *n as usize);
+        let mut words: Vec<&str> = text.rsplit('\0').take(count).collect();
+        words.reverse();
+        let mut r = Reader {
+            ints,
+            at: 0,
+            strs: text.split('\0'),
+            words,
+            me: String::new(),
+            declarations,
+        };
+        r.me = r.s();
+        let time = r.n();
+        let bucket = r.n();
+        let rooms = r.list(Reader::room);
+        let attacks = r.list(|r| (r.s(), r.s()));
+        let destroyed = r.list(|r| (r.room_name(), r.s(), r.n()));
+        let spawns = r.list(Reader::spawn);
+        let creeps = r.list(Reader::creep);
+        World {
+            time,
+            me: r.me.clone(),
+            cpu_limit: 0.0,
+            bucket,
+            rooms,
+            spawns,
+            creeps,
+            our_sites: r.n(),
+            rooms_allowed: r.n(),
+            rules: Rules {
+                structures: r
+                    .list(|r| (r.word().to_string(), r.list(Reader::n)))
+                    .into_iter()
+                    .collect(),
+            },
+            closed: BTreeSet::new(),
+            attacks,
+            destroyed,
+        }
+    }
+
+    /// The rooms in reach the engine keeps us out of: those whose status is
+    /// not our spawn's room's.
+    pub fn closed(
+        world: &World,
+        declarations: &Declarations,
+        mut status: impl FnMut(RoomName) -> Option<RoomStatus>,
+    ) -> BTreeSet<RoomName> {
+        let ours = world.spawns.first().and_then(|s| status(s.pos.room));
+        let read = (world.rooms.iter())
+            .flat_map(|room| {
+                let around = [TOP, RIGHT, BOTTOM, LEFT].map(|e| tiles::room_toward(room.name, e));
+                around.into_iter().flatten().chain([room.name])
+            })
+            .chain(declarations.outposts.iter().map(|o| o.room))
+            .chain(declarations.claims.iter().map(|o| o.room))
+            .chain(declarations.sieges.iter().copied())
+            .collect::<BTreeSet<RoomName>>();
+        read.into_iter()
+            .filter(|room| ours.is_some() && status(*room).is_some_and(|s| Some(s) != ours))
+            .collect()
+    }
+}
+
 pub mod terrain {
     use screeps::LocalRoomTerrain;
 
