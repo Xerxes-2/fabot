@@ -112,29 +112,6 @@ pub fn step_table(factor: FatigueFactor) -> Vec<Option<u16>> {
         .collect()
 }
 
-/// The bench's counts (`ARCHITECTURE.md` §9.3), read by `scripts/bench.mjs
-/// --counts`; nothing in the bot reads them.
-pub fn tally(what: &str, n: i32) {
-    #[cfg(target_arch = "wasm32")]
-    {
-        use wasm_bindgen::{JsCast, JsValue};
-
-        #[wasm_bindgen::prelude::wasm_bindgen]
-        extern "C" {
-            type Global;
-            #[wasm_bindgen(method, getter, js_name = __fabotCount)]
-            fn counter(this: &Global) -> Option<js_sys::Function>;
-        }
-
-        if let Some(counter) = js_sys::global().unchecked_into::<Global>().counter() {
-            let _ = counter.call2(&JsValue::NULL, &JsValue::from_str(what), &JsValue::from(n));
-        }
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    let _ = (what, n);
-}
-
 /// A tile's step weight; None where nothing may stand.
 pub type Weight = Option<NonZeroU8>;
 
@@ -242,7 +219,7 @@ pub fn flood(
     weights: &[Weight; tiles::COUNT],
     steps: &[Option<u16>],
     goals: &[Tile],
-) -> tiles::Table<i32> {
+) -> (tiles::Table<i32>, i32) {
     let mut dist = tiles::table(UNREACHED);
     // The step off a tile; None where no walk leaves it.
     let mut price: [Option<u16>; tiles::COUNT] = [None; tiles::COUNT];
@@ -311,6 +288,5 @@ pub fn flood(
             *d = UNREACHED;
         }
     }
-    tally("flood", dial.relaxed);
-    dist
+    (dist, dial.relaxed)
 }

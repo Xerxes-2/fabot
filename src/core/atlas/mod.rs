@@ -197,11 +197,16 @@ impl std::hash::Hash for FloodKey {
 }
 
 impl RoomGrid {
-    /// The flood toward `goal`, and whether it was kept.
-    fn flood(&self, mover: Mover, goal: Goal, danger: Option<&TileSet>) -> (Rc<Table<i32>>, bool) {
+    /// The flood toward `goal`, whether it was kept, and the tiles it relaxed.
+    fn flood(
+        &self,
+        mover: Mover,
+        goal: Goal,
+        danger: Option<&TileSet>,
+    ) -> (Rc<Table<i32>>, bool, i32) {
         let key = FloodOf::of(mover, goal, danger);
         if let Some(dist) = self.floods.borrow().get(&key as &dyn Keyed) {
-            return (dist.clone(), true);
+            return (dist.clone(), true, 0);
         }
         let footprint = mover.footprint;
         let walled = danger.filter(|_| goal != Goal::Clear).map(|danger| {
@@ -237,9 +242,10 @@ impl RoomGrid {
                 .collect(),
         };
         let steps = step_table(mover.factor);
-        let dist = Rc::new(flood(footprint, weights, &steps, &goals));
+        let (dist, relaxed) = flood(footprint, weights, &steps, &goals);
+        let dist = Rc::new(dist);
         self.floods.borrow_mut().insert(key.kept(), dist.clone());
-        (dist, false)
+        (dist, false, relaxed)
     }
 }
 
@@ -264,6 +270,7 @@ pub struct Atlas {
     closed: Vec<Coords>,
     misses: Cell<i32>,
     hits: Cell<i32>,
+    relaxed: Cell<i32>,
 }
 
 impl Field {
@@ -471,6 +478,7 @@ impl Atlas {
             closed: Vec::new(),
             misses: Cell::new(0),
             hits: Cell::new(0),
+            relaxed: Cell::new(0),
         }
     }
 
@@ -743,6 +751,7 @@ impl Atlas {
             closed: world.closed.iter().map(|r| r.coords()).collect(),
             misses: Cell::new(0),
             hits: Cell::new(0),
+            relaxed: Cell::new(0),
         }
     }
 
@@ -756,6 +765,10 @@ impl Atlas {
 
     pub fn hits(&self) -> i32 {
         self.hits.get()
+    }
+
+    pub fn relaxed(&self) -> i32 {
+        self.relaxed.get()
     }
 
     /// Tiles are asked of rooms in sight: out of sight a grid is its
@@ -963,9 +976,10 @@ impl Atlas {
         goal: Goal,
         danger: Option<&TileSet>,
     ) -> Rc<Table<i32>> {
-        let (dist, kept) = grid.flood(mover, goal, danger);
+        let (dist, kept, relaxed) = grid.flood(mover, goal, danger);
         let count = if kept { &self.hits } else { &self.misses };
         count.set(count.get() + 1);
+        self.relaxed.set(self.relaxed.get() + relaxed);
         dist
     }
 

@@ -180,6 +180,7 @@ fn run_tick() -> Result<(), String> {
     let mut counts = vec![
         ("atlasHits".to_string(), atlas.hits()),
         ("atlasMisses".to_string(), atlas.misses()),
+        ("flood".to_string(), atlas.relaxed()),
     ];
     let abandoning = (declarations.colonies.iter()).filter(|p| p.stage == Stage::Abandon);
     for room in abandoning.filter_map(|p| world.room(p.room)) {

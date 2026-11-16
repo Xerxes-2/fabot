@@ -9,8 +9,8 @@
 // claim is the min-of-rounds B/A with identical fingerprints (each tick's
 // intents and Memory).
 //
-// --counts replays A once and prints §9.3's counts a tick per window instead:
-// floods, flood-table hits, tiles relaxed, by the caller's named frames.
+// --counts replays A once and prints §9.3's Atlas counts a tick per window
+// instead: floods, flood-table hits, tiles relaxed.
 //
 // Usage: npm run bench -- --a A.js [--b B.js] [--rounds R] [--cold K] capture.jsonl…
 //        npm run bench -- --a A.js --counts capture.jsonl…
@@ -66,32 +66,24 @@ function runTick(bot, tick) {
   const ms = Object.fromEntries(observed.phases);
   Object.assign(ms, { bot: observed.cpu, stringify, tick: observed.cpu + stringify });
   const print = createHash("sha256").update(JSON.stringify(intents)).update(memory).digest("hex").slice(0, 12);
-  return { ms, print, faults: observed.faults.filter((f) => f.tick === tick.time) };
+  return { ms, print, faults: observed.faults.filter((f) => f.tick === tick.time), counts: Object.fromEntries(observed.counts) };
 }
 
 if (flags.counts) {
-  Error.stackTraceLimit = 40;
-  const skip = new Set(["flood", "AtlasModule_field", "AtlasModule_travelTicks", "ticksTo", "Object.loop", "loop", "runTick", "run"]);
-  let tally;
-  globalThis.__fabotCount = (what, n) => {
-    const who = [...new Error().stack.matchAll(/at (?:Object\.)?([\w$]+) \(/g)].map((m) => m[1]).filter((f) => !skip.has(f) && !f.startsWith("__")).slice(0, 2).join("<");
-    const row = (tally[who] ??= { floods: 0, hits: 0, tiles: 0 });
-    if (what === "hit") row.hits += n;
-    else (row.floods++, (row.tiles += n));
-  };
   const windows = [];
   let bot;
   for await (const [tick, i] of replay()) {
-    if (i === 0) (windows.push((tally = {})), (bot = load(bundles.A)));
-    runTick(bot, tick);
-    tally.length = i + 1;
+    if (i === 0) (windows.push({ length: 0, floods: 0, hits: 0, tiles: 0 }), (bot = load(bundles.A)));
+    const { counts } = runTick(bot, tick);
+    const w = windows.at(-1);
+    w.length++;
+    w.floods += counts.atlasMisses ?? 0;
+    w.hits += counts.atlasHits ?? 0;
+    w.tiles += counts.flood ?? 0;
   }
-  for (const [wi, { length, ...w }] of windows.entries()) {
-    const rows = Object.entries(w).sort((a, b) => b[1].tiles - a[1].tiles);
-    const sum = (k) => rows.reduce((s, [, r]) => s + r[k], 0);
-    const per = (x) => (x / length).toFixed(1);
-    console.log(`window ${wi} (${length} ticks): ${per(sum("floods"))} floods a tick, hit rate ${((100 * sum("hits")) / (sum("hits") + sum("floods"))).toFixed(1)}%, ${(sum("tiles") / sum("floods")).toFixed(0)} tiles a flood`);
-    for (const [who, r] of rows) console.log(`  ${who.padEnd(48)} floods ${per(r.floods).padStart(7)} hits ${per(r.hits).padStart(7)} tiles ${per(r.tiles).padStart(9)}`);
+  for (const [wi, w] of windows.entries()) {
+    const per = (x) => (x / w.length).toFixed(1);
+    console.log(`window ${wi} (${w.length} ticks): ${per(w.floods)} floods a tick, hit rate ${((100 * w.hits) / (w.hits + w.floods)).toFixed(1)}%, ${(w.tiles / w.floods).toFixed(0)} tiles a flood`);
   }
   process.exit(0);
 }

@@ -367,7 +367,7 @@ fn lanes(
     lane[anchor] = grid::weight(
         grid::value(weights[anchor]).map_or(engine::PLAIN_WEIGHT, |w| w.max(engine::PLAIN_WEIGHT)),
     );
-    let walk = grid::flood(Footprint::One, &lane, &steps(), &[anchor]);
+    let (walk, _) = grid::flood(Footprint::One, &lane, &steps(), &[anchor]);
 
     let mut clear = [false; tiles::COUNT];
     let lattice = |t: Tile| -> bool { on_lat[t] && lane[t].is_some() };
