@@ -6,10 +6,10 @@
 //! build order, the first spawn first.
 use std::io::Read;
 
-use fabot::core::layout::{ground, plan, sites};
-use fabot::core::tiles::{self, Tile};
-use fabot::core::vocabulary::Resource;
-use fabot::core::world::{
+use fabot_core::layout::{ground, plan, sites};
+use fabot_core::tiles::{self, Tile};
+use fabot_core::vocabulary::Resource;
+use fabot_core::world::{
     Controller, Kind, Mineral, Owner, Pos, Room, RoomName, Rules, Source, Store, Structure, terrain,
 };
 use serde_json::{Value, json};

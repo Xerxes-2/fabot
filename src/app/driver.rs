@@ -6,13 +6,13 @@ use wasm_bindgen::prelude::*;
 
 use crate::app::wire;
 use crate::app::world;
-use crate::core::atlas::Atlas;
-use crate::core::intents::Refusal;
-use crate::core::layout::shape::Standing;
-use crate::core::observe::metrics::{self, Metrics};
-use crate::core::strategy::intel::Intel;
-use crate::core::tick::{self, Declarations};
-use crate::core::world::{RoomName, Sightings};
+use fabot_core::atlas::Atlas;
+use fabot_core::intents::Refusal;
+use fabot_core::layout::shape::Standing;
+use fabot_core::observe::metrics::{self, Metrics};
+use fabot_core::strategy::intel::Intel;
+use fabot_core::tick::{self, Declarations};
+use fabot_core::world::{RoomName, Sightings};
 
 const FAULTS_KEPT: usize = 20;
 /// A reset loses at most this many ticks of sight.
@@ -98,7 +98,7 @@ fn run_tick() -> Result<(), String> {
         .besieging(intel.as_ref().unwrap_or(&Intel::new()));
     let start = clock();
     let drain = (state.engagements.iter())
-        .find(|e| e.phase == crate::core::fight::shape::Phase::Draining)
+        .find(|e| e.phase == fabot_core::fight::shape::Phase::Draining)
         .map(|e| e.room);
     let (mut world, pass) = world::of_game(&mut maps, &declarations, drain);
     (world.rooms.iter_mut()).for_each(|r| r.terrain = maps.terrain(r.name));

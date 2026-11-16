@@ -208,7 +208,7 @@ const UNLOCK = {
   extractor: 6, lab: 6, terminal: 6, factory: 7, observer: 8, powerSpawn: 8, nuker: 8,
 };
 const TOWERS = [0, 0, 0, 1, 1, 2, 2, 3, 6];
-// `reserveTarget` (src/core/economy/quota.rs): every tower firing through a
+// `reserveTarget` (core/economy/quota.rs): every tower firing through a
 // creep's life, twice over — and nothing before storage exists to keep it in.
 const reserveOf = (level) => (level >= 4 ? TOWERS[level] * 10 * 1500 * 2 : 0);
 

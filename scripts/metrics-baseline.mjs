@@ -1,5 +1,5 @@
 // The metrics' distribution over healthy soaks, and the windows each run's
-// THRESHOLDS (src/core/observe/metrics.rs) would alert (ARCHITECTURE.md §10.5).
+// THRESHOLDS (core/observe/metrics.rs) would alert (ARCHITECTURE.md §10.5).
 //
 // Usage: npm run metrics:baseline -- <soak run dir>... [--skip T]
 //   --skip  ticks from a run's first window left out, the colony forming
@@ -19,7 +19,7 @@ if (!args.length || !Number.isInteger(skip)) {
   process.exit(1);
 }
 
-const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../src/core/observe/metrics.rs"), "utf8");
+const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../core/observe/metrics.rs"), "utf8");
 const consts = Object.fromEntries([...source.matchAll(/^const (\w+): &str = "([^"]+)";/gm)].map((m) => [m[1], m[2]]));
 const named = (family, name) => family === name || (family.endsWith(".") && name.startsWith(family));
 const slice = (from) => source.slice(source.indexOf(from), source.indexOf("];", source.indexOf(from)));

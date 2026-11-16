@@ -1,5 +1,5 @@
 // Segment 3 (ARCHITECTURE.md §4) in the format `Metrics::text`
-// (src/core/observe/metrics.rs) writes.
+// (core/observe/metrics.rs) writes.
 export const METRICS = 3;
 
 export function windows(text) {

@@ -4,12 +4,12 @@ use serde::{Serialize, Serializer};
 use wasm_bindgen::prelude::wasm_bindgen;
 use wasm_bindgen::{JsCast, JsValue};
 
-use crate::core::memory::Memory;
-use crate::core::observe::metrics::Metrics;
-use crate::core::state::State;
-use crate::core::strategy::intel::{self, Intel};
-use crate::core::tactics::{self, Offer};
-use crate::core::world::World;
+use fabot_core::memory::Memory;
+use fabot_core::observe::metrics::Metrics;
+use fabot_core::state::State;
+use fabot_core::strategy::intel::{self, Intel};
+use fabot_core::tactics::{self, Offer};
+use fabot_core::world::World;
 
 /// Read by `npm run observe` and `scripts/capture`.
 pub const OBSERVE_SEGMENT: u8 = 1;
@@ -76,7 +76,7 @@ pub struct Observed {
     #[serde(serialize_with = "offer_rows")]
     pub offers: Vec<(i32, Vec<Offer>)>,
     pub faults: Vec<Fault>,
-    pub refusals: Vec<crate::core::intents::Refusal>,
+    pub refusals: Vec<fabot_core::intents::Refusal>,
     pub alerts: Vec<String>,
 }
 

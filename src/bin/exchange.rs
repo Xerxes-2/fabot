@@ -6,9 +6,9 @@
 //! compound or ""), and writes `[{ id, kind, ticks, dead, hits }]`.
 use std::io::Read;
 
-use fabot::core::exchange::{self, Losses, Outcome, Side, Stance, Terrain, Tower, fighter};
-use fabot::core::vocabulary::Part;
-use fabot::core::world::{Pos, RoomName};
+use fabot_core::exchange::{self, Losses, Outcome, Side, Stance, Terrain, Tower, fighter};
+use fabot_core::vocabulary::Part;
+use fabot_core::world::{Pos, RoomName};
 use serde_json::{Value, json};
 
 fn int(e: &Value, key: &str) -> i32 {

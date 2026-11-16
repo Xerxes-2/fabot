@@ -116,7 +116,7 @@ const scriptsHash = hash(
     .map((f) => readFileSync(f)),
 );
 // A node is built from the plan of this tree's Layout, whatever the bundle.
-const planHash = hash(...[join(REPO, "src/bin/plan.rs"), ...readdirSync(join(REPO, "src/core/layout")).sort().map((f) => join(REPO, "src/core/layout", f))].map((f) => readFileSync(f)));
+const planHash = hash(...[join(REPO, "src/bin/plan.rs"), ...readdirSync(join(REPO, "core/layout")).sort().map((f) => join(REPO, "core/layout", f))].map((f) => readFileSync(f)));
 const wasmOf = (file) => [file.replace(/\.js$/, ".wasm")].filter(existsSync).map((f) => readFileSync(f));
 for (const b of bots) b.code = hash(readFileSync(b.file, "utf8").replace(/^(?:var |globalThis\.)__FABOT_VERSION__ = .*$/m, ""), ...wasmOf(b.file));
 

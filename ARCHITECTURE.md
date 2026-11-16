@@ -52,6 +52,9 @@ Game ──World.ofGame──▶ World ──decide──▶ Intents ──Execu
 ```
 
 - `World.ofGame` reads the API once; nothing below it touches `Game`.
+  `decide` and the decoder of that read are the `fabot-core` crate (`core/`),
+  apart from the wasm driver (`src/app/`), so they also build natively for a
+  simulator to drive.
 - `decide : State -> World -> Intents * State'` is pure at this boundary and
   **deterministic**: no unseeded random, no reference to anything but its
   arguments, and a clock read only to time its phases, which nothing decided

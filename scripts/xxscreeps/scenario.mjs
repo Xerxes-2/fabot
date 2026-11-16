@@ -12,7 +12,7 @@
 // Usage: npm run scenario -- [name...] [--modules m,n] [--list] [--bot main.js] [--jobs J] [--nightly] [--fetch] [--capture] [--base name] [--seeds N]
 //        npm run scenario -- <name> --watch [--tick-ms N] [--port N]
 //   name    the scenarios to run (default all but the nightly ones), by file name
-//   --modules  also the scenarios naming any of these modules (directories under src/core)
+//   --modules  also the scenarios naming any of these modules (directories under core)
 //   --list  print the selection and run nothing
 //   --nightly  all of them, with those marked "nightly": the offence target,
 //           kept out of `jj ship`
@@ -28,13 +28,13 @@
 //   --jobs  soaks at once (default a quarter of the hardware threads, as soak:many)
 //   --watch the one scenario's soak watched (soak's --watch), in this terminal
 //
-// A scenario file: { "why": the invariant, "modules": the src/core modules it tests, "nightly"?, "start": { "room", "seed",
+// A scenario file: { "why": the invariant, "modules": the core modules it tests, "nightly"?, "start": { "room", "seed",
 // "late"?, "node"?, "invaders"? (soak's --invaders), "wave"? (soak's --wave), "core"? (soak's --core), "unsafe"?, "ended"?, "at"?, "bundle"?,
 // "opponents"? (soak's --opponents) } or { "world": a capture-shaped file
 // (soak's --world; crafted ones under worlds/), "seed", "room"?, "node"?, "late"? (a world with no home of ours, as a recipe's), "ended"?, "invaders"?, "wave"?, "opponents"? (the world's own users), "declarations"? (in place of the world's), "memory"? (keys of Memory.v2 beside the world's), "gcl"? (in place of the world's), "withdrawn"? (rooms whose open siege the owner has just withdrawn), "off"? (modules switched off from the first tick, Memory.v2.switches; "economy" off, our spawns and extensions stand full) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"?, "room"?, "kind"?, "name"?, "act"? }] };
 // a measure is one of `measures` below, read off the soak's output over ticks
 // [from, to), counted from the run's first tick; { "metric": a name the bot's
-// metrics carry (`src/core/observe/metrics.rs`), "room"? } bounds its worst
+// metrics carry (`core/observe/metrics.rs`), "room"? } bounds its worst
 // full window, and fails when none was read.
 // Exits non-zero when a bound fails or a soak does, or loses ticks twice.
 import { spawn, spawnSync } from "node:child_process";
@@ -72,7 +72,7 @@ for (let i = 0; i < rest.length; i++)
   else if (rest[i].startsWith("--")) fail("usage: npm run scenario -- [name...] [--modules m,n] [--list] [--bot main.js] [--jobs J] [--nightly] [--fetch] | <name> --watch [--tick-ms N] [--port N]");
   else names.push(rest[i]);
 
-const CORE = join(REPO, "src/core");
+const CORE = join(REPO, "core");
 const modules = readdirSync(CORE).filter((m) => m !== "tests" && statSync(join(CORE, m)).isDirectory());
 const library = readdirSync(LIBRARY)
   .filter((f) => f.endsWith(".json"))
@@ -205,7 +205,7 @@ const LEDGER_LEAST = 1000;
 const SEEN_AFTER_CAST = 2;
 // The engine's CREEP_SPAWN_TIME.
 const SPAWN_TIME_PER_PART = 3;
-// `AGED` in `src/core/observe/metrics.rs`: fewer ticks to live, a body died of age.
+// `AGED` in `core/observe/metrics.rs`: fewer ticks to live, a body died of age.
 const AGED = 5;
 const firstClaimed = (samples, met) => samples.find((s) => Object.keys(s.claimed ?? {}).length && Object.values(s.claimed).every(met))?.t ?? Infinity;
 const measures = {

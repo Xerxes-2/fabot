@@ -1,9 +1,9 @@
 //! `World.ofGame`: the one reader of the game's objects. `read.js` walks them
 //! in one pass and hands over its numbers and its strings whole, for
-//! `core::world::read` to decode; this fetches what only the engine
+//! `fabot_core::world::read` to decode; this fetches what only the engine
 //! answers. A call across the seam costs more than the field it reads, so the
 //! reader makes a handful a tick.
-use crate::core::HashMap;
+use fabot_core::HashMap;
 use std::collections::BTreeSet;
 
 use js_sys::{Array, Int32Array};
@@ -15,10 +15,10 @@ use screeps::game::{
 use wasm_bindgen::prelude::wasm_bindgen;
 use wasm_bindgen::{JsCast, JsValue};
 
-use crate::core::atlas::tiles;
-use crate::core::tick::Declarations;
-use crate::core::world::RoomName;
-use crate::core::world::*;
+use fabot_core::atlas::tiles;
+use fabot_core::tick::Declarations;
+use fabot_core::world::RoomName;
+use fabot_core::world::*;
 
 #[wasm_bindgen]
 extern "C" {
@@ -64,7 +64,7 @@ impl Maps {
 
     /// Kept when empty too, so a room the map lacks is asked once.
     fn read_around(&mut self, homes: impl Iterator<Item = (i32, i32)>) {
-        let reach = crate::core::tick::SIEGE_HOPS;
+        let reach = fabot_core::tick::SIEGE_HOPS;
         let mut unread: Vec<(i32, RoomName)> = Vec::new();
         for (x, y) in homes {
             for dx in -reach..=reach {
@@ -104,7 +104,7 @@ pub fn of_game(
     let packed = read(drain.map(|room| room.to_string()));
     let ints = packed.get(0).unchecked_into::<Int32Array>().to_vec();
     let text = packed.get(1).as_string().unwrap_or_default();
-    let mut world = crate::core::world::read::world(&ints, &text, declarations);
+    let mut world = fabot_core::world::read::world(&ints, &text, declarations);
     world.cpu_limit = f64::from(game::cpu::limit());
     for name in world.rooms.iter().map(|room| room.name) {
         if !matches!(maps.terrain.get(&name), Some(Some(_)))
@@ -119,7 +119,7 @@ pub fn of_game(
         .filter(|s| s.pos.room != RoomName::SIM)
         .map(|s| s.pos.room.coords());
     maps.read_around(homes.collect::<BTreeSet<_>>().into_iter());
-    world.closed = crate::core::world::read::closed(&world, declarations, |room| maps.status(room));
+    world.closed = fabot_core::world::read::closed(&world, declarations, |room| maps.status(room));
     (world, Pass { ints, strs: text })
 }
 

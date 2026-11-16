@@ -4,11 +4,11 @@ use wasm_bindgen::prelude::wasm_bindgen;
 use wasm_bindgen::{JsCast, JsValue};
 
 use crate::app::world;
-use crate::core::intents::{
+use fabot_core::intents::{
     ControllerAct, CreepAct, Intent, LabAct, LinkAct, Refusal, RoomAct, SpawnAct, TerminalAct,
     TowerAct,
 };
-use crate::core::vocabulary;
+use fabot_core::vocabulary;
 
 const NOT_FOUND: i32 = -5;
 const THREW: i32 = -100;

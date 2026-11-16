@@ -11,7 +11,7 @@ const CACHE = new URL("../captures/history/", import.meta.url);
 // holds half a fight.
 const SETTLED = 1000;
 
-/// Kinds `next_razed` takes from the rival (`src/core/fight/kinds/siege.rs`).
+/// Kinds `next_razed` takes from the rival (`core/fight/kinds/siege.rs`).
 const RAZED = new Set(["tower", "spawn", "extension", "storage", "terminal", "link", "lab", "extractor", "factory",
   "powerSpawn", "nuker", "observer"]);
 
@@ -269,7 +269,7 @@ export function strikes({ ticks, ours }) {
   return out;
 }
 
-/// `next_razed` (`src/core/fight/kinds/siege.rs`) replayed on the history's own
+/// `next_razed` (`core/fight/kinds/siege.rs`) replayed on the history's own
 /// structures: his towers' power on a tile, the most the raze costs him, the
 /// nearest to the set's first member by name, then the id.
 export function razes({ ticks, ours, sources }) {

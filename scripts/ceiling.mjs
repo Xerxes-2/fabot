@@ -2,7 +2,7 @@
 // no issue or ADR citation in code. A directory's line count is every line of
 // every .rs beneath it, minus a `<dir>/kinds/*` entry's files, which are each
 // held to their own ceiling. A comment share is per directory of the bot's
-// source, over its own .rs files. Neither counts a `#[cfg(test)]` item nor
+// source (`src`, `core`), over its own .rs files. Neither counts a `#[cfg(test)]` item nor
 // the shared suites under `core/tests`. Exits non-zero on any breach.
 //
 // Usage: node scripts/ceiling.mjs
@@ -13,8 +13,8 @@ const { lines: ceilings, comments: commentPct } = JSON.parse(
   readFileSync(new URL("./ceilings.json", import.meta.url), "utf8"),
 );
 
-const SRC = "src";
-const SUITES = `${SRC}/core/tests`;
+const ROOTS = ["src", "core"];
+const SUITES = "core/tests";
 
 const rsFiles = (dir) =>
   readdirSync(dir).flatMap((name) => {
@@ -23,7 +23,7 @@ const rsFiles = (dir) =>
     return name.endsWith(".rs") ? [path] : [];
   });
 const shipped = (dir) =>
-  rsFiles(dir).filter((f) => !f.startsWith(SUITES + "/") && !f.startsWith(`${SRC}/bin/`));
+  rsFiles(dir).filter((f) => !f.startsWith(SUITES + "/") && !f.startsWith("src/bin/"));
 
 // The lines the bot ships: a top-level `#[cfg(test)]` item is dropped, to the
 // `;` that ends a declaration or the `}` at column 0 that closes a block.
@@ -73,7 +73,7 @@ for (const [key, ceiling] of Object.entries(ceilings)) {
 }
 
 // AGENTS.md: no issue numbers or ADR citations in code; git log has them.
-const cited = rsFiles(SRC).flatMap((file) =>
+const cited = ROOTS.flatMap(rsFiles).flatMap((file) =>
   readFileSync(file, "utf8")
     .split("\n")
     .map((line, i) => [file, i + 1, line])
@@ -89,7 +89,7 @@ if (cited.length > 0) {
 }
 
 const dirs = [
-  ...new Set(shipped(SRC).map((f) => f.slice(0, f.lastIndexOf("/")))),
+  ...new Set(ROOTS.flatMap(shipped).map((f) => f.slice(0, f.lastIndexOf("/")))),
 ];
 const shares = dirs.map((dir) => {
   const [n, comments] = count(
