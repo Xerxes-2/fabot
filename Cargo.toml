@@ -24,7 +24,7 @@ screeps-game-api.workspace = true
 wasm-bindgen = "0.2"
 serde.workspace = true
 serde_json.workspace = true
-miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
+miniz_oxide = { version = "0.9", default-features = false, features = ["with-alloc"] }
 
 # The soak's node plan and the generated set's predictions, built natively.
 [features]
