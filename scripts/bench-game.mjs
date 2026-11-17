@@ -68,9 +68,15 @@ const special = {
   store: (o) => (o.store ? new Store(o) : undefined),
   creep: (o) => (o.creep ? { ...o.creep, store: new Store(o.creep) } : undefined),
 };
-function getters(proto, keys) {
+// The kinds the engine gives an `energy` and `energyCapacity` read off the data, not the Store.
+const ENERGY_ONLY = new Set(["s:spawn", "s:extension", "s:tower", "s:link"]);
+const energyOnly = {
+  energy: (o) => (o.store ? (o.store.held.energy ?? 0) : 0),
+  energyCapacity: (o) => o.store?.capacity ?? 0,
+};
+function getters(proto, keys, readers = special) {
   for (const k of keys) {
-    const read = special[k] ?? ((o) => o[k]);
+    const read = readers[k] ?? ((o) => o[k]);
     const memo = `_${k}`;
     Object.defineProperty(proto, k, {
       configurable: true,
@@ -121,6 +127,7 @@ function classOf(kind, s) {
     classes.set(kind, proto);
   }
   getters(proto, Object.keys(s).filter((k) => k !== "id" && k !== "pos" && !(k in proto)));
+  if (ENERGY_ONLY.has(kind) && !("energy" in proto)) getters(proto, ["energy", "energyCapacity"], energyOnly);
   return proto;
 }
 const KIND = { 105: "source", 116: "mineral", 111: "site", 106: "resource", 118: "tombstone", 123: "ruin", 103: "creep" };

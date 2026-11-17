@@ -13,6 +13,8 @@
 //               (ARCHITECTURE.md §10.4: an incident replayed)
 //   a tag       every soak-runs/scenario-<tag>-*/capture.jsonl
 //   --show      the differing ticks detailed per capture (default 1)
+//   --check     read.js reads again each fact it keeps across ticks and
+//               stops on the first one apart
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { availableParallelism } from "node:os";
@@ -23,7 +25,7 @@ import { ticksOf } from "./capture-read.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const RUNS = join(HERE, "..", "soak-runs");
-const usage = "usage: npm run replay -- --a A.js [--b B.js] [--jobs J] [--show N] [capture.jsonl | run dir | scenario tag]…";
+const usage = "usage: npm run replay -- --a A.js [--b B.js] [--jobs J] [--show N] [--check] [capture.jsonl | run dir | scenario tag]…";
 const fail = (m) => {
   console.error(m);
   process.exit(2);
@@ -32,7 +34,8 @@ const flags = {};
 const targets = [];
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i++)
-  if (argv[i].startsWith("--")) {
+  if (argv[i] === "--check") globalThis.__fabotCheck = true;
+  else if (argv[i].startsWith("--")) {
     if (!["--a", "--b", "--jobs", "--show", "--worker", "--at"].includes(argv[i]) || argv[i + 1] === undefined) fail(usage);
     flags[argv[i]] = argv[++i];
   } else targets.push(argv[i]);
@@ -115,7 +118,7 @@ const queue = [...files].sort((x, y) => statSync(y).size - statSync(x).size);
 const results = [];
 const worker = (file) =>
   new Promise((done) => {
-    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), "--worker", file, "--a", flags["--a"], ...(flags["--b"] ? ["--b", flags["--b"]] : []), "--show", String(show), ...(flags["--at"] ? ["--at", flags["--at"]] : [])], {
+    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), "--worker", file, "--a", flags["--a"], ...(flags["--b"] ? ["--b", flags["--b"]] : []), "--show", String(show), ...(globalThis.__fabotCheck ? ["--check"] : []), ...(flags["--at"] ? ["--at", flags["--at"]] : [])], {
       stdio: ["ignore", "pipe", "inherit"],
     });
     let out = "";

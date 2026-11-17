@@ -76,16 +76,50 @@ globalThis.__fabotRead = (() => {
   const STORED = new Set(["spawn", "extension", "tower", "container", "storage", "link", "terminal", "lab", "factory", "powerSpawn", "nuker", "invaderCore"]);
   const KNOWN = new Set([...STORED, "road", "rampart", "constructedWall", "extractor", "observer", "keeperLair", "powerBank", "portal"]);
   const COOLED = new Set(["tower", "link", "lab", "extractor", "terminal", "factory", "nuker", "powerSpawn"]);
+  // The official engine reads these off the object's data, where `store` builds a Store each tick.
+  const ENERGY = new Set(["spawn", "extension", "tower", "link"]);
+  const energy = (st) => {
+    const e = st.energy;
+    if (e > 0) n(1), w("energy"), n(e);
+    else n(0);
+    n(st.energyCapacity);
+  };
   // The collapse effect's timer if it runs, else the deploy timer and a flag 0.
   const collapse = (st) => {
     const e = Array.isArray(st.effects) ? st.effects.find((e) => e.effect === 1002) : undefined;
     if (e) n(1), n(e.ticksRemaining);
     else n(0), n(st.ticksToDeploy);
   };
+  let fixed = new Map();
+  let pass = 0;
+  let checking = false;
+  const fixedOf = (st, id) => {
+    let f = fixed.get(id);
+    if (f !== undefined && checking) {
+      const read = (fixed.delete(id), fixedOf(st, id));
+      for (const k of ["type", "x", "y", "tag", "user", "hitsMax"])
+        if (read[k] !== f[k]) throw new Error(`${id} ${k}: kept ${f[k]}, read ${read[k]}`);
+    }
+    if (f === undefined) {
+      const type = st.structureType;
+      // A controller changes hands; a rampart's or wall's hitsMax follows its room's level.
+      const o = type === "controller" ? undefined : st.owner;
+      const tag = type === "controller" ? undefined : st.my === true ? 1 : absent(o) ? 0 : 2;
+      const hitsMax = type === "rampart" || type === "constructedWall" ? undefined : st.hitsMax;
+      fixed.set(id, (f = { type, x: st.pos.x, y: st.pos.y, tag, user: tag === 2 ? o.username : "", hitsMax, pass }));
+    } else f.pass = pass;
+    return f;
+  };
   const structure = (st) => {
-    const type = st.structureType;
-    w(type), s(st.id), n(st.pos.x), n(st.pos.y), owner(st), n(st.hits), n(st.hitsMax);
-    if (STORED.has(type) || !KNOWN.has(type)) store(st.store);
+    const id = st.id;
+    const f = fixedOf(st, id);
+    const type = f.type;
+    w(type), s(id), n(f.x), n(f.y);
+    if (f.tag === undefined) owner(st);
+    else if ((n(f.tag), f.tag === 2)) w(f.user);
+    n(st.hits), n(f.hitsMax ?? st.hitsMax);
+    if (ENERGY.has(type) && typeof st.energyCapacity === "number") energy(st);
+    else if (STORED.has(type) || !KNOWN.has(type)) store(st.store);
     if (COOLED.has(type)) n(st.cooldown);
     if (type === "keeperLair") n(st.ticksToSpawn ?? -1);
     if (type === "invaderCore") collapse(st), n(st.level);
@@ -228,6 +262,8 @@ globalThis.__fabotRead = (() => {
     at = 0;
     strs = [];
     words = new Map();
+    checking = globalThis.__fabotCheck === true;
+    if (++pass % 100 === 0) fixed = new Map([...fixed].filter(([, f]) => f.pass === pass - 1));
     const game = Game;
     n(game.time), n(game.cpu.bucket);
     const rooms = sorted(game.rooms).map((k) => game.rooms[k]);
