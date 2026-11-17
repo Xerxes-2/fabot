@@ -1,7 +1,7 @@
 [workspace]
 members = ["core"]
-# scenario.mjs builds old commits' trees under .scratch/; cargo must not claim them.
-exclude = [".scratch"]
+# Old commits' trees build under .scratch/, an agent's workspace under .claude/: cargo must not claim them.
+exclude = [".scratch", ".claude"]
 
 [workspace.dependencies]
 screeps-game-api = "0.23.5"

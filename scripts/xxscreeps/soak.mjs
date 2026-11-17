@@ -90,6 +90,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { node26 as nodeBin, node26Env } from "./node26.mjs";
 import { patchRuntimeCache } from "./runtime-cache.mjs";
+import { invariants } from "./measures.mjs";
 
 // Where the run's wall time went, written to timing.json (`scenario.mjs` sums them).
 const began = Date.now();
@@ -629,3 +630,7 @@ if (lost.length) {
   console.error(`${run}: no measurement: ${lost.length} ticks lost to a script timeout or abandoned intents (${lost.slice(0, 10).join(", ")}${lost.length > 10 ? ", …" : ""}); see lost.json`);
   process.exit(3);
 }
+// `npm run soak` alone exits 5 on a broken invariant: a scenario bounds its own, and soak:many reads them off the files.
+const broken = process.env.npm_lifecycle_event === "soak" ? invariants(out) : [];
+for (const b of broken) console.error(`${run}: invariant broken: ${b}`);
+if (broken.length) process.exit(5);

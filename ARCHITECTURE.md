@@ -983,8 +983,10 @@ everything v1 used its self-written arena for, and more:
   Before it ships, the same over the two extremes of harvest seats
   (`npm run soak:many`: rooms whose sources have one seat each, and rooms
   whose sources have four or more), so no change is tuned to one kind of
-  terrain, and 10,000 ticks of N7 on `season-late-seat`, so it is judged on
-  the late economy a respawn never reaches, and 10,000 ticks of E1 on
+  terrain, E23S9 on `season-outpost-ring`, the one-source seat the
+  scenarios of a one-source economy start from, 10,000 ticks of N7 on
+  `season-late-seat`, so it is judged on the late economy a respawn never
+  reaches, and 10,000 ticks of E1 on
   `season-outpost-ring` with Hivemind seated two rooms off, so exposure and
   losses (§10.5) are read against a rival that contests the outposts
   (Hivemind over TooAngel: it reaches RCL3 there and walks our outposts,
@@ -992,6 +994,13 @@ everything v1 used its self-written arena for, and more:
   its own). The extremes answer differently
   (a crowd of small bodies works only where seats are many), so they are
   read apart, never as a median.
+  `npm run soak` and `soak:many` also hold the economy's invariants
+  (`measures.mjs`) on every home: no road lost in a room it follows, no
+  level dropped, three ramparts standing once RCL4 has had time to raise
+  them, no paying site waiting past 10,000 ticks, no refusal and no fault;
+  a run that breaks one fails and names its room. The long run checks them on
+  every seat, where a scenario each checked one seat at the cost of the
+  library's slowest soaks.
   A soak is a relative measure: A against B on the same rooms and seed,
   reported as the difference, never as what live will do (live has
   neighbours, season rules and the owner's hand, which no soak calibrates

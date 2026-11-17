@@ -14,12 +14,17 @@
 //   --room   these starts instead of the default: the extremes of harvest
 //            seats, both sources with one seat (a small harvester cannot fill
 //            a source) and both with four or more (bodies can crowd in
-//            instead), the late game, and a contested start: E1 on Season
-//            11's map with Hivemind seated two rooms off, contesting our
-//            outposts. A start is [<world>:]<room>[@<node>][+<bot>:<room>],
-//            <world> one of worlds/ with no home of ours (soak.mjs --world,
-//            --node), <bot> a rival under engine/ seated in <room>
-//            (soak.mjs --opponents), our safe mode kept to activate (--ended)
+//            instead), one source (E23S9 on Season 11's map), the late game,
+//            and a contested start: E1 on that map with Hivemind seated two
+//            rooms off, contesting our outposts. A start is
+//            [<world>:]<room>[@<node>][+<bot>:<room>], <world> one of worlds/
+//            with no home of ours (soak.mjs --world, --node), <bot> a rival
+//            under engine/ seated in <room> (soak.mjs --opponents). With a
+//            rival, or on a world from one spawn as the library's scenarios
+//            there, our safe mode is kept to activate (--ended)
+//
+// Every run holds `measures.mjs`'s invariants; a run that breaks one is named
+// under the table, and the exit is non-zero.
 //   --ticks  per run (default 30000; a node's 10000)
 //   --node   start every run without its own node at this one
 //   --jobs   runs at once (default a quarter of the hardware threads: a soak
@@ -40,6 +45,7 @@ import { node26Env } from "./node26.mjs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sweep } from "./prune.mjs";
+import { invariants } from "./measures.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "../..");
@@ -78,7 +84,7 @@ const parseSeeds = (text) =>
     return { seed: whole(seed, "--seed", 0), late: whole(late, "--seed", 0), label: spec };
   });
 const CONTESTED = "season-outpost-ring:E25S9@E1+hivemind:E27S9";
-const starts = (flags["--room"] ?? `W9N8,W8N3,season-late-seat:W12S28@N7,${CONTESTED}`).split(",").map((spec) => {
+const starts = (flags["--room"] ?? `W9N8,W8N3,season-outpost-ring:E23S9,season-late-seat:W12S28@N7,${CONTESTED}`).split(",").map((spec) => {
   const m = /^(?:([\w-]+):)?([WE]\d+[NS]\d+)(?:@([A-Za-z0-9]+))?(?:\+([a-z]+):([WE]\d+[NS]\d+))?$/.exec(spec);
   if (!m) fail(`--room: "${spec}" is not [world:]room[@node][+bot:room]`);
   const world = m[1] && join(HERE, "worlds", `${m[1]}.json`);
@@ -146,7 +152,7 @@ function soak(run) {
     const { room, world, node, rival, ticks } = run.start;
     const opponents = join(RUNS, `${run.name}.opponents.json`);
     if (rival) writeFileSync(opponents, JSON.stringify([rival]));
-    const args = [...(rival ? ["--opponents", opponents, "--ended"] : []), "--room", room, "--run", run.name, "--ticks", String(ticks), "--seed", String(run.seed.seed), "--late", String(run.seed.late), "--every", "100", "--bot", run.bot.file, ...(node ? ["--node", node] : []), ...(world ? ["--world", world] : [])];
+    const args = [...(rival ? ["--opponents", opponents] : []), ...(rival || (world && !node) ? ["--ended"] : []), "--room", room, "--run", run.name, "--ticks", String(ticks), "--seed", String(run.seed.seed), "--late", String(run.seed.late), "--every", "100", "--bot", run.bot.file, ...(node ? ["--node", node] : []), ...(world ? ["--world", world] : [])];
     const child = spawn("node", [SOAK, ...args], { stdio: ["ignore", "ignore", "ignore"], env: node26Env({ ...process.env, FABOT_PLAN_BUILT: "1" }) });
     child.on("exit", (code) => {
       rmSync(opponents, { force: true });
@@ -176,8 +182,9 @@ await Promise.all(
 
 const ranAs = (run) => todo.find((r) => r.key === run.key);
 const failed = (run) => ranAs(run) !== undefined && codes[ranAs(run).name] !== 0;
+const dirOf = (run) => (failed(run) ? join(RUNS, ranAs(run).name) : join(CACHE, run.key));
 const read = (run, file) => {
-  const path = join(failed(run) ? join(RUNS, ranAs(run).name) : join(CACHE, run.key), file);
+  const path = join(dirOf(run), file);
   return existsSync(path) ? readFileSync(path, "utf8") : null;
 };
 
@@ -232,4 +239,6 @@ for (const start of starts)
           .join(""),
       );
     }
-if (Object.values(codes).some((c) => c !== 0)) process.exit(1);
+const broken = runs.filter((r) => !failed(r)).flatMap((r) => invariants(dirOf(r)).map((b) => `${r.name}: ${b}`));
+for (const b of broken) console.log(`invariant broken: ${b}`);
+if (broken.length || Object.values(codes).some((c) => c !== 0)) process.exit(1);
