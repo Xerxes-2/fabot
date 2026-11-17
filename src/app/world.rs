@@ -53,15 +53,19 @@ pub struct Maps {
 /// spawns first, out to the furthest a route goes.
 const READS_A_TICK: usize = 10;
 
-impl Maps {
-    pub fn terrains(&self) -> impl Iterator<Item = (RoomName, &[u8; tiles::COUNT])> {
-        (self.terrain.iter()).filter_map(|(room, t)| Some((*room, t.as_ref()?.get_bits())))
+impl fabot_core::drive::Terrains for Maps {
+    fn terrains(&self) -> Box<dyn Iterator<Item = (RoomName, &[u8; tiles::COUNT])> + '_> {
+        Box::new(
+            (self.terrain.iter()).filter_map(|(room, t)| Some((*room, t.as_ref()?.get_bits()))),
+        )
     }
 
-    pub fn terrain(&self, room: RoomName) -> Option<&LocalRoomTerrain> {
+    fn terrain(&self, room: RoomName) -> Option<&LocalRoomTerrain> {
         self.terrain.get(&room)?.as_ref()
     }
+}
 
+impl Maps {
     /// Kept when empty too, so a room the map lacks is asked once.
     fn read_around(&mut self, homes: impl Iterator<Item = (i32, i32)>) {
         let reach = fabot_core::tick::SIEGE_HOPS;

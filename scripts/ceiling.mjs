@@ -2,7 +2,7 @@
 // no issue or ADR citation in code. A directory's line count is every line of
 // every .rs beneath it, minus a `<dir>/kinds/*` entry's files, which are each
 // held to their own ceiling. A comment share is per directory of the bot's
-// source (`src`, `core`), over its own .rs files. Neither counts a `#[cfg(test)]` item nor
+// source (`src`, `core`, `sim`), over its own .rs files. Neither counts a `#[cfg(test)]` item nor
 // the shared suites under `core/tests`. Exits non-zero on any breach.
 //
 // Usage: node scripts/ceiling.mjs
@@ -13,7 +13,7 @@ const { lines: ceilings, comments: commentPct } = JSON.parse(
   readFileSync(new URL("./ceilings.json", import.meta.url), "utf8"),
 );
 
-const ROOTS = ["src", "core"];
+const ROOTS = ["src", "core", "sim"];
 const SUITES = "core/tests";
 
 const rsFiles = (dir) =>

@@ -6,7 +6,6 @@ use wasm_bindgen::{JsCast, JsValue};
 
 use fabot_core::memory::Memory;
 use fabot_core::observe::metrics::Metrics;
-use fabot_core::state::State;
 use fabot_core::strategy::intel::{self, Intel};
 use fabot_core::tactics::{self, Offer};
 use fabot_core::world::World;
@@ -20,8 +19,8 @@ pub fn read_memory() -> Memory {
     Memory::of_text(String::from(raw_memory::get()))
 }
 
-pub fn write_state(memory: &mut Memory, state: &State) {
-    if let Some(text) = memory.written(state) {
+pub fn write_memory(text: Option<String>) {
+    if let Some(text) = text {
         raw_memory::set(&JsString::from(text));
     }
 }

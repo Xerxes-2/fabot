@@ -1,0 +1,17 @@
+[package]
+name = "sim"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# krebs (MIT): the official engine's processor ported to Rust, driven here
+# without its V8 server.
+[dependencies]
+fabot-core = { path = "../core", features = ["tools"] }
+krebs = { package = "engine", git = "https://github.com/DefaultO/krebs", rev = "04a5394d00b05bbff4e472e07e0bf07ac811c315" }
+krebs-util = { package = "util", git = "https://github.com/DefaultO/krebs", rev = "04a5394d00b05bbff4e472e07e0bf07ac811c315" }
+screeps-game-api.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

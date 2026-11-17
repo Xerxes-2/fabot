@@ -6,12 +6,9 @@
 //! build order, the first spawn first.
 use std::io::Read;
 
-use fabot_core::layout::{ground, plan, sites};
+use fabot_core::layout::{self, sites};
 use fabot_core::tiles::{self, Tile};
-use fabot_core::vocabulary::Resource;
-use fabot_core::world::{
-    Controller, Kind, Mineral, Owner, Pos, Room, RoomName, Rules, Source, Store, Structure, terrain,
-};
+use fabot_core::world::{Kind, Owner, Pos, Room, RoomName, Rules, Store, Structure};
 use serde_json::{Value, json};
 
 fn main() {
@@ -29,67 +26,21 @@ fn main() {
     };
     let each = |key: &str| -> Vec<Pos> { input[key].as_array().unwrap().iter().map(pos).collect() };
 
-    let room = Room {
-        name,
-        terrain: terrain::leak(
-            input["terrain"]
-                .as_str()
-                .unwrap()
-                .bytes()
-                .map(|c| c - b'0')
-                .collect(),
-        ),
-        controller: Some(Controller {
-            id: "controller".into(),
-            pos: pos(&input["controller"]),
-            owner: Owner::Ours,
-            level,
-            progress: 0,
-            progress_total: 0,
-            ticks_to_downgrade: 0,
-            reservation: None,
-            safe_mode: 0,
-            safe_mode_available: 0,
-            safe_mode_cooldown: 0,
-            upgrade_blocked: 0,
-        }),
-        energy_available: 0,
-        energy_capacity: 0,
-        sources: each("sources")
-            .into_iter()
-            .enumerate()
-            .map(|(i, pos)| Source {
-                id: format!("source{i}"),
-                pos,
-                energy: 0,
-                energy_capacity: 0,
-                ticks_to_regeneration: 0,
-            })
-            .collect(),
-        minerals: each("minerals")
-            .into_iter()
-            .enumerate()
-            .map(|(i, pos)| Mineral {
-                id: format!("mineral{i}"),
-                pos,
-                resource: Resource::Energy,
-                amount: 0,
-            })
-            .collect(),
-        structures: Vec::new(),
-        sites: Vec::new(),
-        piles: Vec::new(),
-        remains: Vec::new(),
-        others: Vec::new(),
-    };
+    let terrain = input["terrain"]
+        .as_str()
+        .unwrap()
+        .bytes()
+        .map(|c| c - b'0')
+        .collect();
+    let rocks = (
+        pos(&input["controller"]),
+        &each("sources")[..],
+        &each("minerals")[..],
+    );
+    let room = layout::bare(name, terrain, rocks, level);
 
     let rules = Rules::vanilla();
-    let ground = ground::of_room(&room).unwrap();
-    let plan = plan::of_ground(&rules, &ground).unwrap();
-    let first_spawn = (plan.items.iter())
-        .find(|i| i.kind == Kind::Spawn)
-        .unwrap()
-        .clone();
+    let (plan, first_spawn) = layout::first_spawn(&rules, &room).unwrap();
 
     let mut built: Vec<Structure> = Vec::new();
     let build = |built: &mut Vec<Structure>, kind: Kind, tile: Tile| {
@@ -109,7 +60,7 @@ fn main() {
             walkable,
         })
     };
-    build(&mut built, Kind::Spawn, first_spawn.tile);
+    build(&mut built, Kind::Spawn, first_spawn);
     loop {
         let census = sites::census_of(
             &Room {

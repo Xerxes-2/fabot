@@ -1,18 +1,16 @@
 //! The tick driver: read, decide, execute, write.
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 
 use wasm_bindgen::prelude::*;
 
 use crate::app::wire;
 use crate::app::world;
-use fabot_core::atlas::Atlas;
-use fabot_core::intents::Refusal;
-use fabot_core::layout::shape::Standing;
+use fabot_core::drive::{self, Terrains as _};
+use fabot_core::intents::Intent;
 use fabot_core::observe::metrics::{self, Metrics};
 use fabot_core::strategy::intel::Intel;
-use fabot_core::tick::{self, Declarations};
-use fabot_core::world::{RoomName, Sightings};
+use fabot_core::tick::Declarations;
+use fabot_core::world::World;
 
 const FAULTS_KEPT: usize = 20;
 /// A reset loses at most this many ticks of sight.
@@ -21,14 +19,9 @@ const INTEL_WRITTEN_EVERY: i32 = 100;
 struct Heap {
     /// A module named here is skipped and its last output not replayed.
     faults: Vec<wire::Fault>,
-    /// Heap only, so empty after a reset, when each module re-derives it.
-    standing: BTreeMap<RoomName, Standing>,
-    spare: BTreeMap<RoomName, f64>,
-    /// Heap only: after a reset every outpost reads clear, and the first body
-    /// back in one that is not sees what stands there and stands it down again.
-    sightings: Sightings,
-    /// Heap only: after a reset every room floods afresh.
-    atlas: Atlas,
+    /// Heap only: after a reset each module re-derives its rows, every
+    /// outpost reads clear and every room floods afresh.
+    drive: drive::Heap,
     maps: world::Maps,
     /// `None` until its segment is read after a reset.
     intel: Option<Intel>,
@@ -41,10 +34,7 @@ thread_local! {
     static HOOKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static HEAP: RefCell<Heap> = RefCell::new(Heap {
         faults: Vec::new(),
-        standing: BTreeMap::new(),
-        spare: BTreeMap::new(),
-        sightings: Sightings::new(),
-        atlas: Atlas::empty(),
+        drive: drive::Heap::new(),
         maps: world::Maps::default(),
         intel: None,
         intel_asked: false,
@@ -66,101 +56,83 @@ fn run_tick() -> Result<(), String> {
     let clock = || game_cpu::get_used();
     let mut phases: Vec<(String, f64)> = Vec::new();
 
-    let (sightings, atlas, mut faults, (standing, spare), mut maps, held, asked, metrics) = HEAP
-        .with(|heap| {
-            let mut heap = heap.borrow_mut();
-            (
-                std::mem::take(&mut heap.sightings),
-                std::mem::replace(&mut heap.atlas, Atlas::empty()),
-                std::mem::take(&mut heap.faults),
-                (
-                    std::mem::take(&mut heap.standing),
-                    std::mem::take(&mut heap.spare),
-                ),
-                std::mem::take(&mut heap.maps),
-                heap.intel.take(),
-                std::mem::replace(&mut heap.intel_asked, true),
-                heap.metrics.take(),
-            )
-        });
+    let (mut kept, mut faults, mut maps, held, asked, metrics) = HEAP.with(|heap| {
+        let mut heap = heap.borrow_mut();
+        (
+            std::mem::take(&mut heap.drive),
+            std::mem::take(&mut heap.faults),
+            std::mem::take(&mut heap.maps),
+            heap.intel.take(),
+            std::mem::replace(&mut heap.intel_asked, true),
+            heap.metrics.take(),
+        )
+    });
     let mut intel = held.or_else(|| wire::read_intel(asked));
-    let metrics = metrics.or_else(|| asked.then(wire::read_metrics));
+    let mut metrics = metrics.or_else(|| asked.then(wire::read_metrics));
 
     let start = clock();
     let mut memory = wire::read_memory();
-    let mut state = memory.state();
-    state.layout = standing;
-    state.spare = spare;
     phases.push(("memory".to_string(), clock() - start));
 
-    let declarations: Declarations = memory
-        .declarations()
-        .besieging(intel.as_ref().unwrap_or(&Intel::new()));
-    let start = clock();
-    let drain = (state.engagements.iter())
-        .find(|e| e.phase == fabot_core::fight::shape::Phase::Draining)
-        .map(|e| e.room);
-    let (mut world, pass) = world::of_game(&mut maps, &declarations, drain);
-    (world.rooms.iter_mut()).for_each(|r| r.terrain = maps.terrain(r.name));
+    let held_intel = intel.is_some();
+    let recording = memory.recording().then(|| memory.text.clone());
     let mut unread = Intel::new();
+    let mut recorded = None;
+    let read_maps = &mut maps;
+    let seam = drive::Seam {
+        read: move |declarations: &Declarations, drain| {
+            let read_maps = read_maps;
+            let (mut world, read) = world::of_game(read_maps, declarations, drain);
+            let maps: &world::Maps = read_maps;
+            (world.rooms.iter_mut()).for_each(|r| r.terrain = maps.terrain(r.name));
+            (world, maps as &dyn drive::Terrains, read)
+        },
+        execute: |intents: &[Intent]| executor::run(intents),
+        write: |world: &World,
+                pass: &world::Pass,
+                rows: &Intel,
+                text,
+                phases: &mut Vec<(String, f64)>| {
+            let start = clock();
+            wire::write_memory(text);
+            if held_intel && world.time % INTEL_WRITTEN_EVERY == 0 {
+                wire::write_intel(rows);
+            }
+            phases.push(("write".to_string(), clock() - start));
+            if let Some(text) = &recording {
+                let start = clock();
+                recorded = wire::record(world, pass, text, rows);
+                phases.push(("record".to_string(), clock() - start));
+            }
+        },
+    };
     let rows = intel.as_mut().unwrap_or(&mut unread);
-    let decided = tick::decide(
-        (clock, start),
-        &mut phases,
-        (&world, wire::tracing()),
-        (declarations, state),
-        (sightings, atlas),
-        rows,
-        (&|room| maps.terrain(room), maps.terrains()),
+    let ran = drive::run(
+        &mut kept,
+        (&mut memory, rows, metrics.as_mut()),
+        (&clock, &mut phases, wire::tracing()),
+        seam,
     );
 
-    for report in &decided.result.reports {
-        if let tick::Outcome::Faulted(message) = &report.outcome {
-            record_fault(&mut faults, report.module, message);
-        }
+    let drive::Ran {
+        world,
+        refusals,
+        faults: faulted,
+        counts,
+        off,
+        offers,
+    } = ran;
+    for (module, message) in &faulted {
+        record_fault(&mut faults, module, message);
     }
-
-    let start = clock();
-    let refusals: Vec<Refusal> = executor::run(&decided.result.intents);
-    let execute_cpu = clock() - start;
-
-    let start = clock();
-    wire::write_state(&mut memory, &decided.result.state);
-    if let Some(rows) = &intel
-        && world.time % INTEL_WRITTEN_EVERY == 0
+    if let Some(fault) = recorded {
+        record_fault(&mut faults, "record", &fault);
+    }
+    if let Some(m) = metrics.as_mut()
+        && world.time % metrics::WINDOW == 0
     {
-        wire::write_intel(rows);
+        wire::write_segment(wire::METRICS_SEGMENT, m.text());
     }
-    let write_cpu = clock() - start;
-
-    phases.push(("execute".to_string(), execute_cpu));
-    phases.push(("write".to_string(), write_cpu));
-
-    if memory.recording() {
-        let start = clock();
-        let rows = intel.as_ref().unwrap_or(&unread);
-        if let Some(fault) = wire::record(&world, &pass, &memory.text, rows) {
-            record_fault(&mut faults, "record", &fault);
-        }
-        phases.push(("record".to_string(), clock() - start));
-    }
-
-    let counts = metrics::counts(&world, &decided);
-    let start = clock();
-    let metrics = metrics.map(|m| {
-        let mut m = metrics::measure(m, &world, &decided, &refusals, &phases);
-        if world.time % metrics::WINDOW == 0 {
-            wire::write_segment(wire::METRICS_SEGMENT, m.text());
-        }
-        m
-    });
-    phases.push(("metrics".to_string(), clock() - start));
-    let tick::Decided {
-        mut result,
-        sightings,
-        atlas,
-        ..
-    } = decided;
 
     let observed = wire::Observed {
         tick: world.time,
@@ -169,28 +141,19 @@ fn run_tick() -> Result<(), String> {
         total: clock(),
         phases,
         counts,
-        off: result.state.off.iter().cloned().collect(),
+        off,
         faults: faults.clone(),
         refusals,
-        offers: result
-            .state
-            .engagements
-            .iter()
-            .filter(|e| !e.plan.offers.is_empty())
-            .map(|e| (e.id, e.plan.offers.clone()))
-            .collect(),
+        offers,
         alerts: metrics.as_ref().map_or_default(Metrics::alerts),
     };
     wire::write_observe(&observed);
-    let standing = std::mem::take(&mut result.state.layout);
+    drop(world);
 
     HEAP.with(|heap| {
         let mut heap = heap.borrow_mut();
         heap.faults = faults;
-        heap.standing = standing;
-        heap.spare = std::mem::take(&mut result.state.spare);
-        heap.sightings = sightings;
-        heap.atlas = atlas;
+        heap.drive = kept;
         heap.maps = maps;
         heap.intel = intel;
         heap.metrics = metrics;

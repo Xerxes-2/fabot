@@ -54,7 +54,8 @@ Game ──World.ofGame──▶ World ──decide──▶ Intents ──Execu
 - `World.ofGame` reads the API once; nothing below it touches `Game`.
   `decide` and the decoder of that read are the `fabot-core` crate (`core/`),
   apart from the wasm driver (`src/app/`), so they also build natively for a
-  simulator to drive.
+  simulator to drive. `core/drive.rs` is the tick between a driver's read and
+  its writes; the wasm driver and `sim/` both call it.
 - `decide : State -> World -> Intents * State'` is pure at this boundary and
   **deterministic**: no unseeded random, no reference to anything but its
   arguments, and a clock read only to time its phases, which nothing decided
@@ -989,11 +990,12 @@ engagement's outcome and the error once for it and `npm run exchange`;
 `predictedWinsLost` fails a fight scenario on an `Exchange` bug. ❓
 `engagements.log` and `observe exchange`, live.
 
-### 10.2 xxscreeps is the engine
+### 10.2 The engines
 
 `xxscreeps` (v1's `npm run xx`) runs vanilla engine rules and the vanilla NPC AI
 under isolated-vm, seeded, against the built `dist/main.js`. v2 uses it for
-everything v1 used its self-written arena for, and more:
+everything v1 used its self-written arena for, and more, until `sim/` takes
+each job over.
 
 - **Scenario library.** Every live incident becomes a scenario: the room's
   state at tick T (from the recorder or room history) seeded into xxscreeps,
@@ -1144,6 +1146,28 @@ deviations (flee counts armed hostiles only; healer picks by range).
 Maintenance is not a risk as of 2026-10: commits three days old, 1,176 in all,
 PRs in the 400s; v1 already builds its isolated-vm against Node 24 through
 nix.
+
+`sim/` (owner, 2026-11-17) runs `decide` natively on krebs's port of the
+official engine, with no wasm and no JS. It follows the official rules and
+never copies xxscreeps' quirks. It writes the soak's files, and the world
+is `scripts/sim/export.mjs`'s copy of the template.
+- ✅ The W8N3 respawn soak (`--world`, `--room`, `--seed`, `--late`).
+- An Invader that spawns on a border stays in the room: the official engine
+  carries no NPC across an exit (`creeps/tick.js`).
+- The official crons run between ticks on their wall-clock periods, as
+  krebs runs them, at Season 11's tick of about 3.4 s (`genInvaders` every
+  88 ticks). Between passes the active set holds every room with a user's
+  object or an owned controller (`processor.js`), and `genInvaders` skips
+  those rooms. The official server raids one only when the cron lands
+  inside a pass. `sim` models that by letting each call find an active room
+  eligible with probability 0.66, fit by maximum likelihood to the harvest
+  between 20,745 waves in Season 11's history (95%: 0.64-0.69), at each
+  wave's own cadence (87.6 ticks on average).
+- ❓ Still on xxscreeps: the nodes, the season worlds, the rivals and the
+  scenario library. The soak's `bodies.jsonl`, `decay.jsonl` and
+  `engagements.jsonl` are written empty, and each room line's `carriedOut`
+  is 0. Its `waves` and `lost` are 0 because sim pushes no scripted wave and
+  loses no tick.
 
 ### 10.3 Unit tests, where the engine would obscure
 
