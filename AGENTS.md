@@ -163,6 +163,9 @@ Docs:
   either way, and the commit quotes the measurement.
 - A speed claim is an interleaved A/B on that benchmark with identical Memory
   fingerprints, or a count. A wall-clock number alone is not a claim.
+- Worth doing is not profile share alone: a change that is net-negative in
+  lines, or unlocks a further optimisation (name it), is taken when replay is
+  identical and the A/B above shows no slowdown.
 
 ## Version control
 
