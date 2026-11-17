@@ -158,12 +158,14 @@ fn colony_of(rng: &mut Rng, blobs: i32) -> Option<Colony> {
         .enumerate()
         .map(|(i, t)| structure(&format!("p{i}"), Kind::Spawn, Owner::Ours, *t))
         .collect();
-    structures.extend(
-        foreign_tiles
-            .iter()
-            .enumerate()
-            .map(|(i, t)| structure(&format!("w{i}"), Kind::Wall, Owner::Nobody, *t)),
-    );
+    structures.extend(foreign_tiles.iter().enumerate().map(|(i, t)| {
+        structure(
+            &format!("w{i}"),
+            Kind::Spawn,
+            Owner::Stranger("x".into()),
+            *t,
+        )
+    }));
 
     // The engine stands rocks and the controller on wall.
     for t in source_tiles.iter().chain([&controller, &mineral]) {

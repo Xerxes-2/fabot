@@ -8,7 +8,7 @@ use crate::engine;
 use crate::grid::{
     FatigueFactor, Footprint, empty_factor, factor_of, loaded_factor, on_edge, step_ticks,
 };
-use crate::tiles::{self, Tile};
+use crate::tiles::{self, Tile, TileSet};
 use crate::vocabulary::{ALL_BODY_PARTS, Part, Resource};
 use crate::world::{
     BodyPart, Creep, Kind, Mineral, Owner, Pos, Room, RoomName, Source, Store, Structure, World,
@@ -775,4 +775,24 @@ fn a_route_goes_round_a_stronghold_where_another_way_stands() {
     };
     assert!(route(false).contains(&core));
     assert!(!route(true).contains(&core));
+}
+
+#[test]
+fn a_walk_round_a_set_never_steps_on_it() {
+    for (walk, mut dice) in walks(23) {
+        let atlas = Atlas::of_world(&world_of(&walk.ground));
+        let target = target_of(ROOM, &walk);
+        let mut round = TileSet::default();
+        for _ in 0..dice.below(200) {
+            let t = tile(&mut dice);
+            if t != walk.start {
+                round.insert(t);
+            }
+        }
+        let start = tiles::to_pos(ROOM, walk.start);
+        for pos in atlas.walk(walk.mover, &target, Some(&round), &start, tiles::COUNT) {
+            let on = covered(walk.mover.footprint, tiles::of_pos(&pos));
+            assert!(on.iter().all(|&(x, y)| !round.contains(tiles::index(x, y))));
+        }
+    }
 }

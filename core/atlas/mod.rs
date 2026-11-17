@@ -273,13 +273,14 @@ pub struct Atlas {
     hits: Cell<i32>,
     relaxed: Cell<i32>,
     trees: Carried<(RoomName, BTreeSet<RoomName>, i32), Tree>,
-    walks: Carried<(Mover, Target, Pos, usize), Vec<Pos>>,
+    walks: Carried<WalkKey, Vec<Pos>>,
     recomputed: Cell<i32>,
     /// Each carried value is computed afresh too and must equal it.
     pub check: bool,
 }
 
 type Carried<K, T> = RefCell<HashMap<K, Kept<T>>>;
+type WalkKey = (Mover, Target, Option<TileSet>, Pos, usize);
 
 /// Weights by address: an unchanged room keeps its `Rc`.
 #[derive(Clone, Debug)]
@@ -1000,16 +1001,26 @@ impl Atlas {
         })
     }
 
-    /// The engine builds nothing on the border.
-    pub fn walk(&self, mover: Mover, target: &Target, from: &Pos, longest: usize) -> Vec<Pos> {
-        let key = (mover, target.clone(), *from, longest);
+    /// The engine builds nothing on the border. `round` is walled in the target's room.
+    pub fn walk(
+        &self,
+        mover: Mover,
+        target: &Target,
+        round: Option<&TileSet>,
+        from: &Pos,
+        longest: usize,
+    ) -> Vec<Pos> {
+        let key = (mover, target.clone(), round.cloned(), *from, longest);
+        let field_at = |at: &Pos| {
+            self.field_round(mover, target, at, round.filter(|_| at.room == target.room))
+        };
         // A stop's region is resolved against the rooms beside it.
         let reach = (key, target.room.coords(), target.max_hops + 1);
         self.carried(&self.walks, reach, || {
             let mut path: Vec<Pos> = Vec::new();
             let mut room = from.room;
             let mut tile = tiles::of_pos(from);
-            let mut field = self.field(mover, target, from);
+            let mut field = field_at(from);
             while let Some(f) = field.as_ref().filter(|_| path.len() < longest) {
                 let step = (f.step(tile)).and_then(|direction| tiles::neighbour(tile, direction));
                 field = match step {
@@ -1018,7 +1029,7 @@ impl Atlas {
                         let onto = tiles::room_toward(room, tiles::exit_of(next));
                         onto.zip(tiles::landing(next)).and_then(|(onto, landing)| {
                             (room, tile) = (onto, landing);
-                            self.field(mover, target, &tiles::to_pos(room, tile))
+                            field_at(&tiles::to_pos(room, tile))
                         })
                     }
                     Some(next) => {

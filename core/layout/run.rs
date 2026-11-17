@@ -76,6 +76,10 @@ pub fn decide(ctx: &mut Context, state: &mut State) -> Result<Vec<Intent>, Strin
         world,
         ctx.derived,
         (&home, &piles),
+        &colonies
+            .iter()
+            .filter_map(|c| c.plan.as_ref())
+            .collect::<Vec<_>>(),
         budget - placed,
     );
 

@@ -23,7 +23,9 @@ pub fn obstacles(room: &Room) -> Vec<Tile> {
         .structures
         .iter()
         .filter(|s| !s.owner.is_ours() && !s.walkable)
-        .map(|s| tiles::of_pos(&s.pos))
+        .map(|s| (s, tiles::of_pos(&s.pos)))
+        // A wall has no owner: off the border, where the server alone builds, it is our ring's.
+        .filter_map(|(s, t)| (!s.kind.is_wall() || tiles::on_edge(t)).then_some(t))
         .collect();
     found.sort_unstable();
     found

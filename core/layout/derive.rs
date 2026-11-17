@@ -194,11 +194,29 @@ mod tests {
             let (_, kept) = colonies(&world, &owned, &fx::exploited(&owned), standing.clone());
             assert!(agree(&plan_of(&standing), &plan_of(&kept)));
 
+            let mut ringed = colony.room.clone();
+            ringed.structures.push(fx::structure(
+                "r",
+                Kind::Wall,
+                Owner::Nobody,
+                tiles::index(25, 25),
+            ));
+            let ringed = fx::world_of(ringed, Vec::new(), Vec::new());
+            let (_, kept) = colonies(&ringed, &owned, &fx::exploited(&owned), standing.clone());
+            assert!(agree(&plan_of(&standing), &plan_of(&kept)));
+
+            for edge in [tiles::index(0, 25), tiles::index(25, 49)] {
+                let mut edged = colony.room.clone();
+                let wall = fx::structure("e", Kind::Wall, Owner::Nobody, edge);
+                edged.structures.push(wall);
+                assert_ne!(ground::obstacles(&edged), ground::obstacles(&colony.room));
+            }
+
             let mut walled = colony.room.clone();
             walled.structures.push(fx::structure(
                 "w",
-                Kind::Wall,
-                Owner::Nobody,
+                Kind::Spawn,
+                Owner::Stranger("x".into()),
                 Tile::of_index(wall.unsigned_abs() as usize % tiles::COUNT),
             ));
             let walled = fx::world_of(walled, Vec::new(), Vec::new());

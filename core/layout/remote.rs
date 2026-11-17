@@ -9,6 +9,7 @@ use crate::tick;
 use crate::tiles::{self, Tile, TileSet};
 use crate::world::{Kind, Owner, Pos, Room, RoomName, World, terrain};
 
+use super::shape::Plan;
 use super::sites::SITES_IN_FLIGHT;
 
 const HAULER: Mover = Mover {
@@ -129,6 +130,7 @@ pub fn sites(
     world: &World,
     derived: &tick::Derived,
     (planned, piles): (&[Intent], &dyn Fn(RoomName) -> Option<Pos>),
+    plans: &[&Plan],
     budget: i32,
 ) -> Vec<Intent> {
     let (colonies, outposts) = (&derived.colonies, &derived.worked);
@@ -143,6 +145,15 @@ pub fn sites(
             || (outposts.iter().any(|o| o.room == room.name) && ours(room))
         {
             rooms.insert(room.name, room);
+        }
+    }
+
+    // A planned structure would bury the road.
+    let mut held: BTreeMap<RoomName, TileSet> = BTreeMap::new();
+    for plan in plans {
+        let solid = held.entry(plan.room).or_default();
+        for i in plan.items.iter().filter(|i| !i.kind.walkable()) {
+            solid.insert(i.tile);
         }
     }
 
@@ -221,10 +232,9 @@ pub fn sites(
                             }
                         }
                     };
-                    for p in road_to
-                        .iter()
-                        .flat_map(|post| atlas.walk(HAULER, &home, post, LONGEST))
-                    {
+                    for p in road_to.iter().flat_map(|post| {
+                        atlas.walk(HAULER, &home, held.get(&home.room), post, LONGEST)
+                    }) {
                         place(
                             &rooms,
                             &mut taken,
