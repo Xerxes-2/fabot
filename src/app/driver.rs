@@ -109,6 +109,7 @@ fn run_tick() -> Result<(), String> {
             }
         },
     };
+    kept.atlas.check = wire::checking();
     let rows = intel.as_mut().unwrap_or(&mut unread);
     let ran = drive::run(
         &mut kept,

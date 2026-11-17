@@ -30,7 +30,7 @@ impl Footprint {
 }
 
 /// MOVE pays off two fatigue a tick, at its boost's multiple.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct FatigueFactor {
     pub weight: i32,
     pub moves: i32,

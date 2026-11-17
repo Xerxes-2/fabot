@@ -35,7 +35,7 @@ impl Terrains for Maps {
 pub struct Driver<W: Write> {
     maps: Maps,
     memory: String,
-    heap: drive::Heap,
+    pub heap: drive::Heap,
     intel: Intel,
     metrics: Metrics,
     pub faults: BTreeSet<(&'static str, String)>,

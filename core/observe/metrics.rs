@@ -1189,6 +1189,7 @@ pub fn counts(world: &World, decided: &tick::Decided) -> Vec<(String, i32)> {
         ("atlasHits".to_string(), atlas.hits()),
         ("atlasMisses".to_string(), atlas.misses()),
         ("flood".to_string(), atlas.relaxed()),
+        ("recomputed".to_string(), atlas.recomputed()),
     ];
     let abandoning =
         (decided.declarations.colonies.iter()).filter(|p| p.stage == tick::Stage::Abandon);

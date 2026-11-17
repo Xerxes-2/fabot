@@ -2,7 +2,7 @@
 //! road are placed off the haul's own walk home.
 use std::collections::BTreeMap;
 
-use crate::atlas::{Atlas, Mover, Target, Tree};
+use crate::atlas::{Atlas, Mover, Tree};
 use crate::grid::Footprint;
 use crate::intents::{Intent, RoomAct};
 use crate::tick;
@@ -29,45 +29,6 @@ fn ours(room: &Room) -> bool {
         Owner::Nobody => c.reservation.as_ref().is_none_or(|(by, _)| by.is_ours()),
         _ => false,
     })
-}
-
-/// The engine builds nothing on the border.
-fn walk(atlas: &Atlas, target: &Target, from: &Pos) -> Vec<Pos> {
-    let mut path: Vec<Pos> = Vec::new();
-    let mut room = from.room;
-    let mut tile = tiles::of_pos(from);
-    let mut field = atlas.field(HAULER, target, from);
-
-    while field.is_some() && path.len() < LONGEST {
-        let step = field
-            .as_ref()
-            .and_then(|f| f.step(tile))
-            .and_then(|direction| tiles::neighbour(tile, direction));
-
-        match step {
-            None => field = None,
-            Some(next) => {
-                if tiles::on_edge(next) {
-                    match (
-                        tiles::room_toward(room, tiles::exit_of(next)),
-                        tiles::landing(next),
-                    ) {
-                        (Some(onto), Some(landing)) => {
-                            room = onto;
-                            tile = landing;
-                            field = atlas.field(HAULER, target, &tiles::to_pos(room, tile));
-                        }
-                        _ => field = None,
-                    }
-                } else {
-                    tile = next;
-                    path.push(tiles::to_pos(room, tile));
-                }
-            }
-        }
-    }
-
-    path
 }
 
 fn opened(
@@ -260,7 +221,10 @@ pub fn sites(
                             }
                         }
                     };
-                    for p in road_to.iter().flat_map(|post| walk(atlas, &home, post)) {
+                    for p in road_to
+                        .iter()
+                        .flat_map(|post| atlas.walk(HAULER, &home, post, LONGEST))
+                    {
                         place(
                             &rooms,
                             &mut taken,

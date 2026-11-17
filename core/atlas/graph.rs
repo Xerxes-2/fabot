@@ -46,14 +46,14 @@ pub struct Ways {
 }
 
 /// Each room's regions' ways to the root, the first settled first.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Tree {
     pub root: Option<Coords>,
-    next: HashMap<Coords, Vec<Way>>,
+    next: Rc<HashMap<Coords, Vec<Way>>>,
 }
 
 /// `onward` is the next room's way its landing walks on by.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Way {
     pub next: Coords,
     pub onward: usize,
@@ -90,7 +90,7 @@ impl Ways {
         }
         Tree {
             root: self.root,
-            next,
+            next: Rc::new(next),
         }
     }
 
@@ -299,14 +299,6 @@ pub fn search(
     let ends: Vec<Coords> = stops.iter().map(|(c, _)| *c).collect();
     let avoid: Vec<Coords> = avoid.iter().map(|r| r.coords()).collect();
     let grid_of = |c: Coords| atlas.rooms.get(&c);
-    let blind = |c: Coords| match grid_of(c) {
-        Some(grid) => grid.blind || grid.stronghold,
-        None => atlas
-            .lairs
-            .get(&c)
-            .copied()
-            .unwrap_or(tiles::is_keeper_room(c)),
-    };
     let seats = target.and_then(|t| Some(atlas.flood_seats(grid_of(start)?, mover, t, None)));
     let on = |d: &Table<i32>, t: Tile| d[Atlas::anchor(mover.footprint, t)];
     ways.nodes.push(Node {
@@ -338,7 +330,7 @@ pub fn search(
                 {
                     continue;
                 }
-                let blind = node.blind + i32::from(blind(there));
+                let blind = node.blind + i32::from(atlas.crossed_last(there));
                 let entry = |&(_, l): &(Tile, Tile)| match (&node.dist, node.next) {
                     (Some(dist), _) => on(dist, l),
                     (None, None) => 0,

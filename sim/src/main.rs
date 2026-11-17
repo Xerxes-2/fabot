@@ -1,7 +1,7 @@
 //! The soak on krebs, natively: `decide` on krebs's documents each tick,
 //! krebs's processor on our intents, `soak-step.mjs`'s files out.
 //!
-//! Usage: sim --world <world.json> --room <name> --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--ended]
+//! Usage: sim --world <world.json> --room <name> --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--ended] [--check]
 mod act;
 mod driver;
 mod read;
@@ -42,20 +42,22 @@ struct Args {
     late: u64,
     /// `soak.mjs --ended`: the safe mode a respawn starts in is over.
     ended: bool,
+    /// What the heap keeps across ticks is computed afresh beside it.
+    check: bool,
 }
 
 fn args() -> Args {
     let mut flags: BTreeMap<String, String> = BTreeMap::new();
     let mut rest = std::env::args().skip(1);
     while let Some(flag) = rest.next() {
-        let value = if flag == "--ended" {
+        let value = if flag == "--ended" || flag == "--check" {
             String::new()
         } else {
             rest.next().unwrap_or_default()
         };
         flags.insert(flag, value);
     }
-    let usage = "usage: sim --world <world.json> --room <name> --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--ended]";
+    let usage = "usage: sim --world <world.json> --room <name> --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--ended] [--check]";
     let need = |flag: &str| (flags.get(flag).cloned()).unwrap_or_else(|| panic!("{flag}: {usage}"));
     let number = |flag: &str, or: u64| {
         (flags.get(flag)).map_or(or, |v| {
@@ -71,6 +73,7 @@ fn args() -> Args {
         seed: number("--seed", 1),
         late: number("--late", 0),
         ended: flags.contains_key("--ended"),
+        check: flags.contains_key("--check"),
     }
 }
 
@@ -213,6 +216,7 @@ fn main() {
         file("metrics.jsonl"),
     ];
     let mut driver = driver::Driver::new(driver::Maps(terrains), out);
+    driver.heap.atlas.check = args.check;
 
     let mut engine = Engine {
         hooks: ProcessorHooks::default(),

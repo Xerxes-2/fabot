@@ -31,6 +31,11 @@ pub fn tracing() -> bool {
     global().fabot_trace().as_bool() == Some(true)
 }
 
+/// `replay --check`: what is kept across ticks is computed afresh beside it.
+pub fn checking() -> bool {
+    global().fabot_check().as_bool() == Some(true)
+}
+
 pub fn trace(line: &str) {
     let _ = console_log(&format!("#trace {line}"));
 }
@@ -40,6 +45,8 @@ extern "C" {
     type Global;
     #[wasm_bindgen(method, getter, js_name = fabotTrace)]
     fn fabot_trace(this: &Global) -> JsValue;
+    #[wasm_bindgen(method, getter, js_name = __fabotCheck)]
+    fn fabot_check(this: &Global) -> JsValue;
     #[wasm_bindgen(method, getter, js_name = __FABOT_VERSION__)]
     fn banner(this: &Global) -> Option<String>;
 

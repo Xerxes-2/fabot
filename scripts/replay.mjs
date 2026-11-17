@@ -13,7 +13,8 @@
 //               (ARCHITECTURE.md §10.4: an incident replayed)
 //   a tag       every soak-runs/scenario-<tag>-*/capture.jsonl
 //   --show      the differing ticks detailed per capture (default 1)
-//   --check     read.js reads again each fact it keeps across ticks and
+//   --check     read.js reads again each fact it keeps across ticks, the
+//               Atlas computes afresh each tree and walk it carries, and
 //               stops on the first one apart
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";

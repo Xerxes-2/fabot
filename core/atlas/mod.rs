@@ -1,5 +1,6 @@
-//! The floods are the one cache (`ARCHITECTURE.md` §1). Built twice from one
-//! `World`, an Atlas answers identically: a kept flood is one on equal weights.
+//! The floods, trees and walks are kept across ticks (`ARCHITECTURE.md` §1).
+//! Built twice from one `World`, an Atlas answers identically: a kept value is
+//! one on equal reads.
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 
@@ -25,14 +26,14 @@ use super::world::{Id, Kind, Owner, Pos, Room, RoomName, World};
 /// A keeper's lair and the resource it guards.
 pub type Post = (Tile, Tile);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Mover {
     pub footprint: Footprint,
     pub factor: FatigueFactor,
 }
 
 /// `tiles` are tile indices; `avoid` never holds a walk back from its ends.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Target {
     pub room: RoomName,
     pub tiles: Vec<Tile>,
@@ -271,6 +272,31 @@ pub struct Atlas {
     misses: Cell<i32>,
     hits: Cell<i32>,
     relaxed: Cell<i32>,
+    trees: Carried<(RoomName, BTreeSet<RoomName>, i32), Tree>,
+    walks: Carried<(Mover, Target, Pos, usize), Vec<Pos>>,
+    recomputed: Cell<i32>,
+    /// Each carried value is computed afresh too and must equal it.
+    pub check: bool,
+}
+
+type Carried<K, T> = RefCell<HashMap<K, Kept<T>>>;
+
+/// Weights by address: an unchanged room keeps its `Rc`.
+#[derive(Clone, Debug)]
+struct RoomRead(Option<Rc<Table<Weight>>>, Option<Rc<TileSet>>, [bool; 3]);
+
+impl PartialEq for RoomRead {
+    fn eq(&self, other: &RoomRead) -> bool {
+        let at = |r: &RoomRead| r.0.as_ref().map(Rc::as_ptr);
+        at(self) == at(other) && self.1 == other.1 && self.2 == other.2
+    }
+}
+
+#[derive(Clone, Debug)]
+struct Kept<T> {
+    read: Vec<RoomRead>,
+    value: T,
+    asked: Cell<bool>,
 }
 
 impl Field {
@@ -479,6 +505,10 @@ impl Atlas {
             misses: Cell::new(0),
             hits: Cell::new(0),
             relaxed: Cell::new(0),
+            trees: RefCell::default(),
+            walks: RefCell::default(),
+            recomputed: Cell::new(0),
+            check: false,
         }
     }
 
@@ -575,20 +605,23 @@ impl Atlas {
     /// are unbounded; past this the room floods afresh.
     const KEPT_FLOODS: usize = 500;
 
-    fn same(a: &[Weight; tiles::COUNT], b: &[Weight; tiles::COUNT]) -> bool {
-        a == b
+    fn reused(previous: Option<&RoomGrid>, weights: Table<Weight>) -> Rc<Table<Weight>> {
+        match previous {
+            Some(grid) if *grid.weights == weights => grid.weights.clone(),
+            _ => Rc::new(weights),
+        }
     }
 
     /// The floods `previous` kept, while its weights hold and the room's
     /// keys stay bounded.
     fn kept(
         previous: Option<RoomGrid>,
-        weights: &[Weight; tiles::COUNT],
+        weights: &Rc<Table<Weight>>,
     ) -> RefCell<HashMap<FloodKey, Rc<Table<i32>>>> {
         match previous {
             Some(grid)
                 if grid.floods.borrow().len() < Atlas::KEPT_FLOODS
-                    && Atlas::same(&grid.weights, weights) =>
+                    && Rc::ptr_eq(&grid.weights, weights) =>
             {
                 grid.floods
             }
@@ -677,9 +710,10 @@ impl Atlas {
             }
 
             let struck = Atlas::walled(&mut weights, Atlas::struck(room));
-            let weights = Rc::new(weights);
+            let last = previous.rooms.remove(&c);
+            let weights = Atlas::reused(last.as_ref(), weights);
             let grid = RoomGrid {
-                floods: Atlas::kept(previous.rooms.remove(&c), &weights),
+                floods: Atlas::kept(last, &weights),
                 weights,
                 struck,
                 standing,
@@ -727,7 +761,7 @@ impl Atlas {
                     };
                     let strikers: Vec<_> = placed.unwrap_or(&[]).iter().map(keeper_of).collect();
                     let struck = Atlas::walled(&mut weights, Atlas::strikes(terrain, &strikers));
-                    let weights = Rc::new(weights);
+                    let weights = Atlas::reused(last.as_ref(), weights);
                     RoomGrid {
                         floods: Atlas::kept(last, &weights),
                         standing: weights.clone(),
@@ -752,6 +786,10 @@ impl Atlas {
             misses: Cell::new(0),
             hits: Cell::new(0),
             relaxed: Cell::new(0),
+            trees: Atlas::asked(previous.trees),
+            walks: Atlas::asked(previous.walks),
+            recomputed: Cell::new(0),
+            check: previous.check,
         }
     }
 
@@ -769,6 +807,10 @@ impl Atlas {
 
     pub fn relaxed(&self) -> i32 {
         self.relaxed.get()
+    }
+
+    pub fn recomputed(&self) -> i32 {
+        self.recomputed.get()
     }
 
     /// Tiles are asked of rooms in sight: out of sight a grid is its
@@ -892,8 +934,102 @@ impl Atlas {
 
     const EXITS: [i32; 4] = [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT];
 
+    /// A keeper room whose lairs no intel places, or a stronghold's.
+    fn crossed_last(&self, c: Coords) -> bool {
+        match self.rooms.get(&c) {
+            Some(grid) => grid.blind || grid.stronghold,
+            None => self
+                .lairs
+                .get(&c)
+                .copied()
+                .unwrap_or(tiles::is_keeper_room(c)),
+        }
+    }
+
+    fn asked<K, T>(mut carried: Carried<K, T>) -> Carried<K, T> {
+        carried.get_mut().retain(|_, k| k.asked.replace(false));
+        carried
+    }
+
+    /// A search from `root` reads no room more than `hops` crossings off, so
+    /// `value` is carried while each of those reads as it did; one not asked
+    /// for a tick is dropped.
+    fn carried<K: std::hash::Hash + Eq, T: Clone + PartialEq>(
+        &self,
+        table: &Carried<K, T>,
+        (key, (x, y), hops): (K, Coords, i32),
+        fresh: impl Fn() -> T,
+    ) -> T {
+        let read: Vec<RoomRead> = (-hops..=hops)
+            .flat_map(|dx| (-(hops - dx.abs())..=hops - dx.abs()).map(move |dy| (x + dx, y + dy)))
+            .map(|c| {
+                let grid = self.rooms.get(&c);
+                let seen = grid.is_some_and(|g| g.seen);
+                let flags = [seen, self.crossed_last(c), self.closed.contains(&c)];
+                RoomRead(
+                    grid.map(|g| g.weights.clone()),
+                    grid.and_then(|g| g.struck.clone()),
+                    flags,
+                )
+            })
+            .collect();
+        if let Some(k) = table.borrow().get(&key).filter(|k| k.read == read) {
+            k.asked.set(true);
+            if !self.check {
+                return k.value.clone();
+            }
+            let value = fresh();
+            assert!(value == k.value, "a carried value differs from a fresh one");
+            return value;
+        }
+        let value = fresh();
+        self.recomputed.set(self.recomputed.get() + 1);
+        let kept = Kept {
+            read,
+            value: value.clone(),
+            asked: Cell::new(true),
+        };
+        table.borrow_mut().insert(key, kept);
+        value
+    }
+
     pub fn tree(&self, avoid: &BTreeSet<RoomName>, max_hops: i32, root: RoomName) -> Tree {
-        graph::search(self, Atlas::PACE, root, None, avoid, max_hops, &[]).tree()
+        let key = (root, avoid.clone(), max_hops);
+        self.carried(&self.trees, (key, root.coords(), max_hops), || {
+            graph::search(self, Atlas::PACE, root, None, avoid, max_hops, &[]).tree()
+        })
+    }
+
+    /// The engine builds nothing on the border.
+    pub fn walk(&self, mover: Mover, target: &Target, from: &Pos, longest: usize) -> Vec<Pos> {
+        let key = (mover, target.clone(), *from, longest);
+        // A stop's region is resolved against the rooms beside it.
+        let reach = (key, target.room.coords(), target.max_hops + 1);
+        self.carried(&self.walks, reach, || {
+            let mut path: Vec<Pos> = Vec::new();
+            let mut room = from.room;
+            let mut tile = tiles::of_pos(from);
+            let mut field = self.field(mover, target, from);
+            while let Some(f) = field.as_ref().filter(|_| path.len() < longest) {
+                let step = (f.step(tile)).and_then(|direction| tiles::neighbour(tile, direction));
+                field = match step {
+                    None => None,
+                    Some(next) if tiles::on_edge(next) => {
+                        let onto = tiles::room_toward(room, tiles::exit_of(next));
+                        onto.zip(tiles::landing(next)).and_then(|(onto, landing)| {
+                            (room, tile) = (onto, landing);
+                            self.field(mover, target, &tiles::to_pos(room, tile))
+                        })
+                    }
+                    Some(next) => {
+                        tile = next;
+                        path.push(tiles::to_pos(room, tile));
+                        field
+                    }
+                };
+            }
+            path
+        })
     }
 
     /// `tree`, grown only until each of `onto` is reached.

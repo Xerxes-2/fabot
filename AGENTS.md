@@ -52,9 +52,13 @@ test; `jj ship` and its gates.
   are never raised. A change over either pays for itself by deleting first.
 - `decide` is deterministic: no clock, no unseeded random.
 - Derived facts are computed once into `Derived` and passed down. A decision
-  function takes `Derived`, never `World`. The only cache is `Atlas`'s
-  flood table; a new memo, `HashMap` cache or lazy cell outside
-  `Derived` is an architecture change (stop and ask).
+  function takes `Derived`, never `World`. A value kept across ticks is
+  keyed by a fingerprint of everything it reads, recomputed when the key
+  changes and never invalidated by hand, and `replay --check` and
+  `sim --check` compute it afresh beside the kept one; one that reads
+  dynamic state (energy, positions, bookings) is not kept. Each has a §4
+  row; any other memo, `HashMap` cache or lazy cell outside `Derived` is an
+  architecture change (stop and ask).
 - Count ceilings (`scripts/ceilings.json`, read by `npm run scenario`) are a
   gate like line ceilings: never raised.
 

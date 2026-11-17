@@ -122,9 +122,12 @@ World ──▶ Derived ──▶ decisions ──▶ Intents
   Room routes are searched once a tick into `Derived`, one tree from each
   room a spawn or body stands in (owner's decision): Economy prices every
   body against every offer, so a search per query cost thousands a tick at
-  six colonies, and none is kept across ticks. Floods are
-  the only demand-driven derivation. Any other memo, `HashMap` cache or
-  lazy cell outside `Derived` is an architecture change (`AGENTS.md`).
+  six colonies. A tree and an outpost road's walk are carried across ticks
+  (§4 `atlas.carried`, owner, 2026-11-18): a value kept past its tick is
+  keyed by a fingerprint of all it reads, recomputed when the key changes,
+  never invalidated by hand, and checked against a fresh one by `--check`.
+  Floods are the only demand-driven derivation. Any other memo, `HashMap`
+  cache or lazy cell outside `Derived` is an architecture change (`AGENTS.md`).
 - **Counts are a gate** (§9.3): floods, Atlas misses, `Exchange.outcome` calls
   and intel reads per tick on a replay capture are deterministic numbers with
   ceilings; a change that doubles the floods fails `jj ship` without anyone
@@ -223,6 +226,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | `standing.*` | per module: last output and the key it was decided on | each module | heap | the replay (§1) |
 | `buffers` | last tick's world lists (each room's, our spawns' and creeps', the event logs'), emptied | World | heap | capacity, never a fact: the read refills them instead of allocating (§9.2) |
 | `fixed` | structure id → its type, tile, owner (a controller's aside) and hitsMax (a rampart's and a wall's aside), with the last pass that read it; dropped every 100 passes when unread | World (`app/read.js`) | JS heap | the engine's getters for these cost a fifth of `world` and never change while the structure stands, but for those set aside; `replay --check` reads each kept fact again and stops on the first apart |
+| `atlas.carried` | (root, rooms avoided, hops) → its room tree; (mover, target, tile, bound) → an outpost road's walk; each with how it read every room in its reach (weights by address, struck tiles, in sight, crossed last, closed); dropped the tick after one goes unasked | Atlas | heap | a search reads no room past its hops, so a carried value is the fresh one while those read the same; the trees and walks a tick redid were a tenth of decide on the live capture (2026-11-18). A hostile walls its tile in the weights, so a value in its reach is redone while it moves |
 | `terrain` | room → its `LocalRoomTerrain` (copied into wasm once when read; each tick's rooms borrow the cache, so no room holds a counted copy of its own), read the first tick it is seen and, a few a tick nearest our spawns first, for every room out to `SIEGE_HOPS`; room → its `getRoomStatus`, for each room in sight, beside one or declared | World | heap | terrain never changes, a status only when a novice or respawn area ends (a reset reads it afresh), and reading either is calls across the seam (§9.2); a room whose status is not our spawns' is never routed into or served, since the engine leaves a creep on the exit tile into it; a room with no terrain read is never observed, since one off the shard refuses the observer |
 
 Rules:
