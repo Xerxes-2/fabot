@@ -79,7 +79,7 @@ pub fn distance(atlas: &Atlas, derived: &Derived, a: &Pos, b: &Pos) -> Option<i3
     if let Some(r) = a.range(b) {
         return Some(r);
     }
-    let tree = (derived.routes.get(&b.room)).or_else(|| derived.routes.get(&a.room));
+    let tree = (derived.route(b.room)).or_else(|| derived.route(a.room));
     let crossed = match tree {
         Some(tree) => tree.crossings(a.room, b.room),
         None => (atlas.route(&BTreeSet::new(), tick::REACH_HOPS, a.room, b.room))
@@ -95,7 +95,7 @@ pub fn ticks_to(
     target: &Target,
     from: &Pos,
 ) -> Option<i32> {
-    match derived.routes.get(&target.room) {
+    match derived.route(target.room) {
         Some(tree)
             if from.room != target.room
                 && target.avoid.is_empty()
@@ -176,7 +176,7 @@ fn sponsors(atlas: &mut Atlas, derived: &Derived) -> Vec<Option<usize>> {
             let young = c.controller.level <= STORAGE_LEVEL && !g.has_storage() && !g.abandoned;
             let can = |ci: usize| ci != cj && banks(ci);
             let at = c.controller.pos;
-            young.then(|| tick::nearest(atlas, &|r| derived.routes.get(&r), &homes, can, &at))?
+            young.then(|| tick::nearest(atlas, &|r| derived.route(r), &homes, can, &at))?
         })
         .collect()
 }
@@ -200,7 +200,7 @@ pub fn owners(atlas: &mut Atlas, derived: &Derived) -> Vec<Option<usize>> {
         out.push(at.and_then(|at| {
             tick::nearest(
                 atlas,
-                &|room| derived.routes.get(&room),
+                &|room| derived.route(room),
                 &homes,
                 |ci| banks(derived, ci),
                 &at,
@@ -297,7 +297,7 @@ fn worker_pace(atlas: &Atlas, derived: &Derived, ci: usize, body: &[Part], power
 
 struct Plan<'a> {
     atlas: &'a Atlas,
-    derived: &'a Derived,
+    derived: &'a Derived<'a>,
     out: Vec<Slot>,
 }
 
@@ -848,7 +848,7 @@ fn errand(atlas: &mut Atlas, derived: &Derived, job: Job, seat: Pos, key: &str) 
         !derived.grounds[ci].abandoned
             && derived.colonies[ci].bank_capacity >= engine::body_cost(bodies::block_of(pattern))
     };
-    let ci = tick::nearest(atlas, &|room| derived.routes.get(&room), &homes, can, &seat)?;
+    let ci = tick::nearest(atlas, &|room| derived.route(room), &homes, can, &seat)?;
     let body = bodies::sized(pattern, 1, derived.colonies[ci].bank_capacity)?;
     Some(Slot {
         id: format!("{}:{key}:0", bodies::name_of(pattern)),
@@ -882,7 +882,7 @@ pub fn plan(atlas: &mut Atlas, derived: &Derived, owners: &[Option<usize>]) -> V
         let at = o.controller.pos;
         let Some(ci) = tick::nearest(
             atlas,
-            &|r| derived.routes.get(&r),
+            &|r| derived.route(r),
             &homes,
             |ci| banks(derived, ci),
             &at,

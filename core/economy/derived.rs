@@ -316,7 +316,7 @@ pub struct Colony {
 }
 
 #[derive(Clone, Debug)]
-pub struct Derived {
+pub struct Derived<'t> {
     pub time: i32,
     /// Colony `i`'s room is `grounds[i]`.
     pub colonies: Vec<Colony>,
@@ -328,13 +328,17 @@ pub struct Derived {
     /// Hold their slots as if they stood, so no slot is cast twice.
     pub ovens: Vec<Body>,
     /// From each room a spawn or body stands in, `Atlas::tree`'s.
-    pub routes: BTreeMap<RoomName, Tree>,
+    routes: BTreeMap<RoomName, Cow<'t, Tree>>,
     /// The declared outposts a foe stands down this tick.
     pub closed: Vec<Outpost>,
     pub spots: HashMap<String, Pos>,
 }
 
-impl Derived {
+impl Derived<'_> {
+    pub fn route(&self, room: RoomName) -> Option<&Tree> {
+        self.routes.get(&room).map(AsRef::as_ref)
+    }
+
     pub fn haul(&self, owners: &[Option<usize>], gi: usize) -> i32 {
         let home = gi < self.colonies.len();
         (self.grounds.iter().zip(owners).enumerate())
@@ -860,14 +864,12 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
     }
 }
 
-fn tree_of(routes: &mut BTreeMap<RoomName, Tree>, atlas: &Atlas, room: RoomName) {
+fn tree_of(routes: &mut BTreeMap<RoomName, Cow<'_, Tree>>, atlas: &Atlas, room: RoomName) {
     routes
         .entry(room)
-        .or_insert_with(|| atlas.tree(&BTreeSet::new(), tick::REACH_HOPS, room));
+        .or_insert_with(|| Cow::Owned(atlas.tree(&BTreeSet::new(), tick::REACH_HOPS, room)));
 }
 
-/// `creeps` is the world's, less every body a fight holds: the port of F#'s
-/// `{ World with Creeps = filtered }`, whose record copy shares the rooms.
 fn free_at(grounds: &[Ground], room: RoomName) -> i32 {
     (grounds.iter().find(|g| g.room == room))
         .and_then(|g| g.terminal.as_ref())
@@ -1140,15 +1142,15 @@ fn ovens_of(world: &World) -> Vec<Body> {
         .collect()
 }
 
-pub fn of_world(
+pub fn of_world<'t>(
     world: &World,
     creeps: &[&Creep],
     atlas: &Atlas,
     declarations: &Declarations,
-    ours: &tick::Derived,
+    ours: &'t tick::Derived,
     intel: &Intel,
     scouts: &[Scout],
-) -> Derived {
+) -> Derived<'t> {
     let colony_rooms: Vec<&Room> = (ours.colonies.iter())
         .filter_map(|name| world.room(*name))
         .collect();
@@ -1277,7 +1279,9 @@ pub fn of_world(
         g.refills.extend(left);
     }
 
-    let mut routes: BTreeMap<RoomName, Tree> = BTreeMap::new();
+    let mut routes: BTreeMap<RoomName, Cow<Tree>> = (ours.trees.iter())
+        .map(|(home, tree)| (*home, Cow::Borrowed(tree)))
+        .collect();
 
     let spawns = world.spawns.iter().map(|s| s.pos.room);
     for room in spawns
@@ -1321,7 +1325,7 @@ pub fn of_world(
 }
 
 fn spots_of(grounds: &[Ground], claims: &[Controller], bodies: &[Body]) -> HashMap<String, Pos> {
-    let mut spots = HashMap::default();
+    let mut found: Vec<(&String, Pos)> = Vec::new();
     for g in grounds {
         let ids = (g.sources.iter().map(|x| (&x.id, x.pos)))
             .chain(g.minerals.iter().map(|x| (&x.id, x.pos)))
@@ -1336,17 +1340,13 @@ fn spots_of(grounds: &[Ground], claims: &[Controller], bodies: &[Body]) -> HashM
             .chain(g.boost_lab.iter().map(|x| (&x.id, x.pos)))
             .chain(g.ores.iter().map(|x| (&x.0, x.1)))
             .chain(g.controller.iter().map(|x| (&x.id, x.pos)));
-        for (id, pos) in ids {
-            spots.entry(id.clone()).or_insert(pos);
-        }
+        found.extend(ids);
     }
-    for c in claims {
-        spots.entry(c.id.clone()).or_insert(c.pos);
-    }
-    for b in bodies {
-        if let Some(id) = &b.id {
-            spots.entry(id.clone()).or_insert(b.pos);
-        }
+    found.extend(claims.iter().map(|c| (&c.id, c.pos)));
+    found.extend(bodies.iter().filter_map(|b| Some((b.id.as_ref()?, b.pos))));
+    let mut spots = HashMap::with_capacity_and_hasher(found.len(), Default::default());
+    for (id, pos) in found {
+        spots.entry(id.clone()).or_insert(pos);
     }
     spots
 }

@@ -52,7 +52,7 @@ pub fn decide(ctx: &mut Context, state: &mut State) -> Result<Vec<Intent>, Strin
         world,
         &ctx.derived.owned,
         &ctx.declarations.colonies,
-        &state.layout,
+        std::mem::take(&mut state.layout),
     );
 
     let budget = engine::MAX_CONSTRUCTION_SITES - world.our_sites;

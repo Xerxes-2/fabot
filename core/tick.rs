@@ -351,6 +351,10 @@ impl Derived {
     pub fn danger(&self, room: RoomName) -> Option<&TileSet> {
         (self.danger.iter()).find_map(|(r, d)| (*r == room).then_some(d))
     }
+
+    pub fn tree(&self, home: RoomName) -> Option<&Tree> {
+        (self.trees.iter()).find_map(|(h, t)| (*h == home).then_some(t))
+    }
 }
 
 /// A keeper's strikes the Atlas walls already; a tower strikes the whole

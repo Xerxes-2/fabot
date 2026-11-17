@@ -25,7 +25,7 @@ struct Spot {
 
 pub struct Jobs<'a> {
     atlas: &'a Atlas,
-    derived: &'a Derived,
+    derived: &'a Derived<'a>,
     sinks: Vec<Vec<Spot>>,
     takes: Vec<Vec<Spot>>,
     digging: HashMap<String, i32>,

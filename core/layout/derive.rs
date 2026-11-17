@@ -47,7 +47,7 @@ pub fn colonies(
     world: &World,
     owned: &BTreeSet<RoomName>,
     plans: &[ColonyPlan],
-    standing: &BTreeMap<RoomName, Standing>,
+    mut standing: BTreeMap<RoomName, Standing>,
 ) -> (Vec<Colony>, BTreeMap<RoomName, Standing>) {
     let mut next: BTreeMap<RoomName, Standing> = BTreeMap::new();
     let mut found: Vec<Colony> = Vec::new();
@@ -60,15 +60,16 @@ pub fn colonies(
 
         let key = key_of(room);
 
-        let ground = ground::of_room(room);
-        let mut kept = match standing.get(&room.name) {
-            Some(s) if s.key == key => s.clone(),
-            _ => Standing {
-                key,
-                plan: None,
-                drawing: ground.as_ref().map(plan::Drawing::of),
-            },
-        };
+        let held = standing.remove(&room.name).filter(|s| s.key == key);
+        let ground = (held.as_ref())
+            .is_none_or(|s| s.drawing.is_some())
+            .then(|| ground::of_room(room))
+            .flatten();
+        let mut kept = held.unwrap_or_else(|| Standing {
+            key,
+            plan: None,
+            drawing: ground.as_ref().map(plan::Drawing::of),
+        });
         if let (Some(d), Some(g)) = (&mut kept.drawing, &ground)
             && let plan::Drawn::Done(done) = d.advance(&world.rules, g, &mut budget)
         {
@@ -181,7 +182,7 @@ mod tests {
         let plans = fx::exploited(&owned);
         let mut standing = standing;
         loop {
-            let (_, next) = colonies(world, &owned, &plans, &standing);
+            let (_, next) = colonies(world, &owned, &plans, standing.clone());
             standing = next;
             if standing.values().all(|s| s.drawing.is_none()) {
                 return standing;
@@ -202,7 +203,7 @@ mod tests {
                 |s: &BTreeMap<RoomName, Standing>| s.values().next().and_then(|s| s.plan.clone());
 
             let owned = hostiles::owned(&world.rooms);
-            let (_, kept) = colonies(&world, &owned, &fx::exploited(&owned), &standing);
+            let (_, kept) = colonies(&world, &owned, &fx::exploited(&owned), standing.clone());
             assert!(agree(&plan_of(&standing), &plan_of(&kept)));
 
             let mut walled = colony.room.clone();

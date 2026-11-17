@@ -1,8 +1,6 @@
 //! A declared outpost has no spawn to anchor a plan on, so its container and
 //! road are placed off the haul's own walk home.
-use std::collections::{BTreeMap, BTreeSet};
-
-use crate::HashMap;
+use std::collections::BTreeMap;
 
 use crate::atlas::{Atlas, Mover, Target, Tree};
 use crate::grid::Footprint;
@@ -192,12 +190,6 @@ pub fn sites(
         }
     }
 
-    // Every outpost in one `sites` is priced to the same homes: grow each
-    // home's tree once.
-    let trees: HashMap<RoomName, Tree> = (colonies.iter())
-        .map(|home| (*home, atlas.tree(&BTreeSet::new(), tick::REACH_HOPS, *home)))
-        .collect();
-
     let homes: Vec<Pos> = colonies
         .iter()
         .filter_map(|c| {
@@ -219,7 +211,7 @@ pub fn sites(
         opened(&mut taken, &mut pending, planned, room);
 
         if budget > 0 && pending[&room.name] < SITES_IN_FLIGHT {
-            let trees = |room| trees.get(&room);
+            let trees = |room| derived.tree(room);
             let sink = sink_for(atlas, &trees, (&homes, piles), &rooms, room);
 
             if let Some(sink) = sink {

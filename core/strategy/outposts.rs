@@ -79,8 +79,7 @@ pub fn busy(
     (engagements, preyed, derived): (&[Engagement], &[RoomName], &Derived),
 ) -> BTreeSet<RoomName> {
     let hunts = |home: RoomName| {
-        (derived.trees.iter())
-            .any(|(h, tree)| *h == home && preyed.iter().any(|r| tree.contains(*r)))
+        (derived.tree(home)).is_some_and(|tree| preyed.iter().any(|r| tree.contains(*r)))
     };
     let raising = |room: &RoomName| !derived.colonies.contains(room);
     let operation = (declarations.claims.iter()).any(|c| raising(&c.room))
