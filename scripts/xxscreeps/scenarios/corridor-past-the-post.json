@@ -1,9 +1,11 @@
 {
-  "why": "a source's link never leaves its miner's post the only way through a one-wide corridor, so no loaded body waits on the miner; the bound is a source's regeneration (300 ticks), what a digger waits beside one dug out, and slack",
-  "modules": ["atlas", "economy", "layout", "mv"],
+  "why": "a source's link never leaves its miner's post the only way through a one-wide corridor, so no loaded body waits on the miner (the bound is a source's regeneration, 300 ticks, what a digger waits beside one dug out, and slack), and no economy body past the post is wedged behind another or crosses back over a border",
+  "modules": ["atlas", "economy", "layout", "mv", "observe"],
   "start": { "world": "scripts/xxscreeps/worlds/corridor-post.json", "seed": 1 },
   "ticks": 4000,
   "assert": [
-    { "measure": "stillLoaded", "max": 350 }
+    { "measure": "stillLoaded", "max": 350 },
+    { "metric": "move.wedged", "max": 0 },
+    { "metric": "move.edgeFlips", "max": 0 }
   ]
 }

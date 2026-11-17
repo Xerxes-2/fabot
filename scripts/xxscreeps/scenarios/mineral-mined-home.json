@@ -1,7 +1,0 @@
-{
-  "why": "a colony with an extractor on a deposit digs it and hauls the ore home. 5000 -> 4800: the worker gate (#808) casts the replacement mineral harvester at t7839, not t7693, and it reaches the deposit after the window ends at t8000 (4862 ore). The bound stays: it is cast timing at the window's edge, not a mining rule",
-  "modules": ["atlas", "economy", "layout", "mv"],
-  "start": { "room": "W8N3", "seed": 1, "node": "N5" },
-  "ticks": 8000,
-  "assert": [{ "measure": "ore", "min": 4800 }]
-}

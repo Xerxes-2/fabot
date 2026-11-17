@@ -20,7 +20,7 @@
 // tombstone or ruin it fell out of. `bodies.jsonl`: each body, ours or not,
 // once it is gone from the colony's rooms, their neighbours and the opponents' rooms or the run ends: its parts, the ticks it
 // was first and last seen, its ticks to live then, the damage struck on it, its ticks by room and
-// by action, each room it entered with the tick, and the times it came into a rival's reach (`reached`).
+// by action, each room it entered with the tick, and the tiles it harvested and reserved from (`tiles`).
 // The colony's rooms are <room> (several homes: each sample's `homes` holds
 // one sample a home, the first's at its top), the outposts and claims its Memory
 // declares at the start, and each room we later reserve or a body of ours
@@ -48,6 +48,8 @@ import * as User from "xxscreeps/engine/db/user/index.js";
 import { getServiceChannel } from "xxscreeps/engine/service/index.js";
 import { getConsoleChannel, runnerUsageChannel } from "xxscreeps/engine/runner/model.js";
 import { loadMemorySegmentBlob, loadUserMemoryString } from "xxscreeps/mods/meta/memory/model.js";
+import { loadTransactionBlob, loadTransactionEntries } from "xxscreeps/mods/classic/brokerage/model.js";
+import { read as readTransaction } from "xxscreeps/mods/classic/brokerage/transaction.js";
 import { getProcessorChannel, pushIntentsForRoomNextTick, userToIntentRoomsSetKey } from "xxscreeps/engine/processor/model.js";
 import { kInvaderUserId } from "xxscreeps/mods/classic/invader/game.js";
 import { typedArrayToString } from "xxscreeps/utility/string.js";
@@ -189,7 +191,7 @@ const CREEP_LIFE_TIME = 1500;
 const CREEP_CLAIM_LIFE_TIME = 600;
 const PARTS = ["tough", "move", "work", "carry", "attack", "ranged_attack", "heal"];
 const PART_COST = { move: 50, work: 100, carry: 50, attack: 80, ranged_attack: 150, heal: 250, claim: 600, tough: 10 };
-const ledger = { dug: 0, regen: 0, spawn: 0, build: 0, upgrade: 0, repair: 0, tower: 0, decayed: 0, linked: 0, handFed: 0, stock0: null, stock: 0 };
+const ledger = { dug: 0, regen: 0, spawn: 0, build: 0, upgrade: 0, repair: 0, tower: 0, decayed: 0, linked: 0, stock0: null, stock: 0 };
 // What a colony holds, in energy, as it stands: the controller's climb, every
 // structure at its construction cost (a road at its terrain's), ramparts' and
 // walls' hits at the repair rate, sites at their progress, and the stock.
@@ -261,11 +263,7 @@ let lastPiles = new Map();
 const pileLog = new Map();
 const graves = new Map();
 const lives = new Map();
-// The bodies standing in a rival's reach last tick, by key.
-let inReach = new Set();
 const near = (a, b, r) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) <= r;
-// The range a body strikes at with the parts it has left (none: -Infinity).
-const reach = (o) => (o.body.some((p) => p.type === "ranged_attack" && p.hits > 0) ? 3 : o.body.some((p) => p.type === "attack" && p.hits > 0) ? 1 : -Infinity);
 function roleOf(pos, objects) {
   const by = (pred) => objects.filter(pred);
   if (by((o) => o["#lookType"] === "constructionSite" && near(o.pos, pos, 0)).length) return "on a site";
@@ -322,13 +320,6 @@ function account(rooms, time) {
     const sources = new Set(objects.filter((o) => o["#lookType"] === "source").map((o) => o.id));
     const towers = new Set(objects.filter((o) => o.structureType === "tower" && o["#user"] === ours).map((o) => o.id));
     const links = new Set(objects.filter((o) => o.structureType === "link" && o["#user"] === ours).map((o) => o.id));
-    // Mirrors the row's `buffer`: the controller's nearest link off a source.
-    const ctl = objects.find((o) => o.structureType === "controller");
-    const fed = new Set(
-      objects
-        .filter((o) => links.has(o.id) && ctl && near(o.pos, ctl.pos, 3) && !objects.some((s) => s["#lookType"] === "source" && near(s.pos, o.pos, 2)))
-        .map((o) => o.id),
-    );
     const strangers = new Set(objects.filter((o) => o["#user"] != null && o["#user"] !== ours).map((o) => o.id));
     for (const e of room["#eventLog"] ?? []) {
       if (strangers.has(e.objectId)) continue;
@@ -350,7 +341,6 @@ function account(rooms, time) {
           line.repair += e.energySpent ?? 0;
         }
       } else if (kind === TRANSFER && links.has(e.objectId) && links.has(e.targetId)) ledger.linked += e.amount - Math.floor(e.amount * LINK_KEEPS);
-      else if (kind === TRANSFER && fed.has(e.targetId) && !links.has(e.objectId)) ledger.handFed += e.amount;
       else if ((kind === ATTACK || kind === HEAL) && towers.has(e.objectId)) ledger.tower += 10;
     }
     if (room["#user"] === ours && room.controller?.["#user"] !== ours && room.controller?.["#reservationEndTime"] > time) line.reserved++;
@@ -416,12 +406,10 @@ function account(rooms, time) {
 }
 
 function live(rooms, time) {
-  const reaching = new Set();
   for (const room of rooms) {
     const struck = new Map();
     for (const e of room["#eventLog"] ?? [])
       if ((e.event ?? e._$Variant) === ATTACK) struck.set(e.targetId, (struck.get(e.targetId) ?? 0) + e.damage);
-    const rivals = room["#objects"].filter((o) => o.body !== undefined && o["#user"] !== ours && reach(o) > 0);
     for (const o of room["#objects"]) {
       if (o.body === undefined) continue;
       const key = `${o["#user"]} ${o.name}`;
@@ -438,15 +426,13 @@ function live(rooms, time) {
       life.ttl = o["#ageTime"] - time;
       life.hits = o.hits;
       life.rooms[room.name] = (life.rooms[room.name] ?? 0) + 1;
-      for (const a of (o["#actionLog"] ?? []).filter((a) => a.time === time)) life.acts[a.type] = (life.acts[a.type] ?? 0) + 1;
-      if (struck.has(o.id)) life.struck = (life.struck ?? 0) + struck.get(o.id);
-      if (life.ours && rivals.some((h) => near(h.pos, o.pos, reach(h)))) {
-        if (!inReach.has(key)) life.reached = (life.reached ?? 0) + 1;
-        reaching.add(key);
+      for (const a of (o["#actionLog"] ?? []).filter((a) => a.time === time)) {
+        life.acts[a.type] = (life.acts[a.type] ?? 0) + 1;
+        if ((a.type === "harvest" || a.type === "reserveController") && !life.tiles?.[a.type]?.includes(at)) ((life.tiles ??= {})[a.type] ??= []).push(at);
       }
+      if (struck.has(o.id)) life.struck = (life.struck ?? 0) + struck.get(o.id);
     }
   }
-  inReach = reaching;
   for (const [key, life] of lives)
     if (life.last !== time) {
       fs.writeSync(livesOut, JSON.stringify(life) + "\n");
@@ -507,7 +493,6 @@ function sample(t, time, room, user = ours) {
     sites: 0,
     queued: {},
     oldestPaying: 0,
-    upgradeWork: 0,
     built: {},
     cpu: null,
     bodies: [],
@@ -545,7 +530,6 @@ function sample(t, time, room, user = ours) {
         // Where each body stands, what it carries and what it did this tick (the
         // processor stamps an action with the tick it leads to).
         const acts = (o["#actionLog"] ?? []).filter((a) => a.time === time).map((a) => a.type);
-        if (acts.includes("upgradeController")) row.upgradeWork += o.body.filter((p) => p.type === "work" && p.hits > 0).length;
         row.bodies.push(`${o.name}@${o.pos.x},${o.pos.y} ${letters(o.body)} e${energyIn(o)} ${acts.join("+") || "-"}`);
       } else {
         row.hostiles++;
@@ -563,18 +547,6 @@ function sample(t, time, room, user = ours) {
   // A bay's extension is its harvester's, filled from the container beside it.
   row.unroaded = solid.filter((o) => o.structureType === "extension" && !sourceContainers.some((c) => near(c.pos, o.pos, 1)) && !roads.some((r) => near(r.pos, o.pos, 1) && !solid.some((s) => s.pos.x === r.pos.x && s.pos.y === r.pos.y))).length;
   row.postedLinks = objects.filter((o) => o.structureType === "link" && o["#lookType"] !== "constructionSite" && sourceContainers.some((c) => near(c.pos, o.pos, 1))).length;
-  // The buffer as `Atlas.buffer` picks it: the controller's nearest link off a source, else its container off a rock.
-  const controller = objects.find((o) => o.structureType === "controller");
-  const built = (o, type) => o.structureType === type && o["#lookType"] !== "constructionSite";
-  const beside = (o, r, kinds) => objects.some((s) => kinds.includes(s["#lookType"]) && near(s.pos, o.pos, r));
-  const range = (o) => Math.max(Math.abs(o.pos.x - controller.pos.x), Math.abs(o.pos.y - controller.pos.y));
-  const buffer =
-    controller &&
-    (objects
-      .filter((o) => built(o, "link") && o["#user"] === user && range(o) <= 3 && !beside(o, 2, ["source"]))
-      .sort((a, b) => range(a) - range(b) || a.pos.y * 50 + a.pos.x - (b.pos.y * 50 + b.pos.x))[0] ??
-      objects.find((o) => built(o, "container") && range(o) <= 3 && !beside(o, 1, ["source", "mineral"])));
-  row.dry = !!buffer && energyIn(buffer) === 0 && objects.some((o) => o.body !== undefined && o["#user"] === user && o.name.startsWith("upgrader-") && near(o.pos, buffer.pos, 1));
   row.mineralAmount = objects.find((o) => o["#lookType"] === "mineral")?.mineralAmount ?? null;
   return row;
 }
@@ -668,71 +640,9 @@ async function standing(ids) {
   return false;
 }
 async function closed(e, t) {
-  const { members, casts, walk, fight, swing, sources, mourned, inReach, ...rest } = e;
-  const arrivals = Object.values(walk?.arrived ?? {}).sort((a, b) => a - b);
-  const blob = walk && { ...walk, last: undefined, arrived: undefined, members: Object.keys(walk.members).length, arrival: arrivals.length ? arrivals[(arrivals.length - 1) >> 1] : null };
-  const fought = fight && { ...fight, last: undefined };
+  const { members, casts, swing, sources, mourned, ...rest } = e;
   const swung = Object.fromEntries(Object.entries(swing).map(([n, { ticks, swings }]) => [n, { ticks, swings }]));
-  fs.writeSync(engagementsOut, JSON.stringify({ ...rest, blob, fought, swung, closed: t, outlived: t === null || (await standing(members)) }) + "\n");
-}
-// World tiles, where adjacent rooms' edge tiles coincide (x = roomX·49 + x).
-const seam = (a, b) => {
-  const at = (p) => {
-    const [, ew, x, ns, y] = /^([WE])(\d+)([NS])(\d+)$/.exec(p.roomName);
-    return [(ew === "E" ? +x : -x - 1) * 49 + p.x, (ns === "S" ? +y : -y - 1) * 49 + p.y];
-  };
-  const [p, q] = [at(a), at(b)];
-  return Math.max(Math.abs(p[0] - q[0]), Math.abs(p[1] - q[1]));
-};
-// A set of two or more on its way to the raid, each tick it approaches:
-// whether every member stands within ⌊n/2⌋ + 1 of the median member by range
-// to the raid (`near` of `ticks`) and the tiles the set stood past it
-// (`over`), and the members that stood still free of fatigue (`stalls` of
-// the `members` that walked); `arrived`: each member's ticks from the
-// muster to its first within 3 of the raid.
-function walking(rec, phase, bodies, theirs, t) {
-  if (phase === "approaching" && bodies.length >= 2 && theirs.length) rec.walk ??= { muster: t, ticks: 0, near: 0, over: 0, stalls: 0, members: {}, arrived: {}, last: {} };
-  const w = rec.walk;
-  if (!w || !theirs.length) return;
-  const toRaid = (o) => Math.min(...theirs.map((h) => seam(o.pos, h.pos)));
-  if (phase === "approaching") {
-    const ranked = [...bodies].sort((a, b) => toRaid(a) - toRaid(b) || (a.name < b.name ? -1 : 1));
-    const anchor = ranked[(ranked.length - 1) >> 1];
-    w.ticks++;
-    const past = bodies.map((o) => seam(o.pos, anchor.pos) - (bodies.length >> 1) - 1);
-    if (past.every((d) => d <= 0)) w.near++;
-    w.over += past.reduce((n, d) => n + Math.max(0, d), 0);
-    for (const o of bodies) w.members[o.name] = true;
-    for (const o of bodies.filter((o) => w.last[o.name])) if (w.last[o.name].fatigue === 0 && seam(w.last[o.name].pos, o.pos) === 0) w.stalls++;
-  }
-  for (const o of bodies) {
-    w.last[o.name] = { pos: o.pos, fatigue: o.fatigue };
-    if (w.arrived[o.name] === undefined && toRaid(o) <= 3) w.arrived[o.name] = t - w.muster;
-  }
-}
-function fought(rec, phase, bodies, theirs) {
-  if (phase === "fighting" && bodies.length >= 2) rec.fight ??= { taken: {}, low: {}, last: {}, wounded: 0, out: 0 };
-  // `ring`: a siege's dismantler-ticks with a body of its set that heals within 1.
-  if (rec.kind === "siege" && phase === "fighting") {
-    const heals = (o) => o.body.some((p) => p.type === "heal" && p.hits > 0);
-    const medics = bodies.filter(heals);
-    for (const w of bodies.filter((o) => o.body.some((p) => p.type === "work" && p.hits > 0))) {
-      rec.ring ??= { ticks: 0, covered: 0 };
-      rec.ring.ticks++;
-      if (medics.some((m) => m !== w && seam(m.pos, w.pos) <= 1)) rec.ring.covered++;
-    }
-  }
-  const f = rec.fight;
-  if (!f) return;
-  for (const o of bodies) {
-    f.taken[o.name] = (f.taken[o.name] ?? 0) + Math.max(0, (f.last[o.name] ?? o.hits) - o.hits);
-    f.last[o.name] = o.hits;
-    f.low[o.name] = Math.min(f.low[o.name] ?? 1, o.hits / o.hitsMax);
-    if (o.hits < o.hitsMax / 2 && theirs.length) {
-      f.wounded++;
-      if (theirs.every((h) => h.pos.roomName !== o.pos.roomName || seam(h.pos, o.pos) > reach(h) + 1)) f.out++;
-    }
-  }
+  fs.writeSync(engagementsOut, JSON.stringify({ ...rest, swung, closed: t, outlived: t === null || (await standing(members)) }) + "\n");
 }
 // ibex's A-B-A oscillation. A swing that struck or healed on both its steps,
 // or stepped over a room's edge (out of the towers' reach), is a dance that
@@ -749,22 +659,6 @@ function swinging(rec, bodies, t, seen) {
     }
     s.last = [b, now];
   }
-}
-// A sweep's `held`/`kept`: each pair of an armed body of it and a rival's
-// unarmed one in its reach a tick, both standing in the room the next and the
-// prey on another tile, and those still in its reach then (the hunt's step is
-// the next tick's shot). A prey shot where it stands keeps itself in reach.
-function keeping(rec, room, objects, bodies) {
-  const prey = objects.filter((o) => o.body !== undefined && o.pos.roomName === room && ![ours, kInvaderUserId].includes(o["#user"]) && o.body.every((p) => !["attack", "ranged_attack"].includes(p.type)));
-  const here = bodies.filter((b) => b.pos.roomName === room);
-  const pairs = here.flatMap((b) => prey.filter((p) => near(b.pos, p.pos, reach(b))).map((p) => ({ name: b.name, id: p.id, pos: p.pos })));
-  for (const was of rec.inReach ?? []) {
-    const now = prey.find((p) => p.id === was.id);
-    if (!here.some((b) => b.name === was.name) || !now || near(now.pos, was.pos, 0)) continue;
-    rec.held = (rec.held ?? 0) + 1;
-    if (pairs.some((k) => k.name === was.name && k.id === was.id)) rec.kept = (rec.kept ?? 0) + 1;
-  }
-  rec.inReach = pairs;
 }
 // `dead`: its own count, or our bodies' tombstones with life left in the rooms
 // it targeted, which catch a death that closed it before it counted one.
@@ -808,10 +702,7 @@ async function engaged(t, time, rooms) {
     if (e.phase !== "forming") rec.mustered ??= t;
     if (e.phase === "fighting") rec.fighting ??= t;
     if (e.order?.length && !e.unanswered) rec.order ??= e.order;
-    if (rec.kind === "siege" && rec.order && !e.order?.length && !e.unanswered) {
-      rec.breached ??= t;
-      rec.breachCast ??= rec.cast;
-    }
+    if (rec.kind === "siege" && rec.order && !e.order?.length && !e.unanswered) rec.breached ??= t;
     // A siege's room is the rival's, which no sample follows.
     const rival = roomNames.includes(e.room) ? null : await shard.loadRoom(e.room, time);
     if (rival) watched.set(e.room, rival);
@@ -844,11 +735,8 @@ async function engaged(t, time, rooms) {
     const close = objects.some((o) => e.ours.includes(o.name) && o["#user"] === ours && theirs.some((h) => near(h.pos, o.pos, 3) && h.pos.roomName === o.pos.roomName));
     if (rec.contact === null && (close || theirs.some((h) => h.hits < h.hitsMax))) rec.contact = t;
     const bodies = objects.filter((o) => o.body !== undefined && o["#user"] === ours && e.ours.includes(o.name));
-    walking(rec, e.phase, bodies, theirs, t);
     lone(rec, e.room, objects, bodies);
-    fought(rec, e.phase, bodies, theirs);
     swinging(rec, bodies, t, seen);
-    if (rec.kind === "sweep") keeping(rec, e.room, objects, bodies);
   }
   for (const [id, rec] of open)
     if (!now.has(id)) {
@@ -858,35 +746,6 @@ async function engaged(t, time, rooms) {
       await closed(rec, t);
     }
   burnt(watched.values());
-}
-
-// Ticks our bodies lost beside a road: grounded past a step onto a tile off
-// it but beside it (never a walk's own choice while the road is free), or a
-// stop of at most 4 ticks on it ended by a step onto a tile a body held.
-let roadLoss = 0;
-const trails = new Map();
-let onRoad = [];
-function detours(rooms) {
-  const objects = rooms.flatMap((r) => [...r["#objects"]]);
-  const key = (p, dx = 0, dy = 0) => `${p.roomName}:${p.x + dx},${p.y + dy}`;
-  const roads = new Set(objects.filter((o) => o.structureType === "road" && o["#lookType"] === "structure").map((o) => key(o.pos)));
-  const besideRoad = (p) => [-1, 0, 1].some((dx) => [-1, 0, 1].some((dy) => roads.has(key(p, dx, dy))));
-  for (const o of objects)
-    if (o.body !== undefined && o["#user"] === ours) {
-      const was = trails.get(o.name);
-      const tile = key(o.pos);
-      if (was?.tile === tile) {
-        if (was.moved) was.wait = { tiles: roads.has(tile) ? onRoad.filter((b) => b.pos.roomName === o.pos.roomName && near(b.pos, o.pos, 1)).map((b) => key(b.pos)) : [], ticks: 1 };
-        else if (was.wait) was.wait.ticks++;
-        was.moved = false;
-        continue;
-      }
-      if (was?.wait?.tiles.includes(tile) && was.wait.ticks <= 4) roadLoss += was.wait.ticks;
-      const moves = o.body.filter((p) => p.type === "move" && p.hits > 0).length;
-      if (!roads.has(tile) && besideRoad(o.pos)) roadLoss += Math.ceil(o.fatigue / (2 * Math.max(1, moves)));
-      trails.set(o.name, { tile, moved: true, wait: null });
-    }
-  onRoad = objects.filter((o) => o.body !== undefined && roads.has(key(o.pos)));
 }
 
 // The most ticks a body of ours stood on one tile carrying energy, acting on
@@ -907,25 +766,30 @@ function stoodLoaded(rooms, time) {
 }
 
 // Crossings a body of ours made back across the border the tick after it
-// landed, and the energy it put back into the store it had drawn it from the
-// tick before.
+// landed.
 let bounced = 0;
-let pouredBack = 0;
 const lastTwo = new Map();
 function wasted(rooms) {
-  const objects = rooms.flatMap((r) => [...r["#objects"]]);
-  const stores = objects.filter((o) => o.structureType === "storage" || o.structureType === "terminal");
-  for (const o of objects)
+  for (const o of rooms.flatMap((r) => [...r["#objects"]]))
     if (o.body !== undefined && o["#user"] === ours) {
-      const beside = stores.find((s) => s.pos.roomName === o.pos.roomName && near(s.pos, o.pos, 1));
-      const now = { room: o.pos.roomName, edge: onEdge(o.pos), energy: energyIn(o), store: beside?.id, stored: beside ? energyIn(beside) : 0 };
+      const now = { room: o.pos.roomName, edge: onEdge(o.pos), energy: energyIn(o) };
       const [a, b] = lastTwo.get(o.name) ?? [];
       if (a && b && a.edge && b.edge && now.edge && a.room === now.room && b.room !== now.room) bounced++;
       if (b && b.room !== now.room && homes.includes(b.room)) lines[b.room].carriedOut += now.energy;
-      if (a && b && now.store && a.store === now.store && b.store === now.store && b.energy > a.energy && now.energy < b.energy && now.stored > b.stored)
-        pouredBack += Math.min(b.energy - a.energy, b.energy - now.energy);
       lastTwo.set(o.name, [b, now]);
     }
+}
+
+// Energy our terminals sent, by the room sent to. The engine lists a user's
+// last 100 sends; a terminal sends once in 10 ticks, ten in a sample.
+const sent = {};
+const sentSeen = new Set();
+async function sends() {
+  for (const id of (await loadTransactionEntries(shard, ours)).outgoing.filter((id) => !sentSeen.has(id))) {
+    sentSeen.add(id);
+    const send = readTransaction(await loadTransactionBlob(shard, id));
+    if (send.resourceType === "energy") sent[send.to] = (sent[send.to] ?? 0) + send.amount;
+  }
 }
 
 // Keep asking for the pause until the first tick is through (`step.mjs`).
@@ -996,7 +860,6 @@ for (let t = 0; t < ticks; t++) {
   const around = [...rooms, ...(await Promise.all(bordering.map((name) => shard.loadRoom(name, time))))];
   live(around, time);
   await engaged(t, time, rooms);
-  detours(rooms);
   stoodLoaded(rooms, time);
   wasted(around);
   for (const o of opponents.filter(({ raid: r }) => r && (t === r.first || (r.every && t > r.first && (t - r.first) % r.every === 0)))) {
@@ -1049,7 +912,8 @@ for (let t = 0; t < ticks; t++) {
     }
     if (homes.length > 1) row.homes = Object.fromEntries(homes.map((h, i) => [h, summary(sample(t, time, rooms[i]))]));
     row.botCpu = fresh ? obs.cpu : null;
-    row.roadLoss = roadLoss;
+    await sends();
+    row.sent = { ...sent };
     row.stillLoaded = stillLoaded;
     // Ore held in our storages and terminals: what the mines brought home.
     row.ore = rooms.flatMap((r) => [...r["#objects"]])
@@ -1073,7 +937,6 @@ for (let t = 0; t < ticks; t++) {
       if (o["#user"] === ours && o.store && ["storage", "terminal", "lab"].includes(o.structureType))
         for (const r of ["OH", "UH", "UH2O"]) row.made[r] = (row.made[r] ?? 0) + (o.store.getUsedCapacity(r) ?? 0);
     row.bounced = bounced;
-    row.pouredBack = pouredBack;
     row.faults = seenFaults.size;
     row.lost = lost.size;
     row.ms = Date.now() - started;

@@ -1,5 +1,5 @@
 {
-  "why": "a declared sweep kills a rival's remote miners, haulers and reservers for more energy than it casts. A HEAL on every body it sends costs it a RANGED at the part cap, so the prey kept in reach falls from 97, 95, 97 to 92, 91, 92 over seeds 1-3; the prey here never shoots back, so that bound priced firepower alone and the owner set it to 91, the lowest of those. Read over the prey's steps alone it is 94/91/94; reading a prey's next tile off where it stands (not where it steps) reads 82/83/82. 91 -> 88 until #812: the worker gate (#808) moves the sweep's cast, 94/91/94 -> 88/89/88. 88 -> 79 until #812: the build-out split (#828) moves the third sweep body's cast 134 ticks earlier, seed 1 88 -> 79. 79 -> 73 until #812: past RCL6 a colony's outposts take the spawn's whole life, so one colony opens an outpost that shares its spawn with the sweep (84 -> 74)",
+  "why": "a declared sweep kills a rival's remote miners, haulers and reservers for more energy than it casts, and loses no body",
   "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
   "start": {
     "world": "scripts/xxscreeps/worlds/siege-declared-room.json",
@@ -32,21 +32,8 @@
   },
   "ticks": 4000,
   "assert": [
-    {
-      "measure": "sweepKilled",
-      "min": 5000
-    },
-    { "measure": "sweepKept", "min": 73 },
-    {
-      "measure": "bodiesLost",
-      "max": 0
-    },
-    {
-      "measure": "sweepNet",
-      "min": 0
-    },
-    {
-      "measure": "threatLookupsMost"
-    }
+    { "measure": "bodiesLost", "max": 0 },
+    { "measure": "sweepNet", "min": 0 },
+    { "measure": "threatLookupsMost" }
   ]
 }

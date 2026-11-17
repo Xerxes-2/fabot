@@ -1,7 +1,9 @@
 {
-  "why": "a stocked colony whose stock stands short of a worker's load past its reserve casts no worker but the deadline's, since a worker never draws under the reserve while no site that pays back stands (#832): workers stood empty beside the controller while the spawn kept casting more. The line is this level's 20k reserve with no threat in the world; main at 577ffede cast 3 workers under it from t1000 (51 worker-windows). castsBelow 0 -> 1, not a cast under the line but the measure's 100-tick sample: the link site is built by t1200 (main leaves it unbuilt to the end), the stock climbs past the line, and a worker cast at t3800 on a 21.6k stock reads the t3700 sample's 17.6k",
+  "why": "a stocked colony whose stock stands short of a worker's load past its reserve casts no worker but the deadline's, since a worker never draws under the reserve while no site that pays back stands (#832): workers stood empty beside the controller while the spawn kept casting more. The line is this level's 20k reserve with no threat in the world; main at 577ffede cast 3 workers under it from t1000 (51 worker-windows)",
   "modules": ["economy"],
   "start": { "world": "scripts/xxscreeps/worlds/season-outpost-ring.json", "room": "E23S9", "seed": 1, "node": "N4" },
   "ticks": 4000,
-  "assert": [{ "measure": "castsBelow", "pattern": "worker", "below": 20000, "from": 1000, "max": 1 }]
+  "assert": [
+    { "measure": "castsBelow", "pattern": "worker", "below": 20000, "from": 1000, "max": 0 }
+  ]
 }

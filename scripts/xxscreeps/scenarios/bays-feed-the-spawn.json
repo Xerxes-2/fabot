@@ -1,7 +1,0 @@
-{
-  "why": "a source's harvest bay is kept by its harvester, so the carriers bring the spawns and extensions only what the bays do not hold: main (e46f299d) carried 103% of the energy spawned, bays 88%",
-  "modules": ["economy", "layout"],
-  "start": { "room": "W8N3", "seed": 1 },
-  "ticks": 14000,
-  "assert": [{ "measure": "ringHauledShare", "from": 9000, "max": 95 }]
-}

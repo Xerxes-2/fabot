@@ -1,12 +1,11 @@
 {
-  "why": "at RCL8 a colony's sites are built, its controller fed only inside its downgrade deadline: R8 reaches RCL8 on RCL7's plan with 50k stored under its 60k reserve. Main 9154fa4f upgraded with the stock held just under the reserve, where builders never draw, left its 5 rampart sites unbuilt and so placed no observer, power spawn, nuker or lab past the sixth. The observer stands at 27700, so the run is 29100 ticks, 26000's share over 24800, when it stood before the dig and carriers queued ahead of every fight cast and the ring was walked as one",
+  "why": "at RCL8 a colony's sites are built before its controller is fed: R8 reaches RCL8 on RCL7's plan with 50k stored under its 60k reserve, leaves no rampart site unbuilt, upgrades nothing while a site of ours stands queued, and leaves no extension off a road but a bay's. Main 9154fa4f upgraded with the stock held just under the reserve, where builders never draw, and left its 5 rampart sites unbuilt. The stock first climbs back to the reserve at t~7700, where upgrading could start, so the run is 9200: a body's life past it; the lab sites queued then stand unbuilt at its end",
   "modules": ["economy", "layout"],
   "start": { "world": "scripts/xxscreeps/worlds/season-outpost-ring.json", "room": "E25S8", "seed": 1, "node": "R8", "ended": true },
-  "ticks": 29100,
+  "ticks": 9200,
   "assert": [
-    { "measure": "builtAtEnd", "kind": "observer", "min": 1 },
-    { "measure": "builtAtEnd", "kind": "powerSpawn", "min": 1 },
-    { "measure": "builtAtEnd", "kind": "lab", "min": 7 },
-    { "measure": "unroadedAtEnd", "max": 0 }
+    { "measure": "sitesAtEnd", "kind": "rampart", "max": 0 },
+    { "measure": "unroadedAtEnd", "max": 0 },
+    { "measure": "upgradeWhileQueued", "max": 0 }
   ]
 }

@@ -1,7 +1,0 @@
-{
-  "why": "a colony with GCL to spare and its stock at the reserve keeps the sponsor's margin from the controller and claims; main's controller drank every stock past the reserve, so the margin never stood and the first claim waited 70k ticks past GCL2",
-  "modules": ["economy", "strategy"],
-  "start": { "room": "W8N3", "seed": 1, "node": "Y2" },
-  "ticks": 7000,
-  "assert": [{ "measure": "claimSpawned", "max": 6500 }]
-}

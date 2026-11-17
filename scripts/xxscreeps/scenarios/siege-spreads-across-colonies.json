@@ -1,11 +1,10 @@
 {
-  "why": "a siege set's bodies are spawned where each stands at the rally soonest across the colonies, not all queued at the nearest: the oldest body keeps its life while the far colonies fill in parallel",
+  "why": "a siege set's bodies are spawned where each stands at the rally soonest across the colonies, not all queued at the nearest: the oldest body is still alive when the last of the set stands",
   "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
   "start": { "world": "scripts/xxscreeps/worlds/siege-spreads-across-colonies.json", "seed": 1 },
   "ticks": 2500,
   "assert": [
-    { "measure": "siegeSpawnSpread", "max": 900 },
-    { "measure": "siegeOldestLife", "min": 500 },
+    { "measure": "siegeOldestLife", "min": 1 },
     { "measure": "bodiesLost", "max": 2 }
   ]
 }

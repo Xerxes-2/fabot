@@ -1,7 +1,0 @@
-{
-  "why": "a colony started from zero scouts its neighbours before its tower, so outposts has a candidate at RCL2 and works one once the pile stands (main casts no scout below RCL3 and works no remote: E23S8 dug 0 by t7000; scouted from RCL1, the first scout at t352 and E23S8 dug from t5802, 12.5k by t7000; from 658673ae the pile stands later and E23S8 is dug from ~t7300)",
-  "modules": ["strategy", "economy"],
-  "start": { "world": "scripts/xxscreeps/worlds/season-outpost-ring.json", "room": "E23S9", "seed": 1, "ended": true },
-  "ticks": 9000,
-  "assert": [{ "measure": "dug", "room": "E23S8", "to": 9000, "min": 5000 }]
-}

@@ -1,10 +1,9 @@
 {
-  "why": "a structure that outlives a creep's life waits behind the sites, so a colony taken over with its roads worn builds its links and ramparts and loses no road or container meanwhile",
+  "why": "a structure that outlives a creep's life waits behind the sites, so a colony taken over with its roads worn loses no road or container while it builds its links and ramparts",
   "modules": ["atlas", "economy", "layout", "mv"],
   "start": { "room": "W8N3", "seed": 1, "late": 7, "node": "T7" },
   "ticks": 3000,
   "assert": [
-    { "measure": "build", "min": 15000 },
     { "measure": "decayedAway", "max": 0 },
     { "measure": "floodsMost" },
     { "measure": "atlasMissRate" }

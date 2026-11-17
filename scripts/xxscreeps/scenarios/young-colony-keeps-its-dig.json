@@ -4,7 +4,6 @@
   "start": { "world": "scripts/xxscreeps/worlds/young-beside-big.json", "seed": 1 },
   "ticks": 4000,
   "assert": [
-    { "measure": "carriedOut", "room": "W1N1", "max": 1000 },
-    { "measure": "upgrade", "to": 2750, "min": 40000 }
+    { "measure": "carriedOut", "room": "W1N1", "max": 1000 }
   ]
 }

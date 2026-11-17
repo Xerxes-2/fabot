@@ -1055,13 +1055,12 @@ everything v1 used its self-written arena for, and more:
   own room; ours without the engine's safe mode); `two-v2-neighbours` seats
   a second v2, a smoke test until v2 has an offensive kind. The scripted
   rivals are one library, `engine/rival/`: `opponent.js`'s { role } picks a
-  behaviour list — keep, remote, raid, drain, harass, pass — over its own
+  behaviour list — keep, remote, raid, drain, pass — over its own
   keys, and the roles share one tower aim, one walk and one room economy. A
   raid's bodies and boosts are stood on our room's edge at its tick
   (`opponents[].raid`). Held is: no level or spawn lost and the raid gone
-  by the window's end (`defend-holds-*`, N3: a kiting raid,
-  a healed pair,
-  Invader waves). TooAngel (AGPL, so fetched by its pinned
+  by the window's end (`defend-holds-*`: Invader waves on N3, TooAngel's
+  squads). TooAngel (AGPL, so fetched by its pinned
   tarball and integrity, never vendored: `engine/tooangel/fetch.json`)
   plays from next door in a world cached at tick 11000, its RCL3, and sends
   its melee squad at our home every 1500 ticks (`defend-holds-tooangel-attack`).
@@ -1071,8 +1070,7 @@ everything v1 used its self-written arena for, and more:
   scenario is skipped, never failed, and `jj ship` never reaches the registry. Hivemind,
   fetched the same way, holds the declared-room world against a siege and
   a sweep, both the offence target and so nightly: `--nightly` runs them,
-  and they join the daily library once they pass. `siege-outlasts-safe-mode`,
-  30,000 ticks, is nightly for its length alone. The International is
+  and they join the daily library once they pass. The International is
   built from source in the cache (`soak.mjs`'s `fetch.json` `build`). The library fails to
   load while a fight kind (`siege-`, `sweep-`, `defend-`) meets no
   open-source bot. ❓ Both fail: reinforcements walk into Hivemind's towers

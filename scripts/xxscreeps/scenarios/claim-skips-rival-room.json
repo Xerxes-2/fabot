@@ -1,5 +1,5 @@
 {
-  "why": "a declared claim a rival was last seen holding casts no claimer while it is out of sight",
+  "why": "a declared claim a rival was last seen holding casts no claimer while it is out of sight. The one claimer allowed is the first, cast before any body of ours has seen the room",
   "modules": ["atlas", "economy", "mv", "strategy"],
   "start": {
     "room": "W8N3",

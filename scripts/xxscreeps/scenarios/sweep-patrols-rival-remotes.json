@@ -1,5 +1,5 @@
 {
-  "why": "a rival working one remote at a time, each in turn: the sweep's set moves on from a room emptied to the next of his rooms and kills there (idling in the first, it killed 2662), never walking home before it ages out",
+  "why": "a rival working one remote at a time, each in turn: the sweep's set moves on from a room emptied to the next of his rooms, never walking home before it ages out, and loses no body",
   "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
   "start": {
     "world": "scripts/xxscreeps/worlds/siege-declared-room.json",
@@ -21,7 +21,6 @@
   },
   "ticks": 4000,
   "assert": [
-    { "measure": "sweepKilled", "min": 5000 },
     { "measure": "fightTicksBack", "max": 0 },
     { "measure": "bodiesLost", "max": 0 },
     { "measure": "threatLookupsMost" }

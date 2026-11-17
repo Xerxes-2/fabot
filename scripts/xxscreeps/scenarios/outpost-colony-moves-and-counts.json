@@ -1,0 +1,18 @@
+{
+  "why": "a colony working two outposts under Invader waves: a body that stays in a room stands a step inside its border, rarely carried back across; no economy body is wedged behind another; a load drawn from the stock is never put back (main drew and banked 900 a carrier every three ticks beside the storage, carry.returned 52,200-70,200 a window; fixed it reads 900 to 1,800, and the bound adds 900); and the bot counts each body of ours the engine killed young, filed under what struck it: only Invaders strike here, so none falls to a player, a tower or an unknown",
+  "modules": ["atlas", "economy", "fight", "mv", "observe"],
+  "start": { "room": "W8N3", "seed": 1, "node": "E1" },
+  "ticks": 4000,
+  "assert": [
+    { "measure": "bounced", "to": 4000, "max": 20 },
+    { "metric": "move.wedged", "max": 0 },
+    { "metric": "carry.returned", "max": 2700 },
+    { "measure": "deathsError", "max": 0 },
+    { "metric": "death.player", "room": "W7N3", "max": 0 },
+    { "metric": "death.tower", "room": "W7N3", "max": 0 },
+    { "metric": "death.unknown", "room": "W7N3", "max": 0 },
+    { "metric": "death.player", "room": "W8N2", "max": 0 },
+    { "metric": "death.tower", "room": "W8N2", "max": 0 },
+    { "metric": "death.unknown", "room": "W8N2", "max": 0 }
+  ]
+}

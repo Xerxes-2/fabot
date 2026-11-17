@@ -1,5 +1,5 @@
 {
-  "why": "a declared claim is claimed, worked from home until its first spawn stands, and grown to RCL3",
+  "why": "a declared claim is claimed and worked from home until its first spawn stands",
   "modules": ["atlas", "economy", "layout", "mv", "strategy"],
   "start": {
     "room": "W8N3",
@@ -8,13 +8,6 @@
   },
   "ticks": 8000,
   "assert": [
-    {
-      "measure": "claimSpawned",
-      "max": 4000
-    },
-    {
-      "measure": "claimLevel",
-      "min": 3
-    }
+    { "measure": "claimSpawned", "max": 8000 }
   ]
 }

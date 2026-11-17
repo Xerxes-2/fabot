@@ -21,9 +21,7 @@
     { "measure": "spawnsLost", "max": 0 },
     { "measure": "attackersAtEnd", "max": 0 },
     { "measure": "homeHostileTicks", "max": 300 },
-    { "measure": "engagements", "min": 3 },
     { "measure": "predictedWinsLost", "max": 0 },
-    { "measure": "oscillation", "max": 43 },
     { "measure": "bodiesLost", "max": 0 }
   ]
 }

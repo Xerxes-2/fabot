@@ -5,7 +5,6 @@ const walk = (creep, goals, options) => {
 };
 
 const step = (creep, goals, flee) => walk(creep, goals, { flee, maxRooms: 1 });
-const flee = (creep, from, range) => walk(creep, from.map((f) => ({ pos: f.pos, range })), { flee: true });
 
 // `engine::tower_attack_at`: 600 to range 5, 450 gone from range 20 out.
 const towerDamage = (range) => (range <= 5 ? 600 : Math.floor(600 - 30 * (Math.min(range, 20) - 5)));
@@ -54,4 +53,4 @@ function filler(creep, room) {
   if (!topUp(creep, room, 0) && creep.transfer(room.storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) creep.moveTo(room.storage, { maxRooms: 1 });
 }
 
-module.exports = { aim, filler, flee, outhealed, repairer, softest, step };
+module.exports = { aim, filler, outhealed, repairer, softest, step };

@@ -1,8 +1,7 @@
 // A rival's behaviour lists, one per `opponent.js` role (§10.2).
-const { aim, filler, flee, outhealed, repairer, softest, step } = require("shared");
+const { aim, filler, outhealed, repairer, softest, step } = require("shared");
 
 const active = (c, part) => c.getActiveBodyparts(part) > 0;
-const armed = (c) => active(c, ATTACK) || active(c, RANGED_ATTACK);
 const hurt = (c) => c.hits < c.hitsMax;
 
 // keep: a room-holder; { focus } names its towers' aim, { safeMode: "extension" }
@@ -38,11 +37,7 @@ function keep(config) {
 
 // remote: a room working { remotes: [room, …] }, its home among them to mine its
 // own source; { roles } the roles it keeps (default all), { shift } the ticks
-// each remote is worked alone in turn (default all at once), { flee } the range
-// a remote body runs from an armed one (default never), { bounce } the range at
-// which it leaves the remote by the exit toward home, steps one tile in there to
-// shed that step's fatigue, waits it out and walks back: a live body's few ticks,
-// where an idle one on the gate is carried back in two.
+// each remote is worked alone in turn (default all at once).
 const BODIES = {
   filler: [CARRY, CARRY, CARRY, CARRY, MOVE, MOVE],
   miner: [WORK, WORK, WORK, WORK, WORK, MOVE, MOVE, MOVE],
@@ -73,29 +68,6 @@ function hauler(c, home) {
 }
 
 const onEdge = (p) => p.x === 0 || p.x === 49 || p.y === 0 || p.y === 49;
-const OPPOSITE = { 1: 5, 2: 6, 3: 7, 4: 8, 5: 1, 6: 2, 7: 3, 8: 4 };
-const exitTo = (room, next) => {
-  const exits = Game.map.describeExits(room) ?? {};
-  return Object.keys(exits).find((dir) => exits[dir] === next);
-};
-
-// bounce: the engine carries a body ending its tick on the gate across, so
-// staying out takes a step inside and the fatigue that step costs.
-function bounce(config, c, home) {
-  const remote = c.memory.remote;
-  if (!remote || c.memory.role === "filler") return false; // a filler's remote is home
-  const inRemote = c.room.name === remote;
-  if (inRemote) c.memory.away = c.pos.findInRange(FIND_HOSTILE_CREEPS, config.bounce).some(armed);
-  if (!c.memory.away) return false;
-  const out = exitTo(c.room.name, inRemote ? home.name : remote);
-  if (out === undefined) return false;
-  if (c.fatigue > 0) return true;
-  if (inRemote && !onEdge(c.pos)) c.moveTo(new RoomPosition(25, 25, home.name));
-  else if (inRemote) return true; // on the gate: the engine carries it across
-  else if (onEdge(c.pos)) c.move(OPPOSITE[out]);
-  else c.moveTo(new RoomPosition(25, 25, remote));
-  return true;
-}
 
 // A body the rival did not spawn (a soak's raid) guards the room it stands in.
 function guard(c) {
@@ -119,10 +91,7 @@ function remote(config) {
   }
   const creeps = Object.values(Game.creeps);
   for (const c of creeps) {
-    if (config.bounce && bounce(config, c, home)) continue;
-    const near = config.flee && c.memory.remote ? c.pos.findInRange(FIND_HOSTILE_CREEPS, config.flee).filter(armed) : [];
-    if (near.length) flee(c, near, config.flee + 1);
-    else ({ filler, miner, hauler, reserver }[c.memory.role] ?? guard)(c, home);
+    ({ filler, miner, hauler, reserver }[c.memory.role] ?? guard)(c, home);
   }
   const spawn = home.find(FIND_MY_SPAWNS).find((s) => !s.spawning);
   const worked = config.shift ? [remotes[Math.floor(Game.time / config.shift) % remotes.length]] : remotes;
@@ -206,77 +175,7 @@ function drain(config) {
   }
 }
 
-// harass: { targets }, each body poking them in turn, shooting the nearest
-// unarmed body, backing off any armed one within 5, going home to heal under 60%
-// hits and on to the next room once healed or idle. The last target is the room
-// they walk round, crossing it only on the way to another. { retreat }: a body
-// that meets an armed one in its target room walks home and comes back `retreat`
-// ticks later, as a live harasser does when it cannot win; without it the body
-// stands and backs off.
-const IDLE = 50;
-// A body that ends a tick on an exit tile is carried into the room beyond it
-// (`processor.js`), so a role that parks one there never stands where it waits.
-function park(creep) {
-  if (!onEdge(creep.pos)) return;
-  const path = PathFinder.search(creep.pos, { pos: new RoomPosition(25, 25, creep.room.name), range: 20 }, { maxOps: 500 }).path;
-  if (path.length > 0) creep.move(creep.pos.getDirectionTo(path[0]));
-}
-// `Room.findExitTo` answers a code, not tiles: the room's own side toward `next`.
-const EXIT = { 1: FIND_EXIT_TOP, 3: FIND_EXIT_RIGHT, 5: FIND_EXIT_BOTTOM, 7: FIND_EXIT_LEFT };
-
-function wayOut(creep, next) {
-  const exits = Game.map.describeExits(creep.room.name) ?? {};
-  const dir = Object.keys(exits).find((d) => exits[d] === next);
-  return creep.pos.findClosestByRange(creep.room.find(EXIT[dir] ?? FIND_EXIT));
-}
-
-function go(creep, room, around) {
-  if (creep.room.name === around && room !== around) return creep.moveTo(wayOut(creep, room), { reusePath: 0 });
-  const roomCallback = (r) => (r === around && room !== around ? false : new PathFinder.CostMatrix());
-  const path = PathFinder.search(creep.pos, { pos: new RoomPosition(25, 25, room), range: 20 }, { roomCallback, maxOps: 8000 }).path;
-  if (path.length > 0) creep.move(creep.pos.getDirectionTo(path[0]));
-}
-
-function harass(config) {
-  const { targets } = config;
-  const home = Object.values(Game.spawns)[0].room.name;
-  const around = targets.at(-1);
-  Object.keys(Game.creeps)
-    .sort()
-    .forEach((name, i) => {
-      const creep = Game.creeps[name];
-      const mem = creep.memory;
-      mem.next ??= i;
-      mem.idle ??= 0;
-      if (creep.hits < creep.hitsMax) creep.heal(creep);
-      if (creep.hits < creep.hitsMax * 0.6) mem.healing = true;
-      if (mem.healing) {
-        if (creep.hits === creep.hitsMax) [mem.healing, mem.next, mem.idle] = [false, mem.next + 1, 0];
-        else if (creep.room.name !== home) return go(creep, home, around);
-        else return config.retreat ? park(creep) : undefined;
-      }
-      const target = targets[mem.next % targets.length];
-      const foes = creep.room.find(FIND_HOSTILE_CREEPS);
-      if (config.retreat && mem.away) {
-        if (creep.room.name === target) return go(creep, home, around);
-        if (Game.time < mem.away) return park(creep);
-        mem.away = 0;
-      }
-      const prey = creep.pos.findClosestByRange(foes.filter((f) => !armed(f)));
-      if (prey && creep.pos.inRangeTo(prey, 3)) creep.rangedAttack(prey);
-      if (config.retreat && creep.room.name === target && foes.some(armed)) {
-        mem.away = Game.time + config.retreat;
-        return go(creep, home, around);
-      }
-      if (creep.room.name !== target) return go(creep, target, around);
-      const threats = foes.filter((f) => armed(f) && creep.pos.inRangeTo(f, 5));
-      if (threats.length > 0) return flee(creep, threats, 5);
-      if (!prey && ++mem.idle > IDLE) [mem.next, mem.idle] = [mem.next + 1, 0];
-      if (prey && !creep.pos.inRangeTo(prey, 3)) creep.moveTo(prey, { range: 3, reusePath: 0 });
-    });
-}
-
 // pass: an ally's bodies stand where they are and strike nothing.
 const pass = () => {};
 
-module.exports = { drain, harass, keep, pass, raid, remote };
+module.exports = { drain, keep, pass, raid, remote };

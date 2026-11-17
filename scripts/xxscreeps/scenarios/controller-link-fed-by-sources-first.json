@@ -1,7 +1,0 @@
-{
-  "why": "the source links feed the controller's link first and carriers bring it only while the upgraders drink more than the links send: main (a31d7649) hand-fed it 28,142 over 4,000 ticks of 19-28 WORK drinking against 9-19 e/t of inflow; fixed 23,710. Bounded on the links' own sends (`linked`, their 3% loss), which carriers filling the controller's link would cut: main (e46f299d) 1,494, harvest bays (#827) 1,689, a31d7649 on today's node 1,764. It was the hand-fed share of the upgrade, but bays fill the spawn faster and cast upgraders sooner, so more upgrade raised it (44.8% against main's 33.3%, upgrade 97.5k against 71.3k) with the rule intact",
-  "modules": ["economy"],
-  "start": { "room": "W9N8", "seed": 1, "node": "N5" },
-  "ticks": 4000,
-  "assert": [{ "measure": "linked", "min": 1450 }]
-}

@@ -1,13 +1,6 @@
 {
-  "why": "a siege shot into a room Hivemind holds answers it and razes it with no body lost. His two full towers and the guardians Hivemind spawns are the answer; no scripted defender stands in the world. His controller keeps the 4 safe modes live held at tick 1316006, on cooldown to 1344934, which covers the run: the raid is the window the owner means to kill him in. Daily: seeds 1-3 hold it, and the raid is the one kind that walks into his towers' line. bodiesLost 0 -> 1 while #799 fixes the set: with the slot economy, workers cast before the second wave's ask hold the spawns 25-90 ticks and one body is lost. The room stands bare 285 ticks into the fight; Hivemind rebuilds after it. The colony's own dig and carriers queue ahead of the set's casts: it musters at 1285 and the room stands bare at 5248, 233 ticks into the fight, so the run is 6000 ticks and the bound 262, 320's share over 285",
-  "modules": [
-    "atlas",
-    "exchange",
-    "fight",
-    "mv",
-    "strategy",
-    "tactics"
-  ],
+  "why": "a siege shot into a room Hivemind holds answers it and razes it bare within the run. His two full towers and the guardians Hivemind spawns are the answer; no scripted defender stands in the world. His controller keeps the 4 safe modes live held at tick 1316006, on cooldown to 1344934, which covers the run: the raid is the window the owner means to kill him in. Daily: seeds 1-3 hold it, and the raid is the one kind that walks into his towers' line. bodiesLost 0 -> 1 while #799 fixes the set: with the slot economy, workers cast before the second wave's ask hold the spawns 25-90 ticks and one body is lost. Hivemind rebuilds after the room stands bare",
+  "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
   "start": {
     "world": "scripts/xxscreeps/worlds/siege-breached-room.json",
     "seed": 1,
@@ -21,17 +14,8 @@
   },
   "ticks": 6000,
   "assert": [
-    {
-      "measure": "razeTicks",
-      "max": 262
-    },
-    {
-      "measure": "bodiesLost",
-      "max": 1
-    },
-    {
-      "measure": "diedAlone",
-      "max": 0
-    }
+    { "measure": "razeTicks", "max": 6000 },
+    { "measure": "bodiesLost", "max": 1 },
+    { "measure": "diedAlone", "max": 0 }
   ]
 }

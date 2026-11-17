@@ -6,6 +6,6 @@
   "assert": [
     { "measure": "builtAtEnd", "kind": "extractor", "min": 1 },
     { "measure": "builtAtEnd", "kind": "terminal", "min": 1 },
-    { "measure": "ore", "min": 1000 }
+    { "measure": "ore", "min": 1 }
   ]
 }

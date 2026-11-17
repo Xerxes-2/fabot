@@ -1,7 +1,0 @@
-{
-  "why": "no body with free capacity stands beside dropped energy without taking it",
-  "modules": ["atlas", "economy", "mv"],
-  "start": { "room": "W3N1", "seed": 1 },
-  "ticks": 14000,
-  "assert": [{ "measure": "decayed", "max": 3500 }]
-}

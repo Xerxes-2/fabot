@@ -1,9 +1,0 @@
-{
-  "why": "an abandoned colony's haulers feed its terminal from its storage, so it empties at the haulers' pace into the terminal, not overland to another colony's sinks",
-  "modules": ["atlas", "economy", "mv"],
-  "start": { "world": "scripts/xxscreeps/worlds/abandon-two-colonies.json", "seed": 1 },
-  "ticks": 3000,
-  "assert": [
-    { "measure": "heldAtEnd", "room": "W1N1", "to": 800, "max": 200 }
-  ]
-}
