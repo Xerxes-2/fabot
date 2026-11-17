@@ -185,13 +185,9 @@ fn to_plan(rules: &Rules, ground: &Ground, built: &Built) -> Plan {
         if !fixed.contains(&tile) || kind.is_extractor() {
             let seq = keyed.len();
             let rock = |r: &Tile| tiles::range(*r, tile) == 1;
-            let crowded = ground.sources.iter().any(|r| {
-                rock(r)
-                    && (tiles::around(*r).iter())
-                        .filter(|n| ground.terrain[**n] != place::WALL)
-                        .count()
-                        > 1
-            });
+            let seat = |n: &&Tile| ground.terrain[**n] != place::WALL && !fixed.contains(n);
+            let crowded = (ground.sources.iter())
+                .any(|r| rock(r) && tiles::around(*r).iter().filter(seat).count() > 1);
             keyed.push((
                 priority(&kind, level, crowded),
                 level,
@@ -295,14 +291,19 @@ fn to_plan(rules: &Rules, ground: &Ground, built: &Built) -> Plan {
     }
 }
 
-/// Hivemind's search, a few variations a tick as its planner spreads them:
-/// the variations still to build and the best scored so far.
+/// Hivemind's search, a few variations a tick as its planner spreads them.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Drawing {
     walls: Vec<u8>,
     exits: Vec<u8>,
     next: usize,
     best: Option<(f64, usize)>,
+}
+
+pub enum Drawn {
+    Drawing,
+    /// The first of the best scored, or none where no variation fits.
+    Done(Option<Plan>),
 }
 
 impl Drawing {
@@ -316,19 +317,13 @@ impl Drawing {
         }
     }
 
-    /// Builds variations while `budget` lasts; the plan, the first of the
-    /// best scored, once every one is built.
-    pub fn advance(
-        &mut self,
-        rules: &Rules,
-        ground: &Ground,
-        budget: &mut usize,
-    ) -> Option<Option<Plan>> {
+    /// Builds variations while `budget` lasts.
+    pub fn advance(&mut self, rules: &Rules, ground: &Ground, budget: &mut usize) -> Drawn {
         let dist = (&self.walls[..], &self.exits[..]);
         let variations = score::variations(ground, dist.0, dist.1);
         while self.next < variations.len() {
             if *budget == 0 {
-                return None;
+                return Drawn::Drawing;
             }
             *budget -= 1;
             if let Some(b) = build::build(rules, ground, dist, &variations[self.next]) {
@@ -342,15 +337,16 @@ impl Drawing {
         let best = self
             .best
             .and_then(|(_, i)| build::build(rules, ground, dist, &variations[i]));
-        Some(best.map(|b| to_plan(rules, ground, &b)))
+        Drawn::Done(best.map(|b| to_plan(rules, ground, &b)))
     }
 }
 
 pub fn of_ground(rules: &Rules, ground: &Ground) -> Option<Plan> {
     let mut budget = usize::MAX;
-    Drawing::of(ground)
-        .advance(rules, ground, &mut budget)
-        .flatten()
+    match Drawing::of(ground).advance(rules, ground, &mut budget) {
+        Drawn::Done(plan) => plan,
+        Drawn::Drawing => None,
+    }
 }
 
 /// The first variation alone: whether a room fits a whole plan, at a
@@ -610,7 +606,7 @@ mod tests {
             let whole = of_ground(&rules, &a);
             let mut drawing = Drawing::of(&b);
             let spread = loop {
-                if let Some(done) = drawing.advance(&rules, &b, &mut 1) {
+                if let Drawn::Done(done) = drawing.advance(&rules, &b, &mut 1) {
                     break done;
                 }
             };

@@ -4788,7 +4788,7 @@
     {"type": "extension", "x": 32, "y": 44, "room": "W2S8", "_id": "d00a09", "user": "f00000000000000000000001", "store": {"energy": 200}, "hits": 1000, "hitsMax": 1000},
     {"type": "container", "x": 10, "y": 43, "room": "W2S8", "_id": "d0090b", "store": {"energy": 12}, "hits": 245000, "hitsMax": 250000},
     {"type": "container", "x": 7, "y": 39, "room": "W2S8", "_id": "d00969", "store": {"energy": 0}, "hits": 67300, "hitsMax": 250000},
-    {"type": "storage", "x": 26, "y": 40, "room": "W2S8", "_id": "d009c0", "user": "f00000000000000000000001", "store": {"energy": 262360, "T": 0, "O": 16784, "U": 1190}, "hits": 10000, "hitsMax": 10000},
+    {"type": "storage", "x": 26, "y": 40, "room": "W2S8", "_id": "d009c0", "user": "f00000000000000000000001", "store": {"energy": 800000, "T": 0, "O": 16784, "U": 1190}, "hits": 10000, "hitsMax": 10000},
     {"type": "terminal", "x": 26, "y": 38, "room": "W2S8", "_id": "d009e9", "user": "f00000000000000000000001", "store": {"energy": 12191, "T": 0, "O": 8152, "U": 5213}, "hits": 3000, "hitsMax": 3000},
     {"type": "road", "x": 6, "y": 40, "room": "W2S8", "_id": "d008fb", "hits": 4700, "hitsMax": 5000},
     {"type": "road", "x": 7, "y": 40, "room": "W2S8", "_id": "d008fc", "hits": 5000, "hitsMax": 5000},

@@ -40,8 +40,7 @@ pub fn key_of(room: &Room) -> String {
     join(&ground::obstacles(room))
 }
 
-/// Hivemind's search spread over ticks as its planner spreads it: some 4 ms a
-/// variation natively, and a room tries up to 40.
+/// `ARCHITECTURE.md` §5: Hivemind's search spread over ticks.
 const VARIATIONS_PER_TICK: usize = 4;
 
 pub fn colonies(
@@ -71,7 +70,7 @@ pub fn colonies(
             },
         };
         if let (Some(d), Some(g)) = (&mut kept.drawing, &ground)
-            && let Some(done) = d.advance(&world.rules, g, &mut budget)
+            && let plan::Drawn::Done(done) = d.advance(&world.rules, g, &mut budget)
         {
             kept.plan = done;
             kept.drawing = None;
@@ -174,7 +173,6 @@ mod tests {
         }
     }
 
-    /// The standing plans once every drawing has finished.
     fn settled(
         world: &World,
         standing: BTreeMap<RoomName, Standing>,

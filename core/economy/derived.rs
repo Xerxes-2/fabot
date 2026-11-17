@@ -19,6 +19,8 @@ use super::bodies::{self, Pattern};
 
 #[derive(Clone, Debug)]
 pub struct Body {
+    /// None while it spawns.
+    pub id: Option<String>,
     pub name: String,
     pub pos: Pos,
     /// Live parts: a part shot to no hits does nothing.
@@ -255,6 +257,10 @@ impl Ground {
         self.stores.iter().any(|s| s.owned)
     }
 
+    pub fn banks_on_pile(&self) -> bool {
+        self.bank().is_some_and(|b| b.kind.is_pile()) && self.terminal.is_none()
+    }
+
     pub fn bank(&self) -> Option<&StoreFact> {
         self.stores.iter().find(|s| s.owned || s.kind.is_pile())
     }
@@ -274,12 +280,17 @@ impl Ground {
     /// A site that waits pays back nothing, so while one stands its builders
     /// draw the reserve.
     pub fn kept_from_builders(&self, reserve: i32) -> i32 {
-        if self.sites.iter().any(|s| s.kind.pays_back()) {
+        if self.sites.iter().any(|s| drawn_for(&s.kind)) {
             0
         } else {
             reserve
         }
     }
+}
+
+/// A rampart guards the reserve and costs one energy.
+pub fn drawn_for(kind: &Kind) -> bool {
+    kind.pays_back() || *kind == Kind::Rampart
 }
 
 /// The lab a waiting body walks to, and what the colony's stores owe it.
@@ -335,7 +346,13 @@ impl Derived {
     }
 }
 
-fn body_of(name: &str, pos: &Pos, parts: &[BodyPart], store: &Store, life: i32) -> Body {
+fn body_of(
+    (id, name): (Option<&str>, &str),
+    pos: &Pos,
+    parts: &[BodyPart],
+    store: &Store,
+    life: i32,
+) -> Body {
     let mut work = 0;
     let mut carry = 0;
     let mut moves = 0;
@@ -354,6 +371,7 @@ fn body_of(name: &str, pos: &Pos, parts: &[BodyPart], store: &Store, life: i32) 
     }
 
     Body {
+        id: id.map(str::to_string),
         name: name.to_string(),
         pos: *pos,
         work,
@@ -1110,7 +1128,13 @@ fn ovens_of(world: &World) -> Vec<Body> {
                     } else {
                         engine::CREEP_LIFETIME
                     };
-                    body_of(&oven.name, &s.pos, &oven.body, &Store::empty(), life)
+                    body_of(
+                        (None, &oven.name),
+                        &s.pos,
+                        &oven.body,
+                        &Store::empty(),
+                        life,
+                    )
                 })
         })
         .collect()
@@ -1230,7 +1254,15 @@ pub fn of_world(
 
     let bodies: Vec<Body> = creeps
         .iter()
-        .map(|c| body_of(&c.name, &c.pos, &c.body, &c.store, c.ticks_to_live))
+        .map(|c| {
+            body_of(
+                (Some(&c.id), &c.name),
+                &c.pos,
+                &c.body,
+                &c.store,
+                c.ticks_to_live,
+            )
+        })
         .collect();
 
     // A bay with no harvester beside to keep it is the carriers' (Hivemind's).
@@ -1265,7 +1297,7 @@ pub fn of_world(
         })
         .filter(reservable)
         .collect();
-    let spots = spots_of(&grounds, &claims);
+    let spots = spots_of(&grounds, &claims, &bodies);
 
     Derived {
         time: world.time,
@@ -1288,7 +1320,7 @@ pub fn of_world(
     }
 }
 
-fn spots_of(grounds: &[Ground], claims: &[Controller]) -> HashMap<String, Pos> {
+fn spots_of(grounds: &[Ground], claims: &[Controller], bodies: &[Body]) -> HashMap<String, Pos> {
     let mut spots = HashMap::default();
     for g in grounds {
         let ids = (g.sources.iter().map(|x| (&x.id, x.pos)))
@@ -1310,6 +1342,11 @@ fn spots_of(grounds: &[Ground], claims: &[Controller]) -> HashMap<String, Pos> {
     }
     for c in claims {
         spots.entry(c.id.clone()).or_insert(c.pos);
+    }
+    for b in bodies {
+        if let Some(id) = &b.id {
+            spots.entry(id.clone()).or_insert(b.pos);
+        }
     }
     spots
 }

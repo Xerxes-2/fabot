@@ -14,6 +14,8 @@ pub enum Task {
     Upgrade(String),
     Reserve(String),
     Claim(String),
+    /// A carrier, by id, bringing this body its load.
+    Meet(String),
     /// A room, by name: what it holds is not seen until a body stands in it.
     Scout(RoomName),
 }
@@ -31,6 +33,7 @@ pub fn task_id(task: &Task) -> String {
         Task::Upgrade(id) => ("u:", id, None),
         Task::Reserve(id) => ("v:", id, None),
         Task::Claim(id) => ("c:", id, None),
+        Task::Meet(id) => ("m:", id, None),
         Task::Scout(room) => {
             scout = room.to_string();
             ("s:", &scout, None)
@@ -68,6 +71,7 @@ pub fn of_task_id(id: &str) -> Option<Task> {
         [Some("u"), Some(target), None, _] => Some(Task::Upgrade(target.to_string())),
         [Some("v"), Some(target), None, _] => Some(Task::Reserve(target.to_string())),
         [Some("c"), Some(target), None, _] => Some(Task::Claim(target.to_string())),
+        [Some("m"), Some(target), None, _] => Some(Task::Meet(target.to_string())),
         [Some("s"), Some(room), None, _] => Some(Task::Scout(RoomName::parse(room)?)),
         _ => None,
     }
@@ -100,7 +104,8 @@ impl Task {
             | Task::Pickup(_, _)
             | Task::Refill(_, _)
             | Task::Reserve(_)
-            | Task::Claim(_) => 1,
+            | Task::Claim(_)
+            | Task::Meet(_) => 1,
             Task::Scout(_) => RANGE_SCOUT,
         }
     }

@@ -93,7 +93,8 @@ fn spot_of(derived: &Derived, task: &Task) -> Option<Pos> {
         | Task::Repair(id)
         | Task::Upgrade(id)
         | Task::Reserve(id)
-        | Task::Claim(id) => id,
+        | Task::Claim(id)
+        | Task::Meet(id) => id,
     };
     derived.spots.get(id).copied()
 }
@@ -164,7 +165,7 @@ fn act_of(derived: &Derived, task: &Task) -> Option<CreepAct> {
         Task::Reserve(id) if held(id) => CreepAct::Unreserve(id.clone()),
         Task::Reserve(id) => CreepAct::Reserve(id.clone()),
         Task::Claim(id) => CreepAct::ClaimController(id.clone()),
-        Task::Scout(_) => return None,
+        Task::Scout(_) | Task::Meet(_) => return None,
     })
 }
 

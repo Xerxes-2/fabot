@@ -67,6 +67,10 @@ impl Slot {
     pub fn draws_reserve(&self) -> bool {
         matches!((self.rank, &self.job), (DEADLINE, _) | (MEND, Job::Work(_)))
     }
+
+    pub fn digs(&self) -> bool {
+        self.rank == CREW
+    }
 }
 
 /// The ticks from `a` to `b`: in one room its range, else its crossings off
@@ -246,6 +250,17 @@ pub fn fed(c: &crate::world::Controller) -> bool {
     c.level < engine::CONTROLLER_MAX_LEVEL || inside_deadline(c)
 }
 
+/// An upgrader brought its loads waits by the controller's feed (`jobs::supply`).
+fn upgrade_pace(atlas: &Atlas, derived: &Derived, ci: usize, body: &[Part]) -> f64 {
+    let power = engine::UPGRADE_DRAIN_PER_WORK;
+    let g = &derived.grounds[ci];
+    if g.banks_on_pile() && g.feed.is_some() {
+        f64::from(power)
+    } else {
+        worker_pace(atlas, derived, ci, body, power)
+    }
+}
+
 /// What a WORK of a worker spends a tick at `power` a WORK while working:
 /// its load lasts so long, then it walks to its energy and back.
 fn worker_pace(atlas: &Atlas, derived: &Derived, ci: usize, body: &[Part], power: i32) -> f64 {
@@ -374,7 +389,7 @@ impl Plan<'_> {
             if own || raised || colony.controller.level >= TOWER_LEVEL {
                 owed += g.sites.iter().map(|s| s.left).sum::<i32>();
                 payback += (g.sites.iter())
-                    .filter(|s| s.kind.pays_back())
+                    .filter(|s| super::derived::drawn_for(&s.kind))
                     .map(|s| s.left)
                     .sum::<i32>();
             }
@@ -544,9 +559,7 @@ impl Plan<'_> {
             (None, Some(pile)) => {
                 let pace = |w: &Vec<Part>| {
                     let work = f64::from(part_count_in(w, Part::Work));
-                    upkeep(w)
-                        / work
-                        / worker_pace(atlas, derived, ci, w, engine::UPGRADE_DRAIN_PER_WORK)
+                    upkeep(w) / work / upgrade_pace(atlas, derived, ci, w)
                 };
                 let piled = f64::from(pile.energy);
                 let decay = (piled / f64::from(engine::ENERGY_DECAY)).ceil();
@@ -689,14 +702,15 @@ impl Plan<'_> {
         let (builders, upgraders) = worker.as_ref().map_or((0, 0), |body| {
             let work = f64::from(part_count_in(body, Part::Work).max(1));
             let per = upkeep(body) / work;
-            let bodies = |spend: f64, power: i32| {
-                let pace = worker_pace(atlas, derived, ci, body, power);
-                (spend / (pace + per) / work).ceil() as i32
-            };
+            let bodies = |spend: f64, pace: f64| (spend / (pace + per) / work).ceil() as i32;
+            let pace = |power: i32| worker_pace(atlas, derived, ci, body, power);
             (
-                bodies(build, engine::BUILD_POWER)
-                    + bodies(mend, engine::REPAIR_POWER / engine::REPAIR_HITS_PER_ENERGY),
-                bodies(upgraded, engine::UPGRADE_DRAIN_PER_WORK),
+                bodies(build, pace(engine::BUILD_POWER))
+                    + bodies(
+                        mend,
+                        pace(engine::REPAIR_POWER / engine::REPAIR_HITS_PER_ENERGY),
+                    ),
+                bodies(upgraded, upgrade_pace(atlas, derived, ci, body)),
             )
         });
         let builders = builders.max(i32::from(owed > 0 || mend > 0.0));
@@ -744,7 +758,18 @@ impl Plan<'_> {
                         / f64::from(engine::SPAWN_TICKS_PER_PART * kinds.len().max(1) as i32)
                 })
                 .sum();
-            for (rate, leg) in [(fixed.max(drawn), ring), (drunk, fed), (mined, ore)] {
+            let brought = |at: &Pos| {
+                (ground.banks_on_pile())
+                    .then(|| leg(atlas, derived, &s.pos, at))
+                    .flatten()
+            };
+            for (rate, leg) in [
+                (fixed.max(drawn), ring),
+                (build + mend, brought(&home)),
+                (upgraded, brought(&colony.controller.pos)),
+                (drunk, fed),
+                (mined, ore),
+            ] {
                 local.extend(leg.map(|leg| (rate, leg)));
             }
         }
@@ -948,7 +973,7 @@ const CREW: i32 = 8;
 const PIONEER: i32 = 2;
 const PIONEERS: usize = 4;
 const TOWER_LEVEL: i32 = 3;
-const STORAGE_LEVEL: i32 = 4;
+pub const STORAGE_LEVEL: i32 = 4;
 const SPEND: i32 = 10;
 const SIGHT: i32 = 3;
 

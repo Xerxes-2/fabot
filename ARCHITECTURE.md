@@ -263,7 +263,14 @@ from RCL3, ahead of the extension bays: RCL2's harvester is too small to keep
 them. Its harvester refills them before the
 link, from a container the carriers leave a full bay's worth in, and a spawn
 draws them first, so the energy they hold is never hauled; a bay with no
-harvester beside it is the carriers'. A remote is served by the
+harvester beside it is the carriers'. While the bank is the pile
+(Hivemind's, below) the carriers bring a home worker its load ahead of the
+bank, draw the pile last but for the ring, and count the workers' spend in
+their sizing, and an upgrader's pace counts no walk: an upgrading worker waits at the controller,
+below RCL4 first drawing a pile or quarter-full container within 10 of it; a
+builder fetches unless a carrier is bringing it a load; a crew digs its own.
+Fetching for itself, a worker 16 tiles from the pile walked twice the upgrade
+it did, and its long walk priced the pile as decay with no spend. A remote is served by the
 nearest colony with a bank: its storage, or before one stands the **pile**
 (`ColonyPlan.pile`), energy dropped on the centre of the hub Layout plans
 round the storage's tile. It is Hivemind's storage location: a paved tile
@@ -358,7 +365,9 @@ it anyway), and the season's fights come from neighbours, which intel sees.
 Open-source bots keep 75k–150k at RCL7–8. While a site
 that pays back stands at home, its builders draw the reserve, and only they,
 a crew sized to those sites alone (`Ground::kept_from_builders`): a site that
-waits pays back nothing. What a builder spends on is `work()`'s order: a
+waits pays back nothing. A rampart's site counts as one (`derived::drawn_for`):
+it costs one energy and guards the reserve, and below the reserve a storage's
+own rampart stood unbuilt beside three idle workers. What a builder spends on is `work()`'s order: a
 decaying repair before a site can take a load. Lowering the reserve itself fed the surplus's upgraders
 too, and drained a raided RCL5 stock from 29k to 0 in 700 ticks.
 
@@ -392,9 +401,10 @@ ring's first site, never waiting on a later structure under it.
 so the ring itself is unproven. A ring whose rival goes stays standing and
 repaired, never replaced.
 
-**The plan is Hivemind's room planner** (`layout/{build,place,score,cut,path}.rs`,
+**The plan is Hivemind's room planner** (`layout/{build,place,score,cut}.rs`,
 MIT, © David Franke), ported step for step with the pathfinder it ran on in
-xxscreeps (its A* and jump point search over a Dial heap, no ops limit):
+xxscreeps (`layout/path.rs`, ISC, © Marcel Laverdet: its A* and jump point
+search over a Dial heap, no ops limit; both notices in `THIRD_PARTY_NOTICES`):
 every room centre and harvest-bay spawn it tries, scored as it scores them,
 the first best taken, so the same room gives Hivemind's plan tile for tile
 (owner, 2026-11-15: partial ports kept missing its order). It reads the
@@ -412,7 +422,11 @@ dig from any tile beside a source; the scorer weighs each source's and the
 controller's walk to that first-built spawn at 0.02, not to Hivemind's
 nearest spawn at 0.003 and 0.002 (owner, 2026-11-16: until RCL7 that one
 spawn's haul is the economy; at Hivemind's weights W8N3's base stood 20
-tiles off both and its soak lost 95k); the ring's pockets above; a crafted
+tiles off both and its soak lost 95k), and each mineral's at Hivemind's 0.001
+to that spawn, not its nearest; a source whose rock has more than one seat
+gets its container ahead of the extensions (Hivemind builds them first), so
+its harvester digs beside the crews from the start (W3N1 lost 4–11k without
+it); the ring's pockets above; a crafted
 room with no exit reads as far from one, where Hivemind plans nothing; the
 nuker is built last, as it pays only loaded and fired; and a source's link
 that would part the walkable tiles round its post, as on a one-wide corridor,

@@ -133,9 +133,9 @@ fn effect(a: Tile, b: Tile) -> f64 {
     1.0 - f64::from(r - 5) / 15.0
 }
 
-/// Departure (owner): a source's and the controller's walk to the first spawn,
-/// which Hivemind weighs 0.003 and 0.002. Ours hauls from that spawn alone
-/// until RCL7; 0.01 left W8N3's base 20 tiles off both.
+/// Departure (owner): each source's and the controller's walk to the first
+/// spawn built, not a harvest bay's (`plan::order`), which Hivemind weighs
+/// 0.003 and 0.002 to its nearest: ours hauls from that one spawn until RCL7.
 const SOURCE_PULL: f64 = 0.02;
 
 /// `getScore`'s total, its terms summed as lodash 3's `_.sum` sums them.
@@ -212,9 +212,6 @@ pub fn score(rules: &Rules, built: &Built, terrain: &[u8], exits: &[u8], ground:
             found.path.len() as f64
         }
     };
-    // Departure: Hivemind measures to its nearest spawn, a harvest bay's
-    // where one stands; ours builds a bay's first (`plan::order`) and works
-    // from it until the storage.
     let harvest = plan.of("harvester");
     let spawns: Vec<Goal> = ((0..10).flat_map(|i| plan.of(&format!("spawn.{i}"))))
         .find(|t| harvest.iter().all(|h| tiles::range(*h, *t) > 1))

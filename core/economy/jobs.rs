@@ -1,13 +1,15 @@
 /// What a body does in its slot this tick: the one load it fetches or
 /// delivers, the site it builds. A task held last tick is kept while it can
 /// still be done, so a walk is not turned mid-way.
+use std::collections::BTreeMap;
+
 use crate::HashMap;
 use crate::atlas::Atlas;
 use crate::engine;
 use crate::vocabulary::Resource;
 use crate::world::{Kind, Pos, RoomName};
 
-use super::derived::{Body, Derived, Ground, RAMPART_SAFE};
+use super::derived::{Body, Derived, Ground, RAMPART_SAFE, StoreKind};
 use super::slots::{self, Job, Slot};
 use super::task::Task;
 
@@ -17,6 +19,8 @@ struct Spot {
     pos: Pos,
     amount: i32,
     tier: i32,
+    /// A worker's: another worker never fills it.
+    to_body: bool,
 }
 
 pub struct Jobs<'a> {
@@ -28,6 +32,8 @@ pub struct Jobs<'a> {
     /// Per colony: a carrier stands, so a worker refills the ring only
     /// without one.
     carried: Vec<bool>,
+    /// Worker id to the carrier holding a load for it.
+    booked: BTreeMap<String, String>,
     hauls: Vec<i32>,
 }
 
@@ -43,6 +49,24 @@ pub fn fee_short(ground: &Ground) -> i32 {
         .sum();
     let kept = if fee > 0 { fee + 100 } else { 0 };
     0.max(kept - t.store.amount_of(&Resource::Energy))
+}
+
+enum Supply {
+    Own,
+    Draw(Task),
+    Meet(String),
+    Wait(Option<Task>),
+}
+
+/// A home worker its colony's carriers bring loads to, by its id: one that
+/// banks on a pile, as Hivemind's do until a storage; a crew digs its own.
+fn brought<'b>(derived: &Derived, slot: &Slot, body: &'b Body) -> Option<&'b String> {
+    let g = &derived.grounds[slot.colony];
+    let home = slot.room == g.room && body.pos.room == g.room;
+    let worker = matches!(slot.job, Job::Work(_)) && !slot.digs();
+    body.id
+        .as_ref()
+        .filter(|_| home && worker && g.banks_on_pile())
 }
 
 const RING: &str = "ring-";
@@ -99,6 +123,7 @@ fn sinks_of(derived: &Derived, ci: usize) -> Vec<Spot> {
                 pos,
                 amount,
                 tier,
+                to_body: false,
             });
         }
     };
@@ -190,6 +215,7 @@ fn takes_of(
                 pos,
                 amount,
                 tier,
+                to_body: false,
             });
         }
     };
@@ -248,12 +274,15 @@ fn takes_of(
             dig,
         );
     }
+    // Hivemind's: past the ring a pile is the last source, or the outposts'
+    // dig waits on it.
+    let ring = sinks.iter().any(|s| s.tier == 0 && s.amount > 0);
     if let Some(s) = g.bank() {
         add(
             Task::Withdraw(s.id.clone(), Resource::Energy),
             s.pos,
             s.energy.min(short),
-            0,
+            if g.banks_on_pile() && !ring { 2 } else { 0 },
         );
     }
     // Sent energy is banked, or the stock the spend is sized to never sees it.
@@ -362,9 +391,23 @@ impl<'a> Jobs<'a> {
         (slots, owners): (&[Slot], &[Option<usize>]),
         held: &[(usize, &Body, Option<Task>)],
     ) -> Jobs<'a> {
-        let sinks: Vec<Vec<Spot>> = (0..derived.colonies.len())
+        let mut sinks: Vec<Vec<Spot>> = (0..derived.colonies.len())
             .map(|ci| sinks_of(derived, ci))
             .collect();
+        for (si, body, _) in held {
+            let s = &slots[*si];
+            if let Some(id) = brought(derived, s, body)
+                && 3 * body.free >= body.store.capacity
+            {
+                sinks[s.colony].push(Spot {
+                    task: Task::Refill(id.clone(), Resource::Energy),
+                    pos: body.pos,
+                    amount: body.free,
+                    tier: 2,
+                    to_body: true,
+                });
+            }
+        }
         let mut aboard = vec![0; derived.colonies.len()];
         for (si, body, task) in held {
             let ci = slots[*si].colony;
@@ -387,10 +430,16 @@ impl<'a> Jobs<'a> {
             .collect();
         let mut carried = vec![false; derived.colonies.len()];
         let mut digging: HashMap<String, i32> = HashMap::default();
-        for (si, _, _) in held {
+        let mut booked = BTreeMap::new();
+        for (si, body, task) in held {
             let s = &slots[*si];
             match &s.job {
-                Job::Fill => carried[s.colony] = true,
+                Job::Fill => {
+                    carried[s.colony] = true;
+                    if let (Some(Task::Refill(to, _)), Some(id)) = (task, &body.id) {
+                        booked.insert(to.clone(), id.clone());
+                    }
+                }
                 Job::Dig(id) => *digging.entry(id.clone()).or_default() += 1,
                 _ => {}
             }
@@ -402,6 +451,7 @@ impl<'a> Jobs<'a> {
             takes,
             digging,
             carried,
+            booked,
             hauls: (0..derived.grounds.len())
                 .map(|gi| derived.haul(owners, gi))
                 .collect(),
@@ -464,7 +514,7 @@ impl<'a> Jobs<'a> {
         {
             return Some(t.clone());
         }
-        let fits = |s: &Spot| matches!(&s.task, Task::Refill(_, r) if held.contains(r) && (storage || s.tier < 3 || !r.is_energy()));
+        let fits = |s: &Spot| matches!(&s.task, Task::Refill(_, r) if held.contains(r) && (storage || (s.tier < 3 || !r.is_energy()) && !s.to_body));
         let load = body.store.capacity - body.free;
         let i = self.pick(&self.sinks[ci], &body.pos, (load, false), &fits)?;
         let task = self.sinks[ci][i].task.clone();
@@ -560,14 +610,90 @@ impl<'a> Jobs<'a> {
         body: &Body,
         kept: Option<&Task>,
     ) -> Option<Task> {
+        let fetching = body.energy == 0
+            || body.free > 0 && kept.is_some_and(|t| t.is_intake() && self.can_take(slot, t));
+        if !fetching {
+            return self.spend(slot, builds, body, kept);
+        }
+        match self.supply(slot, builds, body, kept) {
+            Supply::Own => self.fuel(slot, body, kept),
+            Supply::Meet(carrier) => Some(Task::Meet(carrier)),
+            Supply::Draw(t) => Some(t),
+            Supply::Wait(work) => work,
+        }
+    }
+
+    /// Hivemind's delivery rule (`role/upgrader.ts`, `role/builder.ts`): a
+    /// brought worker short of a load draws what stands by the controller if
+    /// it upgrades, meets the carrier booked to it, waits beside a buffer
+    /// carriers keep, and fetches its own with neither.
+    fn supply(&mut self, slot: &Slot, builds: bool, body: &Body, kept: Option<&Task>) -> Supply {
+        let Some(id) = brought(self.derived, slot, body) else {
+            return Supply::Own;
+        };
+        let work = self.spend(slot, builds, body, kept.filter(|t| !t.is_intake()));
+        let upgrades = matches!(work, Some(Task::Upgrade(_)));
+        if let Some(t) = self.by_controller(slot, body, kept).filter(|_| upgrades) {
+            return Supply::Draw(t);
+        }
+        if let Some(carrier) = self.booked.get(id) {
+            return Supply::Meet(carrier.clone());
+        }
+        let g = &self.derived.grounds[slot.colony];
+        if upgrades && g.feed.is_some() {
+            Supply::Wait(work)
+        } else {
+            Supply::Own
+        }
+    }
+
+    fn by_controller(&self, slot: &Slot, body: &Body, kept: Option<&Task>) -> Option<Task> {
+        let g = self.derived.grounds.iter().find(|g| g.room == slot.room)?;
+        let c = g.controller.as_ref()?;
+        let reach = if c.level < slots::STORAGE_LEVEL {
+            10
+        } else {
+            3
+        };
+        let stores = (g.stores.iter())
+            .filter(|s| match s.kind {
+                StoreKind::Buffer => s.energy > 50,
+                StoreKind::Pile => s.energy >= body.store.capacity && s.pos.within(reach, &c.pos),
+                StoreKind::Container => {
+                    s.energy > engine::CONTAINER_CAPACITY / 4 && s.pos.within(reach, &c.pos)
+                }
+                StoreKind::Storage | StoreKind::Remains => false,
+            })
+            .map(|s| {
+                (
+                    Task::Withdraw(s.id.clone(), Resource::Energy),
+                    s.pos,
+                    s.kind.is_buffer(),
+                )
+            });
+        let piles = (g.piles.iter())
+            .filter(|p| p.resource.is_energy() && p.amount >= body.store.capacity)
+            .filter(|p| p.pos.within(reach, &c.pos))
+            .map(|p| (Task::Pickup(p.id.clone(), p.resource.clone()), p.pos, false));
+        let near: Vec<(Task, Pos, bool)> = stores.chain(piles).collect();
+        if let Some((t, _, _)) = near.iter().find(|(t, _, _)| Some(t) == kept) {
+            return Some(t.clone());
+        }
+        (near.into_iter())
+            .min_by_key(|(_, p, buffer)| (!buffer, self.distance(&body.pos, p)))
+            .map(|(t, _, _)| t)
+    }
+
+    fn spend(
+        &mut self,
+        slot: &Slot,
+        builds: bool,
+        body: &Body,
+        kept: Option<&Task>,
+    ) -> Option<Task> {
         let ci = slot.colony;
         let derived = self.derived;
         let ground = derived.grounds.iter().find(|g| g.room == slot.room)?;
-        if body.energy == 0
-            || body.free > 0 && kept.is_some_and(|t| t.is_intake() && self.can_take(slot, t))
-        {
-            return self.fuel(slot, body, kept);
-        }
         let own = derived
             .colonies
             .get(ci)
@@ -745,6 +871,7 @@ impl<'a> Jobs<'a> {
                     spare
                 },
                 tier: 0,
+                to_body: false,
             });
         }
         for p in g.piles.iter().filter(|p| p.resource.is_energy()) {
@@ -753,6 +880,7 @@ impl<'a> Jobs<'a> {
                 pos: p.pos,
                 amount: p.amount,
                 tier: 0,
+                to_body: false,
             });
         }
         // A pioneer brings its colony's stock past the reserve when the room
@@ -768,6 +896,7 @@ impl<'a> Jobs<'a> {
                     .filter(|n| *n >= body.free)
                     .unwrap_or(0),
                 tier: 1,
+                to_body: false,
             });
         }
         let i = self.pick(&spots, &body.pos, (body.free, false), &|s| {

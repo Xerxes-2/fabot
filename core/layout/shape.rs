@@ -41,7 +41,6 @@ impl Plan {
 pub struct Standing {
     pub key: String,
     pub plan: Option<Plan>,
-    /// The search a plan is still being drawn by.
     pub drawing: Option<super::plan::Drawing>,
 }
 

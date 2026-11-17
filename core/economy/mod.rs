@@ -47,7 +47,7 @@ pub(crate) mod dice {
 
     pub fn task(dice: &mut Dice, target: &str) -> Task {
         let resource = resources()[dice.below(5) as usize].clone();
-        match dice.between(0, 9) {
+        match dice.between(0, 10) {
             0 => Task::Harvest(target.to_string()),
             1 => Task::Withdraw(target.to_string(), resource),
             2 => Task::Pickup(target.to_string(), resource),
@@ -57,6 +57,7 @@ pub(crate) mod dice {
             6 => Task::Upgrade(target.to_string()),
             7 => Task::Reserve(target.to_string()),
             8 => Task::Scout(at().room),
+            9 => Task::Meet(target.to_string()),
             _ => Task::Claim(target.to_string()),
         }
     }
