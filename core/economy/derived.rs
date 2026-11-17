@@ -208,6 +208,7 @@ pub struct PileFact {
 #[derive(Clone, Debug)]
 pub struct Ground {
     pub room: RoomName,
+    pub raided: bool,
     pub controller: Option<Controller>,
     pub sources: Vec<SourceFact>,
     pub minerals: Vec<MineralFact>,
@@ -278,6 +279,21 @@ impl Ground {
         })
     }
 
+    /// Hivemind's `link-network.ts`.
+    pub fn link_net(&self) -> LinkNet {
+        let room = |by: &dyn Fn(&LinkFact) -> bool| -> i32 {
+            (self.links.iter().filter(|l| by(l)))
+                .map(|l| l.energy + l.free)
+                .sum()
+        };
+        let least = room(&|l| l.role.is_controller());
+        LinkNet {
+            energy: self.links.iter().map(|l| l.energy).sum(),
+            least,
+            most: least + room(&|l| l.role.is_hub()),
+        }
+    }
+
     /// A site that waits pays back nothing, so while one stands its builders
     /// draw the reserve.
     pub fn kept_from_builders(&self, reserve: i32) -> i32 {
@@ -302,6 +318,14 @@ pub struct BoostLab {
     pub compound: Resource,
     pub mineral: i32,
     pub energy: i32,
+}
+
+pub struct LinkNet {
+    pub energy: i32,
+    /// Every controller link full.
+    pub least: i32,
+    /// Every hub full too.
+    pub most: i32,
 }
 
 /// A resource, not a decider (`ARCHITECTURE.md` §2).
@@ -679,6 +703,12 @@ fn buffer_seats_of(atlas: &Atlas, room: &Room, buffer: Option<&StoreFact>) -> Ve
     }
 }
 
+fn raided(room: &Room, owned: bool) -> bool {
+    let foes: Vec<Creep> = room.hostiles().cloned().collect();
+    let ours: BTreeSet<RoomName> = owned.then_some(room.name).into_iter().collect();
+    (foes.iter()).any(|c| crate::world::hostiles::armed(&ours, &foes, c))
+}
+
 fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) -> Ground {
     let owned_room = room.controller.as_ref().is_some_and(|c| c.owner.is_ours());
     let built = Atlas::buffer(room);
@@ -779,6 +809,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
 
     Ground {
         room: room.name,
+        raided: raided(room, owned_room),
         controller: room.controller.clone(),
         sources,
         minerals,

@@ -711,6 +711,7 @@ impl Plan<'_> {
                 0 if inside_deadline(&colony.controller) => DEADLINE,
                 0 if mends && !draws => MEND,
                 0 if mends => STOCKED,
+                0 if floor > 0 => STOCKED,
                 k if k < floor => FLOOR,
                 k if k < floor + crews => CREW,
                 _ => SPEND,
@@ -943,7 +944,7 @@ const DEADLINE: i32 = -1;
 const MEND: i32 = 3;
 /// The ore is RCL6's payoff: the outposts take what spawn time it leaves.
 const MINE: i32 = 3;
-/// Upgraders while the stock stands past the reserve, a young colony's workers but crews too (§5).
+/// Cast before the outposts' haul (§5).
 const STOCKED: i32 = 4;
 const OUTPOST_HAUL: i32 = 5;
 const MOST: i32 = engine::MAX_BODY_PARTS as i32;

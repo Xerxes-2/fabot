@@ -47,7 +47,7 @@ impl Target {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Task {
     Harvest(Target),
     Withdraw(Target, Resource),

@@ -187,43 +187,37 @@ fn pickups(derived: &Derived, taken: &BTreeSet<String>) -> Vec<Intent> {
     picks
 }
 
-/// The smallest send: the engine credits `floor(amount × 0.97)`, so a send in
-/// whole hundreds loses the 3% and nothing to the rounding.
-const LINK_BATCH: i32 = 100;
+/// Hivemind's `MIN_ENERGY_TRANSFER`, a quarter of a link.
+const LINK_MIN_SEND: i32 = 200;
 
-/// The sources' links first, so the hub's never takes their room. A send need
-/// not wait to grow: the loss is the same share of any batch.
-fn link_sends(sends: &mut Vec<Intent>, ground: &Ground) {
-    let Some(receiver) = &ground.receiver else {
-        return;
-    };
-    let hub = (ground.links.iter()).find(|l| l.role.is_hub() && l.id != receiver.id);
-    let mut rooms: Vec<(&LinkFact, i32)> = std::iter::once(receiver)
-        .chain(hub)
-        .map(|r| (r, r.free))
-        .collect();
-
-    let mut links: Vec<&LinkFact> = ground.links.iter().collect();
-    links.sort_by_key(|l| !l.role.is_source());
-    for l in (links.into_iter()).filter(|l| l.id != receiver.id && l.cooldown == 0) {
-        let Some((to, room)) = link_to(l, &mut rooms) else {
-            continue;
-        };
-        let amount = (*room).min(l.energy) / LINK_BATCH * LINK_BATCH;
-        if amount > 0 {
-            *room -= amount;
-            sends.push(Intent::Link(l.id, LinkAct::TransferEnergy(to.id, amount)));
-        }
+/// Hivemind's `process/rooms/owned/links.ts`.
+fn link_send(g: &Ground) -> Option<Intent> {
+    let hubs = || g.links.iter().filter(|l| l.role.is_hub());
+    type Side<'a> = Option<(&'a LinkFact, i32)>;
+    fn pick<'a>(best: Side<'a>, hub: Side<'a>) -> Side<'a> {
+        best.filter(|(_, n)| *n >= LINK_MIN_SEND).or(hub).or(best)
     }
-}
-
-/// `link_sends` ranks the controller's link before the hub's, so it takes only
-/// what its bodies drink and the hub, whose carriers bank it, the rest.
-fn link_to<'a, 'b>(
-    from: &LinkFact,
-    rooms: &'b mut [(&'a LinkFact, i32)],
-) -> Option<&'b mut (&'a LinkFact, i32)> {
-    (rooms.iter_mut()).find(|(to, room)| to.id != from.id && *room >= LINK_BATCH)
+    let over = (g.links.iter())
+        .filter(|l| l.role.is_source() && l.energy > 0 && l.cooldown == 0)
+        .min_by_key(|l| -l.energy)
+        .map(|l| (l, l.energy));
+    let hub = (hubs())
+        .filter(|l| l.cooldown == 0 && l.energy > 0)
+        .min_by_key(|l| -l.energy);
+    let (from, out) = pick(over, hub.map(|l| (l, l.energy)))?;
+    let under = (g.links.iter())
+        .filter(|l| l.role.is_controller() && l.free > 0)
+        .min_by_key(|l| -l.free)
+        .map(|l| (l, l.free));
+    let hub = (hubs().filter(|l| l.free > 0))
+        .min_by_key(|l| l.energy)
+        .map(|l| (l, l.free));
+    let (to, room) = pick(under, hub)?;
+    let amount = out.min(room);
+    (from.id != to.id && amount >= LINK_MIN_SEND).then_some(Intent::Link(
+        from.id,
+        LinkAct::TransferEnergy(to.id, amount),
+    ))
 }
 
 /// One send a tick off cooldown: what the terminal holds of the first
@@ -288,7 +282,7 @@ fn dug_out(derived: &Derived) -> BTreeSet<Id> {
 fn sends(derived: &Derived) -> Vec<Intent> {
     let mut sends: Vec<Intent> = Vec::new();
     for g in &derived.grounds {
-        link_sends(&mut sends, g);
+        sends.extend(link_send(g));
         if let Some(send) = terminal_send(g) {
             sends.push(send);
         }
@@ -577,12 +571,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
         .collect();
     let mut jobs = Jobs::new(&*context.atlas, &derived, (&slots, &owners), &held);
     let mut order: Vec<&Creep> = seen;
-    order.sort_by_cached_key(|&c| {
-        let task = kept(&c.name);
-        let slot = assigned.get(&c.name).map(|si| &slots[*si]);
-        let counted = (slot.zip(task.as_ref())).is_some_and(|(s, t)| jobs.counted(s, &c.pos, t));
-        (task.is_none(), !counted, c.name.as_str())
-    });
+    order.sort_by_cached_key(|&c| (kept(&c.name).is_none(), c.name.as_str()));
 
     // A scout walks where `scouting` sends it, with a slot to count it or
     // without, as where no colony casts one.

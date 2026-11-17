@@ -256,13 +256,29 @@ holds a slot of its own. A hauler is 2:1 or
 1:1 CARRY:MOVE, whichever delivers more over a life per energy on its route
 (`bodies::carry_per_move`): any ratio between moves no faster than 1:1 off
 road. The home's carriers fetch only at home, so the ring never waits on a
-body gone to an outpost. The stock is drawn only for its sinks' room past
-the loads at home bound for them, which book first: a load never goes back
-into the store it came from. The source links feed the controller's link
-first and the hub's with the rest, which carriers bank: carriers bring the
-controller's link only while the upgraders drink more than the links
-send, and while they do only upgraders draw the controller's buffer, or a
-worker's draw is carried back from the stock. A harvester drains the container
+body gone to an outpost. A carrier picks its load as Hivemind's dispatcher
+does (`jobs::rank`, its numbers as `const`s): the highest priority, then the
+heaviest weight, then the nearest. The ring keeps Hivemind's per-extension hold: once the loads bound for it
+cover its room it drops three priorities, so a carrier with nothing better
+still brings it. A carrier draws the stock only for a sink that outranks
+every source, and only for its sinks' room past the loads at home bound for
+them: a load never goes back into the store it came from. Departures, each a
+soak Hivemind's numbers lost: every spot but the ring is booked down by the
+loads bound for it, as main booked (Hivemind's remote haulers book a
+source's amount), and in place of Hivemind's per-holder penalty, which
+lost to booking alone (a tower or a lab is ranked by what it lacks before
+the booking, a source by what is left after it); a bay's container gives what stands past its bay's worth;
+while the bank is the pile and the ring has room, the pile ranks first; a
+worker fetching its own takes the nearest load, unranked; and a held order
+is kept to its end. The links are Hivemind's network: one send
+a tick, the fullest source link to the emptiest controller link, a hub with
+room or energy standing in for a side short of a quarter link; carriers fill
+a hub while the network holds less than its controller links' room and drain
+it past that plus the hubs', so a hub that feeds the controller where no
+controller link stands is never filled, as in Hivemind. Carriers bring a controller link by hand only
+while the upgraders drink more than the links send, and while they do only
+upgraders draw the controller's buffer, or a worker's draw is carried back
+from the stock. A harvester drains the container
 under it into its link while the link has room. Each source's post is a **harvest
 bay** (Hivemind's): every neighbour Hivemind may build on but the road in holds
 its link and extensions (a spawn too in the variation that seats one), built
@@ -272,7 +288,7 @@ link, from a container the carriers leave a full bay's worth in, and a spawn
 draws them first, so the energy they hold is never hauled; a bay with no
 harvester beside it is the carriers'. While the bank is the pile
 (Hivemind's, below) the carriers bring a home worker its load ahead of the
-bank, draw the pile last but for the ring, and count the workers' spend in
+bank and count the workers' spend in
 their sizing, and an upgrader's pace counts no walk: an upgrading worker waits at the controller,
 below RCL4 first drawing a pile or quarter-full container within 10 of it; a
 builder fetches unless a carrier is bringing it a load; a crew digs its own.
@@ -334,7 +350,7 @@ to one under half its reserve, furthest short (v1's aid). Aid flows only to
 a colony holding less, so it never flows back. A structure lost within a creep
 life at its pace is mended before a builder's sites; below the reserve a home
 road at risk still casts the floor's first worker, which draws the reserve
-like the deadline's, to mend only; past it that worker still builds, but is cast ahead of the outposts' haul, which held it past three roads' loss once it filled the spawn. A home road's pace counts the wear of the
+like the deadline's, to mend only; past it that worker still builds. With or without a road at risk the floor's first worker is cast ahead of the outposts' haul (v1's two floors first): behind it, the haul held it past three roads' loss once it filled the spawn, and a young colony's level 3 came later. A home road's pace counts the wear of the
 dig carried home over it (v1's road upkeep), an outpost's the wear of its own
 dig. A home's worker still mends an outpost road at its timer alone, since
 pricing that haul sent young homes' workers out to mend it; a colony with a
