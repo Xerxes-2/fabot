@@ -84,8 +84,8 @@ impl Map {
         (i64::from(pos.x), i64::from(pos.y))
     }
 
-    /// Our user, the room's controller ours at level 1 in safe mode, and Spawn1 on `(x, y)`.
-    pub fn stand(&self, room: &str, (x, y): (i64, i64), seed: u64) -> World {
+    /// Our user, the room's controller ours at level 1, in safe mode unless `ended`, and Spawn1 on `(x, y)`.
+    pub fn stand(&self, room: &str, (x, y): (i64, i64), seed: u64, ended: bool) -> World {
         let t = self.time;
         let mut objects: Vec<Value> = Vec::new();
         for o in &self.objects {
@@ -93,7 +93,7 @@ impl Map {
             match o["type"].as_str() {
                 Some("controller") if o["room"] == room => {
                     let ours = json!({ "level": 1, "user": US, "progress": 0, "downgradeTime": null,
-                        "safeMode": t + i64::from(SAFE_MODE_DURATION), "safeModeAvailable": 0 });
+                        "safeMode": if ended { 0 } else { t + i64::from(SAFE_MODE_DURATION) }, "safeModeAvailable": 0 });
                     merge(&mut o, ours);
                 }
                 Some("controller") => merge(&mut o, json!({ "level": 0 })),

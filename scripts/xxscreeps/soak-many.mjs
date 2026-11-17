@@ -4,7 +4,7 @@
 // many at a time, then one table.
 //
 // Usage: npm run soak:many -- [--bot [name=]a.js,[name=]b.js] [--seed 1,2,1+7] [--room A,B,...]
-//                             [--ticks T] [--jobs J] [--tag name] [--node N] [--fresh]
+//                             [--ticks T] [--jobs J] [--tag name] [--node N] [--fresh] [--native]
 //   --bot    the bundles to compare (default dist/main.js); the first is the
 //            base the others are read against. A name defaults to the file's.
 //   --seed   the starts for every room (default 1,2,1+7, the contested start
@@ -32,6 +32,10 @@
 //            more jobs only slow each other)
 //   --tag    output names: soak-runs/<tag>-<bundle>-s<seed>-<room>/ (default many)
 //   --fresh  run even where the cache holds this bundle, room, seed and ticks
+//   --native each run on `sim` (krebs, official rules) instead of xxscreeps; a
+//            --bot is then a sim binary (default this tree's, `npm run build:sim`), --jobs
+//            defaults to every allowed core, and a start with a node or a
+//            rival, which sim does not stand yet, is left out
 //
 // A finished run is cached under soak-runs/.cache/ by its bundle's code (the
 // version stamp aside), start, seed, ticks and the soak scripts (with the
@@ -39,7 +43,7 @@
 // has not changed is not run again.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { node26Env } from "./node26.mjs";
 import { basename, dirname, join, resolve } from "node:path";
@@ -53,7 +57,7 @@ const SOAK = join(HERE, "soak.mjs");
 const RUNS = join(REPO, "soak-runs");
 const CACHE = join(RUNS, ".cache");
 const usage =
-  "usage: npm run soak:many -- [--bot [name=]a.js,...] [--seed 1,2,1+7] [--room [world:]A[@N],...] [--ticks T] [--jobs J] [--tag name] [--node N] [--fresh]";
+  "usage: npm run soak:many -- [--bot [name=]a.js,...] [--seed 1,2,1+7] [--room [world:]A[@N],...] [--ticks T] [--jobs J] [--tag name] [--node N] [--fresh] [--native]";
 const fail = (m) => {
   console.error(m);
   process.exit(1);
@@ -62,8 +66,8 @@ const fail = (m) => {
 const flags = {};
 const rest = process.argv.slice(2);
 for (let i = 0; i < rest.length; i++) {
-  if (rest[i] === "--fresh") {
-    flags["--fresh"] = true;
+  if (rest[i] === "--fresh" || rest[i] === "--native") {
+    flags[rest[i]] = true;
     continue;
   }
   if (!["--room", "--ticks", "--seed", "--jobs", "--tag", "--bot", "--node"].includes(rest[i])) fail(usage);
@@ -84,7 +88,9 @@ const parseSeeds = (text) =>
     return { seed: whole(seed, "--seed", 0), late: whole(late, "--seed", 0), label: spec };
   });
 const CONTESTED = "season-outpost-ring:E25S9@E1+hivemind:E27S9";
-const starts = (flags["--room"] ?? `W9N8,W8N3,season-outpost-ring:E23S9,season-late-seat:W12S28@N7,${CONTESTED}`).split(",").map((spec) => {
+const native = flags["--native"];
+const SIM_TEMPLATE = join(RUNS, ".template.json");
+const allStarts = (flags["--room"] ?? `W9N8,W8N3,season-outpost-ring:E23S9,season-late-seat:W12S28@N7,${CONTESTED}`).split(",").map((spec) => {
   const m = /^(?:([\w-]+):)?([WE]\d+[NS]\d+)(?:@([A-Za-z0-9]+))?(?:\+([a-z]+):([WE]\d+[NS]\d+))?$/.exec(spec);
   if (!m) fail(`--room: "${spec}" is not [world:]room[@node][+bot:room]`);
   const world = m[1] && join(HERE, "worlds", `${m[1]}.json`);
@@ -92,13 +98,19 @@ const starts = (flags["--room"] ?? `W9N8,W8N3,season-outpost-ring:E23S9,season-l
   const at = m[3] ?? node;
   const rival = m[4] && { name: m[4], bot: join(HERE, "engine", m[4]), room: m[5] };
   if (rival && !existsSync(rival.bot)) fail(`--room: no rival ${rival.bot}`);
-  return { label: spec, room: m[2], world, node: at, rival, seeds: parseSeeds(flags["--seed"] ?? (spec === CONTESTED ? "1,2,3,4,1+7,2+7" : "1,2,1+7")), ticks: whole(flags["--ticks"] ?? (at ? 10000 : 30000), "--ticks", 1) };
+  return { label: spec, room: m[2], world, node: at, rival, ended: Boolean(rival || (world && !at)), seeds: parseSeeds(flags["--seed"] ?? (spec === CONTESTED ? "1,2,3,4,1+7,2+7" : "1,2,1+7")), ticks: whole(flags["--ticks"] ?? (at ? 10000 : 30000), "--ticks", 1) };
 });
-const jobs = whole(flags["--jobs"] ?? Math.max(1, Math.floor(availableParallelism() / 4)), "--jobs", 1);
+const starts = native ? allStarts.filter((s) => !s.node && !s.rival) : allStarts;
+if (starts.length < allStarts.length) console.error(`not yet native: ${allStarts.filter((s) => !starts.includes(s)).map((s) => s.label).join(", ")}`);
+if (!starts.length) fail("no start to run");
+const jobs = whole(flags["--jobs"] ?? Math.max(1, Math.floor(availableParallelism() / (native ? 1 : 4))), "--jobs", 1);
 const tag = flags["--tag"] ?? "many";
 if (!/^[A-Za-z0-9-]+$/.test(tag)) fail("--tag: letters, digits, dashes");
 
-const bots = (flags["--bot"] ?? join(REPO, "dist/main.js")).split(",").map((spec) => {
+const built = (res) => (res.status === 0 ? res.stdout.trim() : fail("sim did not build"));
+const defaultBot = () =>
+  native ? built(spawnSync("node", [join(HERE, "../sim/build.mjs")], { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] })) : join(REPO, "dist/main.js");
+const bots = (flags["--bot"] ?? defaultBot()).split(",").map((spec) => {
   const [name, path] = spec.includes("=") ? spec.split("=") : [basename(spec, ".js"), spec];
   if (!/^[A-Za-z0-9-]+$/.test(name)) fail(`--bot: "${name}" is not a name (letters, digits, dashes)`);
   const file = resolve(path);
@@ -124,8 +136,12 @@ const scriptsHash = hash(
 // A node, and a fresh colony's first spawn, stand on the plan of this tree's Layout, whatever the bundle.
 const planHash = hash(...[join(REPO, "src/bin/plan.rs"), ...readdirSync(join(REPO, "core/layout")).sort().map((f) => join(REPO, "core/layout", f))].map((f) => readFileSync(f)));
 const wasmOf = (file) => [file.replace(/\.js$/, ".wasm")].filter(existsSync).map((f) => readFileSync(f));
-for (const b of bots) b.code = hash(readFileSync(b.file, "utf8").replace(/^(?:var |globalThis\.)__FABOT_VERSION__ = .*$/m, ""), ...wasmOf(b.file));
+for (const b of bots) b.code = native ? hash(readFileSync(b.file)) : hash(readFileSync(b.file, "utf8").replace(/^(?:var |globalThis\.)__FABOT_VERSION__ = .*$/m, ""), ...wasmOf(b.file));
 
+if (native && starts.some((s) => !s.world)) {
+  mkdirSync(RUNS, { recursive: true });
+  if (spawnSync("node", [join(HERE, "../sim/export.mjs"), SIM_TEMPLATE], { stdio: ["ignore", "ignore", "inherit"] }).status !== 0) fail("the template did not export");
+}
 const runs = bots.flatMap((bot) =>
   starts.flatMap((start) =>
     start.seeds.map((seed) => ({
@@ -133,7 +149,7 @@ const runs = bots.flatMap((bot) =>
       seed,
       start,
       name: `${tag}-${bot.name}-s${seed.seed}${seed.late ? `l${seed.late}` : ""}-${start.label.replace(/[:@+]/g, "-")}`,
-      key: hash(bot.code, start.room, start.rival ? `${start.rival.name}:${start.rival.room}` : "", planHash + start.node, start.world ? readFileSync(start.world) : "", String(seed.seed), String(seed.late), String(start.ticks), scriptsHash),
+      key: hash(bot.code, start.room, start.rival ? `${start.rival.name}:${start.rival.room}` : "", planHash + start.node, start.world ? readFileSync(start.world) : native ? readFileSync(SIM_TEMPLATE) : "", String(seed.seed), String(seed.late), String(start.ticks), scriptsHash),
     })),
   ),
 );
@@ -149,10 +165,16 @@ console.error(
 
 function soak(run) {
   return new Promise((done) => {
-    const { room, world, node, rival, ticks } = run.start;
+    const { room, world, node, rival, ticks, ended } = run.start;
+    if (native) {
+      const out = join(RUNS, run.name);
+      rmSync(out, { recursive: true, force: true });
+      const args = ["--world", world ?? SIM_TEMPLATE, "--room", room, "--ticks", String(ticks), "--seed", String(run.seed.seed), "--late", String(run.seed.late), "--every", "100", "--out", out, ...(ended ? ["--ended"] : [])];
+      return spawn(run.bot.file, args, { stdio: "ignore" }).on("exit", done);
+    }
     const opponents = join(RUNS, `${run.name}.opponents.json`);
     if (rival) writeFileSync(opponents, JSON.stringify([rival]));
-    const args = [...(rival ? ["--opponents", opponents] : []), ...(rival || (world && !node) ? ["--ended"] : []), "--room", room, "--run", run.name, "--ticks", String(ticks), "--seed", String(run.seed.seed), "--late", String(run.seed.late), "--every", "100", "--bot", run.bot.file, ...(node ? ["--node", node] : []), ...(world ? ["--world", world] : [])];
+    const args = [...(rival ? ["--opponents", opponents] : []), ...(ended ? ["--ended"] : []), "--room", room, "--run", run.name, "--ticks", String(ticks), "--seed", String(run.seed.seed), "--late", String(run.seed.late), "--every", "100", "--bot", run.bot.file, ...(node ? ["--node", node] : []), ...(world ? ["--world", world] : [])];
     const child = spawn("node", [SOAK, ...args], { stdio: ["ignore", "ignore", "ignore"], env: node26Env({ ...process.env, FABOT_PLAN_BUILT: "1" }) });
     child.on("exit", (code) => {
       rmSync(opponents, { force: true });
@@ -162,7 +184,7 @@ function soak(run) {
 }
 
 // Built once here: parallel builds of one project collide.
-if (todo.length && spawnSync("cargo", ["build", "--release", "--quiet", "--features", "tools", "--bin", "plan", "--manifest-path", join(REPO, "Cargo.toml")], { stdio: "inherit" }).status !== 0)
+if (todo.length && !native && spawnSync("cargo", ["build", "--release", "--quiet", "--features", "tools", "--bin", "plan", "--manifest-path", join(REPO, "Cargo.toml")], { stdio: "inherit" }).status !== 0)
   fail("the plan tool did not build");
 const codes = {};
 const queue = [...todo];

@@ -1,7 +1,7 @@
 //! The soak on krebs, natively: `decide` on krebs's documents each tick,
 //! krebs's processor on our intents, `soak-step.mjs`'s files out.
 //!
-//! Usage: sim --world <world.json> --room <name> --out <dir> [--ticks N] [--every K] [--seed N] [--late K]
+//! Usage: sim --world <world.json> --room <name> --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--ended]
 mod act;
 mod driver;
 mod read;
@@ -24,6 +24,9 @@ use serde_json::json;
 
 use view::{View, ms};
 
+#[global_allocator]
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 /// Season 11's measure of how often `genInvaders` lands inside a room's pass (§10.2).
 const INSIDE_PASS: f64 = 0.66;
 /// Season 11's tick, at which the 300 s cron fires every 88 ticks.
@@ -37,15 +40,22 @@ struct Args {
     every: u64,
     seed: u64,
     late: u64,
+    /// `soak.mjs --ended`: the safe mode a respawn starts in is over.
+    ended: bool,
 }
 
 fn args() -> Args {
     let mut flags: BTreeMap<String, String> = BTreeMap::new();
     let mut rest = std::env::args().skip(1);
-    while let (Some(flag), Some(value)) = (rest.next(), rest.next()) {
+    while let Some(flag) = rest.next() {
+        let value = if flag == "--ended" {
+            String::new()
+        } else {
+            rest.next().unwrap_or_default()
+        };
         flags.insert(flag, value);
     }
-    let usage = "usage: sim --world <world.json> --room <name> --out <dir> [--ticks N] [--every K] [--seed N] [--late K]";
+    let usage = "usage: sim --world <world.json> --room <name> --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--ended]";
     let need = |flag: &str| (flags.get(flag).cloned()).unwrap_or_else(|| panic!("{flag}: {usage}"));
     let number = |flag: &str, or: u64| {
         (flags.get(flag)).map_or(or, |v| {
@@ -60,6 +70,7 @@ fn args() -> Args {
         every: number("--every", 100),
         seed: number("--seed", 1),
         late: number("--late", 0),
+        ended: flags.contains_key("--ended"),
     }
 }
 
@@ -172,7 +183,7 @@ fn main() {
         "colony: {}, spawn at {},{}; output {}",
         args.room, seat.0, seat.1, args.out
     );
-    let mut k = map.stand(&args.room, seat, args.seed);
+    let mut k = map.stand(&args.room, seat, args.seed, args.ended);
     let terrains = (map.rooms.iter())
         .filter_map(|(name, t)| {
             let bits: Box<[u8; fabot_core::tiles::COUNT]> = t

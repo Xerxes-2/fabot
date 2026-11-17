@@ -67,5 +67,9 @@ opt-level = 3
 lto = true
 codegen-units = 1
 
+[profile.sim]
+inherits = "release"
+panic = "abort"
+
 [target.wasm32-unknown-unknown.dependencies]
 talc = "5.1.1"

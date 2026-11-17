@@ -1151,7 +1151,11 @@ nix.
 official engine, with no wasm and no JS. It follows the official rules and
 never copies xxscreeps' quirks. It writes the soak's files, and the world
 is `scripts/sim/export.mjs`'s copy of the template.
-- ✅ The W8N3 respawn soak (`--world`, `--room`, `--seed`, `--late`).
+- ✅ A respawn soak on the template or a season world (`--world`, `--room`,
+  `--seed`, `--late`, `--ended`): `soak:many --native` runs its starts with
+  neither a node nor a rival on sim, one process per allowed core, from
+  `npm run build:sim` (target CPU, PGO, `panic = "abort"`; never the wasm
+  bot's or the tests' build).
 - An Invader that spawns on a border stays in the room: the official engine
   carries no NPC across an exit (`creeps/tick.js`).
 - The official crons run between ticks on their wall-clock periods, as
@@ -1163,9 +1167,8 @@ is `scripts/sim/export.mjs`'s copy of the template.
   eligible with probability 0.66, fit by maximum likelihood to the harvest
   between 20,745 waves in Season 11's history (95%: 0.64-0.69), at each
   wave's own cadence (87.6 ticks on average).
-- ❓ Still on xxscreeps: the nodes, the season worlds, the rivals and the
-  scenario library. The soak's `bodies.jsonl`, `decay.jsonl` and
-  `engagements.jsonl` are written empty, and each room line's `carriedOut`
+- ❓ Still on xxscreeps: the nodes, the rivals and the scenario library. The
+  soak's `bodies.jsonl`, `decay.jsonl` and `engagements.jsonl` are written empty, and each room line's `carriedOut`
   is 0. Its `waves` and `lost` are 0 because sim pushes no scripted wave and
   loses no tick.
 
