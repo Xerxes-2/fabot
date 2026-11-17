@@ -145,7 +145,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
     // now, with a fresh budget, where its own group is not there (a home's,
     // so a second raid is not left to towers) or was lost from sight.
     for e in &mut engagements {
-        if !matches!(e.objective, Objective::Defend) {
+        if !matches!(e.objective, Objective::Defend) || e.phase == Phase::Disengaging {
             continue;
         }
 

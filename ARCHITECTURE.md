@@ -562,8 +562,12 @@ Common to every kind:
 - `Approaching → Fighting` when any of ours is in reach.
 - `Fighting → Pursuing` when the group leaves the room and the plan says chase.
 - `* → Disengaging` when losses exceed the budget, or a group event re-runs the
-  exchange and we no longer win, or the group is `Lost` past the grace.
-- `Disengaging → closed` when ours are home or the group is gone.
+  exchange and we no longer win, or the group is `Lost` past the grace. An
+  outpost's losses past the budget but under two bodies re-form it, priced
+  again (v1's two guards a raid).
+- `Disengaging → closed` when ours are home and no armed sighting stands in
+  the room (`sightings`, the clock its economy stands down to): closed sooner,
+  it reopened on the same raid with a fresh budget and fed it bodies.
 - A home's `Defend` never disengages (owner's decision): where an outpost's
   would, it stops asking for bodies, its standing bodies hold on our
   ramparts and the towers carry on; it is `unanswered` and closes only when

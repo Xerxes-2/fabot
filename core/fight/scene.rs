@@ -524,6 +524,7 @@ impl<'a> Scene<'a> {
             // raid passed), and they open engagements of their own.
             clear: self.in_sight(e.room).is_some()
                 || sightings::clear(self.sightings, self.world.time, e.room),
+            raided: !sightings::unarmed(self.sightings, self.world.time, e.room),
         }
     }
 

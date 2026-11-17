@@ -31,6 +31,7 @@ pub struct Facts {
     /// The group stands in a room we hold or work.
     pub threatens: bool,
     pub clear: bool,
+    pub raided: bool,
 }
 
 fn enter(phase: Phase, time: i32, e: &Engagement) -> Engagement {
@@ -64,6 +65,8 @@ pub fn stands_alone(time: i32, e: &Engagement) -> Engagement {
     }
 }
 
+const OUTPOST_LOSSES: i32 = 2;
+
 pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
     let alive: BTreeSet<String> = e.ours.intersection(&facts.standing).cloned().collect();
     let mut next = e.clone();
@@ -74,17 +77,26 @@ pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
     let toward = |phase: Phase| Some(enter(phase, facts.time, e));
     let quit = || Some(give_up(facts.held, facts.time, e));
 
+    // Closed while the raid stands, it reopens on it with a fresh budget.
+    if e.phase == Phase::Disengaging {
+        return if facts.home && !facts.raided {
+            None
+        } else {
+            Some(e.clone())
+        };
+    }
+
     // Losing sight is not the raid leaving (owner's call); a home is always in sight.
     if facts.group.is_none() && (facts.held || facts.clear) {
         return None;
     }
 
-    if e.phase == Phase::Disengaging {
-        return if facts.home { None } else { Some(e.clone()) };
-    }
-
     if facts.group.is_some() && e.lost > e.budget {
-        return quit();
+        return if facts.held || e.lost >= OUTPOST_LOSSES {
+            quit()
+        } else {
+            toward(Phase::Forming)
+        };
     }
 
     let left = facts.group.as_ref().is_some_and(|g| g.room != e.room);
@@ -348,6 +360,7 @@ pub fn opens(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fight::shape::Objective;
     use crate::world::{BodyPart, Store};
 
     fn at(x: i32, y: i32) -> Pos {
@@ -674,6 +687,61 @@ mod tests {
             fallen.extend(haulers(&spec).into_iter().map(|(c, _, _)| before(c)));
 
             assert_eq!(safe_mode(false, &[rival(&[], &fallen)]), None);
+        }
+    }
+
+    #[test]
+    fn an_outpost_defend_beaten_past_its_bound_holds_while_the_raid_stands() {
+        let mut rng = Rng(0x5eed_0854_0ff1_ce00);
+        let phases = [
+            Phase::Forming,
+            Phase::Approaching,
+            Phase::Fighting,
+            Phase::Pursuing,
+            Phase::Disengaging,
+        ];
+
+        for _ in 0..DRAWS {
+            let room = if rng.flip() { "W1N1" } else { "W2N1" };
+            let group = rng.flip().then(|| Group {
+                id: 1,
+                members: BTreeSet::from(["raider".to_string()]),
+                room: RoomName::named(room),
+                last_seen: 0,
+                centre: at(25, 25),
+            });
+            let e = Engagement {
+                phase: phases[rng.below(phases.len() as u64) as usize],
+                lost: rng.between(OUTPOST_LOSSES, OUTPOST_LOSSES + 2),
+                budget: rng.between(0, 3),
+                unanswered: false,
+                ..crate::fight::scene::fresh(
+                    1,
+                    Objective::Defend,
+                    RoomName::named("W1N1"),
+                    0,
+                    Tactic::Close,
+                )
+            };
+            let facts = Facts {
+                time: 1,
+                group,
+                standing: BTreeSet::new(),
+                aging_out: BTreeSet::new(),
+                in_reach: rng.flip(),
+                home: rng.flip(),
+                held: false,
+                asked: rng.flip(),
+                threatens: rng.flip(),
+                clear: rng.flip(),
+                raided: true,
+            };
+
+            let beaten = facts.group.is_some() && e.lost > e.budget;
+            if e.phase == Phase::Disengaging || beaten {
+                let next = step(&facts, &e).expect("a raid still standing keeps its room held");
+                assert_eq!(next.phase, Phase::Disengaging);
+            }
         }
     }
 }
