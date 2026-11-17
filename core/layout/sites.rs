@@ -692,7 +692,7 @@ mod tests {
                 for p in placed {
                     let t = tiles::index(p.x, p.y);
                     room.structures.push(fx::structure(
-                        &format!("s{t}{}", p.kind.name()),
+                        &format!("s{t}.{}", p.kind.ordinal()),
                         p.kind,
                         Owner::Ours,
                         t,

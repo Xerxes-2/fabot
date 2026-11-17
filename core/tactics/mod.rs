@@ -10,7 +10,7 @@ use crate::mv::{Wish, blob, plan};
 use crate::tick;
 use crate::tiles::Tile;
 use crate::vocabulary::Part;
-use crate::world::{Creep, Pos, RoomName};
+use crate::world::{Creep, Id, Pos, RoomName};
 use crate::{engine, tiles};
 
 /// A phase's own tactic (pursue, retreat) is the phase's; this is what a kind
@@ -78,7 +78,7 @@ pub struct Sight<'a> {
     pub atlas: &'a mut Atlas,
     pub hostiles: &'a BTreeMap<RoomName, Vec<Creep>>,
     /// The hostiles a stance lets the reflex strike, and what a volley spares.
-    pub struck: BTreeSet<String>,
+    pub struck: BTreeSet<Id>,
     pub spared: BTreeMap<RoomName, Vec<Pos>>,
     pub ramparts: BTreeMap<RoomName, Vec<Pos>>,
     pub musters: Vec<Pos>,
@@ -93,7 +93,7 @@ fn hostiles_in<'a>(sight: &Sight<'a>, room: RoomName) -> &'a [Creep] {
     sight.hostiles.get(&room).map_or(&[], Vec::as_slice)
 }
 
-fn ranked<'a>(sight: &Sight<'a>, order: &[String], creep: &Creep) -> Vec<&'a Creep> {
+fn ranked<'a>(sight: &Sight<'a>, order: &[Id], creep: &Creep) -> Vec<&'a Creep> {
     let near = hostiles_in(sight, creep.pos.room)
         .iter()
         .filter(|h| sight.struck.contains(&h.id));
@@ -117,7 +117,7 @@ fn ranked<'a>(sight: &Sight<'a>, order: &[String], creep: &Creep) -> Vec<&'a Cre
 
 /// Every body that strikes, in any phase and engaged or not: a swing and a
 /// shot at the first in the kill order in reach, a volley where it lands more.
-pub fn strike(sight: &Sight, order: &[String], creep: &Creep, armed: bool) -> Vec<CreepAct> {
+pub fn strike(sight: &Sight, order: &[Id], creep: &Creep, armed: bool) -> Vec<CreepAct> {
     let targets: Vec<&Creep> = ranked(sight, order, creep)
         .into_iter()
         .filter(|h| !armed || h.live(Part::Attack) > 0 || h.live(Part::RangedAttack) > 0)
@@ -127,7 +127,7 @@ pub fn strike(sight: &Sight, order: &[String], creep: &Creep, armed: bool) -> Ve
     let melee = within(engine::MELEE_RANGE)
         .next()
         .filter(|_| creep.live(Part::Attack) > 0)
-        .map(|h| CreepAct::AttackCreep(h.id.clone()));
+        .map(|h| CreepAct::AttackCreep(h.id));
 
     let volley: i32 = within(engine::RANGED_RANGE)
         .filter_map(|h| creep.pos.range(&h.pos))
@@ -143,7 +143,7 @@ pub fn strike(sight: &Sight, order: &[String], creep: &Creep, armed: bool) -> Ve
         Some(_) if volley > engine::RANGED_ATTACK_POWER && !spares => {
             Some(CreepAct::RangedMassAttack)
         }
-        head => head.map(|h| CreepAct::RangedAttackCreep(h.id.clone())),
+        head => head.map(|h| CreepAct::RangedAttackCreep(h.id)),
     };
 
     melee.into_iter().chain(ranged).collect()
@@ -180,13 +180,13 @@ pub fn hold(sight: &Sight, creep: &Creep) -> Wish {
     plan::stay(&*sight.atlas, creep, mover_of(creep).factor, WEIGHT)
 }
 
-fn aim(sight: &Sight, order: &[String], centre: &Pos, creep: &Creep) -> Pos {
+fn aim(sight: &Sight, order: &[Id], centre: &Pos, creep: &Creep) -> Pos {
     ranked(sight, order, creep)
         .first()
         .map_or(*centre, |h| h.pos)
 }
 
-pub fn close(sight: &mut Sight, order: &[String], centre: &Pos, creep: &Creep) -> Wish {
+pub fn close(sight: &mut Sight, order: &[Id], centre: &Pos, creep: &Creep) -> Wish {
     let at = aim(sight, order, centre, creep);
     toward(sight, creep, &at, engine::MELEE_RANGE)
 }
@@ -228,7 +228,7 @@ fn step_to(creep: &Creep, tile: Tile) -> Wish {
 pub fn kite(
     sight: &mut Sight,
     at: Option<&Pos>,
-    order: &[String],
+    order: &[Id],
     centre: &Pos,
     creep: &Creep,
 ) -> Wish {
@@ -482,10 +482,10 @@ pub fn seats_at(atlas: &Atlas, line: &[Pos], room: RoomName, work: Tile) -> i32 
 pub struct Front {
     pub breach: Pos,
     /// None where the breach is his controller: tapped, never struck.
-    pub wall: Option<String>,
+    pub wall: Option<Id>,
     pub line: Vec<Pos>,
     pub towers: Vec<Pos>,
-    pub struck: Option<String>,
+    pub struck: Option<Id>,
     /// What the towers deal a body working the breach.
     pub strike: i32,
     /// The rival's sources outside its ramparts, where pickets stand, and
@@ -647,7 +647,7 @@ pub fn siege(
             )
         } else if at_breach(creep) {
             (
-                front.wall.clone().map(CreepAct::Dismantle),
+                front.wall.map(CreepAct::Dismantle),
                 toward(sight, creep, &front.breach, engine::MELEE_RANGE),
             )
         } else {
@@ -894,9 +894,9 @@ pub fn heals(
         .into_iter()
         .map(|(healer, p, beside)| {
             let act = if beside {
-                CreepAct::HealCreep(p.id.clone())
+                CreepAct::HealCreep(p.id)
             } else {
-                CreepAct::RangedHealCreep(p.id.clone())
+                CreepAct::RangedHealCreep(p.id)
             };
             (healer, act)
         })
@@ -906,7 +906,7 @@ pub fn heals(
 /// A target's worth a hit, and whether a mass volley strikes it (one with an
 /// owner: the engine's RMA passes over a container).
 pub struct Mark {
-    pub id: String,
+    pub id: Id,
     pub pos: Pos,
     pub worth: i32,
     pub hits: i32,
@@ -956,7 +956,7 @@ pub fn hunt(
     };
     let landed = |at: &Pos, next: bool| -> (i64, Option<CreepAct>) {
         let single = (marks.iter())
-            .map(|m| (share(m, at, next, &shot), m.id.clone()))
+            .map(|m| (share(m, at, next, &shot), m.id))
             .filter(|(w, _)| *w > 0)
             .max();
         let mass: i64 = if spared.iter().any(|p| at.within(engine::RANGED_RANGE, p)) {

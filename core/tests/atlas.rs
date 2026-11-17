@@ -20,7 +20,7 @@ const CASES: u64 = 100;
 
 fn structure(kind: Kind, walkable: bool, x: i32, y: i32) -> Structure {
     Structure {
-        id: format!("s{x},{y}"),
+        id: format!("s{x},{y}").as_str().into(),
         kind,
         pos: Pos::new(ROOM, x, y),
         owner: Owner::Nobody,

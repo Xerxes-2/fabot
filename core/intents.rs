@@ -1,29 +1,29 @@
 use super::mv::Wish;
 use super::vocabulary::{Part, Resource};
-use super::world::{Kind, RoomName};
+use super::world::{Id, Kind, RoomName};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CreepAct {
     /// TOP = 1, clockwise to TOP_LEFT = 8.
     Move(i32),
     Say(String),
-    Harvest(String),
-    Transfer(String, Resource),
-    Withdraw(String, Resource),
-    Pickup(String),
+    Harvest(Id),
+    Transfer(Id, Resource),
+    Withdraw(Id, Resource),
+    Pickup(Id),
     Drop(Resource),
-    Build(String),
-    Repair(String),
-    Upgrade(String),
-    Reserve(String),
-    Unreserve(String),
-    ClaimController(String),
-    AttackCreep(String),
-    RangedAttackCreep(String),
+    Build(Id),
+    Repair(Id),
+    Upgrade(Id),
+    Reserve(Id),
+    Unreserve(Id),
+    ClaimController(Id),
+    AttackCreep(Id),
+    RangedAttackCreep(Id),
     RangedMassAttack,
-    HealCreep(String),
-    RangedHealCreep(String),
-    Dismantle(String),
+    HealCreep(Id),
+    RangedHealCreep(Id),
+    Dismantle(Id),
 }
 
 pub const MELEE: u8 = 1;
@@ -69,27 +69,27 @@ pub fn performed(acts: &[CreepAct]) -> Vec<CreepAct> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SpawnAct {
-    SpawnCreep(Vec<Part>, String, Vec<String>),
-    RecycleCreep(String),
+    SpawnCreep(Vec<Part>, String, Vec<Id>),
+    RecycleCreep(Id),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RoomAct {
     CreateSite(i32, i32, Kind),
-    Destroy(String),
+    Destroy(Id),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LinkAct {
-    TransferEnergy(String, i32),
+    TransferEnergy(Id, i32),
 }
 
 /// The output lab runs it off the two reagent labs, first reagent first.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LabAct {
-    RunReaction(String, String),
+    RunReaction(Id, Id),
     /// The lab spends its compound and energy on the parts of the body with this id.
-    BoostCreep(String),
+    BoostCreep(Id),
 }
 
 /// `send`: resource, amount, the room it lands in.
@@ -106,9 +106,9 @@ pub enum ControllerAct {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TowerAct {
-    Attack(String),
-    Heal(String),
-    Repair(String),
+    Attack(Id),
+    Heal(Id),
+    Repair(Id),
 }
 
 /// Where an ask stands in its room's queue: a floor is never displaced,
@@ -146,15 +146,15 @@ pub struct Refusal {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Intent {
     Creep(String, CreepAct),
-    Spawn(String, SpawnAct),
+    Spawn(Id, SpawnAct),
     Room(RoomName, RoomAct),
-    Tower(String, TowerAct),
-    Controller(String, ControllerAct),
-    Link(String, LinkAct),
-    Lab(String, LabAct),
-    Terminal(String, TerminalAct),
+    Tower(Id, TowerAct),
+    Controller(Id, ControllerAct),
+    Link(Id, LinkAct),
+    Lab(Id, LabAct),
+    Terminal(Id, TerminalAct),
     /// An observer and the room it brings in sight next tick.
-    Observe(String, RoomName),
+    Observe(Id, RoomName),
     /// Tick serves these from the room's queue; none reaches `Executor`.
     Queue(RoomName, Ask),
     /// Tick arbitrates every module's wishes in a room as one.
@@ -173,14 +173,14 @@ impl Intent {
     pub fn actor(&self) -> String {
         match self {
             Intent::Creep(name, _) => name.clone(),
-            Intent::Spawn(id, _) => id.clone(),
+            Intent::Spawn(id, _) => id.to_string(),
             Intent::Room(name, _) => name.to_string(),
-            Intent::Tower(id, _) => id.clone(),
-            Intent::Controller(id, _) => id.clone(),
-            Intent::Link(id, _) => id.clone(),
-            Intent::Lab(id, _) => id.clone(),
-            Intent::Terminal(id, _) => id.clone(),
-            Intent::Observe(id, _) => id.clone(),
+            Intent::Tower(id, _) => id.to_string(),
+            Intent::Controller(id, _) => id.to_string(),
+            Intent::Link(id, _) => id.to_string(),
+            Intent::Lab(id, _) => id.to_string(),
+            Intent::Terminal(id, _) => id.to_string(),
+            Intent::Observe(id, _) => id.to_string(),
             Intent::Queue(room, _) => room.to_string(),
             Intent::Wish(_, wish) => wish.creep.clone(),
             Intent::Trace(creep, _) => creep.clone(),
@@ -202,10 +202,11 @@ impl Intent {
 #[cfg(test)]
 mod tests {
     use super::{CreepAct, performed};
+    use crate::world::Id;
 
     #[test]
     fn the_engine_performs_one_act_per_pipeline_slot_by_its_priority() {
-        let id = || "x".to_string();
+        let id = || Id::from("x");
         let (heal, ranged_heal) = (CreepAct::HealCreep(id()), CreepAct::RangedHealCreep(id()));
         let (attack, shot) = (
             CreepAct::AttackCreep(id()),

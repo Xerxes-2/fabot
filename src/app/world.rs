@@ -102,13 +102,14 @@ pub struct Pass {
 
 pub fn of_game(
     maps: &mut Maps,
+    buffers: &mut read::Buffers,
     declarations: &Declarations,
     drain: Option<RoomName>,
 ) -> (World<'static>, Pass) {
     let packed = read(drain.map(|room| room.to_string()));
     let ints = packed.get(0).unchecked_into::<Int32Array>().to_vec();
     let text = packed.get(1).as_string().unwrap_or_default();
-    let mut world = fabot_core::world::read::world(&ints, &text, declarations);
+    let mut world = read::world(&ints, &text, declarations, buffers);
     world.cpu_limit = f64::from(game::cpu::limit());
     for name in world.rooms.iter().map(|room| room.name) {
         if !matches!(maps.terrain.get(&name), Some(Some(_)))
@@ -123,7 +124,7 @@ pub fn of_game(
         .filter(|s| s.pos.room != RoomName::SIM)
         .map(|s| s.pos.room.coords());
     maps.read_around(homes.collect::<BTreeSet<_>>().into_iter());
-    world.closed = fabot_core::world::read::closed(&world, declarations, |room| maps.status(room));
+    world.closed = read::closed(&world, declarations, |room| maps.status(room));
     (world, Pass { ints, strs: text })
 }
 
@@ -142,8 +143,8 @@ fn engine_name(name: RoomName) -> Option<screeps::RoomName> {
 }
 
 /// `Game.getObjectById` as `Executor` reads it: absent is a refusal, never an error.
-pub fn object_by_id(id: &str) -> Option<JsValue> {
-    Game::object(id).ok().filter(|found| !absent(found))
+pub fn object_by_id(id: &Id) -> Option<JsValue> {
+    Game::object(&id.text()).ok().filter(|found| !absent(found))
 }
 
 /// `Game.creeps[name]`, for the executor's creep.

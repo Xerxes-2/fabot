@@ -7,14 +7,14 @@ use crate::engine;
 use crate::grid::{self, Footprint};
 use crate::tick;
 use crate::vocabulary::{Part, part_count_in};
-use crate::world::{Pos, RoomName};
+use crate::world::{Id, Pos, RoomName};
 
 use super::bodies::{self, Leg, Pattern};
 use super::derived::{Body, Derived, dig_work};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Job {
-    Dig(String),
+    Dig(Id),
     /// The colony's carriers: its sources' and outposts' dig home, the
     /// storage's stock to its sinks, and every ore load.
     Fill,
@@ -22,8 +22,8 @@ pub enum Job {
     /// before it upgrades.
     Work(bool),
     Upgrade,
-    Reserve(String),
-    Claim(String),
+    Reserve(Id),
+    Claim(Id),
     Scout(RoomName),
 }
 
@@ -442,7 +442,7 @@ impl Plan<'_> {
                 if own {
                     digs.push(dig_id.clone());
                 }
-                self.push(ci, g.room, Job::Dig(s.id.clone()), post, &s.id, 0, body);
+                self.push(ci, g.room, Job::Dig(s.id), post, s.id, 0, body);
                 // A source link carries the dig to a hub without limit, to the
                 // controller's link as fast as the room's bodies drink it.
                 let linked = match (&s.link, &g.receiver) {
@@ -461,7 +461,7 @@ impl Plan<'_> {
                 // container, or the dig overflows; never faster than the dig, so
                 // the haulers stay bounded by what the source yields.
                 let waiting: i32 = (g.stores.iter())
-                    .filter(|st| s.container.as_ref() == Some(&st.id))
+                    .filter(|st| s.container.is_some() && s.container == st.id.object())
                     .map(|st| st.energy)
                     .chain(
                         g.piles
@@ -493,15 +493,7 @@ impl Plan<'_> {
                         })
                     {
                         fixed += upkeep(&body);
-                        self.push(
-                            ci,
-                            g.room,
-                            Job::Reserve(c.id.clone()),
-                            c.pos,
-                            &c.id,
-                            0,
-                            body,
-                        );
+                        self.push(ci, g.room, Job::Reserve(c.id), c.pos, c.id, 0, body);
                     }
                 }
                 _ => (),
@@ -533,15 +525,7 @@ impl Plan<'_> {
                 mined +=
                     f64::from(part_count_in(&body, Part::Work) * engine::MINERAL_HARVEST_PER_WORK)
                         / f64::from(engine::MINERAL_HARVEST_CYCLE);
-                self.push(
-                    ci,
-                    colony.room,
-                    Job::Dig(m.id.clone()),
-                    post,
-                    &m.id,
-                    0,
-                    body,
-                );
+                self.push(ci, colony.room, Job::Dig(m.id), post, m.id, 0, body);
                 self.out.last_mut().expect("pushed").rank = MINE;
             }
         }
@@ -890,11 +874,11 @@ pub fn plan(atlas: &mut Atlas, derived: &Derived, owners: &[Option<usize>]) -> V
             continue;
         };
         let jobs = (o.sources.iter())
-            .map(|s| (Job::Dig(s.id.clone()), s.pos, s.id.clone()))
+            .map(|s| (Job::Dig(s.id), s.pos, s.id))
             .chain(std::iter::once((
-                Job::Reserve(o.controller.id.clone()),
+                Job::Reserve(o.controller.id),
                 at,
-                o.controller.id.clone(),
+                o.controller.id,
             )));
         for (job, seat, key) in jobs {
             out.push(Slot {
@@ -915,9 +899,9 @@ pub fn plan(atlas: &mut Atlas, derived: &Derived, owners: &[Option<usize>]) -> V
         out.extend(errand(
             atlas,
             derived,
-            Job::Claim(c.id.clone()),
+            Job::Claim(c.id),
             c.pos,
-            &c.id,
+            &c.id.text(),
         ));
     }
     // A scout takes whichever room its walk picks, so a slot is a count, one

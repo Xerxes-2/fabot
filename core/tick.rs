@@ -20,12 +20,12 @@ use super::tactics::{self, Tactic};
 use super::tiles::{self, Tile, TileSet};
 use super::vocabulary::{Compound, Part, Resource};
 use super::world::{
-    Creep, Kind, Owner, Pos, Room, RoomName, Sightings, Structure, World, hostiles,
+    Creep, Id, Kind, Owner, Pos, Room, RoomName, Sightings, Structure, World, hostiles,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Declared {
-    pub id: String,
+    pub id: Id,
     pub pos: Pos,
 }
 
@@ -526,7 +526,7 @@ fn by_room<'a, T>(pairs: &[(RoomName, &'a T)]) -> Vec<(RoomName, Vec<&'a T>)> {
 
 /// Hivemind's order: the bays, which their harvesters refill, first. None
 /// without a bay, so the engine keeps its own.
-fn drawn(r: &Room, spawn: &Pos) -> Vec<String> {
+fn drawn(r: &Room, spawn: &Pos) -> Vec<Id> {
     let in_bay = Atlas::in_bay(r);
     let bay = |s: &&Structure| in_bay(&s.kind, &s.pos);
     let ours = (r.structures.iter()).filter(|s| s.owner.is_ours());
@@ -537,7 +537,7 @@ fn drawn(r: &Room, spawn: &Pos) -> Vec<String> {
         return Vec::new();
     }
     energy.sort_by_key(|s| (!bay(s), !s.kind.is_spawn(), spawn.range(&s.pos)));
-    energy.into_iter().map(|s| s.id.clone()).collect()
+    energy.into_iter().map(|s| s.id).collect()
 }
 
 /// Each room's spawn queue: floors, then the fight's asks, then the
@@ -573,7 +573,7 @@ pub fn queue(world: &World, asks: &[(RoomName, &Ask)]) -> Vec<Intent> {
                 break;
             };
             out.push(Intent::Spawn(
-                spawn.id.clone(),
+                spawn.id,
                 SpawnAct::SpawnCreep(a.body.clone(), a.name.clone(), drawn(r, &spawn.pos)),
             ));
             bank -= cost;

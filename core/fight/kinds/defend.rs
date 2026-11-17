@@ -7,7 +7,7 @@ use crate::engine;
 use crate::tactics::Tactic;
 use crate::tiles::{self};
 use crate::vocabulary::Part;
-use crate::world::{Controller, Creep, Fallen, Kind, Owner, Pos, RoomName, Structure};
+use crate::world::{Controller, Creep, Fallen, Id, Kind, Owner, Pos, RoomName, Structure};
 
 /// What a `Defend` may fight as, in the order its ties fall to (§6.3).
 pub const CANDIDATES: &[Tactic] = &[
@@ -286,7 +286,7 @@ pub fn fireable(c: &Controller) -> bool {
         && c.ticks_to_downgrade >= engine::safe_mode_downgrade_line(c.level)
 }
 
-pub fn safe_mode(running: bool, homes: &[Home]) -> Option<String> {
+pub fn safe_mode(running: bool, homes: &[Home]) -> Option<Id> {
     let claimer =
         |c: &Controller, h: &Creep| live(Part::Claim, h) && h.pos.within(CLAIMER_REACH, &c.pos);
 
@@ -299,7 +299,7 @@ pub fn safe_mode(running: bool, homes: &[Home]) -> Option<String> {
                 fireable(&h.controller)
                     && (h.hostiles.iter().any(|c| claimer(&h.controller, c)) || last_resort(h))
             })
-            .map(|h| h.controller.id.clone())
+            .map(|h| h.controller.id)
     }
 }
 
@@ -310,7 +310,7 @@ pub const OUTPOST_PRIORITY: f64 = 1.0;
 pub fn opens(
     homes: &BTreeSet<RoomName>,
     worked: &BTreeSet<RoomName>,
-    armed: impl Fn(&str) -> bool,
+    armed: impl Fn(&Id) -> bool,
     time: i32,
     targeted: &BTreeSet<RoomName>,
     groups: &[Group],
@@ -320,7 +320,7 @@ pub fn opens(
         .filter(|g| {
             g.last_seen == time
                 && (homes.contains(&g.room) || worked.contains(&g.room))
-                && g.members.iter().any(|m| armed(m))
+                && g.members.iter().any(&armed)
         })
         .map(|g| {
             (
@@ -377,7 +377,7 @@ mod tests {
             })
             .collect();
         Creep {
-            id: format!("{},{}", pos.x, pos.y),
+            id: format!("{},{}", pos.x, pos.y).as_str().into(),
             name: format!("{},{}", pos.x, pos.y),
             owner,
             pos,
@@ -438,7 +438,7 @@ mod tests {
 
         Home {
             controller: Controller {
-                id: "c".to_string(),
+                id: "c".into(),
                 pos: at(10, 10),
                 owner: Owner::Ours,
                 level: 5,
@@ -705,7 +705,7 @@ mod tests {
             let room = if rng.flip() { "W1N1" } else { "W2N1" };
             let group = rng.flip().then(|| Group {
                 id: 1,
-                members: BTreeSet::from(["raider".to_string()]),
+                members: BTreeSet::from(["raider".into()]),
                 room: RoomName::named(room),
                 last_seen: 0,
                 centre: at(25, 25),

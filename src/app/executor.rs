@@ -9,6 +9,7 @@ use fabot_core::intents::{
     TowerAct,
 };
 use fabot_core::vocabulary;
+use fabot_core::world::Id;
 
 const NOT_FOUND: i32 = -5;
 const THREW: i32 = -100;
@@ -100,7 +101,7 @@ fn actor(v: &JsValue) -> &Actor {
     v.unchecked_ref()
 }
 
-fn on(verb: &str, target: &str, f: impl FnOnce(&JsValue) -> Result<f64, JsValue>) -> (String, i32) {
+fn on(verb: &str, target: &Id, f: impl FnOnce(&JsValue) -> Result<f64, JsValue>) -> (String, i32) {
     match world::object_by_id(target) {
         None => (verb.to_string(), NOT_FOUND),
         Some(t) => outcome(verb, f(&t)),
@@ -246,10 +247,7 @@ fn act(intent: &Intent) -> (String, i32) {
                 }
                 let options: SpawnOptions = Object::new().unchecked_into();
                 if !drawn.is_empty() {
-                    let structures: Array = drawn
-                        .iter()
-                        .filter_map(|id| world::object_by_id(id))
-                        .collect();
+                    let structures: Array = drawn.iter().filter_map(world::object_by_id).collect();
                     options.set_energy_structures(&structures);
                 }
                 outcome("spawn", actor(&spawn).spawn_creep(&parts, name, &options))

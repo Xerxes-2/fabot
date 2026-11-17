@@ -4,7 +4,7 @@ use crate::engine;
 use crate::tick::{ColonyPlan, Stage};
 use crate::tiles::{self, Tile};
 use crate::vocabulary::Resource;
-use crate::world::{Creep, Pos, Room, RoomName, Structure, World};
+use crate::world::{Creep, Id, Pos, Room, RoomName, Structure, World};
 
 use super::ground;
 use super::plan;
@@ -22,8 +22,8 @@ pub struct Colony {
     pub struck: Vec<Pos>,
     pub ours: Vec<Creep>,
     pub ramparts: Vec<Structure>,
-    pub buried: Vec<String>,
-    pub astray: Vec<String>,
+    pub buried: Vec<Id>,
+    pub astray: Vec<Id>,
 }
 
 fn join(values: &[Tile]) -> String {
@@ -106,7 +106,7 @@ pub fn colonies(
             .cloned()
             .collect();
 
-        towers.sort_by(|a, b| a.id.cmp(&b.id));
+        towers.sort_by_key(|a| a.id);
 
         let census = sites::census_of(room, &ours);
         let astray: Vec<Tile> = match &plan {
@@ -146,11 +146,11 @@ pub fn colonies(
                     (room.structures.iter())
                         .any(|s| s.pos == r.pos && s.owner.is_ours() && !s.walkable)
                 })
-                .map(|r| r.id.clone())
+                .map(|r| r.id)
                 .collect(),
             astray: (room.structures.iter())
                 .filter(|c| c.kind.is_container() && astray.contains(&tiles::of_pos(&c.pos)))
-                .map(|c| c.id.clone())
+                .map(|c| c.id)
                 .collect(),
         });
     }

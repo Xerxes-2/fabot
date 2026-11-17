@@ -14,7 +14,7 @@ use crate::tick::{self, TacticRule};
 use crate::tiles::Tile;
 use crate::vocabulary::{Part, Resource, ResourceType};
 use crate::world::{
-    Creep, Owner, Pos, Room, RoomName, Sightings, Structure, World, hostiles, sightings,
+    Creep, Id, Owner, Pos, Room, RoomName, Sightings, Structure, World, hostiles, sightings,
 };
 use crate::{engine, tiles};
 
@@ -58,11 +58,11 @@ pub(super) struct Scene<'a> {
     pub(super) musters: Vec<Pos>,
     pub(super) worked: BTreeSet<RoomName>,
     pub(super) foes: BTreeMap<RoomName, Vec<Creep>>,
-    pub(super) cores: BTreeSet<String>,
+    pub(super) cores: BTreeSet<Id>,
     pub(super) by_id: BTreeMap<i32, Group>,
-    pub(super) hostile_at: BTreeMap<String, Pos>,
+    pub(super) hostile_at: BTreeMap<Id, Pos>,
     pub(super) ours: BTreeMap<&'a str, &'a Creep>,
-    pub(super) armed: BTreeSet<String>,
+    pub(super) armed: BTreeSet<Id>,
     /// The cast bodies standing, and the ones still in an oven.
     pub(super) landed: Vec<Cast>,
     pub(super) waiting: Vec<Cast>,
@@ -131,7 +131,7 @@ impl<'a> Scene<'a> {
         let room = self.in_sight(e.room)?;
 
         match (e.plan.order.first(), &e.objective) {
-            (Some(first), _) => siege::barrier_at(room).get(first.as_str()).copied(),
+            (Some(first), _) => siege::barrier_at(room).get(first).copied(),
             (None, Objective::Siege(target)) => room.structures.iter().find(|s| s.id == *target),
             (None, Objective::Defend | Objective::Sweep) => None,
         }
@@ -179,11 +179,9 @@ impl<'a> Scene<'a> {
         let shot = |t: Tile| -> Option<Pos> {
             (!shields.contains(&t)).then(|| tiles::to_pos(room.name, t))
         };
-        let before = |id: &String| {
+        let before = |id: &Id| {
             (was.iter())
-                .find(|g| {
-                    g.last_seen == self.world.time - 1 && g.members == BTreeSet::from([id.clone()])
-                })
+                .find(|g| g.last_seen == self.world.time - 1 && g.members == BTreeSet::from([*id]))
                 .map(|g| &g.centre)
         };
         // A body working its tile stays on it, and a fleeing one keeps its
@@ -224,7 +222,7 @@ impl<'a> Scene<'a> {
             .map(|c| (c, true))
             .chain(escort.iter().map(|c| (c, false)))
             .map(|(c, unarmed)| tactics::Mark {
-                id: c.id.clone(),
+                id: c.id,
                 pos: c.pos,
                 worth: sweep::worth(c),
                 hits: c.hits,
@@ -240,7 +238,7 @@ impl<'a> Scene<'a> {
                 .filter(|s| s.kind.is_container() || s.kind.is_link() && !s.owner.is_ours())
                 .filter(|s| siege::beside(&reached, &s.pos))
                 .map(|s| tactics::Mark {
-                    id: s.id.clone(),
+                    id: s.id,
                     pos: s.pos,
                     worth: s.hits,
                     hits: s.hits,
@@ -563,7 +561,7 @@ impl<'a> Scene<'a> {
             gave_up: siege::gave_up(e),
             razed: room.is_some_and(|room| match &e.objective {
                 Objective::Siege(target) => {
-                    !siege::stands(room, target)
+                    !siege::stands(room, *target)
                         && (!raid::raids(e) || raid::mark(room, &self.members_of(e)).is_none())
                 }
                 _ => false,
@@ -590,7 +588,7 @@ impl<'a> Scene<'a> {
             return false;
         }
 
-        let towers: BTreeSet<&String> = (self.in_sight(e.room))
+        let towers: BTreeSet<&Id> = (self.in_sight(e.room))
             .into_iter()
             .flat_map(|r| self.towers_in(r))
             .map(|t| &t.id)

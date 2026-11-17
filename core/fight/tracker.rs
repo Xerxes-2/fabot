@@ -2,7 +2,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::shape::Group;
-use crate::world::{Creep, Pos, RoomName, hostiles};
+use crate::world::{Creep, Id, Pos, RoomName, hostiles};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
@@ -59,7 +59,7 @@ fn find(root: &mut [usize], mut i: usize) -> usize {
 
 fn clusters<'a>(owned: &BTreeSet<RoomName>, hostiles: &'a [Creep]) -> Vec<Vec<&'a Creep>> {
     let mut sorted: Vec<&Creep> = hostiles.iter().collect();
-    sorted.sort_by(|a, b| a.id.cmp(&b.id));
+    sorted.sort_by_key(|a| a.id);
     let n = sorted.len();
     let mut root: Vec<usize> = (0..n).collect();
     let armed: Vec<bool> = sorted
@@ -138,11 +138,11 @@ pub fn step(
     let mut prev = prev.to_vec();
     prev.sort_by_key(|g| g.id);
     let cs = clusters(owned, hostiles);
-    let mut owner: BTreeMap<String, usize> = BTreeMap::new();
+    let mut owner: BTreeMap<Id, usize> = BTreeMap::new();
 
     for (gi, g) in prev.iter().enumerate() {
         for m in &g.members {
-            owner.insert(m.clone(), gi);
+            owner.insert(*m, gi);
         }
     }
 
@@ -225,14 +225,14 @@ pub fn step(
 
         groups.push(Group {
             id,
-            members: cs[ci].iter().map(|m| m.id.clone()).collect(),
+            members: cs[ci].iter().map(|m| m.id).collect(),
             room: c.room,
             last_seen: tick,
             centre: c,
         });
     }
 
-    let seen: BTreeSet<&String> = hostiles.iter().map(|h| &h.id).collect();
+    let seen: BTreeSet<&Id> = hostiles.iter().map(|h| &h.id).collect();
 
     for gi in 0..prev.len() {
         let g = &prev[gi];
@@ -269,7 +269,7 @@ mod tests {
 
     fn creep(id: &str, pos: Pos, armed: bool) -> Creep {
         Creep {
-            id: id.to_string(),
+            id: id.into(),
             name: id.to_string(),
             owner: Owner::Stranger("rival".to_string()),
             pos,
@@ -361,7 +361,7 @@ mod tests {
 
         let absent: Vec<String> = pool()
             .into_iter()
-            .filter(|id| now.iter().all(|c| &c.id != id))
+            .filter(|id| now.iter().all(|c| c.id != Id::from(id.as_str())))
             .collect();
         let mut arriving = rng.subset(&absent);
         arriving.truncate(3);
@@ -458,9 +458,9 @@ mod tests {
             let (prev, now, tick) = history(&mut rng);
             let (groups, _) = step(GRACE, 0, &BTreeSet::new(), &prev, &now, tick);
             let ids: Vec<i32> = groups.iter().map(|g| g.id).collect();
-            let mut members: Vec<String> = seen(tick, &groups)
+            let mut members: Vec<Id> = seen(tick, &groups)
                 .iter()
-                .flat_map(|g| g.members.iter().cloned())
+                .flat_map(|g| g.members.iter().copied())
                 .collect();
             members.sort();
 
@@ -469,7 +469,7 @@ mod tests {
             distinct.dedup();
             assert_eq!(distinct, ids);
 
-            let mut hostiles: Vec<String> = now.iter().map(|c| c.id.clone()).collect();
+            let mut hostiles: Vec<Id> = now.iter().map(|c| c.id).collect();
             hostiles.sort();
             assert_eq!(members, hostiles);
         }
@@ -483,7 +483,7 @@ mod tests {
             let (prev, now, tick) = history(&mut rng);
             let (all, _) = step(GRACE, 0, &BTreeSet::new(), &prev, &now, tick);
             let groups = seen(tick, &all);
-            let at: BTreeMap<String, &Creep> = now.iter().map(|c| (c.id.clone(), c)).collect();
+            let at: BTreeMap<Id, &Creep> = now.iter().map(|c| (c.id, c)).collect();
 
             let positions =
                 |g: &Group| -> Vec<&Creep> { g.members.iter().map(|m| at[m]).collect() };
@@ -511,11 +511,11 @@ mod tests {
                 match ps.first() {
                     None => false,
                     Some(first) => {
-                        let mut reached: BTreeSet<String> = BTreeSet::new();
-                        reached.insert(first.id.clone());
+                        let mut reached: BTreeSet<Id> = BTreeSet::new();
+                        reached.insert(first.id);
 
                         loop {
-                            let more: Vec<String> = ps
+                            let more: Vec<Id> = ps
                                 .iter()
                                 .filter(|b| {
                                     !reached.contains(&b.id)
@@ -526,7 +526,7 @@ mod tests {
                                                 && linked(&a.pos, &b.pos)
                                         })
                                 })
-                                .map(|c| c.id.clone())
+                                .map(|c| c.id)
                                 .collect();
 
                             if more.is_empty() {
@@ -584,10 +584,10 @@ mod tests {
             let (prev, now, tick) = history(&mut rng);
             let (groups, events) = step(GRACE, 0, &BTreeSet::new(), &prev, &now, tick);
             let by_id: BTreeMap<i32, &Group> = groups.iter().map(|g| (g.id, g)).collect();
-            let before: BTreeMap<i32, &BTreeSet<String>> =
+            let before: BTreeMap<i32, &BTreeSet<Id>> =
                 prev.iter().map(|g| (g.id, &g.members)).collect();
 
-            let share = |g: &Group, members: &BTreeSet<String>| -> usize {
+            let share = |g: &Group, members: &BTreeSet<Id>| -> usize {
                 g.members.intersection(members).count()
             };
 
@@ -611,7 +611,7 @@ mod tests {
         for _ in 0..DRAWS {
             let (prev, now, tick) = history(&mut rng);
             let (_, events) = step(GRACE, 0, &BTreeSet::new(), &prev, &now, tick);
-            let here: BTreeSet<&String> = now.iter().map(|c| &c.id).collect();
+            let here: BTreeSet<&Id> = now.iter().map(|c| &c.id).collect();
 
             for g in &prev {
                 let seen = g.members.iter().any(|m| here.contains(m));

@@ -1,78 +1,136 @@
 /// What a body is hired to do; compared only through `task_id`, which
 /// `assignments` keys on.
+use std::fmt::Write;
+
 use crate::vocabulary::{Resource, resource_name, resource_of_name};
-use crate::world::RoomName;
+use crate::world::{Id, RoomName};
+
+/// What a task acts on: an object, or a colony's spawn ring or bank pile,
+/// which `run` resolves to the object it serves when the body arrives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Target {
+    Object(Id),
+    Ring(RoomName),
+    Pile(RoomName),
+}
+
+impl From<Id> for Target {
+    fn from(id: Id) -> Target {
+        Target::Object(id)
+    }
+}
+
+const RING: &str = "ring-";
+const PILE: &str = "pile-";
+
+impl Target {
+    pub fn object(self) -> Option<Id> {
+        match self {
+            Target::Object(id) => Some(id),
+            Target::Ring(_) | Target::Pile(_) => None,
+        }
+    }
+
+    fn write(self, out: &mut String) {
+        let _ = match self {
+            Target::Object(id) => out.write_str(&id.text()),
+            Target::Ring(room) => write!(out, "{RING}{room}"),
+            Target::Pile(room) => write!(out, "{PILE}{room}"),
+        };
+    }
+
+    fn parse(text: &str) -> Option<Target> {
+        let room = |tag: &str| text.strip_prefix(tag).and_then(RoomName::parse);
+        (room(RING).map(Target::Ring))
+            .or_else(|| room(PILE).map(Target::Pile))
+            .or_else(|| Id::parse(text).map(Target::Object))
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Task {
-    Harvest(String),
-    Withdraw(String, Resource),
-    Pickup(String, Resource),
-    Refill(String, Resource),
-    Build(String),
-    Repair(String),
-    Upgrade(String),
-    Reserve(String),
-    Claim(String),
-    /// A carrier, by id, bringing this body its load.
-    Meet(String),
+    Harvest(Target),
+    Withdraw(Target, Resource),
+    Pickup(Target, Resource),
+    Refill(Target, Resource),
+    Build(Target),
+    Repair(Target),
+    Upgrade(Target),
+    Reserve(Target),
+    Claim(Target),
+    /// A carrier bringing this body its load.
+    Meet(Target),
     /// A room, by name: what it holds is not seen until a body stands in it.
     Scout(RoomName),
 }
 
-/// Injective because an object id and a resource name hold no `:`.
-pub fn task_id(task: &Task) -> String {
-    let scout: String;
-    let (tag, id, r): (&str, &str, _) = match task {
-        Task::Harvest(id) => ("h:", id, None),
-        Task::Withdraw(id, r) => ("w:", id, Some(r)),
-        Task::Pickup(id, r) => ("p:", id, Some(r)),
-        Task::Refill(id, r) => ("f:", id, Some(r)),
-        Task::Build(id) => ("b:", id, None),
-        Task::Repair(id) => ("r:", id, None),
-        Task::Upgrade(id) => ("u:", id, None),
-        Task::Reserve(id) => ("v:", id, None),
-        Task::Claim(id) => ("c:", id, None),
-        Task::Meet(id) => ("m:", id, None),
-        Task::Scout(room) => {
-            scout = room.to_string();
-            ("s:", &scout, None)
+impl Task {
+    pub fn target(&self) -> Option<Target> {
+        match self {
+            Task::Harvest(t)
+            | Task::Withdraw(t, _)
+            | Task::Pickup(t, _)
+            | Task::Refill(t, _)
+            | Task::Build(t)
+            | Task::Repair(t)
+            | Task::Upgrade(t)
+            | Task::Reserve(t)
+            | Task::Claim(t)
+            | Task::Meet(t) => Some(*t),
+            Task::Scout(_) => None,
         }
+    }
+}
+
+/// Injective because a target and a resource name hold no `:`.
+pub fn task_id(task: &Task) -> String {
+    let tag = match task {
+        Task::Harvest(_) => "h:",
+        Task::Withdraw(..) => "w:",
+        Task::Pickup(..) => "p:",
+        Task::Refill(..) => "f:",
+        Task::Build(_) => "b:",
+        Task::Repair(_) => "r:",
+        Task::Upgrade(_) => "u:",
+        Task::Reserve(_) => "v:",
+        Task::Claim(_) => "c:",
+        Task::Meet(_) => "m:",
+        Task::Scout(_) => "s:",
     };
-    // Pushed, not `format!`: an id a tick per offer, and the formatter costs.
-    let r = r.map(resource_name);
-    let mut out =
-        String::with_capacity(tag.len() + id.len() + r.as_ref().map_or(0, |r| r.len() + 1));
+    let mut out = String::with_capacity(40);
     out.push_str(tag);
-    out.push_str(id);
-    if let Some(r) = r {
+    match (task, task.target()) {
+        (Task::Scout(room), _) => {
+            let _ = write!(out, "{room}");
+        }
+        (_, Some(target)) => target.write(&mut out),
+        (_, None) => (),
+    }
+    if let Task::Withdraw(_, r) | Task::Pickup(_, r) | Task::Refill(_, r) = task {
         out.push(':');
-        out.push_str(&r);
+        out.push_str(&resource_name(r));
     }
     out
 }
 
 pub fn of_task_id(id: &str) -> Option<Task> {
     let mut parts = id.split(':');
-    match [parts.next(), parts.next(), parts.next(), parts.next()] {
-        [Some("h"), Some(target), None, _] => Some(Task::Harvest(target.to_string())),
-        [Some("w"), Some(target), Some(resource), None] => Some(Task::Withdraw(
-            target.to_string(),
-            resource_of_name(resource),
-        )),
-        [Some("p"), Some(target), Some(resource), None] => {
-            Some(Task::Pickup(target.to_string(), resource_of_name(resource)))
-        }
-        [Some("f"), Some(target), Some(resource), None] => {
-            Some(Task::Refill(target.to_string(), resource_of_name(resource)))
-        }
-        [Some("b"), Some(target), None, _] => Some(Task::Build(target.to_string())),
-        [Some("r"), Some(target), None, _] => Some(Task::Repair(target.to_string())),
-        [Some("u"), Some(target), None, _] => Some(Task::Upgrade(target.to_string())),
-        [Some("v"), Some(target), None, _] => Some(Task::Reserve(target.to_string())),
-        [Some("c"), Some(target), None, _] => Some(Task::Claim(target.to_string())),
-        [Some("m"), Some(target), None, _] => Some(Task::Meet(target.to_string())),
-        [Some("s"), Some(room), None, _] => Some(Task::Scout(RoomName::parse(room)?)),
+    let [tag, text, resource, rest] = [parts.next(), parts.next(), parts.next(), parts.next()];
+    if let (Some("s"), Some(room), None) = (tag, text, resource) {
+        return Some(Task::Scout(RoomName::parse(room)?));
+    }
+    let t = Target::parse(text?)?;
+    match (tag?, resource.map(resource_of_name), rest) {
+        ("h", None, _) => Some(Task::Harvest(t)),
+        ("w", Some(r), None) => Some(Task::Withdraw(t, r)),
+        ("p", Some(r), None) => Some(Task::Pickup(t, r)),
+        ("f", Some(r), None) => Some(Task::Refill(t, r)),
+        ("b", None, _) => Some(Task::Build(t)),
+        ("r", None, _) => Some(Task::Repair(t)),
+        ("u", None, _) => Some(Task::Upgrade(t)),
+        ("v", None, _) => Some(Task::Reserve(t)),
+        ("c", None, _) => Some(Task::Claim(t)),
+        ("m", None, _) => Some(Task::Meet(t)),
         _ => None,
     }
 }
@@ -120,8 +178,8 @@ mod tests {
     fn a_task_id_reads_back_as_the_same_task() {
         let mut dice = Dice::new(1);
         for _ in 0..300 {
-            let target = dice::object_id(&mut dice);
-            let task = dice::task(&mut dice, &target);
+            let target = dice::target(&mut dice);
+            let task = dice::task(&mut dice, target);
             assert_eq!(
                 of_task_id(&task_id(&task)).map(|t| task_id(&t)),
                 Some(task_id(&task))
@@ -133,9 +191,9 @@ mod tests {
     fn two_tasks_with_one_id_are_one_task() {
         let mut dice = Dice::new(2);
         for _ in 0..300 {
-            let (ta, tb) = (dice::object_id(&mut dice), dice::object_id(&mut dice));
-            let a = dice::task(&mut dice, &ta);
-            let b = dice::task(&mut dice, &tb);
+            let (ta, tb) = (dice::target(&mut dice), dice::target(&mut dice));
+            let a = dice::task(&mut dice, ta);
+            let b = dice::task(&mut dice, tb);
             assert!(task_id(&a) != task_id(&b) || format!("{a:?}") == format!("{b:?}"));
         }
     }

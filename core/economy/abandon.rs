@@ -7,6 +7,7 @@ use crate::vocabulary::Resource;
 use crate::world::{Creep, Kind, Room, RoomName, Structure};
 
 use super::derived::Ground;
+use super::task::Target;
 
 fn shipped(s: &Structure) -> bool {
     s.owner.is_ours()
@@ -38,10 +39,10 @@ pub fn raze(room: &Room) -> Vec<Intent> {
     }
     let ours: Vec<Intent> = (room.structures.iter())
         .filter(|s| s.owner.is_ours() && s.kind.name() != "controller")
-        .map(|s| Intent::Room(room.name, RoomAct::Destroy(s.id.clone())))
+        .map(|s| Intent::Room(room.name, RoomAct::Destroy(s.id)))
         .collect();
     if ours.is_empty() {
-        vec![Intent::Controller(c.id.clone(), ControllerAct::Unclaim)]
+        vec![Intent::Controller(c.id, ControllerAct::Unclaim)]
     } else {
         ours
     }
@@ -64,7 +65,11 @@ pub fn evacuate(g: &mut Ground, room: &Room, creeps: &[Creep], to: Option<(RoomN
     // The storage's energy rides the shipment's draw alone, so no sink
     // elsewhere outbids the terminal for it.
     g.stores.retain(|s| {
-        !s.kind.is_buffer() && !room.structures.iter().any(|t| t.id == s.id && shipped(t))
+        !s.kind.is_buffer()
+            && !room
+                .structures
+                .iter()
+                .any(|t| s.id == Target::Object(t.id) && shipped(t))
     });
     g.ores = room
         .structures
@@ -75,7 +80,7 @@ pub fn evacuate(g: &mut Ground, room: &Room, creeps: &[Creep], to: Option<(RoomN
                 .held
                 .iter()
                 .filter(|(_, n)| *n > 0)
-                .map(|(r, n)| (s.id.clone(), s.pos, r.clone(), *n))
+                .map(|(r, n)| (s.id, s.pos, r.clone(), *n))
         })
         .collect();
 

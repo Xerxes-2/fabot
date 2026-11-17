@@ -1,5 +1,6 @@
 //! What the bot measures of itself (`ARCHITECTURE.md` §10.5), one definition
 //! for live and the soak. Write-only: no decision reads it.
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write;
 
@@ -14,7 +15,7 @@ use crate::intents::{CreepAct, Intent, Refusal, SpawnAct, TowerAct};
 use crate::tick;
 use crate::tick::{Declarations, Derived};
 use crate::vocabulary::{Part, Resource};
-use crate::world::{Creep, Kind, Owner, Pos, Room, RoomName, World, hostiles};
+use crate::world::{Creep, Id, Kind, Owner, Pos, Room, RoomName, World, hostiles};
 
 pub const WINDOW: i32 = 100;
 const RING: usize = 150;
@@ -321,7 +322,7 @@ impl Cause {
 
 #[derive(Clone, Debug)]
 struct Track {
-    id: String,
+    id: Id,
     seen: i32,
     at: Pos,
     before: Option<Pos>,
@@ -358,13 +359,13 @@ pub struct Metrics {
     cpu: Vec<(String, f64)>,
     pub ring: VecDeque<Window>,
     tasks: HashMap<String, Held>,
-    sites: BTreeMap<String, Stale>,
+    sites: BTreeMap<Id, Stale>,
     controllers: BTreeMap<RoomName, Upgraded>,
     engaged: BTreeMap<i32, RoomName>,
     closed: BTreeMap<RoomName, i32>,
     tracks: HashMap<String, Track>,
     /// A body's last energy draw not yet delivered: the store and the amount.
-    drawn: HashMap<String, (String, i32)>,
+    drawn: HashMap<String, (Id, i32)>,
 }
 
 pub struct Seen<'a> {
@@ -402,13 +403,13 @@ fn energy(creep: &Creep) -> i32 {
 /// The energy each working body is fed this tick: the engine applies a
 /// transfer, withdraw or pickup before the work, so it is spent too.
 fn fed<'a>(creeps: &HashMap<&str, &'a Creep>, intents: &'a [Intent]) -> HashMap<&'a str, i32> {
-    let mut by_id: HashMap<&str, &Creep> = HashMap::default();
+    let mut by_id: HashMap<Id, &Creep> = HashMap::default();
     for intent in intents {
         if let Intent::Creep(name, CreepAct::Build(_) | CreepAct::Repair(_) | CreepAct::Upgrade(_)) =
             intent
             && let Some(c) = creeps.get(name.as_str())
         {
-            by_id.insert(c.id.as_str(), c);
+            by_id.insert(c.id, c);
         }
     }
     let mut out: HashMap<&str, i32> = HashMap::default();
@@ -424,7 +425,7 @@ fn fed<'a>(creeps: &HashMap<&str, &'a Creep>, intents: &'a [Intent]) -> HashMap<
         };
         match act {
             CreepAct::Transfer(id, Resource::Energy) => {
-                if let Some(to) = by_id.get(id.as_str()) {
+                if let Some(to) = by_id.get(id) {
                     *out.entry(to.name.as_str()).or_default() += energy(c).min(to.store.free());
                 }
             }
@@ -440,11 +441,11 @@ fn fed<'a>(creeps: &HashMap<&str, &'a Creep>, intents: &'a [Intent]) -> HashMap<
 /// What one accepted act spends and where. A body builds and repairs within
 /// its room, so its target is looked for there alone. The engine applies one
 /// body's act before the next's, so bodies on one target share what is `undone`.
-fn spent<'w>(
-    world: &'w World,
+fn spent(
+    world: &World,
     creeps: &HashMap<&str, &Creep>,
     fed: &HashMap<&str, i32>,
-    undone: &mut HashMap<&'w str, i32>,
+    undone: &mut HashMap<Id, i32>,
     intent: &Intent,
 ) -> Option<(RoomName, &'static str, i32)> {
     match intent {
@@ -455,14 +456,14 @@ fn spent<'w>(
             let held = energy(c) + fed.get(name.as_str()).copied().unwrap_or(0);
             let (what, (id, total), most) = match act {
                 CreepAct::Build(id) => {
-                    let s = room()?.sites.iter().find(|s| &s.id == id)?;
-                    let target = (s.id.as_str(), s.progress_total - s.progress);
+                    let s = room()?.sites.iter().find(|s| s.id == *id)?;
+                    let target = (s.id, s.progress_total - s.progress);
                     (BUILD, target, works * engine::BUILD_POWER)
                 }
                 CreepAct::Repair(id) => {
-                    let s = room()?.structures.iter().find(|s| &s.id == id)?;
+                    let s = room()?.structures.iter().find(|s| s.id == *id)?;
                     let per = engine::REPAIR_HITS_PER_ENERGY;
-                    let target = (s.id.as_str(), (s.hits_max - s.hits + per - 1) / per);
+                    let target = (s.id, (s.hits_max - s.hits + per - 1) / per);
                     (REPAIR, target, works)
                 }
                 CreepAct::Upgrade(_) => return Some((c.pos.room, UPGRADE, works.min(held))),
@@ -474,11 +475,11 @@ fn spent<'w>(
             Some((c.pos.room, what, n))
         }
         Intent::Spawn(id, SpawnAct::SpawnCreep(body, ..)) => {
-            let s = world.spawns.iter().find(|s| &s.id == id)?;
+            let s = world.spawns.iter().find(|s| s.id == *id)?;
             Some((s.pos.room, SPAWN, engine::body_cost(body)))
         }
         Intent::Tower(id, TowerAct::Attack(_) | TowerAct::Heal(_) | TowerAct::Repair(_)) => {
-            let r = (world.rooms.iter()).find(|r| r.structures.iter().any(|s| &s.id == id))?;
+            let r = (world.rooms.iter()).find(|r| r.structures.iter().any(|s| s.id == *id))?;
             Some((r.name, TOWER, engine::TOWER_ENERGY_COST))
         }
         _ => None,
@@ -486,22 +487,22 @@ fn spent<'w>(
 }
 
 /// The actor and the executor's verb for an act that spends, as a refusal names them.
-fn verb(intent: &Intent) -> Option<(&str, &'static str)> {
+fn verb(intent: &Intent) -> Option<(Cow<'_, str>, &'static str)> {
     Some(match intent {
-        Intent::Creep(name, CreepAct::Build(_)) => (name, "build"),
-        Intent::Creep(name, CreepAct::Repair(_)) => (name, "repair"),
-        Intent::Creep(name, CreepAct::Upgrade(_)) => (name, "upgrade"),
-        Intent::Spawn(id, SpawnAct::SpawnCreep(..)) => (id, "spawn"),
-        Intent::Tower(id, TowerAct::Attack(_)) => (id, "attack"),
-        Intent::Tower(id, TowerAct::Heal(_)) => (id, "heal"),
-        Intent::Tower(id, TowerAct::Repair(_)) => (id, "repair"),
+        Intent::Creep(name, CreepAct::Build(_)) => (name.into(), "build"),
+        Intent::Creep(name, CreepAct::Repair(_)) => (name.into(), "repair"),
+        Intent::Creep(name, CreepAct::Upgrade(_)) => (name.into(), "upgrade"),
+        Intent::Spawn(id, SpawnAct::SpawnCreep(..)) => (id.to_string().into(), "spawn"),
+        Intent::Tower(id, TowerAct::Attack(_)) => (id.to_string().into(), "attack"),
+        Intent::Tower(id, TowerAct::Heal(_)) => (id.to_string().into(), "heal"),
+        Intent::Tower(id, TowerAct::Repair(_)) => (id.to_string().into(), "repair"),
         _ => return None,
     })
 }
 
 fn returned(
     sums: &mut Sums,
-    drawn: &mut HashMap<String, (String, i32)>,
+    drawn: &mut HashMap<String, (Id, i32)>,
     creeps: &HashMap<&str, &Creep>,
     (intents, world): (&[Intent], &World),
     refused: &BTreeSet<(&str, &str)>,
@@ -515,7 +516,7 @@ fn returned(
         };
         if let CreepAct::Transfer(id, Resource::Energy) = act
             && let Some(s) = (world.rooms.iter().flat_map(|r| r.structures.iter()))
-                .find(|s| &s.id == id && (s.kind.is_spawn() || s.kind == Kind::Extension))
+                .find(|s| s.id == *id && (s.kind.is_spawn() || s.kind == Kind::Extension))
             && !refused.contains(&(name, "transfer"))
             && bodies::pattern_of_name(name) == Some(Pattern::Hauler)
         {
@@ -528,11 +529,11 @@ fn returned(
         }
         match act {
             CreepAct::Withdraw(id, Resource::Energy) if !refused.contains(&(name, "withdraw")) => {
-                drawn.insert(name.clone(), (id.clone(), c.store.free()));
+                drawn.insert(name.clone(), (*id, c.store.free()));
             }
             CreepAct::Transfer(id, Resource::Energy) if !refused.contains(&(name, "transfer")) => {
                 if let Some((from, n)) = drawn.remove(name.as_str())
-                    && &from == id
+                    && from == *id
                 {
                     add(sums, None, RETURNED, f64::from(n.min(energy(c))));
                 }
@@ -564,7 +565,7 @@ const FLIP_TICKS: i32 = 5;
 impl Track {
     fn of(c: &Creep, time: i32) -> Track {
         Track {
-            id: c.id.clone(),
+            id: c.id,
             seen: time,
             at: c.pos,
             before: None,
@@ -610,12 +611,12 @@ impl Track {
 }
 
 /// An attacker gone the same tick, or out of sight, is unknown.
-fn cause_of(room: Option<&Room>, by: &str) -> Cause {
+fn cause_of(room: Option<&Room>, by: &Id) -> Cause {
     let npc = |o: &Owner| matches!(o, Owner::Invader | Owner::Keeper);
     let Some(room) = room else {
         return Cause::Unknown;
     };
-    if let Some(c) = room.others.iter().find(|c| c.id == by) {
+    if let Some(c) = room.others.iter().find(|c| c.id == *by) {
         return if npc(&c.owner) {
             Cause::Npc
         } else {
@@ -625,7 +626,7 @@ fn cause_of(room: Option<&Room>, by: &str) -> Cause {
     match room
         .structures
         .iter()
-        .find(|s| s.id == by && s.kind.is_tower())
+        .find(|s| s.id == *by && s.kind.is_tower())
     {
         Some(s) if npc(&s.owner) => Cause::Npc,
         Some(_) => Cause::Tower,
@@ -689,12 +690,12 @@ fn shots(sums: &mut Sums, world: &World, asked: &HashMap<&str, Asked>) {
 fn deaths(sums: &mut Sums, tracks: &mut HashMap<String, Track>, world: &World) {
     let time = world.time;
     if !world.attacks.is_empty() {
-        let ids: HashMap<&str, (&str, RoomName)> = (tracks.iter())
-            .map(|(name, t)| (t.id.as_str(), (name.as_str(), t.at.room)))
+        let ids: HashMap<Id, (&str, RoomName)> = (tracks.iter())
+            .map(|(name, t)| (t.id, (name.as_str(), t.at.room)))
             .collect();
         let struck: Vec<(String, Cause)> = (world.attacks.iter())
             .filter_map(|(by, at)| {
-                let (name, room) = ids.get(at.as_str())?;
+                let (name, room) = ids.get(at)?;
                 Some((name.to_string(), cause_of(world.room(*room), by)))
             })
             .collect();
@@ -851,19 +852,19 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
                     | CreepAct::RangedAttackCreep(_)
                     | CreepAct::RangedMassAttack => a.strike = true,
                     CreepAct::HealCreep(id) | CreepAct::RangedHealCreep(id) => {
-                        a.heal |= (world.creeps.iter()).any(|c| &c.id == id && c.hits < c.hits_max);
+                        a.heal |= (world.creeps.iter()).any(|c| c.id == *id && c.hits < c.hits_max);
                     }
                     _ => (),
                 }
             }
             Intent::Spawn(id, SpawnAct::SpawnCreep(..))
-                if !refused.contains(&(id.as_str(), "spawn")) =>
+                if !refused.contains(&(&*id.text(), "spawn")) =>
             {
                 spawned.extend(
                     world
                         .spawns
                         .iter()
-                        .filter(|s| &s.id == id)
+                        .filter(|s| s.id == *id)
                         .map(|s| s.pos.room),
                 );
             }
@@ -875,8 +876,8 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
             }
             _ => (),
         }
-        if let Some(act) = verb(intent)
-            && !refused.contains(&act)
+        if let Some((actor, act)) = verb(intent)
+            && !refused.contains(&(&*actor, act))
             && let Some((room, what, n)) = spent(world, &creeps, &fed, &mut undone, intent)
         {
             add(sums, Some(room), what, f64::from(n));
@@ -1006,7 +1007,7 @@ impl Metrics {
                     progress: s.progress,
                     since: time,
                 };
-                let stale = self.sites.entry(s.id.clone()).or_insert(fresh);
+                let stale = self.sites.entry(s.id).or_insert(fresh);
                 if stale.progress != s.progress {
                     *stale = fresh;
                 }
@@ -1284,7 +1285,7 @@ mod tests {
     fn a_body_counts_its_stuck_steps_flips_and_swings() {
         let (x, y) = (RoomName::named("W1N1"), RoomName::named("W2N1"));
         let mut t = Track {
-            id: String::new(),
+            id: "a".into(),
             seen: 0,
             at: Pos::new(x, 10, 10),
             before: None,

@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use crate::engine;
 use crate::vocabulary::{Compound, Resource};
-use crate::world::Pos;
+use crate::world::{Id, Pos};
 
 /// Toward the first target (in compound order) its stock stands short of. A
 /// reagent compound short of the shortfall is made first; once none can be,
@@ -90,31 +90,31 @@ pub fn ore_short(
 /// The two reagent labs, and every lab within reach of both as an output.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Roles {
-    pub reagents: (String, String),
-    pub outputs: Vec<String>,
+    pub reagents: (Id, Id),
+    pub outputs: Vec<Id>,
 }
 
 /// Off the labs' tiles alone, so they hold from tick to tick: the pair the
 /// most others stand within reach of both of, ties to the lower ids.
-pub fn roles_of(labs: &[(String, Pos)]) -> Option<Roles> {
-    let mut sorted: Vec<&(String, Pos)> = labs.iter().collect();
-    sorted.sort_by(|a, b| a.0.cmp(&b.0));
+pub fn roles_of(labs: &[(Id, Pos)]) -> Option<Roles> {
+    let mut sorted: Vec<&(Id, Pos)> = labs.iter().collect();
+    sorted.sort_by_key(|a| a.0);
     let reaches = |a: &Pos, b: &Pos| a.range(b).is_some_and(|r| r <= engine::LAB_REACTION_RANGE);
 
     let mut best: Option<Roles> = None;
     for (i, (a, at_a)) in sorted.iter().map(|l| (&l.0, &l.1)).enumerate() {
         for (b, at_b) in sorted.iter().skip(i + 1).map(|l| (&l.0, &l.1)) {
-            let outputs: Vec<String> = sorted
+            let outputs: Vec<Id> = sorted
                 .iter()
                 .filter(|(id, at)| id != a && id != b && reaches(at, at_a) && reaches(at, at_b))
-                .map(|(id, _)| id.clone())
+                .map(|(id, _)| *id)
                 .collect();
             if best
                 .as_ref()
                 .map_or(!outputs.is_empty(), |r| outputs.len() > r.outputs.len())
             {
                 best = Some(Roles {
-                    reagents: (a.clone(), b.clone()),
+                    reagents: (*a, *b),
                     outputs,
                 });
             }
@@ -128,8 +128,8 @@ pub fn roles_of(labs: &[(String, Pos)]) -> Option<Roles> {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Plan {
     pub reaction: Option<(Compound, Roles)>,
-    pub fills: Vec<(String, Resource, i32)>,
-    pub drains: Vec<(String, Resource)>,
+    pub fills: Vec<(Id, Resource, i32)>,
+    pub drains: Vec<(Id, Resource)>,
 }
 
 /// Each reagent lab holds its reagent: anything else is drained, and one under
@@ -140,8 +140,8 @@ pub struct Plan {
 pub fn plan_for(
     targets: &BTreeMap<Compound, i32>,
     stock: &dyn Fn(&Resource) -> i32,
-    labs: &[(String, Pos)],
-    held: &dyn Fn(&str) -> Option<(Resource, i32)>,
+    labs: &[(Id, Pos)],
+    held: &dyn Fn(Id) -> Option<(Resource, i32)>,
 ) -> Plan {
     let half = engine::LAB_MINERAL_CAPACITY / 2;
     let Some(roles) = roles_of(labs) else {
@@ -153,42 +153,41 @@ pub fn plan_for(
             drains: roles
                 .outputs
                 .iter()
-                .filter_map(|lab| held(lab).map(|(mineral, _)| (lab.clone(), mineral)))
+                .filter_map(|lab| held(*lab).map(|(mineral, _)| (*lab, mineral)))
                 .collect(),
             ..Plan::default()
         };
     };
 
     let (first, second) = engine::reagents_of(compound);
-    let (one, other) = roles.reagents.clone();
-    let holds = |lab: &str, mineral: &Resource| held(lab).is_some_and(|(m, _)| &m == mineral);
-    let (first_lab, second_lab) = if holds(&one, &second) || holds(&other, &first) {
+    let (one, other) = roles.reagents;
+    let holds = |lab: Id, mineral: &Resource| held(lab).is_some_and(|(m, _)| &m == mineral);
+    let (first_lab, second_lab) = if holds(one, &second) || holds(other, &first) {
         (other, one)
     } else {
         (one, other)
     };
 
     let mut plan = Plan::default();
-    for (lab, reagent) in [(&first_lab, &first), (&second_lab, &second)] {
+    for (lab, reagent) in [(first_lab, &first), (second_lab, &second)] {
         match held(lab) {
-            Some((m, _)) if &m != reagent => plan.drains.push((lab.clone(), m)),
+            Some((m, _)) if &m != reagent => plan.drains.push((lab, m)),
             Some((_, amount)) if amount >= half => (),
-            Some((_, amount)) => plan.fills.push((
-                lab.clone(),
-                reagent.clone(),
-                engine::LAB_MINERAL_CAPACITY - amount,
-            )),
+            Some((_, amount)) => {
+                plan.fills
+                    .push((lab, reagent.clone(), engine::LAB_MINERAL_CAPACITY - amount))
+            }
             None => plan
                 .fills
-                .push((lab.clone(), reagent.clone(), engine::LAB_MINERAL_CAPACITY)),
+                .push((lab, reagent.clone(), engine::LAB_MINERAL_CAPACITY)),
         }
     }
 
     let product = Resource::Compound(compound);
-    for lab in &roles.outputs {
+    for &lab in &roles.outputs {
         match held(lab) {
-            Some((m, _)) if m != product => plan.drains.push((lab.clone(), m)),
-            Some((_, amount)) if amount >= half => plan.drains.push((lab.clone(), product.clone())),
+            Some((m, _)) if m != product => plan.drains.push((lab, m)),
+            Some((_, amount)) if amount >= half => plan.drains.push((lab, product.clone())),
             _ => (),
         }
     }
@@ -208,16 +207,16 @@ pub fn plan_for(
 /// (output, first reagent's lab, second's).
 pub fn ready_runs(
     plan: &Plan,
-    held: &dyn Fn(&str) -> Option<(Resource, i32)>,
-    cooldown: &dyn Fn(&str) -> i32,
-) -> Vec<(String, String, String)> {
+    held: &dyn Fn(Id) -> Option<(Resource, i32)>,
+    cooldown: &dyn Fn(Id) -> i32,
+) -> Vec<(Id, Id, Id)> {
     let Some((compound, roles)) = &plan.reaction else {
         return Vec::new();
     };
-    let (one, other) = &roles.reagents;
+    let (one, other) = roles.reagents;
     let (first, second) = engine::reagents_of(*compound);
     let product = Resource::Compound(*compound);
-    let stocked = |lab: &str, reagent: &Resource| {
+    let stocked = |lab: Id, reagent: &Resource| {
         held(lab).is_some_and(|(m, amount)| &m == reagent && amount >= engine::LAB_REACTION_AMOUNT)
     };
 
@@ -228,13 +227,13 @@ pub fn ready_runs(
         .outputs
         .iter()
         .filter(|lab| {
-            cooldown(lab) == 0
-                && held(lab).is_none_or(|(m, amount)| {
+            cooldown(**lab) == 0
+                && held(**lab).is_none_or(|(m, amount)| {
                     m == product
                         && amount + engine::LAB_REACTION_AMOUNT <= engine::LAB_MINERAL_CAPACITY
                 })
         })
-        .map(|lab| (lab.clone(), one.clone(), other.clone()))
+        .map(|lab| (*lab, one, other))
         .collect()
 }
 
@@ -285,13 +284,13 @@ mod tests {
     #[test]
     fn the_reagent_pair_is_the_one_most_labs_reach() {
         let at = |x, y| Pos::new(RoomName::named("W1N1"), x, y);
-        let labs: Vec<(String, Pos)> = [(0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (10, 10)]
+        let labs: Vec<(Id, Pos)> = [(0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (10, 10)]
             .iter()
             .enumerate()
-            .map(|(i, (x, y))| (format!("l{i}"), at(*x + 10, *y + 10)))
+            .map(|(i, (x, y))| (Id::from(format!("l{i}").as_str()), at(*x + 10, *y + 10)))
             .collect();
         let roles = roles_of(&labs).unwrap();
-        assert_eq!(roles.reagents, ("l0".to_string(), "l3".to_string()));
-        assert_eq!(roles.outputs, vec!["l1", "l2"]);
+        assert_eq!(roles.reagents, ("l0".into(), "l3".into()));
+        assert_eq!(roles.outputs, vec![Id::from("l1"), Id::from("l2")]);
     }
 }

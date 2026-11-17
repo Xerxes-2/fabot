@@ -9,7 +9,7 @@ use crate::state::State;
 use crate::tick::{self, Context};
 use crate::tiles::{self, TileSet};
 use crate::vocabulary::{Part, Resource};
-use crate::world::{Creep, Pos, RoomName};
+use crate::world::{Creep, Id, Pos, RoomName};
 
 use super::bodies;
 use super::derived::{self, Body, Derived, Ground, LinkFact, RefillFact};
@@ -69,7 +69,7 @@ fn scouting(atlas: &Atlas, derived: &Derived, held: &Assignments) -> Assignments
 
 fn ring_members<'a>(derived: &'a Derived, task: &Task, at: &Pos) -> Vec<&'a RefillFact> {
     let Some(room) = (match task {
-        Task::Refill(id, _) => super::jobs::ring_room(id),
+        Task::Refill(task::Target::Ring(room), _) => Some(*room),
         _ => None,
     }) else {
         return Vec::new();
@@ -83,25 +83,16 @@ fn ring_members<'a>(derived: &'a Derived, task: &Task, at: &Pos) -> Vec<&'a Refi
 }
 
 fn spot_of(derived: &Derived, task: &Task) -> Option<Pos> {
-    let id = match task {
-        Task::Scout(room) => return Some(Pos::new(*room, 25, 25)),
-        Task::Harvest(id)
-        | Task::Withdraw(id, _)
-        | Task::Pickup(id, _)
-        | Task::Refill(id, _)
-        | Task::Build(id)
-        | Task::Repair(id)
-        | Task::Upgrade(id)
-        | Task::Reserve(id)
-        | Task::Claim(id)
-        | Task::Meet(id) => id,
-    };
-    derived.spots.get(id).copied()
+    match task {
+        Task::Scout(room) => Some(Pos::new(*room, 25, 25)),
+        _ => derived.spots.get(&task.target()?).copied(),
+    }
 }
 
 /// What a store, link, lab or container holds of `r`: the engine refuses a
 /// draw from nothing.
-fn holds(derived: &Derived, id: &str, r: &Resource) -> i32 {
+fn holds(derived: &Derived, id: task::Target, r: &Resource) -> i32 {
+    let object = id.object();
     derived
         .grounds
         .iter()
@@ -111,23 +102,23 @@ fn holds(derived: &Derived, id: &str, r: &Resource) -> i32 {
                 .map(|s| s.energy)
                 .sum::<i32>();
             let linked = (g.links.iter())
-                .filter(|l| l.id == id && r.is_energy())
+                .filter(|l| Some(l.id) == object && r.is_energy())
                 .map(|l| l.energy)
                 .sum::<i32>();
             let ores = (g.ores.iter())
-                .filter(|o| o.0 == id && &o.2 == r)
+                .filter(|o| Some(o.0) == object && &o.2 == r)
                 .map(|o| o.3)
                 .sum::<i32>();
             let labs = (g.labs.iter())
-                .filter(|l| l.id == id)
+                .filter(|l| Some(l.id) == object)
                 .filter_map(|l| l.held.as_ref().filter(|h| &h.0 == r).map(|h| h.1))
                 .sum::<i32>();
             let mined = (g.minerals.iter())
-                .filter(|m| m.container.as_deref() == Some(id) && &m.resource == r)
+                .filter(|m| m.container.is_some() && m.container == object && &m.resource == r)
                 .map(|m| m.held)
                 .sum::<i32>();
             let terminal = (g.terminal.iter())
-                .filter(|t| t.id == id)
+                .filter(|t| Some(t.id) == object)
                 .map(|t| t.store.amount_of(r))
                 .sum::<i32>();
             stored.max(terminal)
@@ -139,32 +130,33 @@ fn holds(derived: &Derived, id: &str, r: &Resource) -> i32 {
         .sum()
 }
 
-fn piled(derived: &Derived, id: &str) -> bool {
+fn piled(derived: &Derived, id: task::Target) -> bool {
     (derived.grounds.iter()).any(|g| g.stores.iter().any(|s| s.kind.is_pile() && s.id == id))
 }
 
 fn act_of(derived: &Derived, task: &Task) -> Option<CreepAct> {
-    let held = |id: &str| {
+    let held = |id: task::Target| {
         derived.grounds.iter().any(|g| {
             g.controller
                 .as_ref()
-                .is_some_and(|c| c.id == id && derived::invader_held(c))
+                .is_some_and(|c| id == c.id.into() && derived::invader_held(c))
         })
     };
 
+    let at = |id: &task::Target| id.object();
     Some(match task {
-        Task::Harvest(id) => CreepAct::Harvest(id.clone()),
-        Task::Withdraw(id, _) if piled(derived, id) => CreepAct::Pickup(id.clone()),
-        Task::Refill(id, r) if piled(derived, id) => CreepAct::Drop(r.clone()),
-        Task::Withdraw(id, r) => CreepAct::Withdraw(id.clone(), r.clone()),
-        Task::Pickup(id, _) => CreepAct::Pickup(id.clone()),
-        Task::Refill(id, r) => CreepAct::Transfer(id.clone(), r.clone()),
-        Task::Build(id) => CreepAct::Build(id.clone()),
-        Task::Repair(id) => CreepAct::Repair(id.clone()),
-        Task::Upgrade(id) => CreepAct::Upgrade(id.clone()),
-        Task::Reserve(id) if held(id) => CreepAct::Unreserve(id.clone()),
-        Task::Reserve(id) => CreepAct::Reserve(id.clone()),
-        Task::Claim(id) => CreepAct::ClaimController(id.clone()),
+        Task::Harvest(id) => CreepAct::Harvest(at(id)?),
+        Task::Withdraw(id, _) if piled(derived, *id) => CreepAct::Pickup(at(id)?),
+        Task::Refill(id, r) if piled(derived, *id) => CreepAct::Drop(r.clone()),
+        Task::Withdraw(id, r) => CreepAct::Withdraw(at(id)?, r.clone()),
+        Task::Pickup(id, _) => CreepAct::Pickup(at(id)?),
+        Task::Refill(id, r) => CreepAct::Transfer(at(id)?, r.clone()),
+        Task::Build(id) => CreepAct::Build(at(id)?),
+        Task::Repair(id) => CreepAct::Repair(at(id)?),
+        Task::Upgrade(id) => CreepAct::Upgrade(at(id)?),
+        Task::Reserve(id) if held(*id) => CreepAct::Unreserve(at(id)?),
+        Task::Reserve(id) => CreepAct::Reserve(at(id)?),
+        Task::Claim(id) => CreepAct::ClaimController(at(id)?),
         Task::Scout(_) | Task::Meet(_) => return None,
     })
 }
@@ -191,10 +183,7 @@ fn pickups(derived: &Derived, taken: &BTreeSet<String>) -> Vec<Intent> {
             });
 
             if let Some(p) = pile {
-                picks.push(Intent::Creep(
-                    b.name.clone(),
-                    CreepAct::Pickup(p.id.clone()),
-                ));
+                picks.push(Intent::Creep(b.name.clone(), CreepAct::Pickup(p.id)));
             }
         }
     }
@@ -227,10 +216,7 @@ fn link_sends(sends: &mut Vec<Intent>, ground: &Ground) {
         let amount = (*room).min(l.energy) / LINK_BATCH * LINK_BATCH;
         if amount > 0 {
             *room -= amount;
-            sends.push(Intent::Link(
-                l.id.clone(),
-                LinkAct::TransferEnergy(to.id.clone(), amount),
-            ));
+            sends.push(Intent::Link(l.id, LinkAct::TransferEnergy(to.id, amount)));
         }
     }
 }
@@ -273,7 +259,7 @@ fn terminal_send(g: &Ground) -> Option<Intent> {
             amount = amount * 9 / 10;
         }
         (amount >= engine::TERMINAL_MIN_SEND.min(*owed))
-            .then(|| Intent::Terminal(t.id.clone(), TerminalAct::Send(ore.clone(), amount, *home)))
+            .then(|| Intent::Terminal(t.id, TerminalAct::Send(ore.clone(), amount, *home)))
     })
 }
 
@@ -287,20 +273,18 @@ fn wish_in(groups: &mut Vec<(RoomName, Vec<Wish>)>, room: RoomName, wish: Wish) 
 /// A dug-out source's holders stay seated until it regenerates, and an
 /// extractor's until it cools or its container has room for a pull (v1's
 /// heldByFullContainer): a pull past it drops ore nothing picks up.
-fn dug_out(derived: &Derived) -> BTreeSet<String> {
+fn dug_out(derived: &Derived) -> BTreeSet<Id> {
     derived
         .grounds
         .iter()
         .flat_map(|g| {
-            let sources = (g.sources.iter())
-                .filter(|s| s.energy == 0)
-                .map(|s| s.id.clone());
+            let sources = (g.sources.iter()).filter(|s| s.energy == 0).map(|s| s.id);
             let full = |m: &&derived::MineralFact| {
                 m.cooldown > 0
                     || engine::CONTAINER_CAPACITY - m.held
                         < bodies::MINER_WORK * engine::MINERAL_HARVEST_PER_WORK
             };
-            sources.chain(g.minerals.iter().filter(full).map(|m| m.id.clone()))
+            sources.chain(g.minerals.iter().filter(full).map(|m| m.id))
         })
         .collect()
 }
@@ -313,9 +297,9 @@ fn sends(derived: &Derived) -> Vec<Intent> {
             sends.push(send);
         }
         if let Some(plan) = &g.lab_plan {
-            let lab = |id: &str| g.labs.iter().find(|l| l.id == id);
-            let held = |id: &str| lab(id).and_then(|l| l.held.clone());
-            let cooldown = |id: &str| lab(id).map_or(0, |l| l.cooldown);
+            let lab = |id: Id| g.labs.iter().find(|l| l.id == id);
+            let held = |id: Id| lab(id).and_then(|l| l.held.clone());
+            let cooldown = |id: Id| lab(id).map_or(0, |l| l.cooldown);
             for (output, a, b) in super::labs::ready_runs(plan, &held, &cooldown) {
                 sends.push(Intent::Lab(output, LabAct::RunReaction(a, b)));
             }
@@ -337,10 +321,10 @@ fn weight_of(job: &Job) -> i32 {
 }
 
 /// The seats beside a source no post holds, for a worker's dig.
-fn dig_seats(atlas: &Atlas, derived: &Derived, id: &str, at: &Pos) -> Vec<Pos> {
+fn dig_seats(atlas: &Atlas, derived: &Derived, id: task::Target, at: &Pos) -> Vec<Pos> {
     let post = (derived.grounds.iter())
         .flat_map(|g| g.sources.iter())
-        .find(|s| s.id == id)
+        .find(|s| id == s.id.into())
         .and_then(|s| s.post);
     let seats = atlas.seats(Footprint::One, 1, at);
     seats.into_iter().filter(|p| Some(*p) != post).collect()
@@ -378,11 +362,11 @@ fn target_of(
     let seats: Option<Vec<Pos>> = match (&slot.job, task) {
         (Job::Dig(_) | Job::Upgrade, _) if slot.seat != at => Some(vec![slot.seat]),
         (_, Task::Harvest(id)) => {
-            Some(dig_seats(atlas, derived, id, &at)).filter(|s| !s.is_empty())
+            Some(dig_seats(atlas, derived, *id, &at)).filter(|s| !s.is_empty())
         }
         (_, Task::Reserve(_) | Task::Claim(_)) => reserve_seats(atlas, derived, &at),
         // A drop lands where the body stands.
-        (_, Task::Refill(id, _)) if piled(derived, id) => Some(vec![at]),
+        (_, Task::Refill(id, _)) if piled(derived, *id) => Some(vec![at]),
         // A worker upgrades off the upgraders' seats.
         (Job::Work(_), Task::Upgrade(_)) => {
             let buffer = (derived.grounds.iter())
@@ -437,7 +421,7 @@ fn work(
 ) -> Wish {
     let members = ring_members(derived, task, &creep.pos);
     let ring = match (task, members.first()) {
-        (Task::Refill(_, r), Some(f)) => Some(Task::Refill(f.id.clone(), r.clone())),
+        (Task::Refill(_, r), Some(f)) => Some(Task::Refill(f.id.into(), r.clone())),
         _ => None,
     };
     let task = ring.as_ref().unwrap_or(task);
@@ -455,13 +439,14 @@ fn work(
     let beside = buffer.filter(|b| b.energy > 0 && creep.pos.within(1, &b.pos));
     // The engine withdraws before it upgrades, so the draw tops up the spend.
     if let Some(b) = beside
+        && let Some(id) = b.id.object()
         && task.is_upgrade()
         && body.free > 0
         && body.energy < body.work * engine::UPGRADE_DRAIN_PER_WORK
     {
         acts.push(Intent::Creep(
             creep.name.clone(),
-            CreepAct::Withdraw(b.id.clone(), Resource::Energy),
+            CreepAct::Withdraw(id, Resource::Energy),
         ));
     }
     let digs = matches!(slot.job, Job::Dig(_));
@@ -478,7 +463,7 @@ fn work(
             Task::Upgrade(_) | Task::Build(_) | Task::Repair(_) => body.energy > 0 && body.work > 0,
             Task::Harvest(_) => body.work > 0,
             Task::Reserve(_) | Task::Claim(_) => body.claim > 0,
-            Task::Withdraw(id, r) => holds(derived, id, r) > 0 && body.free > 0,
+            Task::Withdraw(id, r) => holds(derived, *id, r) > 0 && body.free > 0,
             Task::Pickup(..) => body.free > 0,
             Task::Refill(_, r) => body.store.amount_of(r) > 0,
             _ => true,
@@ -492,22 +477,24 @@ fn work(
     }
     if digs && let Some(g) = derived.grounds.iter().find(|g| g.room == creep.pos.room) {
         let beside = |p: &Pos| creep.pos.within(1, p);
-        let bay = (g.bays.iter()).find(|b| beside(&b.pos)).map(|b| &b.id);
+        let bay = (g.bays.iter()).find(|b| beside(&b.pos)).map(|b| b.id);
         let link = (g.links.iter())
             .find(|l| g.receiver.is_some() && l.role.is_source() && l.free > 0 && beside(&l.pos))
-            .map(|l| &l.id);
+            .map(|l| l.id);
         if let Some(to) = bay.or(link) {
             if body.energy > 0 {
                 acts.push(Intent::Creep(
                     creep.name.clone(),
-                    CreepAct::Transfer(to.clone(), Resource::Energy),
+                    CreepAct::Transfer(to, Resource::Energy),
                 ));
             }
             let under = (g.stores.iter()).find(|s| s.pos == creep.pos && s.energy > 0);
-            if let Some(c) = under.filter(|_| body.free > 0) {
+            if let Some(c) = under.filter(|_| body.free > 0)
+                && let Some(id) = c.id.object()
+            {
                 acts.push(Intent::Creep(
                     creep.name.clone(),
-                    CreepAct::Withdraw(c.id.clone(), Resource::Energy),
+                    CreepAct::Withdraw(id, Resource::Energy),
                 ));
             }
         }
@@ -575,7 +562,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
     let scouted = scouting(&*context.atlas, &derived, &state.assignments);
     let dug = dug_out(&derived);
     let ready = |task: &Task| match task {
-        Task::Harvest(id) => !dug.contains(id),
+        Task::Harvest(id) => id.object().is_none_or(|id| !dug.contains(&id)),
         _ => true,
     };
     let stood: BTreeSet<Pos> = seen.iter().map(|c| c.pos).collect();
@@ -664,14 +651,13 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
                     {
                         (g.sites.iter())
                             .min_by_key(|s| creep.pos.range(&s.pos))
-                            .map(|s| (s.pos, task::RANGE_UPGRADE, CreepAct::Build(s.id.clone())))
+                            .map(|s| (s.pos, task::RANGE_UPGRADE, CreepAct::Build(s.id)))
                     }
                     (true, Some(c), _) if c.owner.is_ours() && slots::fed(c) => {
-                        Some((c.pos, task::RANGE_UPGRADE, CreepAct::Upgrade(c.id.clone())))
+                        Some((c.pos, task::RANGE_UPGRADE, CreepAct::Upgrade(c.id)))
                     }
-                    (_, _, Some(s)) if s.owned => {
-                        Some((s.pos, 1, CreepAct::Transfer(s.id.clone(), Resource::Energy)))
-                    }
+                    (_, _, Some(s)) if s.owned => (s.id.object())
+                        .map(|id| (s.pos, 1, CreepAct::Transfer(id, Resource::Energy))),
                     (false, _, Some(s)) => Some((s.pos, 0, CreepAct::Drop(Resource::Energy))),
                     _ => None,
                 });
@@ -697,8 +683,8 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
                 .map(|c| &c.spawns[0])
             {
                 if creep.pos.within(1, &s.pos) {
-                    let recycle = SpawnAct::RecycleCreep(creep.id.clone());
-                    acts.push(Intent::Spawn(s.id.clone(), recycle));
+                    let recycle = SpawnAct::RecycleCreep(creep.id);
+                    acts.push(Intent::Spawn(s.id, recycle));
                 }
                 let to = tick::target_at(&s.pos, 1);
                 let wish = plan::toward_round(context.atlas, creep, mover, &to, 1, danger);
@@ -796,17 +782,17 @@ fn raising(derived: &Derived, body: &Body, slot: &Slot) -> Option<CreepAct> {
     let kept = match slot.job {
         Job::Dig(_) if body.free == 0 => {
             if let Some(site) = g.sites.iter().find(|s| s.pos == *at) {
-                return Some(CreepAct::Build(site.id.clone()));
+                return Some(CreepAct::Build(site.id));
             }
             (g.repairs.iter()).find(|r| r.pos == *at && r.kind.is_container())
         }
         Job::Upgrade => {
-            (g.repairs.iter()).find(|r| g.buffer.as_ref().is_some_and(|b| b.id == r.id))
+            (g.repairs.iter()).find(|r| g.buffer.as_ref().is_some_and(|b| b.id == r.id.into()))
         }
         _ => None,
     };
     kept.filter(|r| 2 * r.hits < r.hits_max)
-        .map(|r| CreepAct::Repair(r.id.clone()))
+        .map(|r| CreepAct::Repair(r.id))
 }
 
 #[cfg(test)]

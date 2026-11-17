@@ -15,7 +15,7 @@ use crate::mv::Wish;
 use crate::tactics::{self, Sight, Tactic};
 use crate::tick;
 use crate::vocabulary::{Part, Resource};
-use crate::world::{Creep, Kind, Pos, Room, Structure};
+use crate::world::{Creep, Id, Kind, Pos, Room, Structure};
 
 /// A siege whose set shoots its way in: a ranged blob, no dismantler.
 pub fn raids(e: &Engagement) -> bool {
@@ -100,17 +100,17 @@ fn next<'a>(room: &'a Room, members: &[&Creep]) -> Option<&'a Structure> {
             (
                 std::cmp::Reverse(removes * 1000 / s.hits.max(1)),
                 near(members, &s.pos),
-                s.id.clone(),
+                s.id,
             )
         })
 }
 
-pub fn target(room: &Room, members: &[&Creep]) -> Option<String> {
-    next(room, members).map(|s| s.id.clone()).or_else(|| {
+pub fn target(room: &Room, members: &[&Creep]) -> Option<Id> {
+    next(room, members).map(|s| s.id).or_else(|| {
         room.controller
             .as_ref()
             .filter(|c| c.owner.is_theirs())
-            .map(|c| c.id.clone())
+            .map(|c| c.id)
     })
 }
 
@@ -122,7 +122,7 @@ pub fn mark(room: &Room, members: &[&Creep]) -> Option<(Pos, i32)> {
     }
     let site = (room.sites.iter())
         .filter(|s| s.owner.is_theirs())
-        .min_by_key(|s| (near(members, &s.pos), s.id.clone()));
+        .min_by_key(|s| (near(members, &s.pos), s.id));
 
     if let Some(site) = site {
         return Some((site.pos, 0));
@@ -151,7 +151,7 @@ pub fn hardest<'a>(room: &'a Room) -> Option<&'a Structure> {
         .max_by_key(|s| {
             (
                 exchange::tower_strike(&towers, &s.pos) + exchange::guard_strike(&guards, &s.pos),
-                s.id.clone(),
+                s.id,
             )
         })
 }
@@ -165,7 +165,7 @@ pub fn plan(
     from: &Pos,
     set: &[Fighter],
     standing: &[&Creep],
-) -> Option<(Vec<String>, Outcome)> {
+) -> Option<(Vec<Id>, Outcome)> {
     let weights = atlas.weights(room.name)?;
     let gait = (set.iter())
         .map(|f| f.gait)
@@ -357,7 +357,7 @@ pub fn volley(sight: &Sight, room: &Room, c: &Creep) -> Option<CreepAct> {
     let reach = |at: &Pos| c.pos.range(at).filter(|r| *r <= engine::RANGED_RANGE);
 
     // A mark: id, range, hits it takes, what its loss costs, charged, bare.
-    let mut marks: Vec<(String, i32, i32, i32, bool, bool)> = Vec::new();
+    let mut marks: Vec<(Id, i32, i32, i32, bool, bool)> = Vec::new();
 
     for s in theirs().filter(|s| siege::razed(&s.kind)) {
         let Some(r) = reach(&s.pos) else { continue };
@@ -366,7 +366,7 @@ pub fn volley(sight: &Sight, room: &Room, c: &Creep) -> Option<CreepAct> {
             s.kind.is_tower() && s.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST;
 
         marks.push((
-            struck.id.clone(),
+            struck.id,
             r,
             s.hits + cover(s).map_or(0, |w| w.hits),
             siege::taken(s, &sources),
@@ -375,9 +375,8 @@ pub fn volley(sight: &Sight, room: &Room, c: &Creep) -> Option<CreepAct> {
         ));
     }
 
-    let dearest = |a: &(String, i32, i32, i32, bool, bool),
-                   b: &(String, i32, i32, i32, bool, bool)| {
-        let dear = |m: &(String, i32, i32, i32, bool, bool)| f64::from(m.3) / f64::from(m.2.max(1));
+    let dearest = |a: &(Id, i32, i32, i32, bool, bool), b: &(Id, i32, i32, i32, bool, bool)| {
+        let dear = |m: &(Id, i32, i32, i32, bool, bool)| f64::from(m.3) / f64::from(m.2.max(1));
 
         dear(a).total_cmp(&dear(b)).then(b.0.cmp(&a.0))
     };
@@ -391,7 +390,7 @@ pub fn volley(sight: &Sight, room: &Room, c: &Creep) -> Option<CreepAct> {
     if !spares && volley > struck.2.min(guns * engine::RANGED_ATTACK_POWER) {
         Some(CreepAct::RangedMassAttack)
     } else {
-        Some(CreepAct::RangedAttackCreep(struck.0.clone()))
+        Some(CreepAct::RangedAttackCreep(struck.0))
     }
 }
 

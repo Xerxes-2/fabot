@@ -105,7 +105,7 @@ impl Reader<'_> {
 
     fn creep(&self, room: RoomName, o: &Obj) -> Creep {
         Creep {
-            id: text(o, atom!("_id")).to_string(),
+            id: Id::of_engine(text(o, atom!("_id"))),
             name: text(o, atom!("name")).to_string(),
             owner: self.owner(o),
             pos: self.pos(room, o),
@@ -125,7 +125,7 @@ impl Reader<'_> {
             _ => controller_downgrade(level as u8).unwrap_or(0) as i32,
         };
         Controller {
-            id: text(o, atom!("_id")).to_string(),
+            id: Id::of_engine(text(o, atom!("_id"))),
             pos: self.pos(room, o),
             owner: self.owner(o),
             level,
@@ -150,7 +150,7 @@ impl Reader<'_> {
         };
         let public = matches!(o.get(Atom::intern("isPublic")), Some(Val::Bool(true)));
         Structure {
-            id: text(o, atom!("_id")).to_string(),
+            id: Id::of_engine(text(o, atom!("_id"))),
             pos: self.pos(room, o),
             hits: num(o, atom!("hits")) as i32,
             hits_max: num(o, atom!("hitsMax")) as i32,
@@ -191,7 +191,7 @@ impl Reader<'_> {
                 .collect::<Vec<_>>();
             Fallen {
                 creep: Creep {
-                    id: text(o, atom!("creepId")).to_string(),
+                    id: Id::of_engine(text(o, atom!("creepId"))),
                     name: text(o, atom!("creepName")).to_string(),
                     owner: self.owner(o),
                     pos: self.pos(room, o),
@@ -206,7 +206,7 @@ impl Reader<'_> {
             }
         });
         Remains {
-            id: text(o, atom!("_id")).to_string(),
+            id: Id::of_engine(text(o, atom!("_id"))),
             pos: self.pos(room, o),
             store: Reader::store(o),
             fallen,
@@ -267,28 +267,28 @@ pub fn world(v: &View, declarations: &Declarations) -> World<'static> {
                     room.structures.push(r.structure(name, "controller", o));
                 }
                 "source" => room.sources.push(Source {
-                    id: text(o, atom!("_id")).to_string(),
+                    id: Id::of_engine(text(o, atom!("_id"))),
                     pos: r.pos(name, o),
                     energy: num(o, atom!("energy")) as i32,
                     energy_capacity: num(o, atom!("energyCapacity")) as i32,
                     ticks_to_regeneration: r.left(o, atom!("nextRegenerationTime")),
                 }),
                 "mineral" => room.minerals.push(Mineral {
-                    id: text(o, atom!("_id")).to_string(),
+                    id: Id::of_engine(text(o, atom!("_id"))),
                     pos: r.pos(name, o),
                     resource: vocabulary::resource_of_name(text(o, atom!("mineralType"))),
                     amount: num(o, atom!("mineralAmount")) as i32,
                 }),
                 "constructionSite" => room.sites.push(Site {
                     kind: Kind::of_name(text(o, atom!("structureType"))),
-                    id: text(o, atom!("_id")).to_string(),
+                    id: Id::of_engine(text(o, atom!("_id"))),
                     pos: r.pos(name, o),
                     owner: r.owner(o),
                     progress: num(o, atom!("progress")) as i32,
                     progress_total: num(o, atom!("progressTotal")) as i32,
                 }),
                 "energy" => room.piles.push(Pile {
-                    id: text(o, atom!("_id")).to_string(),
+                    id: Id::of_engine(text(o, atom!("_id"))),
                     pos: r.pos(name, o),
                     resource: vocabulary::resource_of_name(text(o, atom!("resourceType"))),
                     amount: num(o, Atom::intern(text(o, atom!("resourceType")))) as i32,
@@ -310,7 +310,7 @@ pub fn world(v: &View, declarations: &Declarations) -> World<'static> {
                     }
                     if ours(o) && kind == "spawn" {
                         let spawn = Spawn {
-                            id: text(o, atom!("_id")).to_string(),
+                            id: Id::of_engine(text(o, atom!("_id"))),
                             name: text(o, atom!("name")).to_string(),
                             pos: r.pos(name, o),
                             spawning: None,
@@ -338,13 +338,15 @@ pub fn world(v: &View, declarations: &Declarations) -> World<'static> {
         for e in at.events() {
             if e.kind == EVENT_ATTACK {
                 let target = e.data["targetId"].as_str().unwrap_or_default();
-                world.attacks.push((e.by.to_string(), target.to_string()));
+                world
+                    .attacks
+                    .push((Id::of_engine(e.by), Id::of_engine(target)));
             } else if e.kind == EVENT_OBJECT_DESTROYED {
                 let kind = e.data["type"].as_str().unwrap_or_default();
                 if kind != "creep" {
                     world
                         .destroyed
-                        .push((name, e.by.to_string(), build_cost(kind)));
+                        .push((name, Id::of_engine(e.by), build_cost(kind)));
                 }
             }
         }

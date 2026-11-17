@@ -10,7 +10,7 @@ use fabot_core::intents::Intent;
 use fabot_core::observe::metrics::{self, Metrics};
 use fabot_core::strategy::intel::Intel;
 use fabot_core::tick::Declarations;
-use fabot_core::world::World;
+use fabot_core::world::{World, read};
 
 const FAULTS_KEPT: usize = 20;
 /// A reset loses at most this many ticks of sight.
@@ -23,6 +23,7 @@ struct Heap {
     /// outpost reads clear and every room floods afresh.
     drive: drive::Heap,
     maps: world::Maps,
+    buffers: read::Buffers,
     /// `None` until its segment is read after a reset.
     intel: Option<Intel>,
     intel_asked: bool,
@@ -36,6 +37,7 @@ thread_local! {
         faults: Vec::new(),
         drive: drive::Heap::new(),
         maps: world::Maps::default(),
+        buffers: read::Buffers::default(),
         intel: None,
         intel_asked: false,
         metrics: None,
@@ -56,12 +58,13 @@ fn run_tick() -> Result<(), String> {
     let clock = || game_cpu::get_used();
     let mut phases: Vec<(String, f64)> = Vec::new();
 
-    let (mut kept, mut faults, mut maps, held, asked, metrics) = HEAP.with(|heap| {
+    let (mut kept, mut faults, mut maps, mut buffers, held, asked, metrics) = HEAP.with(|heap| {
         let mut heap = heap.borrow_mut();
         (
             std::mem::take(&mut heap.drive),
             std::mem::take(&mut heap.faults),
             std::mem::take(&mut heap.maps),
+            std::mem::take(&mut heap.buffers),
             heap.intel.take(),
             std::mem::replace(&mut heap.intel_asked, true),
             heap.metrics.take(),
@@ -78,11 +81,11 @@ fn run_tick() -> Result<(), String> {
     let recording = memory.recording().then(|| memory.text.clone());
     let mut unread = Intel::new();
     let mut recorded = None;
-    let read_maps = &mut maps;
+    let (read_maps, read_buffers) = (&mut maps, &mut buffers);
     let seam = drive::Seam {
         read: move |declarations: &Declarations, drain| {
             let read_maps = read_maps;
-            let (mut world, read) = world::of_game(read_maps, declarations, drain);
+            let (mut world, read) = world::of_game(read_maps, read_buffers, declarations, drain);
             let maps: &world::Maps = read_maps;
             (world.rooms.iter_mut()).for_each(|r| r.terrain = maps.terrain(r.name));
             (world, maps as &dyn drive::Terrains, read)
@@ -148,13 +151,14 @@ fn run_tick() -> Result<(), String> {
         alerts: metrics.as_ref().map_or_default(Metrics::alerts),
     };
     wire::write_observe(&observed);
-    drop(world);
+    buffers.keep(world);
 
     HEAP.with(|heap| {
         let mut heap = heap.borrow_mut();
         heap.faults = faults;
         heap.drive = kept;
         heap.maps = maps;
+        heap.buffers = buffers;
         heap.intel = intel;
         heap.metrics = metrics;
     });

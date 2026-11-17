@@ -9,6 +9,7 @@ use fabot_core::intents::{
     TowerAct,
 };
 use fabot_core::vocabulary::{self, Part, Resource};
+use fabot_core::world;
 use krebs::atom;
 use krebs::doc::{Atom, Id, Obj, Val};
 use krebs::intents::{RoomIntents, UserRoomIntents};
@@ -28,8 +29,8 @@ struct Index<'a> {
 }
 
 impl<'a> Index<'a> {
-    fn get(&self, id: &str) -> Option<Found<'a>> {
-        let at = self.v.k.index.objects.get(&Id::new(id)?)?;
+    fn get(&self, id: world::Id) -> Option<Found<'a>> {
+        let at = self.v.k.index.objects.get(&Id::new(&id.text())?)?;
         let docs = &self.v.k.rooms[at.room as usize].objects;
         let i = docs.binary_search_by_key(&at.seq, |d| d.seq).ok()?;
         Some((at.room as usize, &docs[i].obj))
@@ -151,7 +152,7 @@ struct Run<'a> {
 }
 
 impl Run<'_> {
-    fn target(&self, id: &str) -> Result<Found<'_>, ErrorCode> {
+    fn target(&self, id: world::Id) -> Result<Found<'_>, ErrorCode> {
         self.at.get(id).ok_or(NotFound)
     }
 
@@ -179,10 +180,11 @@ impl Run<'_> {
             }
             CreepAct::RangedMassAttack => ("rangedMassAttack", json!({})),
             CreepAct::Transfer(t, r) => {
-                let t = self.target(t)?;
+                let t = self.target(*t)?;
                 let r = vocabulary::resource_name(r);
                 if r == "energy" && text(t.1, atom!("type")) == "controller" {
-                    return self.creep(name, &CreepAct::Upgrade(text(t.1, atom!("_id")).into()));
+                    let id = world::Id::parse(text(t.1, atom!("_id"))).ok_or(InvalidTarget)?;
+                    return self.creep(name, &CreepAct::Upgrade(id));
                 }
                 let room = capacity(t.1, &r);
                 check(room == 0.0, InvalidTarget)?;
@@ -201,7 +203,7 @@ impl Run<'_> {
                 )
             }
             CreepAct::Withdraw(t, r) => {
-                let t = self.target(t)?;
+                let t = self.target(*t)?;
                 let r = vocabulary::resource_name(r);
                 near(t)?;
                 let empty = num(creep.1, atom!("storeCapacity")) - used(creep.1);
@@ -215,7 +217,7 @@ impl Run<'_> {
             }
             CreepAct::Harvest(t) => {
                 check(!has_active(creep.1, "work"), NoBodypart)?;
-                let t = self.target(t)?;
+                let t = self.target(*t)?;
                 let left = if text(t.1, atom!("type")) == "source" {
                     atom!("energy")
                 } else {
@@ -226,7 +228,7 @@ impl Run<'_> {
                 ("harvest", json!({ "id": text(t.1, atom!("_id")) }))
             }
             CreepAct::Pickup(t) => {
-                let t = self.target(t)?;
+                let t = self.target(*t)?;
                 check(used(creep.1) >= num(creep.1, atom!("storeCapacity")), Full)?;
                 near(t)?;
                 ("pickup", json!({ "id": text(t.1, atom!("_id")) }))
@@ -234,17 +236,17 @@ impl Run<'_> {
             CreepAct::Build(t) | CreepAct::Repair(t) | CreepAct::Upgrade(t) => {
                 check(!has_active(creep.1, "work"), NoBodypart)?;
                 check(energy <= 0.0, NotEnough)?;
-                let t = self.target(t)?;
+                let t = self.target(*t)?;
                 check(range(creep, t) > 3.0, NotInRange)?;
                 (stored(act), json!({ "id": text(t.1, atom!("_id")) }))
             }
             CreepAct::RangedAttackCreep(t) | CreepAct::RangedHealCreep(t) => {
-                let t = self.target(t)?;
+                let t = self.target(*t)?;
                 check(range(creep, t) > 3.0, NotInRange)?;
                 (stored(act), json!({ "id": text(t.1, atom!("_id")) }))
             }
             CreepAct::AttackCreep(t) | CreepAct::HealCreep(t) => {
-                let t = self.target(t)?;
+                let t = self.target(*t)?;
                 near(t)?;
                 let (x, y) = (num(t.1, atom!("x")), num(t.1, atom!("y")));
                 (
@@ -256,7 +258,7 @@ impl Run<'_> {
             | CreepAct::Unreserve(t)
             | CreepAct::ClaimController(t)
             | CreepAct::Dismantle(t) => {
-                let t = self.target(t)?;
+                let t = self.target(*t)?;
                 near(t)?;
                 (stored(act), json!({ "id": text(t.1, atom!("_id")) }))
             }
@@ -268,23 +270,23 @@ impl Run<'_> {
     /// An intent on the object `id` once each of `targets` is found.
     fn on(
         &mut self,
-        id: &str,
-        targets: &[&str],
+        id: world::Id,
+        targets: &[world::Id],
         name: &str,
         value: Value,
     ) -> Result<(), ErrorCode> {
         let (room, _) = self.at.get(id).ok_or(NotFound)?;
         for t in targets {
-            self.target(t)?;
+            self.target(*t)?;
         }
-        self.stored.put(room, id, name, value);
+        self.stored.put(room, &id.text(), name, value);
         Ok(())
     }
 
     fn spawn(
         &mut self,
-        id: &str,
-        (body, name, drawn): (&[Part], &str, &[String]),
+        id: world::Id,
+        (body, name, drawn): (&[Part], &str, &[world::Id]),
     ) -> Result<(), ErrorCode> {
         let (room, spawn) = self.at.get(id).ok_or(NotFound)?;
         check(
@@ -299,7 +301,7 @@ impl Run<'_> {
                 banks.filter(|(k, o)| matches!(*k, "spawn" | "extension") && ours(o) && on(o));
             banks.map(|(_, o)| store(o, atom!("energy"))).sum()
         } else {
-            let drawn = drawn.iter().filter_map(|d| self.at.get(d));
+            let drawn = drawn.iter().filter_map(|d| self.at.get(*d));
             drawn.map(|(_, o)| store(o, atom!("energy"))).sum()
         };
         check(
@@ -312,7 +314,7 @@ impl Run<'_> {
         if !drawn.is_empty() {
             value["energyStructures"] = json!(drawn);
         }
-        self.stored.put(room, id, "createCreep", value);
+        self.stored.put(room, &id.text(), "createCreep", value);
         Ok(())
     }
 
@@ -330,7 +332,7 @@ impl Run<'_> {
                 self.stored.push(r, "createConstructionSite", value);
                 ("site", Ok(()))
             }
-            Intent::Room(room, RoomAct::Destroy(id)) => match self.target(id) {
+            Intent::Room(room, RoomAct::Destroy(id)) => match self.target(*id) {
                 Ok((r, _)) => {
                     let value = json!({ "id": id, "roomName": room.to_string() });
                     self.stored.push(r, "destroyStructure", value);
@@ -344,41 +346,41 @@ impl Run<'_> {
                     TowerAct::Heal(t) => ("heal", t),
                     TowerAct::Repair(t) => ("repair", t),
                 };
-                (name, self.on(id, &[t], name, json!({ "id": t })))
+                (name, self.on(*id, &[*t], name, json!({ "id": t })))
             }
             Intent::Controller(id, ControllerAct::ActivateSafeMode) => {
-                ("safeMode", self.on(id, &[], "activateSafeMode", json!({})))
+                ("safeMode", self.on(*id, &[], "activateSafeMode", json!({})))
             }
             Intent::Controller(id, ControllerAct::Unclaim) => {
-                ("unclaim", self.on(id, &[], "unclaim", json!({})))
+                ("unclaim", self.on(*id, &[], "unclaim", json!({})))
             }
             Intent::Link(id, LinkAct::TransferEnergy(t, amount)) => {
                 let value = json!({ "id": t, "amount": amount, "resourceType": "energy" });
-                ("link", self.on(id, &[t], "transfer", value))
+                ("link", self.on(*id, &[*t], "transfer", value))
             }
             Intent::Lab(id, LabAct::RunReaction(a, b)) => {
                 let value = json!({ "lab1": a, "lab2": b });
-                ("runReaction", self.on(id, &[a, b], "runReaction", value))
+                ("runReaction", self.on(*id, &[*a, *b], "runReaction", value))
             }
             Intent::Lab(id, LabAct::BoostCreep(c)) => (
                 "boostCreep",
-                self.on(id, &[c], "boostCreep", json!({ "id": c })),
+                self.on(*id, &[*c], "boostCreep", json!({ "id": c })),
             ),
             Intent::Terminal(id, TerminalAct::Send(r, amount, room)) => {
                 let value = json!({ "resourceType": resource(r), "amount": amount,
                     "targetRoomName": room.to_string(), "description": "" });
-                ("send", self.on(id, &[], "send", value))
+                ("send", self.on(*id, &[], "send", value))
             }
             Intent::Observe(id, room) => {
                 let value = json!({ "roomName": room.to_string() });
-                ("observeRoom", self.on(id, &[], "observeRoom", value))
+                ("observeRoom", self.on(*id, &[], "observeRoom", value))
             }
             Intent::Spawn(id, SpawnAct::RecycleCreep(c)) => (
                 "recycle",
-                self.on(id, &[c], "recycleCreep", json!({ "id": c })),
+                self.on(*id, &[*c], "recycleCreep", json!({ "id": c })),
             ),
             Intent::Spawn(id, SpawnAct::SpawnCreep(body, name, drawn)) => {
-                ("spawn", self.spawn(id, (body, name, drawn)))
+                ("spawn", self.spawn(*id, (body, name, drawn)))
             }
             Intent::Queue(_, _) | Intent::Wish(_, _) => ("unsettled", Err(NotFound)),
             Intent::Trace(_, _) => ("trace", Ok(())),

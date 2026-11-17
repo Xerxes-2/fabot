@@ -54,7 +54,7 @@ pub fn bare(
         energy_capacity: 0,
         sources: (sources.iter().enumerate())
             .map(|(i, pos)| Source {
-                id: format!("source{i}"),
+                id: format!("source{i}").as_str().into(),
                 pos: *pos,
                 energy: 0,
                 energy_capacity: 0,
@@ -63,7 +63,7 @@ pub fn bare(
             .collect(),
         minerals: (minerals.iter().enumerate())
             .map(|(i, pos)| Mineral {
-                id: format!("mineral{i}"),
+                id: format!("mineral{i}").as_str().into(),
                 pos: *pos,
                 resource: crate::vocabulary::Resource::Energy,
                 amount: 0,

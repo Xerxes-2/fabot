@@ -11,7 +11,7 @@ use crate::grid::{self, Footprint};
 use crate::tactics::{self, Offer, Tactic};
 use crate::tick::{self, Declarations};
 use crate::tiles::Tile;
-use crate::world::{self, Creep, Pos, Room, RoomName, Structure};
+use crate::world::{self, Creep, Id, Pos, Room, RoomName, Structure};
 use crate::{engine, tiles};
 
 /// `Casting.price`'s say in how many copies of a block to ask for.
@@ -26,7 +26,7 @@ impl<'a> Scene<'a> {
         colony: RoomName,
         set: &[Fighter],
         standing: &[&Creep],
-    ) -> Option<(Vec<String>, Outcome)> {
+    ) -> Option<(Vec<Id>, Outcome)> {
         let barriers: Vec<&Structure> = siege::barrier_at(room).values().copied().collect();
         let line: Vec<Pos> = barriers.iter().map(|b| b.pos).collect();
 
@@ -143,15 +143,15 @@ impl<'a> Scene<'a> {
 
         // Every barrier on a tile, its rampart first: the tile stands
         // in the plan until it is walkable.
-        let ids_at = |tile: Tile| -> Vec<String> {
+        let ids_at = |tile: Tile| -> Vec<Id> {
             let mut at: Vec<&Structure> = barriers
                 .iter()
                 .copied()
                 .filter(|b| tiles::of_pos(&b.pos) == tile)
                 .collect();
 
-            at.sort_by_key(|b| (!b.kind.is_rampart(), b.id.clone()));
-            at.into_iter().map(|b| b.id.clone()).collect()
+            at.sort_by_key(|b| (!b.kind.is_rampart(), b.id));
+            at.into_iter().map(|b| b.id).collect()
         };
 
         // Seats follow the planned barrier: priced with every medic beside
@@ -173,7 +173,7 @@ impl<'a> Scene<'a> {
         atlas: &Atlas,
         asked: &mut Asked,
         e: &Engagement,
-        target: &str,
+        target: Id,
         left: bool,
         grew: bool,
     ) -> Option<Engagement> {
@@ -369,7 +369,7 @@ impl<'a> Scene<'a> {
                 return Some(siege::replanned(self.world.time, false, e));
             };
             let reached = order.first().is_none_or(|first| {
-                (siege::barrier_at(room).get(first.as_str()))
+                (siege::barrier_at(room).get(first))
                     .is_some_and(|b| !self.unreached(atlas, room, b, &in_room))
             });
             if !added.is_empty() {

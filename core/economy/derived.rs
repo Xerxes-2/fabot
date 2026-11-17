@@ -11,16 +11,17 @@ use crate::tick::{self, Declarations, Outpost};
 use crate::tiles::{self, Tile};
 use crate::vocabulary::{Part, Resource, part_count_in};
 use crate::world::{
-    BodyPart, Controller, Creep, Kind, Owner, Pos, Room, RoomName, Source, Spawn, Store, Structure,
-    World, terrain,
+    BodyPart, Controller, Creep, Id, Kind, Owner, Pos, Room, RoomName, Source, Spawn, Store,
+    Structure, World, terrain,
 };
 
 use super::bodies::{self, Pattern};
+use super::task::Target;
 
 #[derive(Clone, Debug)]
 pub struct Body {
     /// None while it spawns.
-    pub id: Option<String>,
+    pub id: Option<Id>,
     pub name: String,
     pub pos: Pos,
     /// Live parts: a part shot to no hits does nothing.
@@ -39,12 +40,12 @@ pub struct Body {
 
 #[derive(Clone, Debug)]
 pub struct SourceFact {
-    pub id: String,
+    pub id: Id,
     pub pos: Pos,
     pub rate: i32,
     pub post: Option<Pos>,
-    pub container: Option<String>,
-    pub link: Option<String>,
+    pub container: Option<Id>,
+    pub link: Option<Id>,
     pub seats: Option<i32>,
     pub energy: i32,
     /// What its bay's extensions hold full: its container keeps it for them.
@@ -55,7 +56,7 @@ pub struct SourceFact {
 
 #[derive(Clone, Debug)]
 pub struct TerminalFact {
-    pub id: String,
+    pub id: Id,
     pub pos: Pos,
     pub store: Store,
     pub cooldown: i32,
@@ -63,7 +64,7 @@ pub struct TerminalFact {
 
 #[derive(Clone, Debug)]
 pub struct LabFact {
-    pub id: String,
+    pub id: Id,
     pub pos: Pos,
     /// Its one mineral and how much of it.
     pub held: Option<(Resource, i32)>,
@@ -73,19 +74,19 @@ pub struct LabFact {
 /// A deposit our extractor stands on.
 #[derive(Clone, Debug)]
 pub struct MineralFact {
-    pub id: String,
+    pub id: Id,
     pub pos: Pos,
     pub resource: Resource,
     pub amount: i32,
     pub cooldown: i32,
     pub post: Option<Pos>,
-    pub container: Option<String>,
+    pub container: Option<Id>,
     pub held: i32,
 }
 
 #[derive(Clone, Debug)]
 pub struct RefillFact {
-    pub id: String,
+    pub id: Id,
     pub pos: Pos,
     pub kind: Kind,
     pub free: i32,
@@ -117,7 +118,7 @@ impl StoreKind {
 
 #[derive(Clone, Debug)]
 pub struct StoreFact {
-    pub id: String,
+    pub id: Target,
     pub pos: Pos,
     pub kind: StoreKind,
     pub energy: i32,
@@ -156,7 +157,7 @@ impl LinkRole {
 
 #[derive(Clone, Debug)]
 pub struct LinkFact {
-    pub id: String,
+    pub id: Id,
     pub pos: Pos,
     pub role: LinkRole,
     pub energy: i32,
@@ -166,7 +167,7 @@ pub struct LinkFact {
 
 #[derive(Clone, Debug)]
 pub struct SiteFact {
-    pub id: String,
+    pub id: Id,
     pub kind: Kind,
     pub pos: Pos,
     pub left: i32,
@@ -174,7 +175,7 @@ pub struct SiteFact {
 
 #[derive(Clone, Debug)]
 pub struct RepairFact {
-    pub id: String,
+    pub id: Id,
     pub kind: Kind,
     pub pos: Pos,
     pub hits: i32,
@@ -197,7 +198,7 @@ impl RepairFact {
 
 #[derive(Clone, Debug)]
 pub struct PileFact {
-    pub id: String,
+    pub id: Id,
     pub pos: Pos,
     pub resource: Resource,
     pub amount: i32,
@@ -239,7 +240,7 @@ pub struct Ground {
     pub labs: Vec<LabFact>,
     /// What our storage and terminal hold besides energy: (store, its tile,
     /// resource, amount).
-    pub ores: Vec<(String, Pos, Resource, i32)>,
+    pub ores: Vec<(Id, Pos, Resource, i32)>,
     /// Only the declared cluster's home has one.
     pub lab_plan: Option<super::labs::Plan>,
     /// The lab a cast waiting at home is boosted from, and what its parts
@@ -296,7 +297,7 @@ pub fn drawn_for(kind: &Kind) -> bool {
 /// The lab a waiting body walks to, and what the colony's stores owe it.
 #[derive(Clone, Debug)]
 pub struct BoostLab {
-    pub id: String,
+    pub id: Id,
     pub pos: Pos,
     pub compound: Resource,
     pub mineral: i32,
@@ -331,7 +332,7 @@ pub struct Derived<'t> {
     routes: BTreeMap<RoomName, Cow<'t, Tree>>,
     /// The declared outposts a foe stands down this tick.
     pub closed: Vec<Outpost>,
-    pub spots: HashMap<String, Pos>,
+    pub spots: HashMap<Target, Pos>,
 }
 
 impl Derived<'_> {
@@ -351,7 +352,7 @@ impl Derived<'_> {
 }
 
 fn body_of(
-    (id, name): (Option<&str>, &str),
+    (id, name): (Option<Id>, &str),
     pos: &Pos,
     parts: &[BodyPart],
     store: &Store,
@@ -375,7 +376,7 @@ fn body_of(
     }
 
     Body {
-        id: id.map(str::to_string),
+        id,
         name: name.to_string(),
         pos: *pos,
         work,
@@ -491,7 +492,7 @@ fn repair_of(room: &Room, wall: i32, owned_room: bool, s: &Structure) -> Option<
         _ => return None,
     };
     (s.hits < hits_max).then(|| RepairFact {
-        id: s.id.clone(),
+        id: s.id,
         kind: s.kind.clone(),
         pos: s.pos,
         hits: s.hits,
@@ -504,7 +505,7 @@ fn repair_of(room: &Room, wall: i32, owned_room: bool, s: &Structure) -> Option<
 
 fn links_of(
     room: &Room,
-    is_buffer: &dyn Fn(&str) -> bool,
+    is_buffer: &dyn Fn(Id) -> bool,
     storage: Option<&Structure>,
 ) -> Vec<LinkFact> {
     let role_of = |s: &Structure| {
@@ -512,7 +513,7 @@ fn links_of(
             None
         } else if Atlas::is_source_link(room, &s.pos) {
             Some(LinkRole::Source)
-        } else if is_buffer(&s.id) {
+        } else if is_buffer(s.id) {
             Some(LinkRole::Controller)
         } else if storage.is_some_and(|st| st.pos.within(1, &s.pos)) {
             Some(LinkRole::Hub)
@@ -524,7 +525,7 @@ fn links_of(
         .filter_map(|s| {
             let role = role_of(s)?;
             Some(LinkFact {
-                id: s.id.clone(),
+                id: s.id,
                 pos: s.pos,
                 role,
                 energy: s.store.amount_of(&Resource::Energy),
@@ -541,13 +542,13 @@ fn minerals_of(room: &Room) -> Vec<MineralFact> {
             let extractor = (room.structures.iter())
                 .find(|s| s.kind.is_extractor() && s.owner.is_ours() && s.pos == m.pos)?;
             let post = Atlas::post_of(room, &m.pos);
-            let container = post.as_ref().and_then(|(_, id)| id.clone());
+            let container = post.as_ref().and_then(|(_, id)| *id);
             let held = container
                 .as_ref()
-                .and_then(|id| room.structures.iter().find(|s| &s.id == id))
+                .and_then(|id| room.structures.iter().find(|s| s.id == *id))
                 .map_or(0, |c| c.store.amount_of(&m.resource));
             Some(MineralFact {
-                id: m.id.clone(),
+                id: m.id,
                 pos: m.pos,
                 resource: m.resource.clone(),
                 amount: m.amount,
@@ -566,7 +567,7 @@ fn minerals_of(room: &Room) -> Vec<MineralFact> {
 fn stores_of(
     room: &Room,
     buffered: bool,
-    is_buffer: &dyn Fn(&str) -> bool,
+    is_buffer: &dyn Fn(Id) -> bool,
     served_dug: &dyn Fn(&Pos) -> i32,
 ) -> Vec<StoreFact> {
     let mut stores: Vec<StoreFact> = Vec::new();
@@ -586,7 +587,7 @@ fn stores_of(
 
                 let kind = if s.kind.is_storage() || s.kind.is_terminal() {
                     StoreKind::Storage
-                } else if buffered && is_buffer(&s.id) {
+                } else if buffered && is_buffer(s.id) {
                     StoreKind::Buffer
                 } else {
                     StoreKind::Container
@@ -594,7 +595,7 @@ fn stores_of(
 
                 if energy > 0 || owned || kind.is_buffer() {
                     stores.push(StoreFact {
-                        id: s.id.clone(),
+                        id: Target::Object(s.id),
                         pos: s.pos,
                         kind,
                         energy,
@@ -618,7 +619,7 @@ fn stores_of(
 
         if energy > 0 {
             stores.push(StoreFact {
-                id: r.id.clone(),
+                id: Target::Object(r.id),
                 pos: r.pos,
                 kind: StoreKind::Remains,
                 energy,
@@ -637,7 +638,7 @@ fn labs_of(room: &Room) -> Vec<LabFact> {
         .iter()
         .filter(|s| s.kind.is_lab() && s.owner.is_ours())
         .map(|s| LabFact {
-            id: s.id.clone(),
+            id: s.id,
             pos: s.pos,
             held: s
                 .store
@@ -650,7 +651,7 @@ fn labs_of(room: &Room) -> Vec<LabFact> {
         .collect()
 }
 
-fn ores_of(room: &Room) -> Vec<(String, Pos, Resource, i32)> {
+fn ores_of(room: &Room) -> Vec<(Id, Pos, Resource, i32)> {
     room.structures
         .iter()
         .filter(|s| (s.kind.is_storage() || s.kind.is_terminal()) && s.owner.is_ours())
@@ -659,7 +660,7 @@ fn ores_of(room: &Room) -> Vec<(String, Pos, Resource, i32)> {
                 .held
                 .iter()
                 .filter(|(r, n)| crate::vocabulary::is_mineral(r) && *n > 0)
-                .map(|(r, n)| (s.id.clone(), s.pos, r.clone(), *n))
+                .map(|(r, n)| (s.id, s.pos, r.clone(), *n))
         })
         .collect()
 }
@@ -681,7 +682,7 @@ fn buffer_seats_of(atlas: &Atlas, room: &Room, buffer: Option<&StoreFact>) -> Ve
 fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) -> Ground {
     let owned_room = room.controller.as_ref().is_some_and(|c| c.owner.is_ours());
     let built = Atlas::buffer(room);
-    let is_buffer = |id: &str| built.is_some_and(|b| b.id == id);
+    let is_buffer = |id: Id| built.is_some_and(|b| b.id == id);
     let storage = room
         .structures
         .iter()
@@ -701,15 +702,15 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
         });
         let seats = seats_at(atlas, 1, &s.pos);
         SourceFact {
-            id: s.id.clone(),
+            id: s.id,
             pos: s.pos,
             rate,
             post: post.as_ref().map(|(p, _)| *p),
-            container: post.as_ref().and_then(|(_, id)| id.clone()),
+            container: post.as_ref().and_then(|(_, id)| *id),
             link: links
                 .iter()
                 .find(|l| l.role.is_source() && l.pos.within(2, &s.pos))
-                .map(|l| l.id.clone()),
+                .map(|l| l.id),
             seats,
             energy: s.energy,
             bay: (room.structures.iter())
@@ -734,7 +735,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
         .filter(|s| matches!(s.kind, Kind::Spawn | Kind::Extension | Kind::Tower))
         .filter(|s| s.owner.is_ours() && s.store.free() > 0)
         .map(|s| RefillFact {
-            id: s.id.clone(),
+            id: s.id,
             pos: s.pos,
             kind: s.kind.clone(),
             free: s.store.free(),
@@ -746,7 +747,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
         .collect();
 
     let store_of = |kind: StoreKind, dug: i32, l: &LinkFact| StoreFact {
-        id: l.id.clone(),
+        id: Target::Object(l.id),
         pos: l.pos,
         kind,
         energy: l.energy,
@@ -789,7 +790,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
             .iter()
             .filter(|s| s.owner.is_ours())
             .map(|s| SiteFact {
-                id: s.id.clone(),
+                id: s.id,
                 kind: s.kind.clone(),
                 pos: s.pos,
                 left: 0.max(s.progress_total - s.progress),
@@ -800,7 +801,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
             .piles
             .iter()
             .map(|p| PileFact {
-                id: p.id.clone(),
+                id: p.id,
                 pos: p.pos,
                 resource: p.resource.clone(),
                 amount: p.amount,
@@ -841,7 +842,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
             .iter()
             .find(|s| s.kind.is_terminal() && s.owner.is_ours())
             .map(|s| TerminalFact {
-                id: s.id.clone(),
+                id: s.id,
                 pos: s.pos,
                 store: s.store.clone(),
                 cooldown: s.cooldown,
@@ -891,19 +892,19 @@ fn stock_labs(
     };
     // The lab a body waiting at home is boosted from is the cast's and not
     // a reaction's: its compound is kept while the body still lacks it.
-    let kept: BTreeMap<String, Resource> = (world.creeps.iter())
+    let kept: BTreeMap<Id, Resource> = (world.creeps.iter())
         .filter(|c| &c.pos.room == home)
         .filter_map(|c| {
             let compound = crate::boost::of_name(&c.name)?;
             let lab = crate::boost::booster(world, *home, compound)?;
-            Some((lab.id.clone(), Resource::Compound(compound)))
+            Some((lab.id, Resource::Compound(compound)))
         })
         .collect();
-    let labs: Vec<(String, Pos)> = (g.labs.iter())
+    let labs: Vec<(Id, Pos)> = (g.labs.iter())
         .filter(|l| !kept.contains_key(&l.id))
-        .map(|l| (l.id.clone(), l.pos))
+        .map(|l| (l.id, l.pos))
         .collect();
-    let held = |id: &str| {
+    let held = |id: Id| {
         g.labs
             .iter()
             .find(|l| l.id == id)
@@ -928,7 +929,7 @@ fn stock_labs(
                 .sum::<i32>()
     };
     let mut plan = super::labs::plan_for(targets, &stock, &labs, &held);
-    let lab_at = |id: &str| {
+    let lab_at = |id: Id| {
         (world.rooms.iter())
             .filter(|r| &r.name == home)
             .flat_map(|r| r.structures.iter())
@@ -939,25 +940,25 @@ fn stock_labs(
     // booster's own drain, so a cluster too small to run a reaction
     // still empties it.
     for (id, compound) in &kept {
-        let Some(lab) = lab_at(id) else {
+        let Some(lab) = lab_at(*id) else {
             continue;
         };
         for (r, n) in &lab.store.held {
             if *n > 0 && r != compound && crate::vocabulary::is_mineral(r) {
-                plan.drains.push((id.clone(), r.clone()));
+                plan.drains.push((*id, r.clone()));
             }
         }
     }
     g.lab_plan = Some(plan);
     // The lab a waiting cast is boosted from is stocked from the home's
     // stores: the reaction refuses it as a lab of its own.
-    let mut waited: BTreeMap<&str, (Resource, i32, i32)> = BTreeMap::new();
+    let mut waited: BTreeMap<Id, (Resource, i32, i32)> = BTreeMap::new();
     for creep in (world.creeps.iter()).filter(|c| &c.pos.room == home) {
         let Some(w) = crate::boost::waiting(world, *home, creep) else {
             continue;
         };
         let at = waited
-            .entry(w.lab.id.as_str())
+            .entry(w.lab.id)
             .or_insert((Resource::Compound(w.compound), 0, 0));
         at.1 += w.mineral;
         at.2 += w.energy;
@@ -967,7 +968,7 @@ fn stock_labs(
         .find_map(|(id, (compound, mineral, energy))| {
             let lab = lab_at(id)?;
             Some(BoostLab {
-                id: id.to_string(),
+                id,
                 pos: lab.pos,
                 compound: compound.clone(),
                 mineral: mineral - lab.store.amount_of(&compound),
@@ -1208,7 +1209,7 @@ pub fn of_world<'t>(
             // A draw picks up the pile by its id; a drop needs none.
             let id = energy
                 .first()
-                .map_or_else(|| format!("pile-{}", g.room), |p| p.id.clone());
+                .map_or(Target::Pile(g.room), |p| Target::Object(p.id));
             g.stores.push(StoreFact {
                 id,
                 pos,
@@ -1258,7 +1259,7 @@ pub fn of_world<'t>(
         .iter()
         .map(|c| {
             body_of(
-                (Some(&c.id), &c.name),
+                (Some(c.id), &c.name),
                 &c.pos,
                 &c.body,
                 &c.store,
@@ -1324,29 +1325,31 @@ pub fn of_world<'t>(
     }
 }
 
-fn spots_of(grounds: &[Ground], claims: &[Controller], bodies: &[Body]) -> HashMap<String, Pos> {
-    let mut found: Vec<(&String, Pos)> = Vec::new();
+fn spots_of(grounds: &[Ground], claims: &[Controller], bodies: &[Body]) -> HashMap<Target, Pos> {
+    let mut found: Vec<(Target, Pos)> = Vec::new();
     for g in grounds {
-        let ids = (g.sources.iter().map(|x| (&x.id, x.pos)))
-            .chain(g.minerals.iter().map(|x| (&x.id, x.pos)))
-            .chain(g.stores.iter().map(|x| (&x.id, x.pos)))
-            .chain(g.refills.iter().map(|x| (&x.id, x.pos)))
-            .chain(g.sites.iter().map(|x| (&x.id, x.pos)))
-            .chain(g.repairs.iter().map(|x| (&x.id, x.pos)))
-            .chain(g.piles.iter().map(|x| (&x.id, x.pos)))
-            .chain(g.labs.iter().map(|x| (&x.id, x.pos)))
-            .chain(g.links.iter().map(|x| (&x.id, x.pos)))
-            .chain(g.terminal.iter().map(|x| (&x.id, x.pos)))
-            .chain(g.boost_lab.iter().map(|x| (&x.id, x.pos)))
-            .chain(g.ores.iter().map(|x| (&x.0, x.1)))
-            .chain(g.controller.iter().map(|x| (&x.id, x.pos)));
-        found.extend(ids);
+        let ids = (g.sources.iter().map(|x| (x.id, x.pos)))
+            .chain(g.minerals.iter().map(|x| (x.id, x.pos)));
+        found.extend(ids.map(|(id, pos)| (Target::Object(id), pos)));
+        found.extend(g.stores.iter().map(|x| (x.id, x.pos)));
+        let ids = (g.refills.iter().map(|x| (x.id, x.pos)))
+            .chain(g.sites.iter().map(|x| (x.id, x.pos)))
+            .chain(g.repairs.iter().map(|x| (x.id, x.pos)))
+            .chain(g.piles.iter().map(|x| (x.id, x.pos)))
+            .chain(g.labs.iter().map(|x| (x.id, x.pos)))
+            .chain(g.links.iter().map(|x| (x.id, x.pos)))
+            .chain(g.terminal.iter().map(|x| (x.id, x.pos)))
+            .chain(g.boost_lab.iter().map(|x| (x.id, x.pos)))
+            .chain(g.ores.iter().map(|x| (x.0, x.1)))
+            .chain(g.controller.iter().map(|x| (x.id, x.pos)));
+        found.extend(ids.map(|(id, pos)| (Target::Object(id), pos)));
     }
-    found.extend(claims.iter().map(|c| (&c.id, c.pos)));
-    found.extend(bodies.iter().filter_map(|b| Some((b.id.as_ref()?, b.pos))));
+    let ids = (claims.iter().map(|c| (c.id, c.pos)))
+        .chain(bodies.iter().filter_map(|b| Some((b.id?, b.pos))));
+    found.extend(ids.map(|(id, pos)| (Target::Object(id), pos)));
     let mut spots = HashMap::with_capacity_and_hasher(found.len(), Default::default());
     for (id, pos) in found {
-        spots.entry(id.clone()).or_insert(pos);
+        spots.entry(id).or_insert(pos);
     }
     spots
 }

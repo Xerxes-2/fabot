@@ -46,7 +46,7 @@ fn main() {
     let build = |built: &mut Vec<Structure>, kind: Kind, tile: Tile| {
         let walkable = kind.walkable();
         built.push(Structure {
-            id: format!("s{}", built.len()),
+            id: format!("s{}", built.len()).as_str().into(),
             kind,
             pos: tiles::to_pos(name, tile),
             owner: Owner::Ours,

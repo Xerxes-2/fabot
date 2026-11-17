@@ -63,7 +63,7 @@ pub fn structure(id: &str, kind: Kind, owner: Owner, tile: Tile) -> Structure {
     let walkable = kind.walkable();
 
     Structure {
-        id: id.to_string(),
+        id: id.into(),
         kind,
         pos: at(tile),
         owner,
@@ -173,7 +173,7 @@ fn colony_of(rng: &mut Rng, blobs: i32) -> Option<Colony> {
         name: ROOM,
         terrain: terrain::leak(terrain),
         controller: Some(Controller {
-            id: "c".to_string(),
+            id: "c".into(),
             pos: at(controller),
             owner: Owner::Ours,
             level: 8,
@@ -192,7 +192,7 @@ fn colony_of(rng: &mut Rng, blobs: i32) -> Option<Colony> {
             .iter()
             .enumerate()
             .map(|(i, t)| Source {
-                id: format!("s{i}"),
+                id: format!("s{i}").as_str().into(),
                 pos: at(*t),
                 energy: 0,
                 energy_capacity: 0,
@@ -200,7 +200,7 @@ fn colony_of(rng: &mut Rng, blobs: i32) -> Option<Colony> {
             })
             .collect(),
         minerals: vec![Mineral {
-            id: "m".to_string(),
+            id: "m".into(),
             pos: at(mineral),
             resource: Resource::Energy,
             amount: 0,
@@ -367,7 +367,7 @@ pub fn exploited(owned: &BTreeSet<RoomName>) -> Vec<ColonyPlan> {
 
 pub fn site(id: &str, kind: Kind, tile: Tile) -> Site {
     Site {
-        id: id.to_string(),
+        id: id.into(),
         kind,
         pos: at(tile),
         owner: Owner::Ours,
@@ -378,7 +378,7 @@ pub fn site(id: &str, kind: Kind, tile: Tile) -> Site {
 
 pub fn creep(id: &str, owner: Owner, hits: i32, tile: Tile) -> Creep {
     Creep {
-        id: id.to_string(),
+        id: id.into(),
         name: id.to_string(),
         owner,
         pos: at(tile),

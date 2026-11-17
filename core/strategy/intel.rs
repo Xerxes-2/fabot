@@ -8,7 +8,7 @@ use crate::intents::Intent;
 use crate::tick::{self, Declarations, Declared, Outpost};
 use crate::tiles;
 use crate::vocabulary::{Part, Resource, resource_name, resource_of_name};
-use crate::world::{Controller, Owner, Pos, Room, RoomName, Source, World, push_int};
+use crate::world::{Controller, Id, Owner, Pos, Room, RoomName, Source, World, push_int};
 
 /// A room as it stood when last seen, by username: a stance is the
 /// declarations' and changes without a sight.
@@ -67,13 +67,13 @@ pub fn step(world: &World, intel: &mut Intel) {
                 .and_then(|h| user(&world.me, &h.owner)),
             lairs: Some(Atlas::posts(room)),
             controller: c.map(|c| Declared {
-                id: c.id.clone(),
+                id: c.id,
                 pos: c.pos,
             }),
             sources: Some(
                 (room.sources.iter())
                     .map(|s| Declared {
-                        id: s.id.clone(),
+                        id: s.id,
                         pos: s.pos,
                     })
                     .collect(),
@@ -107,7 +107,7 @@ pub fn blind(
         name: outpost.room,
         terrain: None,
         controller: Some(Controller {
-            id: outpost.controller.id.clone(),
+            id: outpost.controller.id,
             pos: outpost.controller.pos,
             owner: row
                 .and_then(|r| r.owner.as_ref())
@@ -131,7 +131,7 @@ pub fn blind(
             .sources
             .iter()
             .map(|s| Source {
-                id: s.id.clone(),
+                id: s.id,
                 pos: s.pos,
                 energy: 0,
                 energy_capacity: 0,
@@ -246,8 +246,8 @@ pub fn sight(
             .iter()
             .enumerate()
             .filter(|(_, o)| tiles::rooms_apart(o.pos.room, *room) <= engine::OBSERVER_RANGE)
-            .min_by_key(|(_, o)| (tiles::rooms_apart(o.pos.room, *room), o.id.clone()))?;
-        let id = observer.id.clone();
+            .min_by_key(|(_, o)| (tiles::rooms_apart(o.pos.room, *room), o.id))?;
+        let id = observer.id;
         free.remove(at);
         Some(Intent::Observe(id, *room))
     };
@@ -328,8 +328,8 @@ pub fn to_text(intel: &Intel) -> String {
     fn name(user: &Option<String>) -> &str {
         user.as_deref().unwrap_or(NONE)
     }
-    fn id_at(out: &mut String, sep: &str, id: &str, at: &Pos) {
-        out.extend([sep, id, "@"]);
+    fn id_at(out: &mut String, sep: &str, id: Id, at: &Pos) {
+        out.extend([sep, &id.text(), "@"]);
         push_int(out, at.index());
     }
     let mut out = String::new();
@@ -359,7 +359,7 @@ pub fn to_text(intel: &Intel) -> String {
             }
         }
         match &r.controller {
-            Some(c) => id_at(&mut out, " ", &c.id, &c.pos),
+            Some(c) => id_at(&mut out, " ", c.id, &c.pos),
             None => out.extend([" ", NONE]),
         }
         match r.sources.as_deref() {
@@ -367,7 +367,7 @@ pub fn to_text(intel: &Intel) -> String {
             Some([]) => out.push_str(" ."),
             Some(sources) => {
                 for (i, s) in sources.iter().enumerate() {
-                    id_at(&mut out, if i == 0 { " " } else { "," }, &s.id, &s.pos);
+                    id_at(&mut out, if i == 0 { " " } else { "," }, s.id, &s.pos);
                 }
             }
         }
@@ -413,7 +413,7 @@ fn site_of(room: RoomName, text: &str) -> Option<Declared> {
         .ok()
         .filter(|i| (0..tiles::COUNT as i32).contains(i))?;
     Some(Declared {
-        id: id.to_string(),
+        id: Id::parse(id)?,
         pos: Pos::new(room, at % 50, at / 50),
     })
 }
@@ -479,7 +479,7 @@ mod tests {
                 .then(|| dice.pick(&["a", "b_c", "d-e", "Invader"]).to_string())
         };
         let site = |dice: &mut Dice| Declared {
-            id: format!("{:x}", dice.between(0, 9_999_999)),
+            id: format!("{:x}", dice.between(0, 9_999_999)).as_str().into(),
             pos: Pos::new(
                 RoomName::named("W1N1"),
                 dice.between(0, 49),

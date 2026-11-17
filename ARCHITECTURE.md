@@ -221,6 +221,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | `scouts`, `preyed` | the declared and threat-radius rooms a scout serves, with their rows' age; the rooms an enemy owns, reserves or works, stalest first | Strategy | heap, this tick only | Economy casts scouts, Fight's sweep candidates; derived from intel each tick |
 | `sightings` | room → each armed hostile's or Invader core's id → the tick it is gone (seen tick + its ticksToLive, or the core's collapse; a deploying core's deploy plus the longest collapse) and whether it is armed; a room in sight holds only what stands there now. A level-0 core is unarmed: it keeps its core engagement open but stands nothing down | World | heap | vision grace; when a stood-down outpost is clear |
 | `standing.*` | per module: last output and the key it was decided on | each module | heap | the replay (§1) |
+| `buffers` | last tick's world lists (each room's, our spawns' and creeps', the event logs'), emptied | World | heap | capacity, never a fact: the read refills them instead of allocating (§9.2) |
 | `terrain` | room → its `LocalRoomTerrain` (copied into wasm once when read; each tick's rooms borrow the cache, so no room holds a counted copy of its own), read the first tick it is seen and, a few a tick nearest our spawns first, for every room out to `SIEGE_HOPS`; room → its `getRoomStatus`, for each room in sight, beside one or declared | World | heap | terrain never changes, a status only when a novice or respawn area ends (a reset reads it afresh), and reading either is calls across the seam (§9.2); a room whose status is not our spawns' is never routed into or served, since the engine leaves a creep on the exit tile into it; a room with no terrain read is never observed, since one off the shard refuses the observer |
 
 Rules:
@@ -958,6 +959,12 @@ to a measurement on the benchmark above, in either direction:
   a word the pass repeats (a kind, a part, a room) written once and read by
   index (`world` −17% on the live capture, 2026-11-13); a field goes on that
   pass, never a call of its own.
+- An object id is `world::Id`, not a `String`: its up to 24 hex digits
+  left-aligned in three words, its length in the fourth, so it is Copy,
+  hashed and compared without a pointer, and an object can be matched across
+  ticks by id. It orders as its text did, which Memory's id sets and every
+  tie-break were written in (identical replay, 2026-11-18). A task's target
+  is an `Id`, or a colony's ring or pile, which no object holds.
 
 ### 9.3 Counts are a gate
 

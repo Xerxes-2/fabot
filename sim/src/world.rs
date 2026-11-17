@@ -103,7 +103,7 @@ impl Map {
             objects.push(o);
         }
         // A harness fixture: any id serves, and Spawn1 is a respawn's first spawn's name.
-        objects.push(json!({ "_id": "f0000000000000000000spwn", "type": "spawn", "room": room, "x": x, "y": y,
+        objects.push(json!({ "_id": "f0000000000000000000ffff", "type": "spawn", "room": room, "x": x, "y": y,
             "name": "Spawn1", "user": US, "store": { "energy": SPAWN_ENERGY_START }, "storeCapacityResource": { "energy": SPAWN_ENERGY_CAPACITY },
             "hits": SPAWN_HITS, "hitsMax": SPAWN_HITS, "spawning": null, "notifyWhenAttacked": true }));
         let user = |id: &str, name: &str| {

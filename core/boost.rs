@@ -8,7 +8,7 @@ use super::intents::{Intent, LabAct};
 use super::mv;
 use super::tick::{Context, target_at};
 use super::vocabulary::{self, Compound, Resource, ResourceType};
-use super::world::{self, Pos, RoomName, World};
+use super::world::{self, Id, Pos, RoomName, World};
 
 /// A cast name's last token names the compound its body walks to a lab for.
 pub fn of_name(name: &str) -> Option<Compound> {
@@ -145,11 +145,11 @@ pub fn stop<'a>(context: &mut Context, intents: &'a [Intent]) -> Cow<'a, [Intent
     let Some((home, _)) = context.declarations.labs() else {
         return Cow::Borrowed(intents);
     };
-    let mut stalls: Vec<(String, Pos, String, Compound)> = Vec::new();
+    let mut stalls: Vec<(String, Pos, Id, Compound)> = Vec::new();
 
     for creep in (context.world.creeps.iter()).filter(|c| c.owner.is_ours() && c.pos.room == home) {
         if let Some(w) = waiting(context.world, home, creep) {
-            stalls.push((creep.name.clone(), w.lab.pos, w.lab.id.clone(), w.compound));
+            stalls.push((creep.name.clone(), w.lab.pos, w.lab.id, w.compound));
         }
     }
 
@@ -166,11 +166,11 @@ pub fn stop<'a>(context: &mut Context, intents: &'a [Intent]) -> Cow<'a, [Intent
         .cloned()
         .collect();
 
-    let mut boostable: BTreeSet<&str> = BTreeSet::new();
+    let mut boostable: BTreeSet<Id> = BTreeSet::new();
     for lab in labs_in(context.world, home) {
         for compound in stalls.iter().map(|(_, _, _, c)| c) {
             if can_boost(lab, *compound) {
-                boostable.insert(lab.id.as_str());
+                boostable.insert(lab.id);
             }
         }
     }
@@ -179,11 +179,8 @@ pub fn stop<'a>(context: &mut Context, intents: &'a [Intent]) -> Cow<'a, [Intent
         let Some(creep) = context.world.creeps.iter().find(|c| &c.name == name) else {
             continue;
         };
-        if creep.pos.within(1, at) && boostable.contains(lab.as_str()) {
-            out.push(Intent::Lab(
-                lab.clone(),
-                LabAct::BoostCreep(creep.id.clone()),
-            ));
+        if creep.pos.within(1, at) && boostable.contains(lab) {
+            out.push(Intent::Lab(*lab, LabAct::BoostCreep(creep.id)));
             continue;
         }
         let mover = Mover {

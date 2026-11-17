@@ -20,7 +20,7 @@ use self::tiles::{Table, Tile, TileSet};
 use super::engine;
 use super::exchange::fighter::{self, Fighter};
 use super::vocabulary::Part;
-use super::world::{Kind, Owner, Pos, Room, RoomName, World};
+use super::world::{Id, Kind, Owner, Pos, Room, RoomName, World};
 
 /// A keeper's lair and the resource it guards.
 pub type Post = (Tile, Tile);
@@ -416,12 +416,12 @@ impl Atlas {
 
     /// Farthest from the controller first, so a controller container on a seat
     /// is no post.
-    pub fn post_of(room: &Room, source: &Pos) -> Option<(Pos, Option<String>)> {
+    pub fn post_of(room: &Room, source: &Pos) -> Option<(Pos, Option<Id>)> {
         let from_controller = |p: &Pos| Atlas::from_controller(room, p);
-        let mut candidates: Vec<(Pos, Option<String>)> = Vec::new();
+        let mut candidates: Vec<(Pos, Option<Id>)> = Vec::new();
         for s in &room.structures {
             if s.kind.is_container() {
-                candidates.push((s.pos, Some(s.id.clone())));
+                candidates.push((s.pos, Some(s.id)));
             }
         }
         for s in &room.sites {

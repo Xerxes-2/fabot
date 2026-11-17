@@ -4,13 +4,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::tactics::{Offer, Tactic};
 use crate::vocabulary::Part;
-use crate::world::{Pos, RoomName};
+use crate::world::{Id, Pos, RoomName};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "crate::memory::Seen", into = "crate::memory::Seen")]
 pub struct Group {
     pub id: i32,
-    pub members: BTreeSet<String>,
+    pub members: BTreeSet<Id>,
     pub room: RoomName,
     pub last_seen: i32,
     pub centre: Pos,
@@ -35,7 +35,7 @@ pub enum Phase {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Plan {
     pub tactic: Tactic,
-    pub order: Vec<String>,
+    pub order: Vec<Id>,
     #[serde(skip)]
     pub offers: Vec<Offer>,
 }
@@ -46,7 +46,7 @@ pub enum Objective {
     Defend,
     /// Into its room to the rival structure `target`; the plan's order is the
     /// barriers on the way, first broken first.
-    Siege(String),
+    Siege(Id),
     /// A rival's remote, `room`, its economy bodies hunted.
     Sweep,
 }

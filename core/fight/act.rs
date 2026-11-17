@@ -14,7 +14,7 @@ use crate::tactics::{self, Tactic};
 use crate::tick;
 use crate::tiles::Tile;
 use crate::vocabulary::Part;
-use crate::world::{self, Creep, Owner, Pos, RoomName, Structure};
+use crate::world::{self, Creep, Id, Owner, Pos, RoomName, Structure};
 use crate::{engine, tiles};
 
 pub(super) fn act(
@@ -35,7 +35,7 @@ pub(super) fn act(
             .values()
             .flatten()
             .filter(|h| scene.struck(h))
-            .map(|h| h.id.clone())
+            .map(|h| h.id)
             .collect(),
         spared: world
             .rooms
@@ -143,7 +143,7 @@ pub(super) fn act(
         .filter(|e| e.phase != Phase::Disengaging)
         .filter_map(|e| match &e.objective {
             Objective::Siege(target) => {
-                Some((e.id, siege::tapped(scene.in_sight(e.room)?, target)?))
+                Some((e.id, siege::tapped(scene.in_sight(e.room)?, *target)?))
             }
             _ => None,
         })
@@ -174,7 +174,7 @@ pub(super) fn act(
         if let Some(controller) = taps.get(&e.id).filter(|_| tactics::claims(c)) {
             let tap = controller.upgrade_blocked == 0
                 && c.pos.within(engine::MELEE_RANGE, &controller.pos);
-            let act = tap.then(|| CreepAct::Unreserve(controller.id.clone()));
+            let act = tap.then_some(CreepAct::Unreserve(controller.id));
             return (
                 act,
                 tactics::toward(sight, c, &controller.pos, engine::MELEE_RANGE),
@@ -367,10 +367,10 @@ fn front_of(scene: &Scene, atlas: &Atlas, e: &Engagement) -> Option<tactics::Fro
         return None;
     };
     let towers = scene.charged(room);
-    let fired: BTreeSet<&String> = scene.towers_in(room).iter().map(|t| &t.id).collect();
+    let fired: BTreeSet<&Id> = scene.towers_in(room).iter().map(|t| &t.id).collect();
     let struck = (scene.world.attacks.iter())
         .find(|(by, _)| fired.contains(by))
-        .map(|(_, at)| at.clone());
+        .map(|(_, at)| *at);
     let strike = (towers.iter())
         .map(|t| t.range(&wall.pos).map_or(0, engine::tower_attack_at))
         .sum();
@@ -389,7 +389,7 @@ fn front_of(scene: &Scene, atlas: &Atlas, e: &Engagement) -> Option<tactics::Fro
     };
     Some(tactics::Front {
         breach: wall.pos,
-        wall: (!room.controller.as_ref().is_some_and(|c| c.id == wall.id)).then(|| wall.id.clone()),
+        wall: (!room.controller.as_ref().is_some_and(|c| c.id == wall.id)).then_some(wall.id),
         line: (room.structures.iter().filter(|s| Scene::rival(s)))
             .map(|s| s.pos)
             .collect(),
@@ -424,9 +424,9 @@ fn homes_of(scene: &Scene, decided: &[Engagement]) -> Vec<Home> {
             .filter(|e| e.unanswered && e.room == *name && scene.by_id.contains_key(&e.group))
             .collect();
 
-        let raid: BTreeSet<String> = raiding
+        let raid: BTreeSet<Id> = raiding
             .iter()
-            .flat_map(|e| scene.by_id[&e.group].members.iter().cloned())
+            .flat_map(|e| scene.by_id[&e.group].members.iter().copied())
             .collect();
 
         if let Some(controller) = &room.controller {

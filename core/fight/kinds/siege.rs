@@ -10,7 +10,7 @@ use crate::engine;
 use crate::exchange::{self, Outcome};
 use crate::tactics::{self, Offer, Tactic};
 use crate::vocabulary::Resource;
-use crate::world::{Controller, Kind, Owner, Pos, Room, RoomName, Structure};
+use crate::world::{Controller, Id, Kind, Owner, Pos, Room, RoomName, Structure};
 
 pub const CANDIDATES: &[Tactic] = &[Tactic::BlobClose];
 
@@ -105,7 +105,7 @@ pub fn next_razed<'a>(room: &'a Room, walk: impl Fn(&Structure) -> i32) -> Optio
             struck(&s.pos),
             std::cmp::Reverse(taken(s, &sources)),
             walk(s),
-            s.id.as_str(),
+            s.id,
         )
     })
 }
@@ -114,18 +114,17 @@ fn declaimed<'a>(room: &'a Room) -> Option<&'a Controller> {
     (room.controller.as_ref()).filter(|c| matches!(c.owner, Owner::Enemy(_)))
 }
 
-pub fn next_target(room: &Room, near: Option<&Pos>) -> Option<String> {
-    let razed =
-        next_razed(room, |s| near.and_then(|p| p.range(&s.pos)).unwrap_or(0)).map(|s| &s.id);
-    razed.or(declaimed(room).map(|c| &c.id)).cloned()
+pub fn next_target(room: &Room, near: Option<&Pos>) -> Option<Id> {
+    let razed = next_razed(room, |s| near.and_then(|p| p.range(&s.pos)).unwrap_or(0)).map(|s| s.id);
+    razed.or(declaimed(room).map(|c| c.id))
 }
 
-pub fn tapped<'a>(room: &'a Room, target: &str) -> Option<&'a Controller> {
+pub fn tapped<'a>(room: &'a Room, target: Id) -> Option<&'a Controller> {
     declaimed(room).filter(|c| c.id == target)
 }
 
 /// The controller stands among the structures, a target only while tapped.
-pub fn stands(room: &Room, target: &str) -> bool {
+pub fn stands(room: &Room, target: Id) -> bool {
     match &room.controller {
         Some(c) if c.id == target => tapped(room, target).is_some(),
         _ => room.structures.iter().any(|s| s.id == target),
@@ -211,11 +210,11 @@ pub fn replanned(time: i32, held: bool, e: &Engagement) -> Engagement {
     }
 }
 
-pub fn barrier_at<'a>(room: &'a Room) -> BTreeMap<&'a str, &'a Structure> {
+pub fn barrier_at<'a>(room: &'a Room) -> BTreeMap<Id, &'a Structure> {
     room.structures
         .iter()
         .filter(|s| !s.owner.is_ours() && (s.kind.is_rampart() || s.kind.is_wall()))
-        .map(|s| (s.id.as_str(), s))
+        .map(|s| (s.id, s))
         .collect()
 }
 

@@ -88,7 +88,8 @@ where
     let drain = (state.engagements.iter())
         .find(|e| e.phase == Phase::Draining)
         .map(|e| e.room);
-    let (world, maps, pass) = (seam.read)(&declarations, drain);
+    let (mut world, maps, pass) = (seam.read)(&declarations, drain);
+    let misread = world.drop_misread();
     let sightings = std::mem::take(&mut heap.sightings);
     let atlas = std::mem::replace(&mut heap.atlas, Atlas::empty());
     let decided = tick::decide(
@@ -101,12 +102,15 @@ where
         (&|room| maps.terrain(room), maps.terrains()),
     );
 
-    let faults = (decided.result.reports.iter())
+    let mut faults: Vec<_> = (decided.result.reports.iter())
         .filter_map(|r| match &r.outcome {
             Outcome::Faulted(message) => Some((r.module, message.clone())),
             _ => None,
         })
         .collect();
+    if misread > 0 {
+        faults.push(("world", format!("{misread} objects' ids not hex: dropped")));
+    }
 
     let start = clock();
     let refusals = (seam.execute)(&decided.result.intents);

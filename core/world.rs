@@ -7,6 +7,105 @@ use super::engine;
 use super::tick::Declarations;
 use super::vocabulary::{Part, Resource, ResourceType};
 
+/// An object id in `screeps::RawObjectId`'s 128 bits, its digits left-aligned
+/// so it orders as its text: Memory's id sets and every tie-break on ids were
+/// written in that order.
+///
+/// Four words, most significant first: a `u128` aligns to 16 and widens every
+/// object that holds one.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Id([u32; 4]);
+
+impl Id {
+    pub fn parse(text: &str) -> Option<Id> {
+        let len = text.len();
+        if len == 0 || len > 24 {
+            return None;
+        }
+        // Two words, not `from_str_radix`: its checked 128-bit multiply cost
+        // `world` 3% on the bench (2026-11-18). Lowercase only, as the engine
+        // writes them: `A1` would equal `a1` and sort apart from its text.
+        let hex = |digits: &[u8]| {
+            (digits.iter()).try_fold(0u64, |v, b| {
+                let digit = char::from(*b)
+                    .to_digit(16)
+                    .filter(|_| !b.is_ascii_uppercase());
+                Some(v << 4 | u64::from(digit?))
+            })
+        };
+        let (high, low) = text.as_bytes().split_at(len.saturating_sub(16));
+        let value = u128::from(hex(high)?) << 64 | u128::from(hex(low)?);
+        let key = (value << (4 * (24 - len))) << 32 | len as u128;
+        Some(Id([96, 64, 32, 0].map(|at| (key >> at) as u32)))
+    }
+
+    /// No text parses to it: `World::drop_misread` drops the object holding it.
+    pub const MISREAD: Id = Id([0; 4]);
+
+    pub fn of_engine(text: &str) -> Id {
+        Id::parse(text).unwrap_or(Id::MISREAD)
+    }
+
+    pub fn text(self) -> IdText {
+        let [w0, w1, w2, len] = self.0.map(u64::from);
+        let (high, low, len) = (w0, w1 << 32 | w2, len as usize);
+        let mut out = [0u8; 24];
+        for (i, b) in out[..len].iter_mut().enumerate() {
+            let word = if i < 8 {
+                high >> (4 * (7 - i))
+            } else {
+                low >> (4 * (23 - i))
+            };
+            *b = b"0123456789abcdef"[(word & 15) as usize];
+        }
+        IdText(out, len)
+    }
+}
+
+pub struct IdText([u8; 24], usize);
+
+impl std::ops::Deref for IdText {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        std::str::from_utf8(&self.0[..self.1]).unwrap_or_default()
+    }
+}
+
+impl serde::Serialize for Id {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&self.text())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Id {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(d)?;
+        Id::parse(&text).ok_or_else(|| serde::de::Error::custom("no object id"))
+    }
+}
+
+/// A fixture's readable tag, hexed so tags keep their order.
+#[cfg(any(test, feature = "tools"))]
+impl From<&str> for Id {
+    fn from(tag: &str) -> Id {
+        let hex: String = tag.bytes().map(|b| format!("{b:02x}")).collect();
+        Id::parse(&hex).expect("a tag of 12 bytes at most")
+    }
+}
+
+impl std::fmt::Display for Id {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.text())
+    }
+}
+
+impl std::fmt::Debug for Id {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "\"{self}\"")
+    }
+}
+
 /// A room by its world coordinates: W0 is x = -1, N0 is y = -1.
 /// Ordered west to east, then north to south: not as its name is.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -485,7 +584,7 @@ impl Kind {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Structure {
-    pub id: String,
+    pub id: Id,
     pub kind: Kind,
     pub pos: Pos,
     pub owner: Owner,
@@ -504,7 +603,7 @@ pub struct Structure {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Site {
-    pub id: String,
+    pub id: Id,
     pub kind: Kind,
     pub pos: Pos,
     pub owner: Owner,
@@ -514,7 +613,7 @@ pub struct Site {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Source {
-    pub id: String,
+    pub id: Id,
     pub pos: Pos,
     pub energy: i32,
     pub energy_capacity: i32,
@@ -524,7 +623,7 @@ pub struct Source {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Mineral {
-    pub id: String,
+    pub id: Id,
     pub pos: Pos,
     pub resource: Resource,
     pub amount: i32,
@@ -532,7 +631,7 @@ pub struct Mineral {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Pile {
-    pub id: String,
+    pub id: Id,
     pub pos: Pos,
     pub resource: Resource,
     pub amount: i32,
@@ -540,7 +639,7 @@ pub struct Pile {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Controller {
-    pub id: String,
+    pub id: Id,
     pub pos: Pos,
     pub owner: Owner,
     pub level: i32,
@@ -565,7 +664,7 @@ pub struct BodyPart {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Creep {
-    pub id: String,
+    pub id: Id,
     pub name: String,
     pub owner: Owner,
     pub pos: Pos,
@@ -588,7 +687,7 @@ pub struct Fallen {
 /// A tombstone or a ruin.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Remains {
-    pub id: String,
+    pub id: Id,
     pub pos: Pos,
     pub store: Store,
     pub fallen: Option<Fallen>,
@@ -630,7 +729,7 @@ pub struct Oven {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Spawn {
-    pub id: String,
+    pub id: Id,
     pub name: String,
     pub pos: Pos,
     pub spawning: Option<Oven>,
@@ -656,9 +755,9 @@ pub struct World<'a> {
     /// engine leaves a creep on the exit tile into one, never carrying it across.
     pub closed: BTreeSet<RoomName>,
     /// Last tick's strikes, `(attacker, target)` ids, off the rooms' event logs (§3).
-    pub attacks: Vec<(String, String)>,
+    pub attacks: Vec<(Id, Id)>,
     /// Last tick's structures destroyed, off the same logs, with their build cost.
-    pub destroyed: Vec<(RoomName, String, i32)>,
+    pub destroyed: Vec<(RoomName, Id, i32)>,
     pub rules: Rules,
 }
 
@@ -728,6 +827,10 @@ pub mod read {
             self.str().to_string()
         }
 
+        fn id(&mut self) -> Id {
+            Id::of_engine(self.str())
+        }
+
         /// The engine names every room in the grammar; a name outside it reads
         /// as `sim`'s, the one room the grid has no square for, not a panic.
         fn room_name(&mut self) -> RoomName {
@@ -744,9 +847,18 @@ pub mod read {
             self.strs.next().unwrap_or_default()
         }
 
-        fn list<T>(&mut self, mut each: impl FnMut(&mut Self) -> T) -> Vec<T> {
+        fn list<T>(&mut self, each: impl FnMut(&mut Self) -> T) -> Vec<T> {
+            self.list_into(Vec::new(), each)
+        }
+
+        fn list_into<T>(
+            &mut self,
+            mut out: Vec<T>,
+            mut each: impl FnMut(&mut Self) -> T,
+        ) -> Vec<T> {
             let count = self.n();
-            (0..count).map(|_| each(self)).collect()
+            out.extend((0..count).map(|_| each(self)));
+            out
         }
 
         fn owner(&mut self) -> Owner {
@@ -806,7 +918,7 @@ pub mod read {
 
         fn creep(&mut self) -> Creep {
             Creep {
-                id: self.s(),
+                id: self.id(),
                 name: self.s(),
                 owner: self.owner(),
                 pos: self.pos(),
@@ -821,7 +933,7 @@ pub mod read {
 
         fn controller(&mut self) -> Controller {
             Controller {
-                id: self.s(),
+                id: self.id(),
                 pos: self.pos(),
                 owner: self.owner(),
                 level: self.n(),
@@ -843,7 +955,7 @@ pub mod read {
 
         fn structure(&mut self, room: RoomName) -> Structure {
             let kind = Kind::of_name(self.word());
-            let id = self.s();
+            let id = self.id();
             let pos = self.pos_in(room);
             let owner = self.owner();
             let hits = self.n();
@@ -892,7 +1004,7 @@ pub mod read {
         /// A tombstone's creep keeps no hits or fatigue.
         fn remains(&mut self) -> Remains {
             Remains {
-                id: self.s(),
+                id: self.id(),
                 pos: self.pos(),
                 store: self.store(),
                 fallen: if self.flag() {
@@ -909,8 +1021,9 @@ pub mod read {
             }
         }
 
-        fn room(&mut self) -> Room<'static> {
+        fn room(&mut self, buffers: &mut Buffers) -> Room<'static> {
             let name = self.room_name();
+            let lists = buffers.rooms.pop().unwrap_or_default();
             Room {
                 terrain: None,
                 energy_available: self.n(),
@@ -920,43 +1033,43 @@ pub mod read {
                 } else {
                     None
                 },
-                sources: self.list(|r| Source {
-                    id: r.s(),
+                sources: self.list_into(lists.sources, |r| Source {
+                    id: r.id(),
                     pos: r.pos(),
                     energy: r.n(),
                     energy_capacity: r.n(),
                     ticks_to_regeneration: r.n(),
                 }),
-                minerals: self.list(|r| Mineral {
-                    id: r.s(),
+                minerals: self.list_into(lists.minerals, |r| Mineral {
+                    id: r.id(),
                     pos: r.pos(),
                     resource: vocabulary::resource_of_name(r.word()),
                     amount: r.n(),
                 }),
-                structures: self.list(|r| r.structure(name)),
-                sites: self.list(|r| Site {
+                structures: self.list_into(lists.structures, |r| r.structure(name)),
+                sites: self.list_into(lists.sites, |r| Site {
                     kind: Kind::of_name(r.word()),
-                    id: r.s(),
+                    id: r.id(),
                     pos: r.pos_in(name),
                     owner: r.owner(),
                     progress: r.n(),
                     progress_total: r.n(),
                 }),
-                piles: self.list(|r| Pile {
-                    id: r.s(),
+                piles: self.list_into(lists.piles, |r| Pile {
+                    id: r.id(),
                     pos: r.pos(),
                     resource: vocabulary::resource_of_name(r.word()),
                     amount: r.n(),
                 }),
-                remains: self.list(Reader::remains),
-                others: self.list(Reader::creep),
+                remains: self.list_into(lists.remains, Reader::remains),
+                others: self.list_into(lists.others, Reader::creep),
                 name,
             }
         }
 
         fn spawn(&mut self) -> Spawn {
             Spawn {
-                id: self.s(),
+                id: self.id(),
                 name: self.s(),
                 pos: self.pos(),
                 spawning: if self.flag() {
@@ -972,7 +1085,55 @@ pub mod read {
         }
     }
 
-    pub fn world(ints: &[i32], text: &str, declarations: &Declarations) -> World<'static> {
+    #[derive(Default)]
+    pub struct Buffers {
+        rooms: Vec<Lists>,
+        spawns: Vec<Spawn>,
+        creeps: Vec<Creep>,
+        attacks: Vec<(Id, Id)>,
+        destroyed: Vec<(RoomName, Id, i32)>,
+    }
+
+    #[derive(Default)]
+    struct Lists {
+        sources: Vec<Source>,
+        minerals: Vec<Mineral>,
+        structures: Vec<Structure>,
+        sites: Vec<Site>,
+        piles: Vec<Pile>,
+        remains: Vec<Remains>,
+        others: Vec<Creep>,
+    }
+
+    fn emptied<T>(mut list: Vec<T>) -> Vec<T> {
+        list.clear();
+        list
+    }
+
+    impl Buffers {
+        pub fn keep(&mut self, world: World) {
+            for room in world.rooms {
+                self.rooms.push(Lists {
+                    sources: emptied(room.sources),
+                    minerals: emptied(room.minerals),
+                    structures: emptied(room.structures),
+                    sites: emptied(room.sites),
+                    piles: emptied(room.piles),
+                    remains: emptied(room.remains),
+                    others: emptied(room.others),
+                });
+            }
+            (self.spawns, self.creeps) = (emptied(world.spawns), emptied(world.creeps));
+            (self.attacks, self.destroyed) = (emptied(world.attacks), emptied(world.destroyed));
+        }
+    }
+
+    pub fn world(
+        ints: &[i32],
+        text: &str,
+        declarations: &Declarations,
+        buffers: &mut Buffers,
+    ) -> World<'static> {
         let count = ints.last().map_or(0, |n| *n as usize);
         let mut words: Vec<&str> = text.rsplit('\0').take(count).collect();
         words.reverse();
@@ -987,11 +1148,13 @@ pub mod read {
         r.me = r.s();
         let time = r.n();
         let bucket = r.n();
-        let rooms = r.list(Reader::room);
-        let attacks = r.list(|r| (r.s(), r.s()));
-        let destroyed = r.list(|r| (r.room_name(), r.s(), r.n()));
-        let spawns = r.list(Reader::spawn);
-        let creeps = r.list(Reader::creep);
+        let rooms = r.list(|r| r.room(buffers));
+        let attacks = r.list_into(std::mem::take(&mut buffers.attacks), |r| (r.id(), r.id()));
+        let destroyed = r.list_into(std::mem::take(&mut buffers.destroyed), |r| {
+            (r.room_name(), r.id(), r.n())
+        });
+        let spawns = r.list_into(std::mem::take(&mut buffers.spawns), Reader::spawn);
+        let creeps = r.list_into(std::mem::take(&mut buffers.creeps), Reader::creep);
         World {
             time,
             me: r.me.clone(),
@@ -1123,10 +1286,10 @@ pub struct Seen {
     pub armed: bool,
 }
 
-pub type Sightings = BTreeMap<RoomName, BTreeMap<String, Seen>>;
+pub type Sightings = BTreeMap<RoomName, BTreeMap<Id, Seen>>;
 
 pub mod sightings {
-    use super::{Creep, RoomName, Seen, Sightings, World, hostiles};
+    use super::{Creep, Id, RoomName, Seen, Sightings, World, hostiles};
     use std::collections::BTreeMap;
 
     pub fn step(world: &World, previous: Sightings) -> Sightings {
@@ -1139,13 +1302,13 @@ pub mod sightings {
 
         // A room in sight holds what stands there now: a wave killed reopens it.
         for room in &world.rooms {
-            let mut seen: BTreeMap<String, Seen> = BTreeMap::new();
+            let mut seen: BTreeMap<Id, Seen> = BTreeMap::new();
 
             let foes: Vec<Creep> = room.hostiles().cloned().collect();
             for creep in &foes {
                 if hostiles::armed(&owned, &foes, creep) {
                     seen.insert(
-                        creep.id.clone(),
+                        creep.id,
                         Seen {
                             gone: world.time + creep.ticks_to_live,
                             armed: true,
@@ -1157,7 +1320,7 @@ pub mod sightings {
             for s in &room.structures {
                 if s.kind.is_invader_core() {
                     seen.insert(
-                        s.id.clone(),
+                        s.id,
                         Seen {
                             gone: world.time + s.collapse,
                             armed: s.level > 0,
@@ -1213,6 +1376,46 @@ impl World<'_> {
     pub fn room(&self, name: RoomName) -> Option<&Room<'_>> {
         self.rooms.iter().find(|r| r.name == name)
     }
+
+    /// The objects whose id the engine wrote in no hex, dropped and counted:
+    /// kept, two of them would share one id.
+    pub fn drop_misread(&mut self) -> usize {
+        let ok = |id: &Id| *id != Id::MISREAD;
+        let before = self.objects();
+        for r in &mut self.rooms {
+            r.controller = r.controller.take().filter(|c| ok(&c.id));
+            r.sources.retain(|o| ok(&o.id));
+            r.minerals.retain(|o| ok(&o.id));
+            r.structures.retain(|o| ok(&o.id));
+            r.sites.retain(|o| ok(&o.id));
+            r.piles.retain(|o| ok(&o.id));
+            (r.remains).retain(|o| ok(&o.id) && o.fallen.as_ref().is_none_or(|f| ok(&f.creep.id)));
+            r.others.retain(|o| ok(&o.id));
+        }
+        self.spawns.retain(|o| ok(&o.id));
+        self.creeps.retain(|o| ok(&o.id));
+        self.attacks.retain(|(by, at)| ok(by) && ok(at));
+        self.destroyed.retain(|(_, id, _)| ok(id));
+        before - self.objects()
+    }
+
+    fn objects(&self) -> usize {
+        let rooms = self.rooms.iter().map(|r| {
+            usize::from(r.controller.is_some())
+                + r.sources.len()
+                + r.minerals.len()
+                + r.structures.len()
+                + r.sites.len()
+                + r.piles.len()
+                + r.remains.len()
+                + r.others.len()
+        });
+        rooms.sum::<usize>()
+            + self.spawns.len()
+            + self.creeps.len()
+            + self.attacks.len()
+            + self.destroyed.len()
+    }
 }
 
 pub fn body_kinds(creep: &Creep) -> Vec<Part> {
@@ -1226,4 +1429,40 @@ pub fn body_boosts(creep: &Creep) -> Vec<Option<ResourceType>> {
 /// A creep's body as the engine prices it.
 pub fn body_cost(creep: &Creep) -> i32 {
     engine::body_cost(&body_kinds(creep))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Id;
+
+    #[test]
+    fn an_id_reads_back_as_its_text_and_orders_as_it() {
+        let texts = [
+            "0",
+            "1",
+            "a",
+            "a0",
+            "ab",
+            "00",
+            "10000000",
+            "100000000",
+            "1000000000000000",
+            "10000000000000000",
+            "ffffffffffffffff",
+            "fffffffffffffffff",
+            "0df4aea318bd552",
+            "5bbcab1d9099fc012e632dbc",
+            "5bbcab1d9099fc012e632dbd",
+            "ffffffffffffffffffffffff",
+        ];
+        for a in texts {
+            let id = Id::parse(a).unwrap();
+            assert_eq!(id.to_string(), a);
+            for b in texts {
+                assert_eq!(id.cmp(&Id::parse(b).unwrap()), a.cmp(b), "{a} {b}");
+            }
+        }
+        let bad = ["", "ring-W1N1", "+1", "A1", "0000000000000000000000000"];
+        assert!(bad.map(Id::parse).iter().all(Option::is_none));
+    }
 }

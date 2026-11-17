@@ -8,7 +8,7 @@ use crate::exchange::{self, Fighter, fighter};
 use crate::tick::Declarations;
 use crate::vocabulary::{Compound, Part, Resource, ResourceType};
 use crate::world::{
-    Creep, Kind, Owner, Pos, Room, RoomName, Spawn, Store, Structure, World, terrain,
+    Creep, Id, Kind, Owner, Pos, Room, RoomName, Spawn, Store, Structure, World, terrain,
 };
 
 pub type Body = Vec<Part>;
@@ -109,8 +109,8 @@ pub fn fighter_of(c: &Creep) -> Fighter {
 /// hostile without a body, which no exchange prices.
 pub fn core_as_hostile(core: &Structure) -> Creep {
     Creep {
-        id: core.id.clone(),
-        name: core.id.clone(),
+        id: core.id,
+        name: core.id.to_string(),
         owner: core.owner.clone(),
         pos: core.pos,
         body: Vec::new(),
@@ -404,14 +404,14 @@ pub fn holds(set: &[Fighter], strike: i32) -> bool {
             || (0..set.len()).all(|i| engine::HEAL_POWER * (set[i].heal + lent(i)) >= strike))
 }
 
-pub fn kill_order(hostiles: &[Creep]) -> Vec<String> {
-    let ranked: Vec<(String, (bool, f64))> = hostiles
+pub fn kill_order(hostiles: &[Creep]) -> Vec<Id> {
+    let ranked: Vec<(Id, (bool, f64))> = hostiles
         .iter()
         .map(|h| {
             let f = fighter_of(h);
             let damage = engine::ATTACK_POWER * f.attack + engine::RANGED_ATTACK_POWER * f.ranged;
             (
-                h.id.clone(),
+                h.id,
                 (f.heal == 0, -(f64::from(damage) / f64::from(h.hits.max(1)))),
             )
         })
@@ -521,7 +521,7 @@ mod tests {
     fn spawns_in(room: RoomName, count: i32) -> Vec<Spawn> {
         (1..=count)
             .map(|x| Spawn {
-                id: format!("{room}-{x}"),
+                id: format!("{room}-{x}").as_str().into(),
                 name: String::new(),
                 pos: Pos { room, x, y: 25 },
                 spawning: None,

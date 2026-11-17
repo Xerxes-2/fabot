@@ -21,7 +21,7 @@ let used = 0;
 const at = (x, y) => ({ x, y, roomName: "W1N1" });
 const store = (held, capacity) => Object.defineProperty({ ...held }, "getCapacity", { value: (r) => (r === undefined || r === "energy" ? capacity : null) });
 const spawn = {
-  id: "s1",
+  id: "a1",
   name: "Spawn1",
   structureType: "spawn",
   my: true,
@@ -33,9 +33,9 @@ const spawn = {
   spawning: null,
   spawnCreep: () => 0,
 };
-const road = { id: "r1", structureType: "road", pos: at(26, 25), hits: 5000, hitsMax: 5000 };
+const road = { id: "a2", structureType: "road", pos: at(26, 25), hits: 5000, hitsMax: 5000 };
 const creep = {
-  id: "k1",
+  id: "a3",
   name: "a",
   my: true,
   owner: { username: "me" },
@@ -62,11 +62,11 @@ const creep = {
   upgradeController: () => 0,
 };
 const found = {
-  105: [{ id: "src1", pos: at(5, 5), energy: 3000, energyCapacity: 3000, ticksToRegeneration: undefined }],
-  116: [{ id: "m1", pos: at(40, 40), mineralType: "H", mineralAmount: 70000 }],
+  105: [{ id: "a4", pos: at(5, 5), energy: 3000, energyCapacity: 3000, ticksToRegeneration: undefined }],
+  116: [{ id: "a5", pos: at(40, 40), mineralType: "H", mineralAmount: 70000 }],
   107: [spawn, road],
-  111: [{ id: "cs1", structureType: "extension", my: true, owner: { username: "me" }, pos: at(27, 27), progress: 0, progressTotal: 3000 }],
-  106: [{ id: "p1", resourceType: "energy", pos: at(11, 11), amount: 50 }],
+  111: [{ id: "a6", structureType: "extension", my: true, owner: { username: "me" }, pos: at(27, 27), progress: 0, progressTotal: 3000 }],
+  106: [{ id: "a7", resourceType: "energy", pos: at(11, 11), amount: 50 }],
   118: [],
   123: [],
   103: [],
@@ -98,8 +98,8 @@ globalThis.Game = {
   spawns: { Spawn1: spawn },
   creeps: { a: creep },
   gcl: { level: 1 },
-  constructionSites: { cs1: found[111][0] },
-  getObjectById: (id) => ({ s1: spawn, src1: found[105][0], c1: room.controller, cs1: found[111][0], p1: found[106][0] })[id] ?? null,
+  constructionSites: { a6: found[111][0] },
+  getObjectById: (id) => ({ a1: spawn, a4: found[105][0], c1: room.controller, a6: found[111][0], a7: found[106][0] })[id] ?? null,
 };
 
 // The sandbox's text polyfill, run where no native one exists, matches Node's byte for byte.

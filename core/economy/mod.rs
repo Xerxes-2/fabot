@@ -15,19 +15,24 @@ pub(crate) mod dice {
     use crate::tick::{Declared, Outpost};
     use crate::vocabulary::{Compound, Ore, Part, Resource, part_count_in};
     use crate::world::{
-        BodyPart, Controller, Creep, Kind, Mineral, Owner, Pile, Pos, Remains, Room, RoomName,
+        BodyPart, Controller, Creep, Id, Kind, Mineral, Owner, Pile, Pos, Remains, Room, RoomName,
         Site, Source, Spawn, Store, Structure, World,
     };
 
-    use super::task::Task;
+    use super::task::{Target, Task};
 
     pub use crate::tests::Dice;
 
-    pub fn object_id(dice: &mut Dice) -> String {
-        let n = dice.between(1, 12);
-        (0..n)
+    pub fn target(dice: &mut Dice) -> Target {
+        let n = dice.between(1, 24);
+        let hex: String = (0..n)
             .map(|_| "0123456789abcdef".as_bytes()[dice.below(16) as usize] as char)
-            .collect()
+            .collect();
+        match dice.below(8) {
+            0 => Target::Ring(at().room),
+            1 => Target::Pile(at().room),
+            _ => Target::Object(Id::parse(&hex).expect("hex")),
+        }
     }
 
     pub fn resources() -> Vec<Resource> {
@@ -45,20 +50,20 @@ pub(crate) mod dice {
         Pos::new(RoomName::named("W9N9"), 25, 25)
     }
 
-    pub fn task(dice: &mut Dice, target: &str) -> Task {
+    pub fn task(dice: &mut Dice, target: Target) -> Task {
         let resource = resources()[dice.below(5) as usize].clone();
         match dice.between(0, 10) {
-            0 => Task::Harvest(target.to_string()),
-            1 => Task::Withdraw(target.to_string(), resource),
-            2 => Task::Pickup(target.to_string(), resource),
-            3 => Task::Refill(target.to_string(), resource),
-            4 => Task::Build(target.to_string()),
-            5 => Task::Repair(target.to_string()),
-            6 => Task::Upgrade(target.to_string()),
-            7 => Task::Reserve(target.to_string()),
+            0 => Task::Harvest(target),
+            1 => Task::Withdraw(target, resource),
+            2 => Task::Pickup(target, resource),
+            3 => Task::Refill(target, resource),
+            4 => Task::Build(target),
+            5 => Task::Repair(target),
+            6 => Task::Upgrade(target),
+            7 => Task::Reserve(target),
             8 => Task::Scout(at().room),
-            9 => Task::Meet(target.to_string()),
-            _ => Task::Claim(target.to_string()),
+            9 => Task::Meet(target),
+            _ => Task::Claim(target),
         }
     }
 
@@ -91,7 +96,7 @@ pub(crate) mod dice {
         let hits = dice.between(1, hits_max);
 
         Structure {
-            id: format!("{room}s{i}"),
+            id: format!("{room}s{i}").as_str().into(),
             owner: if owned && kind != Kind::Road && kind != Kind::Container {
                 Owner::Ours
             } else {
@@ -135,7 +140,7 @@ pub(crate) mod dice {
         let holder = dice.pick_of(&[Owner::Stranger("someone".to_string()), Owner::Ours]);
 
         let controller = Controller {
-            id: format!("{name}c"),
+            id: format!("{name}c").as_str().into(),
             pos: cpos,
             owner: if owned { Owner::Ours } else { Owner::Nobody },
             level: if owned { level } else { 0 },
@@ -155,7 +160,7 @@ pub(crate) mod dice {
 
         let sources: Vec<Source> = (0..dice.between(0, 2))
             .map(|k| Source {
-                id: format!("{name}src{k}"),
+                id: format!("{name}src{k}").as_str().into(),
                 pos: pos(dice, name),
                 energy: 1000,
                 energy_capacity: 3000,
@@ -171,7 +176,7 @@ pub(crate) mod dice {
         for k in 0..if owned { dice.between(1, 3) } else { 0 } {
             let busy = dice.pick(&[0, 0, 1, 2]);
             spawns.push(Spawn {
-                id: format!("{name}p{k}"),
+                id: format!("{name}p{k}").as_str().into(),
                 name: format!("{name}sp{k}"),
                 pos: pos(dice, name),
                 spawning: match busy {
@@ -212,7 +217,7 @@ pub(crate) mod dice {
             structures,
             sites: if has_site {
                 vec![Site {
-                    id: format!("{name}site"),
+                    id: format!("{name}site").as_str().into(),
                     kind: Kind::Extension,
                     pos: site_pos,
                     owner: Owner::Ours,
@@ -224,7 +229,7 @@ pub(crate) mod dice {
             },
             piles: if pile_amount > 0 {
                 vec![Pile {
-                    id: format!("{name}pile"),
+                    id: format!("{name}pile").as_str().into(),
                     pos: site_pos,
                     resource: Resource::Energy,
                     amount: pile_amount,
@@ -252,7 +257,7 @@ pub(crate) mod dice {
         let energy = dice.between(0, carry);
 
         Creep {
-            id: format!("c{i}"),
+            id: format!("c{i}").as_str().into(),
             name: format!("{prefix}-{i}-x"),
             owner: Owner::Ours,
             pos: at,
@@ -304,14 +309,14 @@ pub(crate) mod dice {
         let declared = |(r, c): &(&Room, &Controller)| Outpost {
             room: r.name,
             controller: Declared {
-                id: c.id.clone(),
+                id: c.id,
                 pos: c.pos,
             },
             sources: r
                 .sources
                 .iter()
                 .map(|s| Declared {
-                    id: s.id.clone(),
+                    id: s.id,
                     pos: s.pos,
                 })
                 .collect(),

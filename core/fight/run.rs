@@ -12,7 +12,7 @@ use crate::intents::{Ask, Intent, Rank};
 use crate::state::State;
 use crate::tactics::{self, Tactic};
 use crate::tick::{self, Context, Module};
-use crate::world::{Creep, Pos, RoomName, hostiles};
+use crate::world::{Creep, Id, Pos, RoomName, hostiles};
 
 /// A merge keeps the older group's id; two engagements on one group are one,
 /// the older surviving with both's bodies, losses and budget. Also each
@@ -81,7 +81,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
     let atlas: &mut Atlas = &mut *context.atlas;
 
     let mut foes: BTreeMap<RoomName, Vec<Creep>> = BTreeMap::new();
-    let mut cores: BTreeSet<String> = BTreeSet::new();
+    let mut cores: BTreeSet<Id> = BTreeSet::new();
 
     for r in &world.rooms {
         let mut all: Vec<Creep> = r.hostiles().cloned().collect();
@@ -91,7 +91,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
             .iter()
             .filter(|s| s.kind.is_invader_core() && s.level == 0);
         all.extend(razed.map(casting::core_as_hostile));
-        cores.extend(all[seen..].iter().map(|c| c.id.clone()));
+        cores.extend(all[seen..].iter().map(|c| c.id));
         foes.insert(r.name, all);
     }
 
@@ -120,8 +120,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
         .collect();
 
     let by_id: BTreeMap<i32, Group> = groups.iter().map(|g| (g.id, g.clone())).collect();
-    let hostile_at: BTreeMap<String, Pos> =
-        hostiles.iter().map(|h| (h.id.clone(), h.pos)).collect();
+    let hostile_at: BTreeMap<Id, Pos> = hostiles.iter().map(|h| (h.id, h.pos)).collect();
     let ours: BTreeMap<&str, &Creep> = world.creeps.iter().map(|c| (c.name.as_str(), c)).collect();
     let standing: BTreeSet<String> = world.creeps.iter().map(|c| c.name.clone()).collect();
     let aging_out: BTreeSet<String> = world
@@ -136,9 +135,9 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
     // An outpost has no towers to answer a body that works it (§7.2).
     let outpost = |r: &RoomName| worked.contains(r) && !homes.contains(r);
     let works = |h: &Creep| outpost(&h.pos.room) && hostiles::works(h);
-    let armed: BTreeSet<String> = (hostiles.iter())
+    let armed: BTreeSet<Id> = (hostiles.iter())
         .filter(|h| cores.contains(&h.id) || hostiles::armed(owned, &hostiles, h) || works(h))
-        .map(|h| h.id.clone())
+        .map(|h| h.id)
         .collect();
 
     // A Defend left open holds its room: a newcomer inside it is its target
@@ -246,7 +245,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
             && let Some(room) = scene.in_sight(e.room)
         {
             let barriers = siege::barrier_at(room);
-            e.plan.order.retain(|id| barriers.contains_key(id.as_str()));
+            e.plan.order.retain(|id| barriers.contains_key(id));
 
             let members = scene.members_of(e);
             let next = if raid::raids(e) {
@@ -255,7 +254,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
                 siege::next_target(room, members.first().map(|c| &c.pos))
             };
 
-            if (!siege::stands(room, target) || siege::tapped(room, target).is_some())
+            if (!siege::stands(room, *target) || siege::tapped(room, *target).is_some())
                 && let Some(next) = next
                 && next != *target
             {
@@ -431,7 +430,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
             }
             let mut watch = fresh(
                 first_id,
-                Objective::Siege(target.clone()),
+                Objective::Siege(target),
                 room.name,
                 world.time,
                 Tactic::BlobClose,
@@ -503,7 +502,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
 
         match &e.objective {
             Objective::Siege(target) => {
-                if let Some(next) = scene.besieged(atlas, &mut asked, &e, target, left, grew) {
+                if let Some(next) = scene.besieged(atlas, &mut asked, &e, *target, left, grew) {
                     decided.push(next);
                 }
             }

@@ -88,14 +88,14 @@ pub fn fire(
             (h, dealt > 0 || strikes(h, struck), heal, dealt, need)
         })
         .collect();
-    targets.sort_by_key(|(h, urgent, _, dealt, need)| (!urgent, need - dealt, h.id.clone()));
+    targets.sort_by_key(|(h, urgent, _, dealt, need)| (!urgent, need - dealt, h.id));
 
     let mut free: Vec<&Structure> = towers.iter().collect();
     let mut acts: Vec<Intent> = Vec::new();
 
     for (target, urgent, heal, dealt, need) in targets {
         let at = |t: &Structure| t.pos.range(&target.pos).map_or(0, engine::tower_attack_at);
-        free.sort_by_key(|t| (-at(t), t.id.clone()));
+        free.sort_by_key(|t| (-at(t), t.id));
         let every: i32 = free.iter().map(|t| at(t)).sum();
         if dealt >= need || !urgent && taken(target, dealt + every) <= heal {
             continue;
@@ -108,10 +108,7 @@ pub fn fire(
             }
             landed += at(tower);
             committed += 1;
-            acts.push(Intent::Tower(
-                tower.id.clone(),
-                TowerAct::Attack(target.id.clone()),
-            ));
+            acts.push(Intent::Tower(tower.id, TowerAct::Attack(target.id)));
         }
         free.drain(..committed);
     }
@@ -123,7 +120,7 @@ pub fn fire(
     {
         acts.extend(
             free.iter()
-                .map(|t| Intent::Tower(t.id.clone(), TowerAct::Heal(wounded.id.clone()))),
+                .map(|t| Intent::Tower(t.id, TowerAct::Heal(wounded.id))),
         );
     } else if let Some(dying) = (ramparts.iter())
         .filter(|r| r.hits <= 2 * engine::RAMPART_DECAY_AMOUNT)
@@ -131,10 +128,7 @@ pub fn fire(
         && let Some(tower) = (free.iter())
             .find(|t| t.store.amount_of(&Resource::Energy) >= engine::TOWER_CAPACITY / 2)
     {
-        acts.push(Intent::Tower(
-            tower.id.clone(),
-            TowerAct::Repair(dying.id.clone()),
-        ));
+        acts.push(Intent::Tower(tower.id, TowerAct::Repair(dying.id)));
     }
 
     acts
@@ -148,7 +142,7 @@ mod tests {
     use crate::layout::fixtures as fx;
     use crate::layout::run;
     use crate::tiles::{self};
-    use crate::world::Owner;
+    use crate::world::{Id, Owner};
     use std::collections::BTreeMap;
 
     #[test]
@@ -217,11 +211,11 @@ mod tests {
             for act in &acts {
                 match act {
                     Intent::Tower(id, TowerAct::Attack(target)) => {
-                        assert_ne!(id, "t1");
+                        assert_ne!(*id, Id::from("t1"));
                         assert!(enemies.iter().any(|h| &h.id == target));
                     }
                     Intent::Tower(id, TowerAct::Heal(target)) => {
-                        assert_ne!(id, "t1");
+                        assert_ne!(*id, Id::from("t1"));
                         assert!(ours.iter().any(|c| &c.id == target));
                     }
                     other => panic!("{} is no tower act", other.actor()),

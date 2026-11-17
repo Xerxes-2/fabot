@@ -12,7 +12,7 @@ use super::state::State;
 use super::tactics::{Tactic, by_name, name};
 use super::tick::{ColonyPlan, Declarations, Declared, Flow, Node, Outpost, Stage, undeclared};
 use super::vocabulary::{self, Resource};
-use super::world::{Pos, RoomName};
+use super::world::{Id, Pos, RoomName};
 
 pub struct Memory {
     /// As the tick found it, for the recorder.
@@ -131,7 +131,7 @@ fn list<T: DeserializeOwned, C: FromIterator<T> + Default>(v: &Value, key: &str)
 /// A source or controller declared in its outpost's room.
 #[derive(Deserialize)]
 struct At {
-    id: String,
+    id: Id,
     x: i32,
     y: i32,
 }
@@ -184,7 +184,7 @@ pub struct Seen {
     centre: Pos,
     id: i32,
     seen: i32,
-    members: BTreeSet<String>,
+    members: BTreeSet<Id>,
 }
 
 impl From<Seen> for Group {
@@ -216,7 +216,7 @@ pub struct Kind {
     #[serde(skip_serializing_if = "Option::is_none")]
     kind: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    target: Option<String>,
+    target: Option<Id>,
 }
 
 impl From<Kind> for Objective {
