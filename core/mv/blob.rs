@@ -119,7 +119,7 @@ pub fn wishes(
     let lag = |creep: &Creep| lags[index_of(creep)];
 
     let mut ranked: Vec<&Creep> = members.to_vec();
-    ranked.sort_by_key(|c| (lag(c), c.name.clone()));
+    ranked.sort_by_cached_key(|&c| (lag(c), c.name.as_str()));
     let anchor = ranked[(ranked.len() - 1) / 2];
     let r = radius(members.len());
 

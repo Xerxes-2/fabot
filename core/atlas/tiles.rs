@@ -90,6 +90,16 @@ impl TileSet {
     }
 }
 
+impl FromIterator<Tile> for TileSet {
+    fn from_iter<I: IntoIterator<Item = Tile>>(tiles: I) -> TileSet {
+        let mut set = TileSet::default();
+        for t in tiles {
+            set.insert(t);
+        }
+        set
+    }
+}
+
 pub fn all() -> impl Iterator<Item = Tile> {
     (0..COUNT as u16).map(Tile)
 }

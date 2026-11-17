@@ -511,7 +511,7 @@ pub fn picket(sight: &mut Sight, front: &Front, members: &[&Creep], creep: &Cree
             .and_then(|s| s.parse::<i32>().ok())
     };
     let mut pickets: Vec<&Creep> = members.iter().copied().filter(|c| picket_of(c)).collect();
-    pickets.sort_by_key(|c| (slot(c), c.name.clone()));
+    pickets.sort_by_cached_key(|&c| (slot(c), c.name.as_str()));
 
     let at = pickets
         .iter()

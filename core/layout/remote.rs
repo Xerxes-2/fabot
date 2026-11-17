@@ -80,17 +80,12 @@ fn opened(
         return;
     }
 
-    let mut tiles_open = TileSet::default();
-
-    for s in &room.structures {
-        if !s.kind.is_rampart() {
-            tiles_open.insert(tiles::of_pos(&s.pos));
-        }
-    }
-
-    for s in &room.sites {
-        tiles_open.insert(tiles::of_pos(&s.pos));
-    }
+    let mut tiles_open: TileSet = (room.structures.iter())
+        .filter(|s| !s.kind.is_rampart())
+        .map(|s| &s.pos)
+        .chain(room.sites.iter().map(|s| &s.pos))
+        .map(tiles::of_pos)
+        .collect();
 
     let mut n = room.sites.iter().filter(|s| s.owner.is_ours()).count() as i32;
 
@@ -225,13 +220,12 @@ pub fn sites(
                         Some((_, None)) => continue,
                         Some((post, Some(_))) if !beside(&post) => Some(post),
                         held => {
-                            let open_tiles = taken[&room.name].clone();
                             let mut seats: Vec<(bool, i32, Tile)> = Vec::new();
 
                             for t in tiles::within(1, tiles::of_pos(&s.pos)) {
                                 if t != tiles::of_pos(&s.pos)
                                     && !tiles::on_edge(t)
-                                    && !open_tiles.contains(t)
+                                    && !taken[&room.name].contains(t)
                                     && !terrain::is_wall(
                                         room.terrain,
                                         tiles::x_of(t),
@@ -248,9 +242,7 @@ pub fn sites(
                                 }
                             }
 
-                            seats.sort_unstable();
-
-                            match (seats.first(), held) {
+                            match (seats.iter().min(), held) {
                                 (Some(&(on, _, t)), held) if !on || held.is_none() => {
                                     place(
                                         &rooms,

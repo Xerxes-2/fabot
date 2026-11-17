@@ -433,8 +433,7 @@ pub fn worked(
         .chain(raised)
         .filter(|o| {
             open(world, sightings, owned, o.room)
-                && (derived.trees.iter())
-                    .any(|(home, tree)| home == &o.room || tree.contains(o.room))
+                && (derived.trees.iter()).any(|(_, tree)| tree.contains(o.room))
         })
         .cloned()
         .collect()

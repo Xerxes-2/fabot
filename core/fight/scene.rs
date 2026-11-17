@@ -371,7 +371,7 @@ impl<'a> Scene<'a> {
     /// How many of the drain's bodies the set already holds, standing or in
     /// an oven: a pair's shape is no other body's.
     pub(super) fn paired(&self, e: &Engagement, ovens: &[Cast], set: &[casting::Body]) -> usize {
-        let of = |body: &[Part]| set.contains(&body.to_vec());
+        let of = |body: &[Part]| set.iter().any(|b| b[..] == *body);
         let stand = self
             .members_of(e)
             .iter()

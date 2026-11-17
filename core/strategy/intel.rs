@@ -300,7 +300,7 @@ pub fn sight(
         .chain(near)
         .filter(|room| !covered(&observed, room))
         .collect();
-    rooms.sort_by_key(|room| (seen(room), *room));
+    rooms.sort_by_cached_key(|room| (seen(room), *room));
     rooms.dedup();
     let scouts = rooms
         .into_iter()

@@ -2,9 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::engine;
 use crate::tick::{ColonyPlan, Stage};
-use crate::tiles::{self, Tile};
+use crate::tiles::{self, Tile, TileSet};
 use crate::vocabulary::Resource;
-use crate::world::{Creep, Id, Pos, Room, RoomName, Structure, World};
+use crate::world::{Creep, Id, Pos, RoomName, Structure, World};
 
 use super::ground;
 use super::plan;
@@ -26,20 +26,6 @@ pub struct Colony {
     pub astray: Vec<Id>,
 }
 
-fn join(values: &[Tile]) -> String {
-    values
-        .iter()
-        .map(std::string::ToString::to_string)
-        .collect::<Vec<String>>()
-        .join(",")
-}
-
-/// Terrain, sources, minerals and the controller never move, so the key
-/// leaves them out; our own structures are never read.
-pub fn key_of(room: &Room) -> String {
-    join(&ground::obstacles(room))
-}
-
 /// `ARCHITECTURE.md` §5: Hivemind's search spread over ticks.
 const VARIATIONS_PER_TICK: usize = 4;
 
@@ -58,7 +44,9 @@ pub fn colonies(
             continue;
         };
 
-        let key = key_of(room);
+        // Terrain, sources, minerals and the controller never move, so the
+        // key leaves them out.
+        let key = ground::obstacles(room);
 
         let held = standing.remove(&room.name).filter(|s| s.key == key);
         let ground = (held.as_ref())
@@ -108,6 +96,10 @@ pub fn colonies(
 
         towers.sort_by_key(|a| a.id);
 
+        let blocked: TileSet = (room.structures.iter())
+            .filter(|s| s.owner.is_ours() && !s.walkable)
+            .map(|s| tiles::of_pos(&s.pos))
+            .collect();
         let census = sites::census_of(room, &ours);
         let astray: Vec<Tile> = match &plan {
             Some(plan) => (sites::astray(plan, &census).into_iter())
@@ -141,11 +133,7 @@ pub fn colonies(
                 .cloned()
                 .collect(),
             buried: (room.structures.iter())
-                .filter(|r| r.kind.is_road())
-                .filter(|r| {
-                    (room.structures.iter())
-                        .any(|s| s.pos == r.pos && s.owner.is_ours() && !s.walkable)
-                })
+                .filter(|r| r.kind.is_road() && blocked.contains(tiles::of_pos(&r.pos)))
                 .map(|r| r.id)
                 .collect(),
             astray: (room.structures.iter())

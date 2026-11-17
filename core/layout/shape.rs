@@ -39,7 +39,7 @@ impl Plan {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Standing {
-    pub key: String,
+    pub key: Vec<Tile>,
     pub plan: Option<Plan>,
     pub drawing: Option<super::plan::Drawing>,
 }
