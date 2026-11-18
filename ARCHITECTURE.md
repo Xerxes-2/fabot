@@ -770,6 +770,9 @@ A body the declared cluster's stock covers is cast with its compound in its
 name (`fight-<tick>-<engagement>-<slot>-<compound>`): the name is the request,
 so no Memory row is added for it. `Tick` settles the body at the home's lab
 before its work, and the economy fills that lab from the home's stores. The
+lab is one with room for the compound; with none, Hivemind's choice (no
+reagent lab, the least of another mineral), out of the reaction and drained
+from the body's first tick, its spawning. The
 hold is a fact of the tick, never a timer: it stands only while the parts still
 lack the compound, the home holds it with the energy to spend, and a body in
 the room can carry it there — a colony that cannot serve the body leaves it to

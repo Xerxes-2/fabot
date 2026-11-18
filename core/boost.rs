@@ -19,8 +19,9 @@ pub fn of_name(name: &str) -> Option<Compound> {
 }
 
 /// The lab a body asking for `compound` is boosted from: one with room for it
-/// holding the most of it, ties to the lower id; a lab holding another mineral
-/// only when none has room, its drain making room.
+/// holding the most of it, ties to the lower id; when none has room, Hivemind's
+/// (`boost-manager.ts`): no reagent lab, the one holding least of another
+/// mineral, so its drain is the shortest.
 pub fn booster<'a>(
     world: &'a World,
     room: RoomName,
@@ -30,11 +31,20 @@ pub fn booster<'a>(
     let most = |a: &&'a world::Structure, b: &&'a world::Structure| {
         held(a).cmp(&held(b)).then_with(|| b.id.cmp(&a.id))
     };
+    let all: Vec<(Id, Pos)> = labs_in(world, room).map(|l| (l.id, l.pos)).collect();
+    let reagents = crate::economy::labs::roles_of(&all).map(|r| r.reagents);
+    let reagent = |l: &world::Structure| reagents.is_some_and(|(a, b)| l.id == a || l.id == b);
+    let other = |l: &world::Structure| {
+        (l.store.held.iter())
+            .filter(|(r, _)| vocabulary::is_mineral(r))
+            .map(|(_, n)| *n)
+            .sum::<i32>()
+    };
 
     (labs_in(world, room))
         .filter(|l| holds_room_for(l, compound))
         .max_by(most)
-        .or_else(|| labs_in(world, room).max_by(most))
+        .or_else(|| (labs_in(world, room)).min_by_key(|l| (reagent(l), other(l), l.id)))
 }
 
 fn labs_in<'a>(world: &'a World, room: RoomName) -> impl Iterator<Item = &'a world::Structure> {
