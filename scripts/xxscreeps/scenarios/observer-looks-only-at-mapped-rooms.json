@@ -1,6 +1,7 @@
 {
   "why": "an RCL8 colony at the edge of an 18-room world: its observer looks only at rooms the map holds (observing past the edge was refused, -10, twice a tick)",
   "modules": ["atlas", "strategy"],
+  "xxscreeps": "sim's observeRoom never refuses -10 (act.rs checks no map edge), so the bound reads nothing there",
   "start": { "world": "scripts/xxscreeps/worlds/young-among-outposts.json", "seed": 1 },
   "ticks": 300,
   "assert": [

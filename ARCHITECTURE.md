@@ -1213,15 +1213,19 @@ settles which is right, case by case; neither engine is presumed.
   xxscreeps stands or writes, or its `xxscreeps` says why it stays
   (`scenario.mjs --list` names each one's engine); `--bot`, `--base`,
   `--capture` and `--watch` run every one on xxscreeps.
+- ✅ A captured world with a home of ours, stood by `scripts/sim/run.mjs`
+  as `engine/live.mjs` stands it on xxscreeps (its Memory and declarations,
+  GCL and other players; their creeps, tombstones and ruins left out), and
+  a start's own `declarations`, `memory` and `gcl`.
 - ❓ Still on xxscreeps (`scripts/sim/run.mjs` `SIM_START`, `SIM_MEASURES`):
-  a start with opponents (rivals, raids), a captured world with a home of
-  ours, scripted `invaders`, `wave` or `core`, a resumed world (`at`,
-  `bundle`), or the start's own `declarations`, `memory`, `off`, `gcl`,
-  `unsafe`, `follow`, `withdrawn`; a node sim does not stand (`claims`,
-  `spare`, `stale`, `short`, `labStock`); and a measure reading
-  `bodies.jsonl`, `engagements.jsonl`, an opponent's side (`who`) or a
-  sample field sim's sampler does not write (`claimed`, `bodies`, `made`,
-  `ore`, `bounced`, `sent`, `stillLoaded`, `boosted`, `homes`). The
+  a start with opponents (rivals, raids), scripted `invaders`, `wave` or
+  `core`, a resumed world (`at`, `bundle`), or the start's own `off`,
+  `unsafe`, `follow`, `withdrawn`; a capture's intel segments; a node sim
+  does not stand (`claims`, `spare`, `stale`, `short`, `labStock`); and a
+  measure reading `bodies.jsonl`, `engagements.jsonl`, an opponent's side
+  (`who`), per-home rows (`homes`) or a sample field sim's sampler does not
+  write (`claimed`, `bodies`, `made`, `ore`, `bounced`, `sent`,
+  `stillLoaded`, `boosted`). The
   soak's `bodies.jsonl`, `decay.jsonl` and `engagements.jsonl` are written empty, and each room line's `carriedOut`
   is 0. Its `waves` and `lost` are 0 because sim pushes no scripted wave and
   loses no tick.

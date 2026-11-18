@@ -181,12 +181,8 @@ impl Engine {
 fn main() {
     let args = args();
     let map = world::read(&args.world);
-    let seat = map.seat(&args.room);
-    eprintln!(
-        "colony: {}, spawn at {},{}; output {}",
-        args.room, seat.0, seat.1, args.out
-    );
-    let mut k = map.stand(&args.room, seat, args.seed, args.ended);
+    eprintln!("colony: {}; output {}", args.room, args.out);
+    let mut k = map.stand(&args.room, args.seed, args.ended);
     let terrains = (map.rooms.iter())
         .filter_map(|(name, t)| {
             let bits: Box<[u8; fabot_core::tiles::COUNT]> = t

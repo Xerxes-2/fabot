@@ -61,10 +61,10 @@ export const near = (room, hops) => {
 };
 
 // Mirror `sim/src/world.rs` US, the engine's CONTROLLER_DOWNGRADE and krebs's `creeps/build.rs`.
-const US = "u1";
+export const US = "u1";
 const DOWNGRADE = [0, 20000, 10000, 20000, 40000, 80000, 120000, 150000, 200000];
 const energy = (n) => ({ energy: n });
-const BUILT = {
+export const BUILT = {
   spawn: [5000, { storeCapacityResource: energy(300) }],
   extension: [1000, { storeCapacityResource: energy(0) }],
   link: [1000, { storeCapacityResource: energy(800), cooldown: 0 }],
@@ -79,7 +79,21 @@ const BUILT = {
   factory: [1000, { storeCapacity: 50000, cooldown: 0 }],
   container: [250000, { storeCapacity: 2000 }],
   road: [5000, {}],
+  rampart: [1, {}],
+  constructedWall: [1, { hitsMax: 300000000 }],
 };
+const RAMPART_HITS_MAX = [0, 0, 300000, 1000000, 3000000, 10000000, 30000000, 100000000, 300000000];
+const DECAY = { road: 1000, container: 100, rampart: 100 };
+
+/**
+ * What a finished site of `kind` is at tick `t`, on a tile of `terrain` (its
+ * digit) in a room at `level`: its store, hits, capacity and next decay.
+ */
+export function built(kind, terrain, t, level) {
+  const [hits, extra] = BUILT[kind];
+  const full = kind === "road" ? hits * ({ 1: 150, 2: 5 }[terrain] ?? 1) : kind === "rampart" ? RAMPART_HITS_MAX[level] : (extra.hitsMax ?? hits);
+  return { store: energy(0), ...extra, hits: kind === "road" ? full : hits, hitsMax: full, ...(DECAY[kind] && { nextDecayTime: t + DECAY[kind] }) };
+}
 // `modern` picks xxscreeps' template with every structure kind, which krebs always has.
 const STOOD = new Set(["level", "built", "stored", "without", "worn", "bodies", "outposts", "alone", "labs", "modern", "buried", "moved"]);
 const terrainOf = (room) => [room.terrain].flat().join("");
@@ -146,16 +160,11 @@ export function standNode(world, room, name, plan) {
   const [stock, ...ores] = String(node.stored).split(",");
   for (const s of list) {
     if (!BUILT[s.kind]) throw new Error(`no ${s.kind} in a node`);
-    const [hits, extra] = BUILT[s.kind];
-    const o = { _id: nextId(), type: s.kind, room, x: s.x, y: s.y, notifyWhenAttacked: true, store: energy(0), hits, hitsMax: hits, ...extra };
+    const o = { _id: nextId(), type: s.kind, room, x: s.x, y: s.y, notifyWhenAttacked: true, ...built(s.kind, terrain[s.y * 50 + s.x], t, node.level) };
     if (s.kind !== "road" && s.kind !== "container") o.user = US;
     if (s.kind === "spawn") Object.assign(o, s === first ? { name: "Spawn1", store: energy(300) } : { name: `Node${id}` }, { spawning: null });
     if (s.kind === "storage") o.store = { energy: Number(stock), ...Object.fromEntries(ores.map((m) => m.split(":")).map(([r, n]) => [r, Number(n)])) };
-    if (s.kind === "road") o.hits = o.hitsMax = hits * ({ 1: 150, 2: 5 }[terrain[s.y * 50 + s.x]] ?? 1);
-    if (s.kind === "road" || s.kind === "container") {
-      o.hits = Math.ceil(o.hits * (node.worn ?? 1));
-      o.nextDecayTime = t + (s.kind === "road" ? 1000 : 100);
-    }
+    if (s.kind === "road" || s.kind === "container") o.hits = Math.ceil(o.hits * (node.worn ?? 1));
     if (s.kind === "nuker") o.cooldownTime = t + 100000;
     home.objects.push(o);
   }
@@ -184,7 +193,7 @@ export function standNode(world, room, name, plan) {
 
   const declarations = { outposts: node.outposts ? outposts(world, room) : [], ...(node.labs && { labs: { home: room, targets: node.labs } }), ...(node.alone && { avoid: near(room, 3) }) };
   if (node.outposts && !declarations.outposts.length) throw new Error(`${room}: no neighbour fits an outpost`);
-  return { ...world, declarations };
+  return { ...world, simMemory: { v2: { declarations } } };
 }
 
 // Mirrors `engine/colony.mjs`'s outposts, which reads xxscreeps' database.

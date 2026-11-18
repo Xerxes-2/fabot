@@ -1,6 +1,7 @@
 {
   "why": "an RCL4 colony with its level's extensions and tower unbuilt puts its whole spend on them before it upgrades, as Hivemind builds a level out (owner, 2026-11-12): a structure pays only once it stands. Main at e46f299d split the spend and stood 19 of 20 extensions and no tower by t5000; built out first, all 20 and the tower stand",
   "modules": ["atlas", "economy", "layout", "mv"],
+  "xxscreeps": "on sim 16 of 20 extensions stand at t5000 (xxscreeps 20 at t4800): sim casts about a third more energy into bodies from t~1200, cause not yet traced; the owner decides",
   "start": { "world": "scripts/xxscreeps/worlds/swamp-road.json", "seed": 1 },
   "ticks": 5000,
   "assert": [

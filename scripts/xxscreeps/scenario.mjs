@@ -101,15 +101,11 @@ for (const s of library.filter((s) => FIGHT_KINDS.some((k) => s.name.startsWith(
 // A scenario runs on `sim` (ARCHITECTURE.md §10.2) unless its start or a
 // measure needs what only xxscreeps stands or writes, or its "xxscreeps" says
 // why it stays there; a bundle, base, capture or watch runs every one there.
-const seatsUs = (file) => {
-  const world = JSON.parse(readFileSync(resolve(REPO, file), "utf8"));
-  return (world.rooms ?? []).some((r) => r.objects.some((o) => o.type === "spawn" && o.user === world.userId));
-};
 const xxscreepsWhy = (s) =>
   s.xxscreeps ??
   (Object.keys(s.start).filter((k) => !SIM_START.includes(k)).map((k) => `its start's ${k}`)[0] ||
-    (s.start.world && seatsUs(s.start.world) && "a world with a home of ours") ||
     (s.start.node && unstood(s.start.node)) ||
+    (s.start.world && Object.keys(JSON.parse(readFileSync(resolve(REPO, s.start.world), "utf8")).segments ?? {}).length && "a capture's intel segments") ||
     (s.assert.some((a) => a.who) && "a measure of an opponent's side") ||
     s.assert.filter((a) => !SIM_MEASURES.has(a.metric !== undefined ? "metric" : a.measure)).map((a) => `${a.measure} is not read off sim`)[0] ||
     null);
@@ -229,10 +225,6 @@ const preludes = [];
 // Two preludes of one world would save into one directory.
 const preluding = new Map();
 const play = async ({ name, start, ticks, engine }) => {
-  if (engine === "sim") {
-    const { world, room, node, seed, late, ended } = start;
-    return runSim(sim, { world: world && resolve(REPO, world), room, node, ticks, seed, late, ended, out: join(REPO, "soak-runs", name) });
-  }
   if (start.world && (start.declarations || start.off || start.memory || start.gcl)) {
     const world = join(REPO, "soak-runs", `world-${name}.json`);
     mkdirSync(dirname(world), { recursive: true });
@@ -240,6 +232,10 @@ const play = async ({ name, start, ticks, engine }) => {
     const v2 = { ...crafted.memory?.v2, ...start.memory, switches: { ...crafted.memory?.v2?.switches, ...Object.fromEntries((start.off ?? []).map((m) => [m, false])) } };
     writeFileSync(world, JSON.stringify({ ...crafted, gcl: start.gcl ?? crafted.gcl, memory: { ...crafted.memory, v2 }, declarations: start.declarations ?? crafted.declarations }));
     start = { ...start, world };
+  }
+  if (engine === "sim") {
+    const { world, room, node, seed, late, ended } = start;
+    return runSim(sim, { world: world && resolve(REPO, world), room, node, ticks, seed, late, ended, out: join(REPO, "soak-runs", name) });
   }
   if (start.world)
     return soak(["--world", resolve(REPO, start.world), "--seed", String(start.seed), "--ticks", String(ticks), "--run", name, "--bot", bot, ...(start.room ? ["--room", start.room] : []), ...(start.node ? ["--node", start.node] : []), ...(start.late ? ["--late", String(start.late)] : []), ...(start.invaders ? ["--invaders", start.invaders] : []), ...(start.wave ? ["--wave", start.wave] : []), ...(start.follow ? ["--follow", start.follow.join(",")] : []), ...(start.ended ? ["--ended"] : []), ...opponentsOf(name, start.opponents)]);

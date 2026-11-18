@@ -21,8 +21,11 @@ pub struct Map {
     pub rooms: Vec<(String, String)>,
     objects: Vec<Value>,
     time: i64,
-    /// Memory's text at the start: a node's declarations (`scripts/sim/node.mjs`), as a capture holds them.
+    /// Memory's text at the start: what `scripts/sim/run.mjs` stood as `simMemory`.
     pub memory: String,
+    /// The other players, by id, and our GCL: a capture's.
+    users: Vec<(String, String)>,
+    gcl: i64,
 }
 
 /// Each room's terrain as 2500 digits, row by row; rows or one string.
@@ -33,9 +36,14 @@ pub fn read(path: &str) -> Map {
         rooms: Vec::new(),
         objects: Vec::new(),
         time: world["time"].as_i64().unwrap_or(0),
-        memory: (world.get("declarations")).map_or_else(String::new, |d| {
-            json!({ "v2": { "declarations": d } }).to_string()
-        }),
+        memory: world
+            .get("simMemory")
+            .map_or_else(String::new, Value::to_string),
+        users: (world["users"].as_object().into_iter().flatten())
+            .filter(|(id, _)| *id != US && *id != INVADER && *id != KEEPER)
+            .map(|(id, name)| (id.clone(), name.as_str().unwrap_or(id).to_string()))
+            .collect(),
+        gcl: world["gcl"].as_i64().unwrap_or(0),
     };
     for room in world["rooms"].as_array().expect("rooms") {
         let name = room["name"].as_str().expect("a room's name").to_string();
@@ -90,8 +98,8 @@ impl Map {
     }
 
     /// Our user, the room's controller ours (at level 1 unless the world's already is), in safe mode
-    /// unless `ended`, and Spawn1 on `(x, y)` unless a spawn stands.
-    pub fn stand(&self, room: &str, (x, y): (i64, i64), seed: u64, ended: bool) -> World {
+    /// unless `ended` or the world says, and Spawn1 on Layout's tile unless a spawn stands.
+    pub fn stand(&self, room: &str, seed: u64, ended: bool) -> World {
         let t = self.time;
         let mut objects: Vec<Value> = Vec::new();
         for o in &self.objects {
@@ -102,14 +110,16 @@ impl Map {
                         let ours = json!({ "level": 1, "user": US, "progress": 0, "downgradeTime": null, "safeModeAvailable": 0 });
                         merge(&mut o, ours);
                     }
-                    let safe = if ended {
-                        0
-                    } else {
-                        t + i64::from(SAFE_MODE_DURATION)
-                    };
-                    merge(&mut o, json!({ "safeMode": safe }));
+                    if o.get("safeMode").is_none() {
+                        let safe = if ended {
+                            0
+                        } else {
+                            t + i64::from(SAFE_MODE_DURATION)
+                        };
+                        merge(&mut o, json!({ "safeMode": safe }));
+                    }
                 }
-                Some("controller") => merge(&mut o, json!({ "level": 0 })),
+                Some("controller") if o["user"].is_null() => merge(&mut o, json!({ "level": 0 })),
                 Some("source") => merge(&mut o, json!({ "invaderHarvested": 0 })),
                 _ => {}
             }
@@ -117,6 +127,8 @@ impl Map {
         }
         // A harness fixture: any id serves, and Spawn1 is a respawn's first spawn's name.
         if !self.in_room(room).any(|o| o["type"] == "spawn") {
+            let (x, y) = self.seat(room);
+            eprintln!("spawn at {x},{y}");
             objects.push(json!({ "_id": "f0000000000000000000ffff", "type": "spawn", "room": room, "x": x, "y": y,
             "name": "Spawn1", "user": US, "store": { "energy": SPAWN_ENERGY_START }, "storeCapacityResource": { "energy": SPAWN_ENERGY_CAPACITY },
             "hits": SPAWN_HITS, "hitsMax": SPAWN_HITS, "spawning": null, "notifyWhenAttacked": true }));
@@ -126,11 +138,20 @@ impl Map {
             "cpu": 100, "gcl": 0, "cpuAvailable": 10000, "active": 10000, "rooms": [], "money": 0, "power": 0 })
         };
         let mut us = user(US, USERNAME);
-        us["rooms"] = json!([room]);
+        let homes = objects
+            .iter()
+            .filter(|o| o["type"] == "controller" && o["user"] == US);
+        us["rooms"] = homes.map(|o| o["room"].clone()).collect();
+        us["gcl"] = json!(self.gcl);
+        let npcs = [us, user(INVADER, "Invader"), user(KEEPER, "Source Keeper")];
+        let users: Vec<_> = npcs
+            .into_iter()
+            .chain(self.users.iter().map(|(id, name)| user(id, name)))
+            .collect();
         let db = json!({
             "rooms": self.rooms.iter().map(|(n, _)| room_doc(n)).collect::<Vec<_>>(),
             "rooms.terrain": self.rooms.iter().map(|(n, t)| json!({ "room": n, "terrain": t })).collect::<Vec<_>>(),
-            "users": [us, user(INVADER, "Invader"), user(KEEPER, "Source Keeper")],
+            "users": users,
             "rooms.objects": objects,
         });
         let scenario = json!({ "kind": "global", "worldSeed": format!("0x{seed:x}"),

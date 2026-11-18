@@ -20,7 +20,14 @@ use crate::view::{
 };
 use crate::world::Map as World;
 
-const PAYING: &str = "spawn extension container storage link tower";
+const PAYING: [&str; 6] = [
+    "spawn",
+    "extension",
+    "container",
+    "storage",
+    "link",
+    "tower",
+];
 
 /// The level that first allows the kind: a structure's worth is scaled by it.
 fn unlock(kind: StructureType) -> f64 {
@@ -33,8 +40,10 @@ fn unlock(kind: StructureType) -> f64 {
 
 /// `soak-step.mjs` `reserveOf`: every tower firing through a creep's life, twice over.
 fn reserve(level: u32) -> f64 {
-    let towers =
-        f64::from(StructureType::Tower.controller_structures(level) * u32::from(level >= 4));
+    if level < 4 {
+        return 0.0;
+    }
+    let towers = f64::from(StructureType::Tower.controller_structures(level));
     towers * f64::from(TOWER_ENERGY_COST) * f64::from(CREEP_LIFE_TIME) * 2.0
 }
 
@@ -258,8 +267,10 @@ impl Sampler {
                         // The engine decays what a pile holds after this tick's drops, x, to
                         // now = x - ceil(x / 1000); x = 1000k and 1000k + 1 both leave 999k.
                         let lost = (now / f64::from(ENERGY_DECAY - 1)).ceil();
-                        self.ledger.decayed += lost * f64::from(u8::from(booked));
-                        line.decayed += lost * f64::from(u8::from(booked));
+                        if booked {
+                            self.ledger.decayed += lost;
+                            line.decayed += lost;
+                        }
                     }
                     "creep" if !ours(o) => hostile = true,
                     "tombstone" if self.graves.insert(text(o, atom!("_id")).into()) => {
@@ -271,7 +282,9 @@ impl Sampler {
                         let part = |p: Part| (f64::from(p.cost()) * rate).min(max);
                         let parsed = body.iter().filter_map(|p| p.parse().ok());
                         let left = parsed.map(part).sum::<f64>().floor();
-                        self.ledger.corpses += left * f64::from(u8::from(booked));
+                        if booked {
+                            self.ledger.corpses += left;
+                        }
                     }
                     "creep" => {
                         let body = parts(o);
@@ -361,7 +374,7 @@ impl Sampler {
                 "constructionSite" if mine => {
                     sites += 1;
                     *queued.entry(st.to_string()).or_default() += 1;
-                    if PAYING.split(' ').any(|k| k == st) {
+                    if PAYING.contains(&st) {
                         let at = *self
                             .placed
                             .entry(text(o, atom!("_id")).to_string())
@@ -507,8 +520,11 @@ impl Sampler {
         }
         let stock = self.ledger.stock;
         let reserve = reserve(level);
-        let credit = (reserve > 0.0).then(|| reserve * (stock / reserve).tanh());
-        let credit = credit.unwrap_or(stock);
+        let credit = if reserve > 0.0 {
+            reserve * (stock / reserve).tanh()
+        } else {
+            stock
+        };
         let worth = json!({ "controller": controller, "structures": structures, "fortification": fortification,
             "sites": sites, "stock": stock });
         let score = json!({ "controller": controller, "structures": scored, "fortification": fortification,
@@ -533,7 +549,9 @@ impl Sampler {
                         for (r, amount) in obj(o, atom!("store")).into_iter().flat_map(Obj::iter) {
                             let amount = amount.as_f64().unwrap_or(0.0);
                             held += amount;
-                            ores += amount * f64::from(u8::from(r.as_str() != "energy"));
+                            if r.as_str() != "energy" {
+                                ores += amount;
+                            }
                         }
                     }
                     _ => {}
