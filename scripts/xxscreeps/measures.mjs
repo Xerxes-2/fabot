@@ -21,21 +21,6 @@ const livesOf = (dir) =>
     .split("\n")
     .filter(Boolean)
     .map((l) => JSON.parse(l));
-// The first siege's set: the bodies of its ask, the one tick it cast the most
-// of them in (its name's first token the tick it was cast, the second its
-// engagement) — not a reinforcement, nor a cast left over from an earlier use
-// of the id (`bodies.jsonl`).
-const siegeSet = (dir) => {
-  const first = rowsOf(dir).filter((e) => e.kind === "siege").sort((a, b) => a.opened - b.opened)[0];
-  if (!first) return [];
-  const of = livesOf(dir).filter((b) => b.ours && b.name.split("-")[2] === String(first.id));
-  const castOf = (b) => Number(b.name.split("-")[1]);
-  const most = new Map();
-  for (const b of of) most.set(castOf(b), (most.get(castOf(b)) ?? 0) + 1);
-  const ask = [...most].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0];
-  return of.filter((b) => castOf(b) === ask);
-};
-const lastSiege = (dir) => rowsOf(dir).filter((e) => e.kind === "siege").sort((a, b) => a.opened - b.opened).at(-1);
 const scoutsOf = (dir) => livesOf(dir).filter((b) => b.ours && b.name.startsWith("scout-"));
 export const samplesOf = (dir) => readFileSync(join(dir, "samples.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
 // The bot's per-tick counts (`ARCHITECTURE.md` §9.3), as `soak-step` reads them off
@@ -204,13 +189,6 @@ export const measures = {
     return Object.keys(last.rooms).slice(1).reduce((n, r) => n + last.rooms[r].dug - (first.rooms[r]?.dug ?? 0), 0);
   },
   dug: (samples, a) => (at(samples, a.to ?? Infinity).rooms[a.room]?.dug ?? 0) - (at(samples, a.from ?? 0).rooms[a.room]?.dug ?? 0),
-  // Energy a side's towers spent: ours, or `who`'s an opponent's.
-  towerSpent: (samples, a) => {
-    const [first, last] = [at(samples, a.from ?? 0), at(samples, a.to ?? Infinity)];
-    return a.who ? (last.others[a.who]?.spent ?? 0) - (first.others[a.who]?.spent ?? 0) : last.ledger.tower - first.ledger.tower;
-  },
-  // The energy `who`'s towers hold at the window's end.
-  towerLeft: (samples, a) => at(samples, a.to ?? Infinity).others[a.who]?.fire ?? Infinity,
   upgrade: (samples, a) => upgradedIn(at(samples, a.to ?? Infinity), a) - upgradedIn(at(samples, a.from ?? 0), a),
   // (none ever: Infinity)
   extensionsBeforeContainer: (samples) => {
@@ -237,8 +215,6 @@ export const measures = {
   predictedWinsLost: (_, __, dir) => bugs(engagementsOf(dir)).length,
   // Engagements opened: an attack the bot never answered tests nothing.
   engagements: (_, __, dir) => engagementsOf(dir).length,
-  // Priced or not: a sweep that finds nothing opens unanswered.
-  engagementsOpened: (_, a, dir) => rowsOf(dir).filter((e) => (!a.kind || e.kind === a.kind) && (!a.room || e.room === a.room)).length,
   // Acts the engine refused (the soak's refusals.json), but an observer's
   // look at a room xxscreeps' map does not hold (-10), which no live map refuses.
   refusals: (_, __, dir) =>
@@ -249,36 +225,7 @@ export const measures = {
   // over the engagements of `kind` (none named: every one); none seen: 0.
   oscillation: (_, a, dir) =>
     Math.max(0, ...rowsOf(dir).filter((e) => !a.kind || e.kind === a.kind).flatMap((e) => Object.values(e.swung).map((s) => Math.round((100 * s.swings) / Math.max(1, s.ticks))))),
-  // The most ticks a siege took from its muster to its breach (one that never breached: Infinity),
-  // so its cast's wait on the economy's spawns is not read.
-  breachTicks: (_, __, dir) => Math.max(...rowsOf(dir).filter((e) => e.kind === "siege").map((e) => (e.mustered === undefined ? Infinity : (e.breached ?? (e.disengaged || e.closed === null ? Infinity : e.closed)) - e.mustered)), ...(rowsOf(dir).some((e) => e.kind === "siege") ? [] : [Infinity])),
-  // The rival's structures the last siege opened left standing in its room (none opened: Infinity),
-  // and the ticks from its fight's start until it first stood none (never: Infinity), which a rebuild after does not move.
-  razeLeft: (_, __, dir) => lastSiege(dir)?.left ?? Infinity,
-  razeTicks: (_, __, dir) => (lastSiege(dir)?.bare ?? Infinity) - (lastSiege(dir)?.fighting ?? 0),
-  // Over the first siege: the ramparts its room lost before its first target fell.
-  siegeRampartsLost: (_, __, dir) => rowsOf(dir).find((e) => e.kind === "siege")?.rampartsLost ?? Infinity,
-  // 1 when the first siege's first target is of `kind`, else 0.
-  siegeFirstTarget: (_, a, dir) => Number(rowsOf(dir).find((e) => e.kind === "siege")?.firstKind === a.kind),
-  // Its bodies that landed in a region the target is walled off from, but not a
-  // body that left the room the tick after landing on a border tile: those are a
-  // drain pair's excursions (soak-step's `entered`).
-  siegeWalledEntries: (_, __, dir) => Object.values(rowsOf(dir).find((e) => e.kind === "siege")?.entries ?? {}).filter((s) => s === "walled").length,
-  // The least hits a siege's target (a spawn, a core) ever stood at (none seen: Infinity).
-  siegeTargetLow: (_, __, dir) => Math.min(Infinity, ...rowsOf(dir).filter((e) => e.kind === "siege" && e.target).map((e) => e.target.low)),
-  // The oldest body of the first siege's set's life when the last of it stands: a spawn runs
-  // `SPAWN_TICKS_PER_PART` a part (none: -Infinity).
-  siegeOldestLife: (_, __, dir) => {
-    const set = siegeSet(dir);
-    if (!set.length) return -Infinity;
-    const stands = Math.max(...set.map((b) => b.first + 3 * b.body.length));
-    return 1500 - (stands - Math.min(...set.map((b) => b.first)));
-  },
-  // Over the sweeps, the rival's bodies killed and harvest denied (soak-step's `killed`, `denied`) less what they cast.
-  sweepNet: (_, __, dir) => rowsOf(dir).filter((e) => e.kind === "sweep").reduce((n, e) => n + (e.killed ?? 0) + (e.denied ?? 0) - e.cast, 0),
   bodiesLost: (_, __, dir) => rowsOf(dir).reduce((n, e) => n + (e.dead ?? 0), 0),
-  // Of those, the ones that died in their engagement's room with no set-mate within 3 (soak-step's `alone`).
-  diedAlone: (_, __, dir) => rowsOf(dir).reduce((n, e) => n + (e.alone ?? 0), 0),
   // Our bodies gone from the colony's rooms and their neighbours with life left: died, or walked
   // through a room the soak does not follow.
   bodiesOut: (_, __, dir) => {
@@ -286,18 +233,9 @@ export const measures = {
     const end = Math.max(...lives.map((b) => b.last));
     return new Set(lives.filter((b) => b.ours && b.last < end && b.ttl > 1).map((b) => b.name)).size;
   },
-  // Ticks our fight bodies stood in the rooms the soak follows once back from beyond them.
-  fightTicksBack: (_, __, dir) => {
-    const lives = livesOf(dir).filter((b) => b.ours && b.name.startsWith("fight-"));
-    const first = new Map(lives.map((b) => [b.name, Infinity]));
-    for (const b of lives) first.set(b.name, Math.min(first.get(b.name), b.first));
-    return lives.filter((b) => b.first > first.get(b.name)).reduce((n, b) => n + Object.values(b.rooms).reduce((m, k) => m + k, 0), 0);
-  },
   bodiesStruck: (_, __, dir) => livesOf(dir).reduce((n, b) => n + (b.ours ? (b.struck ?? 0) : 0), 0),
   // The damage struck on the body called `name`.
   struckOn: (_, a, dir) => livesOf(dir).reduce((n, b) => n + (b.name === a.name ? (b.struck ?? 0) : 0), 0),
-  // The most energy one engagement cast, of the bodies that stood in it.
-  mostCast: (_, __, dir) => Math.max(0, ...rowsOf(dir).map((e) => e.cast ?? 0)),
   faults: (_, __, dir) => readFileSync(join(dir, "faults.jsonl"), "utf8").split("\n").filter(Boolean).length,
   // The most levels the room stood below the highest it held before (`who`:
   // an opponent's room, else ours); a room lost stands at level 0.
@@ -322,7 +260,6 @@ export const measures = {
     const safe = seen.findIndex((s) => s.safeMode);
     return seen[0].creeps - Math.min(...seen.slice(0, safe < 0 ? seen.length : safe + 1).map((s) => s.creeps));
   },
-  creepsAtEnd: (samples, a) => sideOf(a)(at(samples, a.to ?? Infinity)).creeps,
   // A core engagement that loses sight must not drop its razer's asks.
   closedOnCore: (samples, _, dir) => rowsOf(dir).filter((e) => e.core && e.closed !== null && (at(samples, e.closed).rooms[e.room]?.cores ?? 0) > 0).length,
   // A wave's engagement left open holds its bodies and asks: the most ticks

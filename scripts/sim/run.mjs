@@ -21,12 +21,12 @@ export const SIM_START = ["room", "seed", "late", "node", "ended", "world", "dec
 export const SIM_MEASURES = new Set([
   "metric", "spendError", "decayedAway", "roadsLost", "dug", "upgrade", "build", "linked", "builtAtEnd", "sitesAtEnd",
   "buriedAtEnd", "unroadedAtEnd", "oldestPayingSite", "extensionsBeforeContainer", "sourceContainersAtEnd", "postedLinksAtEnd",
-  "levelsLost", "spawnsLost", "fewestCreeps", "creepsAtEnd", "safeModeAt", "rising", "outpostDug", "upgradeWhileQueued",
+  "levelsLost", "spawnsLost", "fewestCreeps", "safeModeAt", "rising", "outpostDug", "upgradeWhileQueued",
   "upgradeStall", "leastDowngrade", "coresAtEnd", "hostilesAtEnd", "homeHostileTicks", "floodsMost", "atlasMissRate",
   "threatLookupsMost", "refusals", "faults", "heldAtEnd", "oresAtEnd", "homeLevel", "claimSafeMode", "claimLevelOf", "claimsOwned",
   "rcl2ToTower", "claimSpawned", "claimersCast", "made", "ore", "boosted", "bounced", "stillLoaded", "carriedOut", "castsBelow",
   "spawnStuck", "scoutsCast", "scoutStill", "scoutTicksIn", "reserverOnPost", "castIn", "bodiesOut", "bodiesStruck", "struckOn",
-  "deathsError", "fightTicksBack", "attackersAtEnd", "creepsLostBeforeSafeMode", "towerSpent",
+  "deathsError", "attackersAtEnd", "creepsLostBeforeSafeMode",
 ]);
 
 /** Whether a `worlds/`-shaped world holds a spawn of ours: a capture, not a map. */

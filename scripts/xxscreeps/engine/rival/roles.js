@@ -1,103 +1,41 @@
 // A rival's behaviour lists, one per `opponent.js` role (§10.2).
-const { aim, filler, outhealed, repairer, softest, step } = require("shared");
+const FILL = [STRUCTURE_TOWER, STRUCTURE_SPAWN, STRUCTURE_EXTENSION];
+const step = (creep, goals, flee) => {
+  const path = PathFinder.search(creep.pos, goals, { flee, maxRooms: 1 }).path;
+  if (path.length > 0) creep.move(creep.pos.getDirectionTo(path[0]));
+};
+
+// The towers are topped up to within one volley's worth before any rampart is mended.
+function repairer(creep, room) {
+  if (creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0) {
+    if (creep.withdraw(room.storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) creep.moveTo(room.storage, { maxRooms: 1 });
+    return;
+  }
+  const fill = creep.pos.findClosestByRange(FIND_MY_STRUCTURES, { filter: (s) => FILL.includes(s.structureType) && s.store.getFreeCapacity(RESOURCE_ENERGY) > (s.structureType === STRUCTURE_TOWER ? 500 : 0) });
+  if (fill) {
+    if (creep.transfer(fill, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) creep.moveTo(fill, { maxRooms: 1 });
+    return;
+  }
+  const weakest = room.find(FIND_MY_STRUCTURES, { filter: (s) => s.structureType === STRUCTURE_RAMPART }).sort((a, b) => a.hits - b.hits || a.pos.y - b.pos.y)[0];
+  if (weakest && creep.repair(weakest) === ERR_NOT_IN_RANGE) creep.moveTo(weakest, { range: 3, maxRooms: 1 });
+}
 
 const active = (c, part) => c.getActiveBodyparts(part) > 0;
 const hurt = (c) => c.hits < c.hitsMax;
 
-// keep: a room-holder; { focus } names its towers' aim, { safeMode: "extension" }
-// spends safe mode once an extension is struck and "always" on its first tick,
-// { fire } their volley: "outheal" holds it unless it beats the heal the foe's
-// own side gives it, "never" holds every one.
-function keep(config) {
+function keep() {
   for (const room of Object.values(Game.rooms)) {
     if (!room.controller?.my) continue;
     const foes = room.find(FIND_HOSTILE_CREEPS);
-    // One dismantled whole in a tick is seen only as one fewer.
-    const extensions = room.find(FIND_MY_STRUCTURES, { filter: (s) => s.structureType === STRUCTURE_EXTENSION });
-    const struck = extensions.some((s) => s.hits < s.hitsMax) || extensions.length < (Memory.extensions?.[room.name] ?? 0);
-    Memory.extensions = { ...Memory.extensions, [room.name]: extensions.length };
-    if (config.safeMode === "always" || (config.safeMode === "extension" && struck)) room.controller.activateSafeMode();
-    const towers = room.find(FIND_MY_STRUCTURES, { filter: (s) => s.structureType === STRUCTURE_TOWER });
-    const charged = towers.filter((t) => t.store.getUsedCapacity(RESOURCE_ENERGY) >= 10);
-    if (config.fire === "outheal") {
-      const foe = charged.length && (config.focus === "soft" ? softest(charged[0], foes) : charged[0].pos.findClosestByRange(foes));
-      if (foe && !outhealed(charged, foe, foes)) for (const tower of charged) tower.attack(foe);
-    } else if (config.fire !== "never") {
-      for (const tower of towers) {
-        const foe = aim(tower, foes, config.focus);
-        if (foe) tower.attack(foe);
-      }
+    for (const tower of room.find(FIND_MY_STRUCTURES, { filter: (s) => s.structureType === STRUCTURE_TOWER })) {
+      const foe = tower.pos.findClosestByRange(foes);
+      if (foe) tower.attack(foe);
     }
     const mine = room.find(FIND_MY_CREEPS);
     for (const creep of mine) repairer(creep, room);
     const spawn = room.find(FIND_MY_SPAWNS).find((s) => !s.spawning);
     if (spawn && mine.length === 0 && room.energyAvailable >= 3 * 200) spawn.spawnCreep([].concat(...Array(3).fill([WORK, CARRY, MOVE])), `repairer-${Game.time}`);
   }
-}
-
-// remote: a room working { remotes: [room, …] }, its home among them to mine its
-// own source; { roles } the roles it keeps (default all), { shift } the ticks
-// each remote is worked alone in turn (default all at once).
-const BODIES = {
-  filler: [CARRY, CARRY, CARRY, CARRY, MOVE, MOVE],
-  miner: [WORK, WORK, WORK, WORK, WORK, MOVE, MOVE, MOVE],
-  hauler: [...Array(10).fill(CARRY), ...Array(5).fill(MOVE)],
-  reserver: [CLAIM, CLAIM, MOVE, MOVE],
-};
-const to = (c, room) => c.moveTo(new RoomPosition(25, 25, room), { range: 20 });
-
-function workAt(c, find, act) {
-  const target = c.room.name === c.memory.remote && find(c);
-  if (!target) to(c, c.memory.remote);
-  else if (act(c, target) === ERR_NOT_IN_RANGE) c.moveTo(target);
-}
-
-const miner = (creep) => workAt(creep, (c) => c.pos.findClosestByRange(FIND_SOURCES), (c, source) => c.harvest(source));
-const reserver = (creep) => workAt(creep, (c) => c.room.controller, (c, controller) => c.reserveController(controller));
-
-function hauler(c, home) {
-  if (c.store.getFreeCapacity() === 0) c.memory.full = true;
-  if (c.store.getUsedCapacity() === 0) c.memory.full = false;
-  if (c.memory.full) {
-    if (c.room.name !== home.name) return to(c, home.name);
-    return filler(c, home);
-  }
-  if (c.room.name !== c.memory.remote) return to(c, c.memory.remote);
-  const pile = c.room.find(FIND_DROPPED_RESOURCES).sort((a, b) => b.amount - a.amount)[0];
-  if (pile && c.pickup(pile) === ERR_NOT_IN_RANGE) c.moveTo(pile);
-}
-
-const onEdge = (p) => p.x === 0 || p.x === 49 || p.y === 0 || p.y === 49;
-
-// A body the rival did not spawn (a soak's raid) guards the room it stands in.
-function guard(c) {
-  const foe = c.pos.findClosestByRange(FIND_HOSTILE_CREEPS);
-  const patient = c.pos.findInRange(FIND_MY_CREEPS, 1).sort((a, b) => a.hits / a.hitsMax - b.hits / b.hitsMax)[0];
-  if (patient.hits < patient.hitsMax) c.heal(patient);
-  if (!foe) return;
-  c.rangedAttack(foe);
-  c.moveTo(foe, { maxRooms: 1, range: 1 });
-}
-
-function remote(config) {
-  const remotes = config.remotes ?? [];
-  const roles = ["filler", ...(config.roles ?? ["miner", "hauler", "reserver"])];
-  const home = Object.values(Game.rooms).find((r) => r.controller?.my);
-  if (!home) return;
-  const foes = home.find(FIND_HOSTILE_CREEPS);
-  for (const tower of home.find(FIND_MY_STRUCTURES, { filter: (s) => s.structureType === STRUCTURE_TOWER })) {
-    const foe = aim(tower, foes);
-    if (foe) tower.attack(foe);
-  }
-  const creeps = Object.values(Game.creeps);
-  for (const c of creeps) {
-    ({ filler, miner, hauler, reserver }[c.memory.role] ?? guard)(c, home);
-  }
-  const spawn = home.find(FIND_MY_SPAWNS).find((s) => !s.spawning);
-  const worked = config.shift ? [remotes[Math.floor(Game.time / config.shift) % remotes.length]] : remotes;
-  for (const role of roles)
-    for (const remote of role === "filler" ? [home.name] : worked.filter((r) => role !== "reserver" || r !== home.name))
-      if (spawn && !creeps.some((c) => c.memory.remote === remote && c.memory.role === role)) return spawn.spawnCreep(BODIES[role], `${role}-${remote}-${Game.time}`, { memory: { role, remote } });
 }
 
 // raid: a gun kites a swing inside 2 and holds 3 off, a swing closes and never
@@ -151,31 +89,6 @@ function raid(config) {
   }
 }
 
-// drain: { target }, bodies one tile inside its edge healing each other, home
-// under half hits and back once healed.
-const inward = (p) => (p.x === 0 ? RIGHT : p.x === 49 ? LEFT : p.y === 0 ? BOTTOM : TOP);
 const toward = (creep, room) => creep.moveTo(new RoomPosition(25, 25, room), { reusePath: 0 });
 
-function mend(creep) {
-  const patient = creep.pos.findInRange(FIND_MY_CREEPS, 3).filter(hurt).sort((a, b) => a.hits - b.hits)[0];
-  if (!patient) return;
-  if (creep.pos.isNearTo(patient)) creep.heal(patient);
-  else creep.rangedHeal(patient);
-}
-
-function drain(config) {
-  const home = Object.values(Game.spawns)[0].room.name;
-  for (const creep of Object.values(Game.creeps)) {
-    mend(creep);
-    if (creep.room.name === config.target) {
-      if (creep.hits < creep.hitsMax / 2) toward(creep, home);
-      else if (onEdge(creep.pos)) creep.move(inward(creep.pos));
-    } else if (creep.hits === creep.hitsMax) toward(creep, config.target);
-    else if (onEdge(creep.pos)) creep.move(inward(creep.pos));
-  }
-}
-
-// pass: an ally's bodies stand where they are and strike nothing.
-const pass = () => {};
-
-module.exports = { drain, keep, pass, raid, remote };
+module.exports = { keep, raid };

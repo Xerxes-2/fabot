@@ -71,7 +71,6 @@ const ours = await User.findUserByName(db, username);
 const svc = getServiceChannel(shard);
 const memory = JSON.parse((await loadUserMemoryString(shard, ours)) || "{}");
 const claimed = (memory.v2?.declarations?.claims ?? []).map((o) => o.room);
-const full = memory.v2?.switches?.economy === false;
 const roomNames = [...new Set([...homes, ...(memory.v2?.declarations?.outposts ?? []).map((o) => o.room), ...claimed, ...followArg.split(",").filter(Boolean)])];
 const waves = wavesArg
   .split(",")
@@ -559,86 +558,10 @@ function sample(t, time, room, user = ours) {
   return row;
 }
 
-// What `prediction.mjs` reads an engagement's outcome from; `cast`: the energy
-// of the bodies it asked that stood in it; `core`: an Invader core was in its group.
-const LETTER_COST = Object.fromEntries(Object.entries(PART_COST).map(([t, c]) => [t === "claim" ? "K" : t[0].toUpperCase(), c]));
+// What `prediction.mjs` reads an engagement's outcome from; `core`: an Invader core was in its group.
 const open = new Map();
-// Energy the towers a rival holds spent, by user id: 10 a shot (ARCHITECTURE.md
-// §10.2's adversaries, where a drain is priced against what it draws).
-const burned = new Map();
-function burnt(rooms) {
-  for (const room of rooms) {
-    const towers = new Map([...room["#objects"]].filter((o) => o.structureType === "tower" && o["#user"] && o["#user"] !== ours).map((o) => [o.id, o["#user"]]));
-    for (const e of room["#eventLog"] ?? [])
-      if ([ATTACK, HEAL, REPAIR].includes(e.event ?? e._$Variant) && towers.has(e.objectId))
-        burned.set(towers.get(e.objectId), (burned.get(towers.get(e.objectId)) ?? 0) + 10);
-  }
-}
-// What a siege razes (`fight/kinds/siege.rs` rank_of): the rival's left in its room.
-const RAZED = new Set(["tower", "spawn", "extension", "storage", "terminal", "link", "lab", "extractor", "factory", "powerSpawn", "nuker", "observer"]);
-const razeLeft = (objects, room) => objects.filter((o) => o.pos.roomName === room && RAZED.has(o.structureType) && o["#user"] && o["#user"] !== ours).length;
-// Whether a walk from `from` that breaks no barrier reaches beside `at`.
-function holds(room, inRoom, from, at) {
-  const terrain = world.map.getRoomTerrain(room);
-  const walls = inRoom.filter((o) => o["#lookType"] === "structure" && !["road", "container"].includes(o.structureType) && !(o.structureType === "rampart" && o["#user"] === ours));
-  const blocked = new Set(walls.map((o) => o.pos.x * 50 + o.pos.y));
-  const seen = new Set([from.x * 50 + from.y]);
-  const queue = [{ x: from.x, y: from.y }];
-  while (queue.length) {
-    const p = queue.pop();
-    if (Math.max(Math.abs(p.x - at.x), Math.abs(p.y - at.y)) <= 1) return true;
-    for (let dx = -1; dx <= 1; dx++)
-      for (let dy = -1; dy <= 1; dy++) {
-        const [x, y] = [p.x + dx, p.y + dy];
-        if (x < 0 || y < 0 || x > 49 || y > 49 || seen.has(x * 50 + y) || terrain.get(x, y) & 1 || blocked.has(x * 50 + y)) continue;
-        seen.add(x * 50 + y);
-        queue.push({ x, y });
-      }
-  }
-  return false;
-}
-// Each body's entry into a siege's room, by the region it landed in: "target"
-// when it holds the target, else "walled" — but a body that landed in another
-// region on a border tile and left the room the next tick is a bouncer's
-// excursion, not an entry (the drain, ARCHITECTURE.md §6.2), so its "edge"
-// waits one tick for whether it stays or walks further.
 const onEdge = (p) => p.x === 0 || p.x === 49 || p.y === 0 || p.y === 49;
-function entered(rec, e, inRoom, bodies) {
-  const entries = (rec.entries ??= {});
-  for (const name of Object.keys(entries).filter((n) => entries[n] === "edge")) {
-    if (bodies.some((b) => b.name === name)) entries[name] = "walled";
-    else delete entries[name];
-  }
-  for (const b of bodies.filter(() => rec.firstAt && rec.razed === undefined))
-    entries[b.name] ??= holds(e.room, inRoom, b.pos, rec.firstAt) ? "target" : onEdge(b.pos) ? "edge" : "walled";
-}
-// A siege's first target and its kind and the tick it fell (`razed`), and the
-// ramparts its room lost before.
-function breaching(rec, e, objects, t) {
-  const inRoom = objects.filter((o) => o.pos.roomName === e.room);
-  const ramparts = inRoom.filter((o) => o.structureType === "rampart" && o["#lookType"] === "structure").length;
-  rec.first ??= e.target;
-  rec.ramparts ??= ramparts;
-  const target = inRoom.find((o) => o.id === rec.first);
-  if (target) [rec.firstAt, rec.firstKind] = [{ x: target.pos.x, y: target.pos.y }, target.structureType];
-  else if (rec.firstAt) rec.razed ??= t;
-  if (rec.razed === undefined) rec.rampartsLost = rec.ramparts - ramparts;
-  entered(rec, e, inRoom, inRoom.filter((o) => o.body !== undefined && o["#user"] === ours && e.ours.includes(o.name)));
-}
 const engagementsOut = fs.openSync(join(out, "engagements.jsonl"), "w");
-// A sweep's `killed`: each rival body struck dead in its room (a tombstone
-// with life left, once), at its body's share of that life.
-const struck = new Set();
-const killedIn = (objects, room) =>
-  objects
-    .filter((o) => o["#lookType"] === "tombstone" && o.pos.roomName === room && !struck.has(o.id))
-    .filter((o) => ![ours, kInvaderUserId].includes(o["#creep"].user) && o["#creep"].ticksToLive > 1)
-    .reduce((n, o) => {
-      struck.add(o.id);
-      const body = o["#creep"].body;
-      const life = body.includes("claim") ? 600 : 1500;
-      return n + Math.floor((body.reduce((sum, p) => sum + PART_COST[p], 0) * Math.min(life, o["#creep"].ticksToLive)) / life);
-    }, 0);
 const allRooms = await shard.data.sMembers("rooms");
 async function standing(ids) {
   for (const name of allRooms) {
@@ -648,7 +571,7 @@ async function standing(ids) {
   return false;
 }
 async function closed(e, t) {
-  const { members, casts, swing, sources, mourned, ...rest } = e;
+  const { members, swing, ...rest } = e;
   const swung = Object.fromEntries(Object.entries(swing).map(([n, { ticks, swings }]) => [n, { ticks, swings }]));
   fs.writeSync(engagementsOut, JSON.stringify({ ...rest, swung, closed: t, outlived: t === null || (await standing(members)) }) + "\n");
 }
@@ -675,30 +598,13 @@ function fell(rec, objects) {
   for (const o of gravesOf(rec, objects)) rec.fell.add(o.id);
   rec.dead = Math.max(rec.dead, rec.fell.size);
 }
-// `alone`: its bodies that died in its room with no set-mate standing, or
-// falling that tick, within 3: a reinforcement picked off on its own.
-function lone(rec, room, objects, bodies) {
-  const graves = gravesOf(rec, objects).filter((o) => o.pos.roomName === room);
-  rec.mourned ??= new Set();
-  for (const g of graves.filter((g) => !rec.mourned.has(g.id))) {
-    rec.mourned.add(g.id);
-    const mates = [...bodies, ...graves.filter((o) => o !== g && o.deathTime === g.deathTime)];
-    if (!mates.some((o) => o.pos.roomName === room && near(o.pos, g.pos, 3))) rec.alone = (rec.alone ?? 0) + 1;
-  }
-}
 async function engaged(t, time, rooms) {
   const fight = JSON.parse((await loadUserMemoryString(shard, ours)) || "{}").v2?.fight ?? {};
   const now = new Set();
-  const watched = new Map();
   for (const e of fight.engagements ?? []) {
     now.add(e.id);
-    const rec = open.get(e.id) ?? { id: e.id, kind: e.kind ?? "defend", room: e.room, opened: t, members: new Set(), ours: new Set(), rooms: new Set(), fell: new Set(), swing: {}, answered: false, gaveUp: false, disengaged: false, contact: null, seen: null, casts: new Map(), cast: 0 };
+    const rec = open.get(e.id) ?? { id: e.id, kind: e.kind ?? "defend", room: e.room, opened: t, members: new Set(), ours: new Set(), rooms: new Set(), fell: new Set(), swing: {}, answered: false, gaveUp: false, disengaged: false, contact: null, seen: null };
     open.set(e.id, rec);
-    for (const c of (fight.casts ?? []).filter((c) => c.engagement === e.id)) rec.casts.set(c.name, c.body);
-    for (const n of e.ours.filter((n) => rec.casts.has(n))) {
-      rec.cast += [...rec.casts.get(n)].reduce((sum, p) => sum + LETTER_COST[p], 0);
-      rec.casts.delete(n);
-    }
     for (const m of (fight.groups ?? []).find((g) => g.id === e.group)?.members ?? []) rec.members.add(m);
     rec.predicted = e.predicted;
     rec.dead = Math.max(e.lost, rec.fell.size);
@@ -707,53 +613,24 @@ async function engaged(t, time, rooms) {
     rec.answered ||= !e.unanswered;
     rec.gaveUp ||= rec.answered && e.unanswered;
     rec.disengaged ||= e.phase === "disengaging";
-    if (e.phase !== "forming") rec.mustered ??= t;
-    if (e.phase === "fighting") rec.fighting ??= t;
-    if (e.order?.length && !e.unanswered) rec.order ??= e.order;
-    if (rec.kind === "siege" && rec.order && !e.order?.length && !e.unanswered) rec.breached ??= t;
-    // A siege's room is the rival's, which no sample follows.
+    // An engagement's room may be one no sample follows.
     const rival = roomNames.includes(e.room) ? null : await shard.loadRoom(e.room, time);
-    if (rival) watched.set(e.room, rival);
     const seen = rival ? [...rooms, rival] : rooms;
     const objects = seen.flatMap((r) => [...r["#objects"]]);
-    if (rec.kind === "siege") {
-      rec.left = razeLeft(objects, e.room);
-      if (rec.left === 0 && rec.fighting !== undefined) rec.bare ??= t;
-      breaching(rec, e, objects, t);
-    }
-    if (rec.kind === "sweep") {
-      rec.killed = (rec.killed ?? 0) + killedIn(objects, e.room);
-      // `denied`: while a body of it stands in its room, each source's yield a tick less what was dug.
-      const held = objects.some((o) => o["#user"] === ours && e.ours.includes(o.name) && o.pos.roomName === e.room);
-      for (const s of objects.filter((o) => o["#lookType"] === "source" && o.pos.roomName === e.room)) {
-        const was = rec.sources?.get(s.id) ?? s.energy;
-        (rec.sources ??= new Map()).set(s.id, s.energy);
-        if (held) rec.denied = (rec.denied ?? 0) + Math.round(s.energyCapacity / 300 - Math.max(0, was - s.energy));
-      }
-    }
-    // The least hits a siege's target (a spawn, a core) has stood at: not a
-    // group member, so nothing else reads it.
-    if (e.target !== undefined) {
-      const target = objects.find((o) => o.id === e.target);
-      if (target !== undefined) rec.target = { low: Math.min(rec.target?.low ?? Infinity, target.hits) };
-    }
     const theirs = objects.filter((o) => rec.members.has(o.id));
     if (theirs.length) rec.seen = t;
     rec.core ||= theirs.some((o) => o.structureType === "invaderCore");
     const close = objects.some((o) => e.ours.includes(o.name) && o["#user"] === ours && theirs.some((h) => near(h.pos, o.pos, 3) && h.pos.roomName === o.pos.roomName));
     if (rec.contact === null && (close || theirs.some((h) => h.hits < h.hitsMax))) rec.contact = t;
     const bodies = objects.filter((o) => o.body !== undefined && o["#user"] === ours && e.ours.includes(o.name));
-    lone(rec, e.room, objects, bodies);
     swinging(rec, bodies, t, seen);
   }
   for (const [id, rec] of open)
     if (!now.has(id)) {
       open.delete(id);
-      if (rec.kind === "siege") rec.left = razeLeft([...(await shard.loadRoom(rec.room, time))["#objects"]], rec.room);
       for (const r of rec.rooms) fell(rec, [...(await shard.loadRoom(r, time))["#objects"]]);
       await closed(rec, t);
     }
-  burnt(watched.values());
 }
 
 // The most ticks a body of ours stood on one tile carrying energy, acting on
@@ -889,7 +766,6 @@ for (let t = 0; t < ticks; t++) {
     await pushIntentsForRoomNextTick(shard, core.room, kInvaderUserId, { local: { soakCore: [[]] }, internal: true });
     process.stderr.write(`t${t} core in ${core.room}\n`);
   }
-  if (full) for (const home of homes) await pushIntentsForRoomNextTick(shard, home, kInvaderUserId, { local: { soakFull: [[]] }, internal: true });
   if (room["#level"] !== levels.at(-1)?.rcl) levels.push({ t, time, rcl: room["#level"] });
   if (t % every === 0 || t === ticks - 1) {
     const row = sample(t, time, room);
@@ -911,10 +787,6 @@ for (let t = 0; t < ticks; t++) {
         rcl: room["#user"] === o.id ? room["#level"] : 0,
         spawns: objects.filter((x) => x.structureType === "spawn").length,
         creeps: objects.filter((x) => x.body !== undefined).length,
-        ramparts: objects.filter((x) => x.structureType === "rampart").length,
-        // Its towers' energy, and every shot they have spent.
-        fire: objects.filter((x) => x.structureType === "tower").reduce((n, t) => n + energyIn(t), 0),
-        spent: burned.get(o.id) ?? 0,
         home: room["#user"] === o.id ? summary(sample(t, time, room, o.id)) : null,
       };
     }

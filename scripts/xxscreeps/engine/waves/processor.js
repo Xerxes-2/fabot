@@ -7,7 +7,6 @@
 // `soakRaid` stands a scripted raid (`raid/`) the same way: the owner's bodies
 // on the exit tiles of the sides given, or one tile inside them when `inside`,
 // since the engine moves a body on an exit tile to the next room.
-// `soakFull` stands a room's spawns and extensions full, the economy's refill when it is switched off.
 import { registerIntentProcessor } from "xxscreeps/engine/processor/index.js";
 import { Game } from "xxscreeps/game/index.js";
 import { FIND_EXIT } from "xxscreeps/game/constants/index.js";
@@ -37,14 +36,6 @@ registerIntentProcessor(Room, "soakWave", { internal: true }, (room, context, op
     if (exits[i]) room["#insertObject"](create(exits[i], role, size, Game.time + CREEP_LIFE_TIME));
   });
   context.setActive();
-});
-
-registerIntentProcessor(Room, "soakFull", { internal: true }, (room, context) => {
-  for (const o of room["#objects"])
-    if ((o.structureType === "spawn" || o.structureType === "extension") && o["#user"] === room["#user"] && o.store.getFreeCapacity("energy") > 0) {
-      o.store["#add"]("energy", o.store.getFreeCapacity("energy"));
-      context.didUpdate();
-    }
 });
 
 registerIntentProcessor(Room, "soakRaid", { internal: true }, (room, context, owner, bodies, open, inside) => {

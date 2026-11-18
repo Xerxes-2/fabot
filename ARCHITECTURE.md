@@ -1042,12 +1042,6 @@ each job over.
   costs its last N ticks; the bundle under test runs on from it as a deploy
   would), its ticks and bounds on what the soak measured, scenarios on one
   start sharing one soak; `jj ship` runs those of the modules a change touches.
-  The operator's rules are a scenario like any other:
-  `tactics-forbid-stands-the-siege-down` is a declared siege whose tactic a
-  rule forbids, which prices nothing it may fight and casts nothing.
-  A tactic's scenario runs with the economy switched off (`"off"`), its bank
-  stood full each tick, so an economy change never moves its fight; one that
-  tests the fight with the colony (defend, siege, outposts) keeps it on.
 - **Soak.** The real sector's terrain and rooms, from one spawn for thousands
   of ticks: income curve, expansion cadence, losses to NPC waves, CPU curve.
   ✅ Season 11's own map (`season-world.mjs`) stands in for the template's
@@ -1133,11 +1127,9 @@ each job over.
   Overmind and The International need a build). NPCs do not hold a room;
   this is the only offline test offence has. ✅ A scenario seats opponents
   beside ours (`start.opponents`: a bundle or a bot directory, each in its
-  own room; ours without the engine's safe mode); `two-v2-neighbours` seats
-  a second v2, a smoke test until v2 has an offensive kind. The scripted
+  own room; ours without the engine's safe mode). The scripted
   rivals are one library, `engine/rival/`: `opponent.js`'s { role } picks a
-  behaviour list — keep, remote, raid, drain, pass — over its own
-  keys, and the roles share one tower aim, one walk and one room economy. A
+  behaviour list — keep, raid — over its own keys. A
   raid's bodies and boosts are stood on our room's edge at its tick
   (`opponents[].raid`). Held is: no level or spawn lost and the raid gone
   by the window's end (`defend-holds-*`: Invader waves on N3, TooAngel's
@@ -1149,14 +1141,10 @@ each job over.
   (`engine/seat.js`): read off the machine, they throttle it by load. A run
   fetches only with `--fetch`; without the tarball in the cache that
   scenario is skipped, never failed, and `jj ship` never reaches the registry. Hivemind,
-  fetched the same way, holds the declared-room world against a siege and
-  a sweep, both the offence target and so nightly: `--nightly` runs them,
-  and they join the daily library once they pass. The International is
+  fetched the same way, contests soak:many's outposts. The International is
   built from source in the cache (`soak.mjs`'s `fetch.json` `build`). The library fails to
-  load while a fight kind (`siege-`, `sweep-`, `defend-`) meets no
-  open-source bot. ❓ Both fail: reinforcements walk into Hivemind's towers
-  alone, and three keep sieges hold their bounds only while its towers
-  strike the nearest foe. ❓ self-play with an attacking v2.
+  load while no `defend-` scenario meets an open-source bot. ❓ self-play
+  with an attacking v2.
 - **Exchange calibration** (§10.1), generated: `npm run exchange`.
 
 Coverage, read off xxscreeps 0.2.1's mods and changelog (2026-10-10): invader
@@ -1225,7 +1213,7 @@ settles which is right, case by case; neither engine is presumed.
   a start with an opponent that plays (a rival bot, a raid; a scripted
   `keep` rival only holds its room, which sim stands with no code),
   scripted `invaders`, `wave` or `core`, a resumed world (`at`, `bundle`),
-  or the start's own `off`, `unsafe`, `withdrawn`; a capture's intel segments; a node sim
+  or the start's own `unsafe`; a capture's intel segments; a node sim
   does not stand (`labStock`); and a measure `SIM_MEASURES` does not name.
   The soak's `decay.jsonl` and `engagements.jsonl` are written empty. Its
   `waves` and `lost` are 0 because sim pushes no scripted wave and loses no
@@ -1344,7 +1332,7 @@ empty:
 | M1 economy | the rest of v1's economy mechanisms | the seat-extreme soak beats v1's bundle in both classes, on a second seed |
 | M1b outposts | declared outposts: reservation, remote harvest and haul, before M2 because RCL6+ structures spend more than a home's two sources give. No fighting before M3: a player's armed hostile in an outpost stands it down while it can reach the room's work — its sources and containers — and no longer; an Invader's raid, whose only aim is that work, stands it down on sight; a stronghold core stands it down outright; and one last seen in a room gone blind stands it down for its life (`sightings`; the owner's choice over porting a guard early, and over a claimer probing a blind room; the split by owner is the owner's too, 2026-10-20, as in v1's ADR 0043: an Invader's raid is read to its life, a player's to where it stands); M3's `Defend` walks its set there once it stands, which brings the room back in sight | node E1 (with timed Invader waves): each outpost nets positive after its bodies and its stand-downs |
 | M2 structures | node builder (N1–N4) ✅, links ✅ (the controller's and the longest-way source's first: +5–17k worth over 20k ticks on N4; hub-first broke even, as v1's arithmetic said), node N5 ✅; labs ✅ (the declared cluster reacts toward its targets, and the boost a cast asks for in its name is its sink, §6.5); factory and the RCL8 set wait for a sink (owner's call: one room mines one ore, a reaction needs two, offline has no market) | links: the node beats the economy without them; the rest: judged with their sink, M3's boosts or several colonies |
-| M3 defence | `Exchange` ✅, `Defend` ✅ (scenario `defend-kills-home-raid`), the first tactics ✅, casting ✅, the opponents harness ✅ (`two-v2-neighbours`), scripted raids and TooAngel held ✅ (`defend-holds-*`) | self-play and the fixed opponents held; the prediction error within bound (§10.1) |
+| M3 defence | `Exchange` ✅, `Defend` ✅ (scenario `defend-kills-home-raid`), the first tactics ✅, casting ✅, the opponents harness ✅, scripted raids and TooAngel held ✅ (`defend-holds-*`) | self-play and the fixed opponents held; the prediction error within bound (§10.1) |
 | M4 live | v2 replaces v1 | ❓ the owner decides from progress |
 | M5 reach | `Strategy` over many colonies, the offensive kinds | the end in §0 |
 

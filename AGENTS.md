@@ -138,7 +138,9 @@ Docs:
   what an offence pays is proven against a bot that spawns, works and fights
   back. A scripted rival (`engine/rival`'s roles)
   checks only that the plan runs as planned (raze order, positioning, gate
-  tile), and its `why` says why a real bot does not fit.
+  tile), and its `why` says why a real bot does not fit. While fight is
+  paused, offence scenarios live on the `fight-scenarios` bookmark and come
+  back with it.
 - An `Exchange` change is verified by the prediction error on the generated
   set not rising (§10.1).
 - An economy change is read off the soak's curves over the long horizon

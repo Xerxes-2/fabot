@@ -14,8 +14,7 @@
 //   name    the scenarios to run (default all but the nightly ones), by file name
 //   --modules  also the scenarios naming any of these modules (directories under core)
 //   --list  print the selection, each with its engine, and run nothing
-//   --nightly  all of them, with those marked "nightly": the offence target,
-//           kept out of `jj ship`
+//   --nightly  all of them, with those marked "nightly", kept out of `jj ship`
 //   --fetch  fetch the tarball a rival's `fetch.json` names; without it a
 //           scenario whose rival is not cached is SKIPped, never failed
 //   --bot   the bundle (default dist/main.js)
@@ -31,7 +30,7 @@
 // A scenario file: { "why": the invariant, "modules": the core modules it tests, "nightly"?, "xxscreeps"?: why it stays off sim, "start": { "room", "seed",
 // "late"?, "node"?, "invaders"? (soak's --invaders), "wave"? (soak's --wave), "core"? (soak's --core), "unsafe"?, "ended"?, "at"?, "bundle"?,
 // "opponents"? (soak's --opponents) } or { "world": a capture-shaped file
-// (soak's --world; crafted ones under worlds/), "seed", "room"?, "node"?, "late"? (a world with no home of ours, as a recipe's), "ended"?, "invaders"?, "wave"?, "opponents"? (the world's own users), "declarations"? (in place of the world's), "memory"? (keys of Memory.v2 beside the world's), "gcl"? (in place of the world's), "withdrawn"? (rooms whose open siege the owner has just withdrawn), "off"? (modules switched off from the first tick, Memory.v2.switches; "economy" off, our spawns and extensions stand full) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"?, "room"?, "kind"?, "name"?, "act"? }] };
+// (soak's --world; crafted ones under worlds/), "seed", "room"?, "node"?, "late"? (a world with no home of ours, as a recipe's), "ended"?, "invaders"?, "wave"?, "opponents"? (the world's own users), "declarations"? (in place of the world's), "memory"? (keys of Memory.v2 beside the world's), "gcl"? (in place of the world's) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"?, "room"?, "kind"?, "name"?, "act"? }] };
 // a measure is one of `measures` below, read off the soak's output over ticks
 // [from, to), counted from the run's first tick; { "metric": a name the bot's
 // metrics carry (`core/observe/metrics.rs`), "room"? } bounds its worst
@@ -83,20 +82,11 @@ const library = readdirSync(LIBRARY)
 for (const s of library) s.assert = withAlways(s.assert);
 for (const s of library)
   if (!s.modules?.length || s.modules.some((m) => !modules.includes(m))) fail(`${s.name}: "modules" must name some of ${modules.join(", ")}`);
-// A scripted rival shares our blind spots: each fight kind meets an open-source bot at least once.
+// A scripted rival shares our blind spots: the defence meets an open-source bot at least once.
 const OPEN_SOURCE = ["scripts/xxscreeps/engine/hivemind", "scripts/xxscreeps/engine/tooangel"];
-const FIGHT_KINDS = ["siege", "sweep", "defend"];
-for (const kind of FIGHT_KINDS)
-  if (!library.some((s) => s.name.startsWith(`${kind}-`) && s.start.opponents?.some((o) => OPEN_SOURCE.includes(o.bot)))) fail(`no ${kind}-* scenario seats an open-source bot (${OPEN_SOURCE.join(", ")})`);
-// A siege opens only on a declared room, so a crafted world holding one open
-// on another is a state no run reaches, unless the owner withdrew it (`withdrawn`).
-for (const { name, start } of library.filter((s) => s.start.world)) {
-  const world = JSON.parse(readFileSync(resolve(REPO, start.world), "utf8"));
-  const declared = [...(start.declarations ?? world.declarations ?? {}).sieges ?? [], ...(start.withdrawn ?? [])];
-  for (const e of world.memory?.v2?.fight?.engagements ?? [])
-    if (e.kind === "siege" && !declared.includes(e.room)) fail(`${name}: ${start.world} holds a siege open on ${e.room}, which its declarations do not name`);
-}
-for (const s of library.filter((s) => FIGHT_KINDS.some((k) => s.name.startsWith(`${k}-`))))
+const defends = library.filter((s) => s.name.startsWith("defend-"));
+if (!defends.some((s) => s.start.opponents?.some((o) => OPEN_SOURCE.includes(o.bot)))) fail(`no defend-* scenario seats an open-source bot (${OPEN_SOURCE.join(", ")})`);
+for (const s of defends)
   if (!s.assert.some((a) => a.measure === "bodiesLost" && a.max !== undefined)) fail(`${s.name}: a fight scenario bounds bodiesLost by a "max"`);
 // A scenario runs on `sim` (ARCHITECTURE.md §10.2) unless its start or a
 // measure needs what only xxscreeps stands or writes, or its "xxscreeps" says
@@ -149,14 +139,13 @@ for (const { name, start } of scenarios)
   if ((start.at === undefined) !== (start.bundle === undefined) || (start.at !== undefined && (start.node || !/^[0-9a-f]{8,40}$/.test(start.bundle))))
     fail(`${name}: a start "at" a tick names its "bundle" by commit id, and no node`);
 for (const { name, start } of scenarios)
-  if (start.world && Object.keys(start).some((k) => !["world", "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "withdrawn", "off", "follow", "ended", "memory", "gcl"].includes(k))) fail(`${name}: a "world" start takes a "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "withdrawn", "off", "follow", "ended", "memory", "gcl" and nothing else`);
-  else if (!start.world && start.off) fail(`${name}: only a "world" start switches modules "off"`);
+  if (start.world && Object.keys(start).some((k) => !["world", "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "follow", "ended", "memory", "gcl"].includes(k))) fail(`${name}: a "world" start takes a "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "follow", "ended", "memory", "gcl" and nothing else`);
 
 // A world holds its opponents' seats; their config is the scenario's.
 const tag = (opponents = []) => (opponents.length ? `-o${createHash("sha256").update(JSON.stringify(opponents)).digest("hex").slice(0, 8)}` : "");
 const seats = (opponents = []) => opponents.map(({ config, ...seat }) => seat);
-const recipe = ({ world, room, seed, late = 0, node, invaders, wave, core, unsafe, ended, declarations, memory, gcl, off, follow }, opponents) =>
-  `${[world && basename(world, ".json"), room].filter(Boolean).join("-")}${declarations ? `-d${createHash("sha256").update(JSON.stringify(declarations)).digest("hex").slice(0, 8)}` : ""}${memory ? `-m${createHash("sha256").update(JSON.stringify(memory)).digest("hex").slice(0, 8)}` : ""}${gcl ? `-g${gcl}` : ""}-s${seed}${late ? `l${late}` : ""}${node ? `-${node}` : ""}${invaders ? `-i${invaders.replace(/[:,]/g, "_")}` : ""}${wave ? `-w${wave.replace(/[:,]/g, "_")}` : ""}${core ? `-c${core.replace(/[:,]/g, "_")}` : ""}${unsafe ? "-u" : ""}${ended ? "-e" : ""}${off ? `-x${off.join("_")}` : ""}${follow ? `-f${follow.join("_")}` : ""}${tag(opponents)}`;
+const recipe = ({ world, room, seed, late = 0, node, invaders, wave, core, unsafe, ended, declarations, memory, gcl, follow }, opponents) =>
+  `${[world && basename(world, ".json"), room].filter(Boolean).join("-")}${declarations ? `-d${createHash("sha256").update(JSON.stringify(declarations)).digest("hex").slice(0, 8)}` : ""}${memory ? `-m${createHash("sha256").update(JSON.stringify(memory)).digest("hex").slice(0, 8)}` : ""}${gcl ? `-g${gcl}` : ""}-s${seed}${late ? `l${late}` : ""}${node ? `-${node}` : ""}${invaders ? `-i${invaders.replace(/[:,]/g, "_")}` : ""}${wave ? `-w${wave.replace(/[:,]/g, "_")}` : ""}${core ? `-c${core.replace(/[:,]/g, "_")}` : ""}${unsafe ? "-u" : ""}${ended ? "-e" : ""}${follow ? `-f${follow.join("_")}` : ""}${tag(opponents)}`;
 // A cached world is replayed only by the opponents' code that played it, and
 // the engine mods and world scripts it was stood and played under.
 const codeOf = (...paths) =>
@@ -167,7 +156,7 @@ const codeOf = (...paths) =>
     .digest("hex")
     .slice(0, 8);
 const harness = codeOf(...["seed", "seat.js", "waves", "core", "colony.mjs", "seat-tile.mjs", "node.mjs", "live.mjs"].map((f) => join(HERE, "engine", f)));
-const worldOf = (start) => `${recipe(start, seats(start.opponents).map((s) => ({ ...s, code: codeOf(s.bot === "@bot" ? bot : s.bot) })))}-t${start.at}-${start.bundle}-h${harness}`;
+const worldOf = (start) => `${recipe(start, seats(start.opponents).map((s) => ({ ...s, code: codeOf(s.bot) })))}-t${start.at}-${start.bundle}-h${harness}`;
 const worldDir = (start) => join(REPO, "soak-runs/worlds", worldOf(start));
 const keyOf = ({ start, ticks, engine }, name = engine === "sim" ? `sim-${simCode}` : basename(bot, ".js")) => `scenario-${name}-${start.at ? `${worldOf(start)}${tag(start.opponents)}` : recipe(start, start.opponents)}-${ticks}`;
 const sim = scenarios.some((s) => s.engine === "sim") ? (simBinary() ?? fail("sim did not build")) : null;
@@ -214,23 +203,22 @@ const soak = (args, watched = watch.length > 0 && !args.includes("--save")) =>
     const child = spawn("node", [join(HERE, "soak.mjs"), ...args, ...capture, ...(flags["--fetch"] ? ["--fetch"] : []), ...(watched ? watch : [])], { stdio: watched ? "inherit" : "ignore", env: node26Env({ ...process.env, FABOT_PLAN_BUILT: "1" }) });
     child.on("exit", (code) => done(code));
   });
-// `bot`: a path from the repo, or "@bot", the bundle under test.
 const opponentsOf = (name, opponents) => {
   if (!opponents) return [];
   const file = join(REPO, "soak-runs", `opponents-${name}.json`);
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify(opponents.map((o) => ({ ...o, bot: o.bot === "@bot" ? bot : resolve(REPO, o.bot) }))));
+  writeFileSync(file, JSON.stringify(opponents.map((o) => ({ ...o, bot: resolve(REPO, o.bot) }))));
   return ["--opponents", file];
 };
 const preludes = [];
 // Two preludes of one world would save into one directory.
 const preluding = new Map();
 const play = async ({ name, start, ticks, engine }) => {
-  if (start.world && (start.declarations || start.off || start.memory || start.gcl)) {
+  if (start.world && (start.declarations || start.memory || start.gcl)) {
     const world = join(REPO, "soak-runs", `world-${name}.json`);
     mkdirSync(dirname(world), { recursive: true });
     const crafted = JSON.parse(readFileSync(resolve(REPO, start.world), "utf8"));
-    const v2 = { ...crafted.memory?.v2, ...start.memory, switches: { ...crafted.memory?.v2?.switches, ...Object.fromEntries((start.off ?? []).map((m) => [m, false])) } };
+    const v2 = { ...crafted.memory?.v2, ...start.memory };
     writeFileSync(world, JSON.stringify({ ...crafted, gcl: start.gcl ?? crafted.gcl, memory: { ...crafted.memory, v2 }, declarations: start.declarations ?? crafted.declarations }));
     start = { ...start, world };
   }
