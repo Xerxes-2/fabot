@@ -20,14 +20,7 @@ use crate::view::{
 };
 use crate::world::Map as World;
 
-const PAYING: [&str; 6] = [
-    "spawn",
-    "extension",
-    "container",
-    "storage",
-    "link",
-    "tower",
-];
+const PAYING: &str = "spawn extension container storage link tower";
 
 /// The level that first allows the kind: a structure's worth is scaled by it.
 fn unlock(kind: StructureType) -> f64 {
@@ -40,12 +33,9 @@ fn unlock(kind: StructureType) -> f64 {
 
 /// `soak-step.mjs` `reserveOf`: every tower firing through a creep's life, twice over.
 fn reserve(level: u32) -> f64 {
-    let towers = StructureType::Tower.controller_structures(level);
-    if level >= 4 {
-        f64::from(towers) * f64::from(TOWER_ENERGY_COST) * f64::from(CREEP_LIFE_TIME) * 2.0
-    } else {
-        0.0
-    }
+    let towers =
+        f64::from(StructureType::Tower.controller_structures(level) * u32::from(level >= 4));
+    towers * f64::from(TOWER_ENERGY_COST) * f64::from(CREEP_LIFE_TIME) * 2.0
 }
 
 /// A creep's body, or a tombstone's.
@@ -70,11 +60,16 @@ fn life(body: &[&str]) -> f64 {
     })
 }
 
-fn near(a: &Obj, b: &Obj, r: f64) -> bool {
-    (num(a, atom!("x")) - num(b, atom!("x")))
-        .abs()
-        .max((num(a, atom!("y")) - num(b, atom!("y"))).abs())
-        <= r
+fn xy(o: &Obj) -> (i64, i64) {
+    (num(o, atom!("x")) as i64, num(o, atom!("y")) as i64)
+}
+
+fn chebyshev((x, y): (i64, i64), (a, b): (i64, i64)) -> i64 {
+    (x - a).abs().max((y - b).abs())
+}
+
+fn near(a: &Obj, b: &Obj, r: i64) -> bool {
+    chebyshev(xy(a), xy(b)) <= r
 }
 
 #[derive(Default, Clone)]
@@ -366,7 +361,7 @@ impl Sampler {
                 "constructionSite" if mine => {
                     sites += 1;
                     *queued.entry(st.to_string()).or_default() += 1;
-                    if PAYING.contains(&st) {
+                    if PAYING.split(' ').any(|k| k == st) {
                         let at = *self
                             .placed
                             .entry(text(o, atom!("_id")).to_string())
@@ -411,7 +406,7 @@ impl Sampler {
         }
         let rocks: Vec<&Obj> = home.of("source").collect();
         let source_containers: Vec<&Obj> = (home.of("container"))
-            .filter(|c| rocks.iter().any(|s| near(s, c, 1.0)))
+            .filter(|c| rocks.iter().any(|s| near(s, c, 1)))
             .collect();
         let roads: Vec<&Obj> = home.of("road").collect();
         let solid: Vec<&Obj> = (home.objects.iter())
@@ -427,22 +422,37 @@ impl Sampler {
             })
             .map(|(_, o)| *o)
             .collect();
-        let same = |a: &Obj, b: &Obj| near(a, b, 0.0);
+        let same = |a: &Obj, b: &Obj| near(a, b, 0);
         let buried = roads
             .iter()
             .filter(|r| solid.iter().any(|s| same(r, s)))
             .count();
+        let terrain = map.terrain(&self.rooms[0]);
+        let extension = |o: &Obj| text(o, atom!("type")) == "extension";
+        let extensions: Vec<_> = solid
+            .iter()
+            .filter(|&&o| extension(o))
+            .map(|o| xy(o))
+            .collect();
+        let open = |(x, y): (i64, i64)| {
+            (terrain[(y * 50 + x) as usize] - b'0') & 1 == 0
+                && !solid.iter().any(|s| xy(s) == (x, y))
+        };
+        let ring = |t| extensions.iter().filter(|e| chebyshev(**e, t) == 1).count();
+        // A Hivemind extension bay is filled from the open tile five or more of its extensions ring.
+        let around = |(x, y)| (0..9).map(move |i| (x + i % 3 - 1, y + i / 3 - 1));
+        let bay = |o| around(o).any(|t| t != o && open(t) && ring(t) >= 5);
         let unroaded = (solid.iter())
-            .filter(|&&o| text(o, atom!("type")) == "extension")
-            .filter(|&&o| !source_containers.iter().any(|c| near(c, o, 1.0)))
+            .filter(|&&o| extension(o) && !bay(xy(o)))
+            .filter(|&&o| !source_containers.iter().any(|c| near(c, o, 1)))
             .filter(|&&o| {
                 !roads
                     .iter()
-                    .any(|r| near(r, o, 1.0) && !solid.iter().any(|s| same(s, r)))
+                    .any(|r| near(r, o, 1) && !solid.iter().any(|s| same(s, r)))
             })
             .count();
         let posted = (home.of("link"))
-            .filter(|l| source_containers.iter().any(|c| near(c, l, 1.0)))
+            .filter(|l| source_containers.iter().any(|c| near(c, l, 1)))
             .count();
         let (worth, score) = self.worth(v, map);
         json!({ "t": t, "time": time, "rcl": level, "safeMode": safe, "progress": progress, "creeps": creeps,
@@ -481,17 +491,13 @@ impl Sampler {
                         if (mine || matches!(kind, "road" | "container"))
                             && k.construction_cost().is_some() =>
                     {
-                        let cost = if k == StructureType::Road {
-                            let at = (num(o, atom!("y")) * 50.0 + num(o, atom!("x"))) as usize;
-                            let ratio = match map.terrain(name)[at] {
-                                b'1' | b'3' => CONSTRUCTION_COST_ROAD_WALL_RATIO,
-                                b'2' => CONSTRUCTION_COST_ROAD_SWAMP_RATIO,
-                                _ => 1,
-                            };
-                            f64::from(build_cost(kind)) * f64::from(ratio)
-                        } else {
-                            f64::from(build_cost(kind))
+                        let at = (num(o, atom!("y")) * 50.0 + num(o, atom!("x"))) as usize;
+                        let ratio = match (k, map.terrain(name)[at]) {
+                            (StructureType::Road, b'1' | b'3') => CONSTRUCTION_COST_ROAD_WALL_RATIO,
+                            (StructureType::Road, b'2') => CONSTRUCTION_COST_ROAD_SWAMP_RATIO,
+                            _ => 1,
                         };
+                        let cost = f64::from(build_cost(kind)) * f64::from(ratio);
                         structures += cost;
                         scored += cost * (1.0 + unlock(k).ln());
                     }
@@ -501,11 +507,8 @@ impl Sampler {
         }
         let stock = self.ledger.stock;
         let reserve = reserve(level);
-        let credit = if reserve == 0.0 {
-            stock
-        } else {
-            reserve * (stock / reserve).tanh()
-        };
+        let credit = (reserve > 0.0).then(|| reserve * (stock / reserve).tanh());
+        let credit = credit.unwrap_or(stock);
         let worth = json!({ "controller": controller, "structures": structures, "fortification": fortification,
             "sites": sites, "stock": stock });
         let score = json!({ "controller": controller, "structures": scored, "fortification": fortification,
@@ -530,9 +533,7 @@ impl Sampler {
                         for (r, amount) in obj(o, atom!("store")).into_iter().flat_map(Obj::iter) {
                             let amount = amount.as_f64().unwrap_or(0.0);
                             held += amount;
-                            if r.as_str() != "energy" {
-                                ores += amount;
-                            }
+                            ores += amount * f64::from(u8::from(r.as_str() != "energy"));
                         }
                     }
                     _ => {}

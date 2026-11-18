@@ -129,7 +129,8 @@ Docs:
   replay of the library's captures against its base (`npm run replay`,
   `ARCHITECTURE.md` §10.4). A change of behaviour reads its first differing
   tick there before the scenarios run.
-- A behaviour fix is verified by an xxscreeps scenario that reproduces the
+- A behaviour fix is verified by a scenario (`scenario.mjs --list` names
+  its engine) that reproduces the
   incident passing, and the scenario library not regressing
   (`ARCHITECTURE.md` §10.2). Add the scenario to the library.
 - An offence scenario (siege, sweep, drain: anything that attacks a rival)

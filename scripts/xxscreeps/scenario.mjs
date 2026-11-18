@@ -13,7 +13,7 @@
 //        npm run scenario -- <name> --watch [--tick-ms N] [--port N]
 //   name    the scenarios to run (default all but the nightly ones), by file name
 //   --modules  also the scenarios naming any of these modules (directories under core)
-//   --list  print the selection and run nothing
+//   --list  print the selection, each with its engine, and run nothing
 //   --nightly  all of them, with those marked "nightly": the offence target,
 //           kept out of `jj ship`
 //   --fetch  fetch the tarball a rival's `fetch.json` names; without it a
@@ -28,7 +28,7 @@
 //   --jobs  soaks at once (default a quarter of the hardware threads, as soak:many)
 //   --watch the one scenario's soak watched (soak's --watch), in this terminal
 //
-// A scenario file: { "why": the invariant, "modules": the core modules it tests, "nightly"?, "start": { "room", "seed",
+// A scenario file: { "why": the invariant, "modules": the core modules it tests, "nightly"?, "xxscreeps"?: why it stays off sim, "start": { "room", "seed",
 // "late"?, "node"?, "invaders"? (soak's --invaders), "wave"? (soak's --wave), "core"? (soak's --core), "unsafe"?, "ended"?, "at"?, "bundle"?,
 // "opponents"? (soak's --opponents) } or { "world": a capture-shaped file
 // (soak's --world; crafted ones under worlds/), "seed", "room"?, "node"?, "late"? (a world with no home of ours, as a recipe's), "ended"?, "invaders"?, "wave"?, "opponents"? (the world's own users), "declarations"? (in place of the world's), "memory"? (keys of Memory.v2 beside the world's), "gcl"? (in place of the world's), "withdrawn"? (rooms whose open siege the owner has just withdrawn), "off"? (modules switched off from the first tick, Memory.v2.switches; "economy" off, our spawns and extensions stand full) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"?, "room"?, "kind"?, "name"?, "act"? }] };
@@ -47,6 +47,8 @@ import { fileURLToPath } from "node:url";
 import { check, engagementsOf, measures, samplesOf, withAlways } from "./measures.mjs";
 import { report } from "./prediction.mjs";
 import { sweep } from "./prune.mjs";
+import { unstood } from "../sim/node.mjs";
+import { SIM_MEASURES, SIM_START, buildPlan, exportTemplate, runSim, simBinary } from "../sim/run.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "../..");
@@ -96,6 +98,24 @@ for (const { name, start } of library.filter((s) => s.start.world)) {
 }
 for (const s of library.filter((s) => FIGHT_KINDS.some((k) => s.name.startsWith(`${k}-`))))
   if (!s.assert.some((a) => a.measure === "bodiesLost" && a.max !== undefined)) fail(`${s.name}: a fight scenario bounds bodiesLost by a "max"`);
+// A scenario runs on `sim` (ARCHITECTURE.md §10.2) unless its start or a
+// measure needs what only xxscreeps stands or writes, or its "xxscreeps" says
+// why it stays there; a bundle, base, capture or watch runs every one there.
+const seatsUs = (file) => {
+  const world = JSON.parse(readFileSync(resolve(REPO, file), "utf8"));
+  return (world.rooms ?? []).some((r) => r.objects.some((o) => o.type === "spawn" && o.user === world.userId));
+};
+const xxscreepsWhy = (s) =>
+  s.xxscreeps ??
+  (Object.keys(s.start).filter((k) => !SIM_START.includes(k)).map((k) => `its start's ${k}`)[0] ||
+    (s.start.world && seatsUs(s.start.world) && "a world with a home of ours") ||
+    (s.start.node && unstood(s.start.node)) ||
+    (s.assert.some((a) => a.who) && "a measure of an opponent's side") ||
+    s.assert.filter((a) => !SIM_MEASURES.has(a.metric !== undefined ? "metric" : a.measure)).map((a) => `${a.measure} is not read off sim`)[0] ||
+    null);
+const forced = ["--bot", "--base", "--capture"].find((f) => flags[f]) ?? (watch.length ? "--watch" : undefined);
+for (const s of library) s.engine = forced || xxscreepsWhy(s) ? "xxscreeps" : "sim";
+
 // name@sK names a scenario on seed K alone, as --seeds names its runs.
 const seeded = (s, seed) => (seed === (s.start.seed ?? 1) ? s : { ...s, name: `${s.name}@s${seed}`, start: { ...s.start, seed } });
 const pinned = names.filter((n) => /@s\d+$/.test(n)).map((n) => [n.replace(/@s\d+$/, ""), Number(n.match(/@s(\d+)$/)[1])]);
@@ -113,7 +133,7 @@ const scenarios = library
   .flatMap((s) => Array.from({ length: seeds }, (_, k) => seeded(s, (s.start.seed ?? 1) + k)))
   .concat(pinned.map(([n, seed]) => seeded(library.find((s) => s.name === n), seed)));
 if (flags["--list"]) {
-  for (const s of scenarios) console.log(`${s.name}  ${s.modules.join(",")}`);
+  for (const s of scenarios) console.log(`${s.name}  ${s.modules.join(",")}  ${s.engine === "sim" ? "sim" : `xxscreeps: ${xxscreepsWhy(s) ?? forced}`}`);
   console.log(`${scenarios.length} of ${library.length} scenarios`);
   process.exit(0);
 }
@@ -152,17 +172,19 @@ const codeOf = (...paths) =>
 const harness = codeOf(...["seed", "seat.js", "waves", "core", "colony.mjs", "node.mjs", "live.mjs"].map((f) => join(HERE, "engine", f)));
 const worldOf = (start) => `${recipe(start, seats(start.opponents).map((s) => ({ ...s, code: codeOf(s.bot === "@bot" ? bot : s.bot) })))}-t${start.at}-${start.bundle}-h${harness}`;
 const worldDir = (start) => join(REPO, "soak-runs/worlds", worldOf(start));
-const keyOf = ({ start, ticks }, name = basename(bot, ".js")) => `scenario-${name}-${start.at ? `${worldOf(start)}${tag(start.opponents)}` : recipe(start, start.opponents)}-${ticks}`;
+const keyOf = ({ start, ticks, engine }, name = engine === "sim" ? `sim-${simCode}` : basename(bot, ".js")) => `scenario-${name}-${start.at ? `${worldOf(start)}${tag(start.opponents)}` : recipe(start, start.opponents)}-${ticks}`;
+const sim = scenarios.some((s) => s.engine === "sim") ? (simBinary() ?? fail("sim did not build")) : null;
+const simCode = sim && createHash("sha256").update(readFileSync(sim)).digest("hex").slice(0, 8);
+if (forced && scenarios.some((s) => !xxscreepsWhy(s))) console.error(`${forced}: every scenario on xxscreeps, which runs bundles, bases, captures and the client`);
 const runs = new Map();
 for (const s of scenarios) {
-  const run = runs.get(keyOf(s)) ?? { name: keyOf(s), label: `${recipe(s.start, s.start.opponents)}${s.start.at ? `-t${s.start.at}` : ""}-${s.ticks}`, start: s.start, ticks: s.ticks, scenarios: [], secs: 0 };
+  const run = runs.get(keyOf(s)) ?? { name: keyOf(s), label: `${recipe(s.start, s.start.opponents)}${s.start.at ? `-t${s.start.at}` : ""}-${s.ticks}${s.engine === "sim" ? " (sim)" : ""}`, start: s.start, ticks: s.ticks, engine: s.engine, scenarios: [], secs: 0 };
   run.scenarios.push(s.name);
   runs.set(run.name, run);
 }
 
 // Built once here: parallel builds of one project collide.
-if (runs.size && spawnSync("cargo", ["build", "--release", "--quiet", "--features", "tools", "--bin", "plan", "--manifest-path", join(REPO, "Cargo.toml")], { stdio: "inherit" }).status !== 0)
-  fail("the plan tool did not build");
+if (runs.size && !buildPlan()) fail("the plan tool did not build");
 // Built in `.scratch/`, on disk (`/tmp` is RAM), with a `jj` that fails: the
 // real one would name the build after the workspace above it, not "unknown".
 const bundleAt = (commit) => {
@@ -186,6 +208,7 @@ const bundleAt = (commit) => {
   return out;
 };
 for (const { start } of runs.values()) if (start.bundle) bundleAt(start.bundle);
+if (scenarios.some((s) => s.engine === "sim" && !s.start.world) && !exportTemplate()) fail("the template did not export");
 const started = Date.now();
 // A soak that saves a world for a later start is a prelude, never the one watched.
 const soak = (args, watched = watch.length > 0 && !args.includes("--save")) =>
@@ -205,7 +228,11 @@ const opponentsOf = (name, opponents) => {
 const preludes = [];
 // Two preludes of one world would save into one directory.
 const preluding = new Map();
-const play = async ({ name, start, ticks }) => {
+const play = async ({ name, start, ticks, engine }) => {
+  if (engine === "sim") {
+    const { world, room, node, seed, late, ended } = start;
+    return runSim(sim, { world: world && resolve(REPO, world), room, node, ticks, seed, late, ended, out: join(REPO, "soak-runs", name) });
+  }
   if (start.world && (start.declarations || start.off || start.memory || start.gcl)) {
     const world = join(REPO, "soak-runs", `world-${name}.json`);
     mkdirSync(dirname(world), { recursive: true });

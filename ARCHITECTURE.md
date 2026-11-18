@@ -1183,7 +1183,10 @@ nix.
 `sim/` (owner, 2026-11-17) runs `decide` natively on krebs's port of the
 official engine, with no wasm and no JS. It follows the official rules and
 never copies xxscreeps' quirks. It writes the soak's files, and the world
-is `scripts/sim/export.mjs`'s copy of the template.
+is `scripts/sim/export.mjs`'s copy of the template. Native is the default
+engine for soaks and economy scenarios. When native and xxscreeps disagree,
+the official engine's source (@screeps/engine, @screeps/backend cronjobs)
+settles which is right, case by case; neither engine is presumed.
 - ✅ A respawn soak on the template or a season world (`--world`, `--room`,
   `--seed`, `--late`, `--ended`), and a node, stood in the world's JSON by
   `scripts/sim/node.mjs` as `soak.mjs --node` stands it: `soak:many` runs
@@ -1206,7 +1209,19 @@ is `scripts/sim/export.mjs`'s copy of the template.
 - A season world carries each of its sectors' centre and keeper rooms
   (`season-world.mjs`): genInvaders raids only a sector with a live core, and
   genStrongholds stands one only from a centre room in the world.
-- ❓ Still on xxscreeps: the rivals and the scenario library. The
+- ✅ A scenario runs on sim unless its start or a measure needs what only
+  xxscreeps stands or writes, or its `xxscreeps` says why it stays
+  (`scenario.mjs --list` names each one's engine); `--bot`, `--base`,
+  `--capture` and `--watch` run every one on xxscreeps.
+- ❓ Still on xxscreeps (`scripts/sim/run.mjs` `SIM_START`, `SIM_MEASURES`):
+  a start with opponents (rivals, raids), a captured world with a home of
+  ours, scripted `invaders`, `wave` or `core`, a resumed world (`at`,
+  `bundle`), or the start's own `declarations`, `memory`, `off`, `gcl`,
+  `unsafe`, `follow`, `withdrawn`; a node sim does not stand (`claims`,
+  `spare`, `stale`, `short`, `labStock`); and a measure reading
+  `bodies.jsonl`, `engagements.jsonl`, an opponent's side (`who`) or a
+  sample field sim's sampler does not write (`claimed`, `bodies`, `made`,
+  `ore`, `bounced`, `sent`, `stillLoaded`, `boosted`, `homes`). The
   soak's `bodies.jsonl`, `decay.jsonl` and `engagements.jsonl` are written empty, and each room line's `carriedOut`
   is 0. Its `waves` and `lost` are 0 because sim pushes no scripted wave and
   loses no tick.

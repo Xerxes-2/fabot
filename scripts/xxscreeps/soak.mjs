@@ -92,7 +92,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { node26 as nodeBin, node26Env } from "./node26.mjs";
 import { patchRuntimeCache } from "./runtime-cache.mjs";
 import { invariants } from "./measures.mjs";
-import { NODES, near } from "../sim/node.mjs";
+import { NODES, near, planNode } from "../sim/node.mjs";
 
 // Where the run's wall time went, written to timing.json (`scenario.mjs` sums them).
 const began = Date.now();
@@ -349,24 +349,7 @@ const planned = (level) => {
 };
 if (fresh && !(node && node.level > 1)) [colony.x, colony.y] = [planned(1)[0].x, planned(1)[0].y];
 if (node && node.level > 1) {
-  built = planned(node.built ?? node.level).filter((s) => !node.without.includes(s.kind));
-  if (node.buried) {
-    const held = new Set(built.map((s) => s.y * 50 + s.x));
-    const next = planned(node.level).filter((s) => s.kind === "extension" && !held.has(s.y * 50 + s.x));
-    built.push(...next.map(({ x, y }) => ({ kind: "road", x, y })));
-  }
-  if (node.moved) {
-    const { terrain, sources, controller } = JSON.parse(ground);
-    const range = (a, [x, y]) => Math.max(Math.abs(a.x - x), Math.abs(a.y - y));
-    const used = new Set(built.map((s) => s.y * 50 + s.x));
-    for (const c of built.filter((s) => s.kind === "container")) {
-      const rock = sources.find((r) => range(c, r) === 1);
-      const serves = (t) => (rock ? range(t, rock) === 1 : range(t, controller) <= 3 && !sources.some((r) => range(t, r) <= 1));
-      const tiles = Array.from({ length: 2304 }, (_, i) => ({ x: (i % 48) + 1, y: Math.floor(i / 48) + 1 }));
-      const seat = tiles.find((t) => serves(t) && terrain[t.y * 50 + t.x] !== "1" && !used.has(t.y * 50 + t.x) && range(t, rock ?? controller) > 0);
-      if (seat) [c.x, c.y] = [seat.x, seat.y], used.add(seat.y * 50 + seat.x);
-    }
-  }
+  built = planNode(JSON.parse(ground), node, join(REPO, "target/release/plan"));
   writeFileSync(join(world, "node.json"), JSON.stringify(built));
   [colony.x, colony.y] = [built[0].x, built[0].y];
 }

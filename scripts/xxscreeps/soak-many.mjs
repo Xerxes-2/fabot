@@ -41,21 +41,21 @@
 // version stamp aside), start, seed, ticks and the soak scripts (with the
 // plan a node is built from, and the world), so a base that
 // has not changed is not run again.
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { node26Env } from "./node26.mjs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sweep } from "./prune.mjs";
 import { invariants } from "./measures.mjs";
-import { standNode, unstood } from "../sim/node.mjs";
+import { unstood } from "../sim/node.mjs";
+import { TEMPLATE as SIM_TEMPLATE, buildPlan, exportTemplate, runSim, simBinary } from "../sim/run.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "../..");
 const SOAK = join(HERE, "soak.mjs");
-const PLAN = join(REPO, "target/release/plan");
 const RUNS = join(REPO, "soak-runs");
 const CACHE = join(RUNS, ".cache");
 const usage =
@@ -91,7 +91,6 @@ const parseSeeds = (text) =>
   });
 const CONTESTED = "season-outpost-ring:E25S9@E1+hivemind:E27S9";
 const native = !flags["--xxscreeps"];
-const SIM_TEMPLATE = join(RUNS, ".template.json");
 const allStarts = (flags["--room"] ?? `W9N8,W8N3,season-outpost-ring:E23S9,season-late-seat:W12S28@N7,${CONTESTED}`).split(",").map((spec) => {
   const m = /^(?:([\w-]+):)?([WE]\d+[NS]\d+)(?:@([A-Za-z0-9]+))?(?:\+([a-z]+):([WE]\d+[NS]\d+))?$/.exec(spec);
   if (!m) fail(`--room: "${spec}" is not [world:]room[@node][+bot:room]`);
@@ -111,9 +110,7 @@ const jobs = whole(flags["--jobs"] ?? Math.max(1, Math.floor(availableParallelis
 const tag = flags["--tag"] ?? "many";
 if (!/^[A-Za-z0-9-]+$/.test(tag)) fail("--tag: letters, digits, dashes");
 
-const built = (res) => (res.status === 0 ? res.stdout.trim() : fail("sim did not build"));
-const defaultBot = () =>
-  native ? built(spawnSync("node", [join(HERE, "../sim/build.mjs")], { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] })) : join(REPO, "dist/main.js");
+const defaultBot = () => (native ? (simBinary() ?? fail("sim did not build")) : join(REPO, "dist/main.js"));
 const bots = (flags["--bot"] ?? defaultBot()).split(",").map((spec) => {
   const [name, path] = spec.includes("=") ? spec.split("=") : [basename(spec, ".js"), spec];
   if (!/^[A-Za-z0-9-]+$/.test(name)) fail(`--bot: "${name}" is not a name (letters, digits, dashes)`);
@@ -132,7 +129,7 @@ const hash = (...parts) => {
   return h.digest("hex").slice(0, 16);
 };
 const scriptsHash = hash(
-  ...[SOAK, join(HERE, "../sim/node.mjs"), ...readdirSync(join(HERE, "engine"), { recursive: true }).map((f) => join(HERE, "engine", f))]
+  ...[SOAK, join(HERE, "../sim/node.mjs"), join(HERE, "../sim/run.mjs"), ...readdirSync(join(HERE, "engine"), { recursive: true }).map((f) => join(HERE, "engine", f))]
     .filter((f) => f.endsWith(".mjs") || f.endsWith(".js"))
     .sort()
     .map((f) => readFileSync(f)),
@@ -142,10 +139,7 @@ const planHash = hash(...[join(REPO, "src/bin/plan.rs"), ...readdirSync(join(REP
 const wasmOf = (file) => [file.replace(/\.js$/, ".wasm")].filter(existsSync).map((f) => readFileSync(f));
 for (const b of bots) b.code = native ? hash(readFileSync(b.file)) : hash(readFileSync(b.file, "utf8").replace(/^(?:var |globalThis\.)__FABOT_VERSION__ = .*$/m, ""), ...wasmOf(b.file));
 
-if (native && starts.some((s) => !s.world)) {
-  mkdirSync(RUNS, { recursive: true });
-  if (spawnSync("node", [join(HERE, "../sim/export.mjs"), SIM_TEMPLATE], { stdio: ["ignore", "ignore", "inherit"] }).status !== 0) fail("the template did not export");
-}
+if (native && starts.some((s) => !s.world) && !exportTemplate()) fail("the template did not export");
 const runs = bots.flatMap((bot) =>
   starts.flatMap((start) =>
     start.seeds.map((seed) => ({
@@ -170,23 +164,7 @@ console.error(
 function soak(run) {
   return new Promise((done) => {
     const { room, world, node, rival, ticks, ended } = run.start;
-    if (native) {
-      const out = join(RUNS, run.name);
-      rmSync(out, { recursive: true, force: true });
-      const map = node ? join(RUNS, `${run.name}.world.json`) : (world ?? SIM_TEMPLATE);
-      const finish = (code) => {
-        if (node) rmSync(map, { force: true });
-        done(code);
-      };
-      try {
-        if (node) writeFileSync(map, JSON.stringify(standNode(JSON.parse(readFileSync(world ?? SIM_TEMPLATE, "utf8")), room, node, PLAN)));
-      } catch (e) {
-        console.error(`${run.name}: ${e.message}`);
-        return finish(-1);
-      }
-      const args = ["--world", map, "--room", room, "--ticks", String(ticks), "--seed", String(run.seed.seed), "--late", String(run.seed.late), "--every", "100", "--out", out, ...(ended ? ["--ended"] : [])];
-      return spawn(run.bot.file, args, { stdio: "ignore" }).on("exit", finish).on("error", () => finish(-1));
-    }
+    if (native) return runSim(run.bot.file, { world, room, node, ticks, seed: run.seed.seed, late: run.seed.late, ended, out: join(RUNS, run.name) }).then(done);
     const opponents = join(RUNS, `${run.name}.opponents.json`);
     if (rival) writeFileSync(opponents, JSON.stringify([rival]));
     const args = [...(rival ? ["--opponents", opponents] : []), ...(ended ? ["--ended"] : []), "--room", room, "--run", run.name, "--ticks", String(ticks), "--seed", String(run.seed.seed), "--late", String(run.seed.late), "--every", "100", "--bot", run.bot.file, ...(node ? ["--node", node] : []), ...(world ? ["--world", world] : [])];
@@ -199,8 +177,7 @@ function soak(run) {
 }
 
 // Built once here: parallel builds of one project collide.
-if (todo.some((r) => !native || r.start.node) && spawnSync("cargo", ["build", "--release", "--quiet", "--features", "tools", "--bin", "plan", "--manifest-path", join(REPO, "Cargo.toml")], { stdio: "inherit" }).status !== 0)
-  fail("the plan tool did not build");
+if (todo.some((r) => !native || r.start.node) && !buildPlan()) fail("the plan tool did not build");
 const codes = {};
 const queue = [...todo];
 await Promise.all(

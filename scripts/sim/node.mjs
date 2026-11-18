@@ -81,7 +81,7 @@ const BUILT = {
   road: [5000, {}],
 };
 // `modern` picks xxscreeps' template with every structure kind, which krebs always has.
-const STOOD = new Set(["level", "built", "stored", "without", "worn", "bodies", "outposts", "alone", "labs", "modern"]);
+const STOOD = new Set(["level", "built", "stored", "without", "worn", "bodies", "outposts", "alone", "labs", "modern", "buried", "moved"]);
 const terrainOf = (room) => [room.terrain].flat().join("");
 
 /** Why sim cannot stand node `name`, or null. */
@@ -89,6 +89,39 @@ export function unstood(name) {
   if (!NODES[name]) return `no node ${name}: one of ${Object.keys(NODES).join(", ")}`;
   const missing = Object.keys(NODES[name]).filter((k) => !STOOD.has(k));
   return missing.length ? `sim does not stand ${name}'s ${missing.join(", ")} yet` : null;
+}
+
+/**
+ * What `node` stands on `ground` (`engine/node.mjs ground`'s shape), in the
+ * plan tool's build order: its plan at its level but what it is `without`,
+ * `buried` adding roads on the extension tiles its level adds past `built`,
+ * `moved` setting each container on another tile serving its rock.
+ */
+export function planNode(ground, node, plan) {
+  const planned = (level) => {
+    const res = spawnSync(plan, { input: JSON.stringify({ ...ground, level }), encoding: "utf8" });
+    if (res.status !== 0) throw new Error(`the plan tool failed: ${res.stderr}`);
+    return JSON.parse(res.stdout);
+  };
+  const built = planned(node.built ?? node.level).filter((s) => !node.without.includes(s.kind));
+  if (node.buried) {
+    const held = new Set(built.map((s) => s.y * 50 + s.x));
+    const next = planned(node.level).filter((s) => s.kind === "extension" && !held.has(s.y * 50 + s.x));
+    built.push(...next.map(({ x, y }) => ({ kind: "road", x, y })));
+  }
+  if (node.moved) {
+    const { terrain, sources, controller } = ground;
+    const range = (a, [x, y]) => Math.max(Math.abs(a.x - x), Math.abs(a.y - y));
+    const used = new Set(built.map((s) => s.y * 50 + s.x));
+    for (const c of built.filter((s) => s.kind === "container")) {
+      const rock = sources.find((r) => range(c, r) === 1);
+      const serves = (t) => (rock ? range(t, rock) === 1 : range(t, controller) <= 3 && !sources.some((r) => range(t, r) <= 1));
+      const tiles = Array.from({ length: 2304 }, (_, i) => ({ x: (i % 48) + 1, y: Math.floor(i / 48) + 1 }));
+      const seat = tiles.find((t) => serves(t) && terrain[t.y * 50 + t.x] !== "1" && !used.has(t.y * 50 + t.x) && range(t, rock ?? controller) > 0);
+      if (seat) [c.x, c.y] = [seat.x, seat.y], used.add(seat.y * 50 + seat.x);
+    }
+  }
+  return built;
 }
 
 /** `world` with `room` stood as node `name`; `plan` is the plan tool's binary. */
@@ -103,10 +136,8 @@ export function standNode(world, room, name, plan) {
   const xy = (o) => [o.x, o.y];
   const of = (type) => home.objects.filter((o) => o.type === type);
   const [controller] = of("controller");
-  const ground = { room, terrain, sources: of("source").map(xy), minerals: of("mineral").map(xy), controller: xy(controller), level: node.built ?? node.level };
-  const res = spawnSync(plan, { input: JSON.stringify(ground), encoding: "utf8" });
-  if (res.status !== 0) throw new Error(`the plan tool failed: ${res.stderr}`);
-  const list = JSON.parse(res.stdout).filter((s) => !node.without.includes(s.kind));
+  const ground = { room, terrain, sources: of("source").map(xy), minerals: of("mineral").map(xy), controller: xy(controller) };
+  const list = planNode(ground, node, plan);
   const [first] = list;
 
   // Ids in list order, so the engine's tie-breaks by object order repeat.
