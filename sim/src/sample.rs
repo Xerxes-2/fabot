@@ -3,7 +3,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use krebs::atom;
+use krebs::constants::{CREEP_CORPSE_RATE, CREEP_PART_MAX_ENERGY};
 use krebs::doc::{Atom, Obj, Val};
+use krebs::intents::RoomIntents;
 use screeps::{
     CONSTRUCTION_COST_ROAD_SWAMP_RATIO, CONSTRUCTION_COST_ROAD_WALL_RATIO, CREEP_CLAIM_LIFE_TIME,
     CREEP_LIFE_TIME, ENERGY_DECAY, LINK_LOSS_RATIO, Part, REPAIR_COST, SPAWN_ENERGY_CAPACITY,
@@ -46,13 +48,26 @@ fn reserve(level: u32) -> f64 {
     }
 }
 
+/// A creep's body, or a tombstone's.
 fn parts(o: &Obj) -> Vec<&str> {
-    match o.get(Atom::intern("body")) {
-        Some(Val::Arr(parts)) => (parts.iter().filter_map(Val::as_obj))
-            .map(|p| text(p, atom!("type")))
+    match o
+        .get(Atom::intern("body"))
+        .or(o.get(Atom::intern("creepBody")))
+    {
+        Some(Val::Arr(parts)) => (parts.iter())
+            .filter_map(|p| p.as_str().or(p.as_obj().map(|p| text(p, atom!("type")))))
             .collect(),
         _ => Vec::new(),
     }
+}
+
+fn life(body: &[&str]) -> f64 {
+    let claim = body.contains(&"claim");
+    f64::from(if claim {
+        CREEP_CLAIM_LIFE_TIME
+    } else {
+        CREEP_LIFE_TIME
+    })
 }
 
 fn near(a: &Obj, b: &Obj, r: f64) -> bool {
@@ -79,6 +94,8 @@ struct Line {
 struct Ledger {
     dug: f64,
     regen: f64,
+    /// What our bodies leave beyond what they carried: the engine's corpse rate.
+    corpses: f64,
     spawn: f64,
     build: f64,
     upgrade: f64,
@@ -97,15 +114,20 @@ pub struct Sampler {
     ledger: Ledger,
     regen_next: f64,
     born: BTreeSet<String>,
-    piles: BTreeMap<String, f64>,
+    /// Each pile's room and energy at the last tick's end.
+    piles: BTreeMap<String, (String, f64)>,
+    /// The piles our bodies pick up and the bodies our spawns recycle this tick.
+    taken: BTreeSet<String>,
+    graves: BTreeSet<String>,
     placed: BTreeMap<String, i64>,
 }
 
-/// What `stockOf` counts: piles, and stores nobody's or ours.
+/// Piles, tombstones (an Invader's corpse is ours to take), and stores nobody's or ours.
 fn stock(room: &Room) -> f64 {
     (room.objects.iter())
         .map(|(kind, o)| match *kind {
             "energy" => num(o, atom!("energy")),
+            "tombstone" => store(o, atom!("energy")),
             _ if ours(o) || text(o, atom!("user")).is_empty() => store(o, atom!("energy")),
             _ => 0.0,
         })
@@ -124,10 +146,14 @@ impl Sampler {
         self.lines.insert(room.to_string(), Line::default());
     }
 
-    /// Rooms we own, reserve or work in join from the tick they first do.
-    fn follow_worked(&mut self, v: &View) {
+    /// Rooms we own, reserve or work in, or carry energy through, join from the tick they first do,
+    /// so no energy of ours is ever outside the ledger.
+    fn follow_worked(&mut self, v: &View) -> Vec<String> {
+        let mut joined = Vec::new();
         for room in &v.rooms {
-            if self.lines.contains_key(room.name) || room.events.is_null() {
+            let mine = room.of("creep").filter(|o| ours(o));
+            let carried: f64 = mine.map(|o| store(o, atom!("energy"))).sum();
+            if self.lines.contains_key(room.name) || room.events.is_null() && carried == 0.0 {
                 continue;
             }
             let held = room.of("controller").any(|o| {
@@ -145,26 +171,31 @@ impl Sampler {
                 let works = matches!(e.kind, EVENT_BUILD | EVENT_REPAIR);
                 (works || e.kind == EVENT_HARVEST && source(on)) && creep(e.by)
             });
-            if held || worked {
+            if held || worked || carried > 0.0 {
                 self.follow(room.name);
+                joined.push(room.name.to_string());
                 if let Some(stock0) = &mut self.ledger.stock0 {
-                    *stock0 += stock(room);
+                    // What our creeps carry in was in the room they came from.
+                    *stock0 += stock(room) - carried;
                 }
             }
         }
+        joined
     }
 
     /// One tick of the ledger, off the followed rooms as the tick left them.
     pub fn account(&mut self, v: &View) {
-        self.follow_worked(v);
+        let joined = self.follow_worked(v);
         let time = v.k.time as f64;
-        self.ledger.regen += std::mem::take(&mut self.regen_next);
         let mut piles = BTreeMap::new();
+        self.ledger.regen += std::mem::take(&mut self.regen_next);
         let mut total = 0.0;
         for name in &self.rooms {
             let room = v.room(name);
             total += stock(room);
             let line = self.lines.get_mut(name).expect("a line per followed room");
+            // Its stock at joining is counted after this tick's decay.
+            let booked = self.ledger.stock0.is_some() && !joined.contains(name);
             let ids = |pred: &dyn Fn(&str, &Obj) -> bool| -> BTreeSet<&str> {
                 (room.objects.iter())
                     .filter(|(kind, o)| pred(kind, o))
@@ -227,15 +258,26 @@ impl Sampler {
                         line.reserved += f64::from(u8::from(reservation.is_some_and(held)));
                     }
                     "energy" if text(o, atom!("resourceType")) == "energy" => {
-                        let id = text(o, atom!("_id")).to_string();
-                        if let Some(before) = self.piles.get(&id) {
-                            let lost = (before / f64::from(ENERGY_DECAY)).ceil();
-                            self.ledger.decayed += lost;
-                            line.decayed += lost;
-                        }
-                        piles.insert(id, num(o, atom!("energy")));
+                        let now = num(o, atom!("energy"));
+                        piles.insert(text(o, atom!("_id")).to_string(), (name.clone(), now));
+                        // The engine decays what a pile holds after this tick's drops, x, to
+                        // now = x - ceil(x / 1000); x = 1000k and 1000k + 1 both leave 999k.
+                        let lost = (now / f64::from(ENERGY_DECAY - 1)).ceil();
+                        self.ledger.decayed += lost * f64::from(u8::from(booked));
+                        line.decayed += lost * f64::from(u8::from(booked));
                     }
                     "creep" if !ours(o) => hostile = true,
+                    "tombstone" if self.graves.insert(text(o, atom!("_id")).into()) => {
+                        let body = parts(o);
+                        let recycled = self.taken.contains(text(o, atom!("creepId")));
+                        let ttl = num(o, Atom::intern("creepTicksToLive")) / life(&body);
+                        let rate = if recycled { 1.0 } else { CREEP_CORPSE_RATE } * ttl;
+                        let max = f64::from(CREEP_PART_MAX_ENERGY);
+                        let part = |p: Part| (f64::from(p.cost()) * rate).min(max);
+                        let parsed = body.iter().filter_map(|p| p.parse().ok());
+                        let left = parsed.map(part).sum::<f64>().floor();
+                        self.ledger.corpses += left * f64::from(u8::from(booked));
+                    }
                     "creep" => {
                         let body = parts(o);
                         let cost = (body.iter().filter_map(|p| p.parse::<Part>().ok()))
@@ -246,12 +288,7 @@ impl Sampler {
                         {
                             self.ledger.spawn += cost;
                         }
-                        let life = if body.contains(&"claim") {
-                            CREEP_CLAIM_LIFE_TIME
-                        } else {
-                            CREEP_LIFE_TIME
-                        };
-                        line.bodies += cost / f64::from(life);
+                        line.bodies += cost / life(&body);
                     }
                     "spawn" | "extension" if ours(o) => {
                         bank += store(o, atom!("energy"));
@@ -263,6 +300,14 @@ impl Sampler {
                     _ => {}
                 }
             }
+            // A pile of 1 nobody picked up decays to nothing.
+            let gone = (self.piles.iter())
+                .filter(|(id, (r, e))| {
+                    r == name && *e <= 1.0 && !piles.contains_key(*id) && !self.taken.contains(*id)
+                })
+                .count() as f64;
+            self.ledger.decayed += gone;
+            line.decayed += gone;
             line.hostile += f64::from(u8::from(hostile));
             if bank < f64::from(SPAWN_ENERGY_CAPACITY) {
                 self.regen_next += low_spawns;
@@ -271,6 +316,18 @@ impl Sampler {
         self.piles = piles;
         self.ledger.stock0.get_or_insert(total);
         self.ledger.stock = total;
+    }
+
+    /// The piles our bodies pick up and the bodies our spawns recycle, off this tick's intents.
+    pub fn intend(&mut self, intents: &[(usize, RoomIntents)]) {
+        let objects = intents
+            .iter()
+            .flat_map(|(_, i)| &i.users)
+            .flat_map(|u| &u.objects);
+        let target =
+            |o: &Obj, act| obj(o, Atom::intern(act)).map(|t| text(t, atom!("id")).to_string());
+        let acts = objects.flat_map(|(_, o)| ["pickup", "recycleCreep"].map(|act| target(o, act)));
+        self.taken = acts.flatten().collect();
     }
 
     /// The home's level, 0 once it is not ours.
@@ -285,8 +342,8 @@ impl Sampler {
         let l = &self.ledger;
         let spent = l.spawn + l.build + l.upgrade + l.repair + l.tower;
         let moved = l.stock - l.stock0.unwrap_or(0.0);
-        let residual = l.dug + l.regen - spent - l.decayed - l.linked - moved;
-        json!({ "dug": l.dug, "regen": l.regen, "spawn": l.spawn, "build": l.build, "upgrade": l.upgrade,
+        let residual = l.dug + l.regen + l.corpses - spent - l.decayed - l.linked - moved;
+        json!({ "dug": l.dug, "regen": l.regen, "corpses": l.corpses, "spawn": l.spawn, "build": l.build, "upgrade": l.upgrade,
             "repair": l.repair, "tower": l.tower, "decayed": l.decayed, "linked": l.linked, "stock": l.stock,
             "residual": residual })
     }
@@ -295,7 +352,6 @@ impl Sampler {
     pub fn sample(&mut self, v: &View, t: u64, map: &World) -> Value {
         let time = v.k.time as i64;
         let home = v.room(&self.rooms[0]);
-        let mut row = Map::new();
         let (mut creeps, mut body_parts, mut spawns, mut hostiles) = (0, 0, 0, 0);
         let (mut sources, mut stored, mut dropped, mut cash, mut capacity) =
             (0.0, 0.0, 0.0, 0.0, 0.0);
@@ -389,41 +445,12 @@ impl Sampler {
             .filter(|l| source_containers.iter().any(|c| near(c, l, 1.0)))
             .count();
         let (worth, score) = self.worth(v, map);
-        for (k, value) in [
-            ("t", json!(t)),
-            ("time", json!(time)),
-            ("rcl", json!(level)),
-            ("safeMode", json!(safe)),
-            ("progress", json!(progress)),
-            ("creeps", json!(creeps)),
-            ("parts", json!(body_parts)),
-            ("spawns", json!(spawns)),
-            ("hostiles", json!(hostiles)),
-            ("sources", json!(sources)),
-            ("energy", json!(cash)),
-            ("capacity", json!(capacity)),
-            ("stored", json!(stored)),
-            ("dropped", json!(dropped)),
-            ("sites", json!(sites)),
-            ("queued", json!(queued)),
-            ("oldestPaying", json!(oldest)),
-            ("built", json!(built)),
-            ("sourceContainers", json!(source_containers.len())),
-            ("buried", json!(buried)),
-            ("unroaded", json!(unroaded)),
-            ("postedLinks", json!(posted)),
-            ("mineralAmount", mineral),
-            ("ledger", self.ledger()),
-            ("worth", worth),
-            ("score", score),
-            ("rooms", self.lines(v)),
-            ("others", json!({})),
-            ("bodies", json!([])),
-            ("foes", json!([])),
-        ] {
-            row.insert(k.to_string(), value);
-        }
-        Value::Object(row)
+        json!({ "t": t, "time": time, "rcl": level, "safeMode": safe, "progress": progress, "creeps": creeps,
+            "parts": body_parts, "spawns": spawns, "hostiles": hostiles, "sources": sources, "energy": cash,
+            "capacity": capacity, "stored": stored, "dropped": dropped, "sites": sites, "queued": queued,
+            "oldestPaying": oldest, "built": built, "sourceContainers": source_containers.len(), "buried": buried,
+            "unroaded": unroaded, "postedLinks": posted, "mineralAmount": mineral, "ledger": self.ledger(),
+            "worth": worth, "score": score, "rooms": self.lines(v), "others": {}, "bodies": [], "foes": [] })
     }
 
     fn worth(&self, v: &View, map: &World) -> (Value, Value) {

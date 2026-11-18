@@ -1,6 +1,6 @@
 // A world of Season 11's real map for `npm run soak -- --world` (ARCHITECTURE.md
-// §10.2): the rooms within <radius> of <room>, each with its terrain and its
-// sources, minerals, controller and keeper lairs, nobody's, from a copy of the
+// §10.2): the rooms within <radius> of <room> and their sectors' centres,
+// each with its terrain and its sources, minerals, controller and keeper lairs, nobody's, from a copy of the
 // season's room history (its README). Season objects (Thorium, reactors) and
 // what comes and goes (deposits, power banks, cores, portals) are left out.
 //
@@ -34,9 +34,14 @@ const terrainOf = (x, y) => {
 };
 
 const MINERAL_AMOUNT = { 1: 15000, 2: 35000, 3: 70000, 4: 100000 };
+// Why each sector's centre 3x3 comes too: ARCHITECTURE.md §10.2.
+const shown = (c) => (c >= 0 ? c : -c - 1);
+const centre = (c) => (c >= 0 ? shown(c) - (shown(c) % 10) + 5 : -(shown(c) - (shown(c) % 10) + 5) - 1);
+const box = [];
+for (let y = cy - radius; y <= cy + radius; y++) for (let x = cx - radius; x <= cx + radius; x++) box.push([x, y]);
+const sectors = box.filter(([x, y]) => shown(x) % 10 && shown(y) % 10).flatMap(([x, y]) => [-1, 0, 1].flatMap((dy) => [-1, 0, 1].map((dx) => [centre(x) + dx, centre(y) + dy])));
 const rooms = [];
-for (let y = cy - radius; y <= cy + radius; y++)
-  for (let x = cx - radius; x <= cx + radius; x++) {
+for (const [x, y] of new Map([...box, ...sectors].map(([x, y]) => [nameOf(x, y), [x, y]])).values()) {
     const name = nameOf(x, y);
     const res = spawnSync(process.execPath, [join(archive, "read.mjs"), "state", name, String(tick)], { encoding: "utf8", maxBuffer: 1 << 28 });
     const state = res.status === 0 && res.stdout.trim() ? Object.values(JSON.parse(res.stdout)) : [];

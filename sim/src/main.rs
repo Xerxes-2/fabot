@@ -257,6 +257,7 @@ fn main() {
             Vec::new()
         };
         drop(v);
+        sampler.intend(&intents);
 
         let at = Instant::now();
         engine.step(&mut k, intents);

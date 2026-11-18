@@ -1187,6 +1187,9 @@ is `scripts/sim/export.mjs`'s copy of the template.
   eligible with probability 0.66, fit by maximum likelihood to the harvest
   between 20,745 waves in Season 11's history (95%: 0.64-0.69), at each
   wave's own cadence (87.6 ticks on average).
+- A season world carries each of its sectors' centre and keeper rooms
+  (`season-world.mjs`): genInvaders raids only a sector with a live core, and
+  genStrongholds stands one only from a centre room in the world.
 - ❓ Still on xxscreeps: the rivals and the scenario library. The
   soak's `bodies.jsonl`, `decay.jsonl` and `engagements.jsonl` are written empty, and each room line's `carriedOut`
   is 0. Its `waves` and `lost` are 0 because sim pushes no scripted wave and
