@@ -48,7 +48,7 @@ import { check, engagementsOf, measures, samplesOf, withAlways } from "./measure
 import { report } from "./prediction.mjs";
 import { sweep } from "./prune.mjs";
 import { unstood } from "../sim/node.mjs";
-import { SIM_MEASURES, SIM_START, buildPlan, exportTemplate, runSim, simBinary } from "../sim/run.mjs";
+import { SIM_MEASURES, SIM_START, buildPlan, exportTemplate, runSim, simBinary, unseated } from "../sim/run.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "../..");
@@ -105,6 +105,7 @@ const xxscreepsWhy = (s) =>
   s.xxscreeps ??
   (Object.keys(s.start).filter((k) => !SIM_START.includes(k)).map((k) => `its start's ${k}`)[0] ||
     (s.start.node && unstood(s.start.node)) ||
+    (s.start.opponents ?? []).map(unseated).find(Boolean) ||
     (s.start.world && Object.keys(JSON.parse(readFileSync(resolve(REPO, s.start.world), "utf8")).segments ?? {}).length && "a capture's intel segments") ||
     (s.assert.some((a) => a.who) && "a measure of an opponent's side") ||
     s.assert.filter((a) => !SIM_MEASURES.has(a.metric !== undefined ? "metric" : a.measure)).map((a) => `${a.measure} is not read off sim`)[0] ||
@@ -165,7 +166,7 @@ const codeOf = (...paths) =>
     .reduce((h, f) => h.update(f).update(readFileSync(f)), createHash("sha256"))
     .digest("hex")
     .slice(0, 8);
-const harness = codeOf(...["seed", "seat.js", "waves", "core", "colony.mjs", "node.mjs", "live.mjs"].map((f) => join(HERE, "engine", f)));
+const harness = codeOf(...["seed", "seat.js", "waves", "core", "colony.mjs", "seat-tile.mjs", "node.mjs", "live.mjs"].map((f) => join(HERE, "engine", f)));
 const worldOf = (start) => `${recipe(start, seats(start.opponents).map((s) => ({ ...s, code: codeOf(s.bot === "@bot" ? bot : s.bot) })))}-t${start.at}-${start.bundle}-h${harness}`;
 const worldDir = (start) => join(REPO, "soak-runs/worlds", worldOf(start));
 const keyOf = ({ start, ticks, engine }, name = engine === "sim" ? `sim-${simCode}` : basename(bot, ".js")) => `scenario-${name}-${start.at ? `${worldOf(start)}${tag(start.opponents)}` : recipe(start, start.opponents)}-${ticks}`;
@@ -234,8 +235,8 @@ const play = async ({ name, start, ticks, engine }) => {
     start = { ...start, world };
   }
   if (engine === "sim") {
-    const { world, room, node, seed, late, ended } = start;
-    return runSim(sim, { world: world && resolve(REPO, world), room, node, ticks, seed, late, ended, out: join(REPO, "soak-runs", name) });
+    const { world, room, node, seed, late, ended, follow, opponents } = start;
+    return runSim(sim, { world: world && resolve(REPO, world), room, node, ticks, seed, late, ended, follow, rivals: opponents, out: join(REPO, "soak-runs", name) });
   }
   if (start.world)
     return soak(["--world", resolve(REPO, start.world), "--seed", String(start.seed), "--ticks", String(ticks), "--run", name, "--bot", bot, ...(start.room ? ["--room", start.room] : []), ...(start.node ? ["--node", start.node] : []), ...(start.late ? ["--late", String(start.late)] : []), ...(start.invaders ? ["--invaders", start.invaders] : []), ...(start.wave ? ["--wave", start.wave] : []), ...(start.follow ? ["--follow", start.follow.join(",")] : []), ...(start.ended ? ["--ended"] : []), ...opponentsOf(name, start.opponents)]);

@@ -1222,9 +1222,10 @@ settles which is right, case by case; neither engine is presumed.
   tombstones and ruins left out), and
   a start's own `declarations`, `memory` and `gcl`.
 - ❓ Still on xxscreeps (`scripts/sim/run.mjs` `SIM_START`, `SIM_MEASURES`):
-  a start with opponents (rivals, raids), scripted `invaders`, `wave` or
-  `core`, a resumed world (`at`, `bundle`), or the start's own `off`,
-  `unsafe`, `follow`, `withdrawn`; a capture's intel segments; a node sim
+  a start with an opponent that plays (a rival bot, a raid; a scripted
+  `keep` rival only holds its room, which sim stands with no code),
+  scripted `invaders`, `wave` or `core`, a resumed world (`at`, `bundle`),
+  or the start's own `off`, `unsafe`, `withdrawn`; a capture's intel segments; a node sim
   does not stand (`labStock`); and a measure `SIM_MEASURES` does not name.
   The soak's `decay.jsonl` and `engagements.jsonl` are written empty. Its
   `waves` and `lost` are 0 because sim pushes no scripted wave and loses no

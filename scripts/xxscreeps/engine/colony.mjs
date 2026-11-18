@@ -14,6 +14,7 @@
 // prints every room that fits, by name.
 import { Database, Shard } from "xxscreeps/engine/db/index.js";
 import { Source } from "xxscreeps/mods/classic/source/source.js";
+import { seatTile } from "./seat-tile.mjs";
 
 const [arg] = process.argv.slice(2);
 const listing = arg === "--list";
@@ -22,8 +23,6 @@ const db = await Database.connect();
 const shard = await Shard.connect(db, "shard0");
 const world = await shard.loadWorld();
 const accessible = await shard.data.sMembers("rooms");
-
-const range = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
 
 async function survey(name) {
   const room = await shard.loadRoom(name, shard.time).catch(() => null);
@@ -36,22 +35,8 @@ async function survey(name) {
 
 function spawnTile(name, { objects, controller, sources }) {
   const terrain = world.map.getRoomTerrain(name);
-  const wall = (x, y) => (terrain.get(x, y) & 1) === 1;
   const taken = new Set(objects.map((o) => `${o.pos.x},${o.pos.y}`));
-  const anchors = [controller.pos, ...sources.map((s) => s.pos)];
-  let best = null;
-  for (let y = 3; y <= 46; y++) {
-    for (let x = 3; x <= 46; x++) {
-      if (terrain.get(x, y) !== 0 || taken.has(`${x},${y}`)) continue;
-      if (anchors.some((a) => range(a, { x, y }) < 3)) continue;
-      let open = true;
-      for (let dy = -1; dy <= 1 && open; dy++) for (let dx = -1; dx <= 1; dx++) if (wall(x + dx, y + dy)) open = false;
-      if (!open) continue;
-      const score = anchors.reduce((sum, a) => sum + range(a, { x, y }), 0);
-      if (best === null || score < best.score) best = { x, y, score };
-    }
-  }
-  return best;
+  return seatTile((x, y) => terrain.get(x, y), taken, [controller.pos, ...sources.map((s) => s.pos)]);
 }
 
 async function outposts(name) {

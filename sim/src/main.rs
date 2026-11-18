@@ -1,7 +1,7 @@
 //! The soak on krebs, natively: `decide` on krebs's documents each tick,
 //! krebs's processor on our intents, `soak-step.mjs`'s files out.
 //!
-//! Usage: sim --world <world.json> --room <name> --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--ended] [--check]
+//! Usage: sim --world <world.json> --room <name> --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--follow A,B] [--ended] [--check]
 mod act;
 mod driver;
 mod lives;
@@ -45,6 +45,8 @@ struct Args {
     ended: bool,
     /// What the heap keeps across ticks is computed afresh beside it.
     check: bool,
+    /// Rooms the samples follow beside the declared ones: an outpost Strategy picks is declared nowhere.
+    follow: Vec<String>,
 }
 
 fn args() -> Args {
@@ -58,7 +60,7 @@ fn args() -> Args {
         };
         flags.insert(flag, value);
     }
-    let usage = "usage: sim --world <world.json> --room <name> --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--ended] [--check]";
+    let usage = "usage: sim --world <world.json> --room <name> --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--follow A,B] [--ended] [--check]";
     let need = |flag: &str| (flags.get(flag).cloned()).unwrap_or_else(|| panic!("{flag}: {usage}"));
     let number = |flag: &str, or: u64| {
         (flags.get(flag)).map_or(or, |v| {
@@ -75,6 +77,11 @@ fn args() -> Args {
         late: number("--late", 0),
         ended: flags.contains_key("--ended"),
         check: flags.contains_key("--check"),
+        follow: (flags.get("--follow").into_iter())
+            .flat_map(|f| f.split(','))
+            .filter(|r| !r.is_empty())
+            .map(str::to_string)
+            .collect(),
     }
 }
 
@@ -239,7 +246,8 @@ fn main() {
             .filter_map(|c| c["room"].as_str().map(str::to_string))
             .collect()
     };
-    let mut sampler = sample::Sampler::new(&args.room, &declared("outposts"), declared("claims"));
+    let followed = [declared("outposts"), args.follow.clone()].concat();
+    let mut sampler = sample::Sampler::new(&args.room, &followed, declared("claims"));
     let mut levels: Vec<serde_json::Value> = Vec::new();
     let (mut engine_ms, mut sample_ms) = (0.0, 0.0);
     let began = Instant::now();

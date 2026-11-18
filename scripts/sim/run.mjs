@@ -6,6 +6,9 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BUILT, US, built, near, standNode } from "./node.mjs";
+import { seatTile } from "../xxscreeps/engine/seat-tile.mjs";
+
+const SAFE_MODE_DURATION = 20000;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "../..");
@@ -14,7 +17,7 @@ export const TEMPLATE = join(REPO, "soak-runs/.template.json");
 
 // What sim stands (`world.rs`, `node.mjs`) and what `scenario.mjs` reads off what it writes
 // (`sample.rs`, `lives.rs`: no engagements.jsonl, opponent's side or terminal sends).
-export const SIM_START = ["room", "seed", "late", "node", "ended", "world", "declarations", "memory", "gcl"];
+export const SIM_START = ["room", "seed", "late", "node", "ended", "world", "declarations", "memory", "gcl", "follow", "opponents"];
 export const SIM_MEASURES = new Set([
   "metric", "spendError", "decayedAway", "roadsLost", "dug", "upgrade", "build", "linked", "builtAtEnd", "sitesAtEnd",
   "buriedAtEnd", "unroadedAtEnd", "oldestPayingSite", "extensionsBeforeContainer", "sourceContainersAtEnd", "postedLinksAtEnd",
@@ -89,6 +92,25 @@ export function standCapture(world) {
   return JSON.parse(text);
 }
 
+/** Why sim cannot seat `rival` (a scenario's opponent), or null (ARCHITECTURE.md §10.2). */
+export const unseated = (rival) =>
+  rival.bot === "scripts/xxscreeps/engine/rival" && rival.config?.role === "keep" && !rival.raid && rival.x === undefined ? null : `${rival.name} plays`;
+
+/** `rival`'s room as `manage bot add` seats it: its controller at level 1 in safe mode, a spawn on `seatTile`. */
+function standRival(world, rival, i) {
+  const id = (0xe00000 + i).toString(16);
+  world.users = { ...world.users, [id]: rival.name };
+  const home = world.rooms.find((r) => r.name === rival.room);
+  const terrain = [home.terrain].flat().join("");
+  const controller = home.objects.find((o) => o.type === "controller");
+  const anchors = [controller, ...home.objects.filter((o) => o.type === "source")];
+  const seat = seatTile((x, y) => Number(terrain[y * 50 + x]), new Set(home.objects.map((o) => `${o.x},${o.y}`)), anchors);
+  const t = world.time ?? 0;
+  Object.assign(controller, { user: id, level: 1, progress: 0, downgradeTime: t + 20000, safeMode: t + SAFE_MODE_DURATION, safeModeAvailable: 0 });
+  home.objects.push({ _id: `${id}ffff`, type: "spawn", room: rival.room, x: seat.x, y: seat.y, name: "Spawn1", user: id,
+    ...built("spawn", "0", t, 1), store: { energy: 300 }, spawning: null, notifyWhenAttacked: true });
+}
+
 /** This tree's sim (`npm run build:sim`), its path; null when it did not build. */
 export function simBinary() {
   const res = spawnSync("node", [join(HERE, "build.mjs")], { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
@@ -106,7 +128,7 @@ export const buildPlan = () =>
   spawnSync("cargo", ["build", "--release", "--quiet", "--features", "tools", "--bin", "plan", "--manifest-path", join(REPO, "Cargo.toml")], { stdio: "inherit" }).status === 0;
 
 /** A soak into `out` on `world` (default the template); resolves to sim's exit code, -1 when it never ran. */
-export function runSim(bin, { world, room, node, ticks, seed = 1, late = 0, ended = false, out }) {
+export function runSim(bin, { world, room, node, ticks, seed = 1, late = 0, ended = false, follow = [], rivals = [], out }) {
   return new Promise((done) => {
     rmSync(out, { recursive: true, force: true });
     const base = JSON.parse(readFileSync(world ?? TEMPLATE, "utf8"));
@@ -121,13 +143,19 @@ export function runSim(bin, { world, room, node, ticks, seed = 1, late = 0, ende
     // xxscreeps follows a capture's homes in its order and takes no room for it.
     if (seated) room = base.rooms.find((r) => r.objects.some((o) => o.type === "spawn" && o.user === base.userId)).name;
     try {
-      writeFileSync(map, JSON.stringify(node ? standNode(base, room, node, PLAN) : captured ? standCapture(base) : base));
+      const stood = node ? standNode(base, room, node, PLAN) : captured ? standCapture(base) : base;
+      rivals.forEach((rival, i) => standRival(stood, rival, i));
+      // As `soak.mjs`'s `node.mjs unsafe` beside an opponent: our room has no safe mode, none to activate.
+      if (rivals.length && !seated && !ended)
+        for (const c of stood.rooms.find((r) => r.name === room).objects.filter((o) => o.type === "controller"))
+          Object.assign(c, { safeMode: 0, safeModeAvailable: 0 });
+      writeFileSync(map, JSON.stringify(stood));
     } catch (e) {
       console.error(`${out}: ${e.message}`);
       return finish(-1);
     }
     if (!existsSync(map)) return finish(-1);
-    const args = ["--world", map, "--room", room, "--ticks", String(ticks), "--seed", String(seed), "--late", String(late), "--every", "100", "--out", out, ...(ended ? ["--ended"] : [])];
+    const args = ["--world", map, "--room", room, "--ticks", String(ticks), "--seed", String(seed), "--late", String(late), "--every", "100", "--out", out, ...(follow.length ? ["--follow", follow.join(",")] : []), ...(ended ? ["--ended"] : [])];
     spawn(bin, args, { stdio: "ignore" }).on("exit", finish).on("error", () => finish(-1));
   });
 }
