@@ -1215,20 +1215,20 @@ settles which is right, case by case; neither engine is presumed.
   `--capture` and `--watch` run every one on xxscreeps.
 - ✅ A captured world with a home of ours, stood by `scripts/sim/run.mjs`
   as `engine/live.mjs` stands it on xxscreeps (its Memory and declarations,
-  GCL and other players; their creeps, tombstones and ruins left out), and
+  GCL, other players and `closed` rooms (out of borders); their creeps,
+  tombstones and ruins left out), and
   a start's own `declarations`, `memory` and `gcl`.
 - ❓ Still on xxscreeps (`scripts/sim/run.mjs` `SIM_START`, `SIM_MEASURES`):
   a start with opponents (rivals, raids), scripted `invaders`, `wave` or
   `core`, a resumed world (`at`, `bundle`), or the start's own `off`,
   `unsafe`, `follow`, `withdrawn`; a capture's intel segments; a node sim
-  does not stand (`claims`, `spare`, `stale`, `short`, `labStock`); and a
-  measure reading `bodies.jsonl`, `engagements.jsonl`, an opponent's side
-  (`who`), per-home rows (`homes`) or a sample field sim's sampler does not
-  write (`claimed`, `bodies`, `made`, `ore`, `bounced`, `sent`,
-  `stillLoaded`, `boosted`). The
-  soak's `bodies.jsonl`, `decay.jsonl` and `engagements.jsonl` are written empty, and each room line's `carriedOut`
-  is 0. Its `waves` and `lost` are 0 because sim pushes no scripted wave and
-  loses no tick.
+  does not stand (`labStock`); and a measure `SIM_MEASURES` does not name.
+  The soak's `decay.jsonl` and `engagements.jsonl` are written empty. Its
+  `waves` and `lost` are 0 because sim pushes no scripted wave and loses no
+  tick.
+- ❓ A world cut from the map lacks the bus rooms of some sectors, so
+  genDeposits finds none there and throws; sim logs it and runs the next
+  job, as the backend's cron does.
 
 ### 10.3 Unit tests, where the engine would obscure
 

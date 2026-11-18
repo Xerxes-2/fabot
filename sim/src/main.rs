@@ -4,6 +4,7 @@
 //! Usage: sim --world <world.json> --room <name> --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--ended] [--check]
 mod act;
 mod driver;
+mod lives;
 mod read;
 mod sample;
 mod view;
@@ -171,7 +172,10 @@ impl Engine {
                 } else {
                     Vec::new()
                 };
-                job(k, &mut CronCtx::new(k.seed, k.time, now, name)).expect(name);
+                // The backend logs a job that throws and runs the next (ARCHITECTURE.md §10.2's genDeposits).
+                if let Err(e) = job(k, &mut CronCtx::new(k.seed, k.time, now, name)) {
+                    eprintln!("{name}: {e}");
+                }
                 hidden.into_iter().for_each(|r| k.active.insert(r));
             }
         }
@@ -203,7 +207,7 @@ fn main() {
         BufWriter::new(File::create(format!("{}/{name}", args.out)).expect("an output file"))
     };
     let mut samples = file("samples.jsonl");
-    for empty in ["bodies.jsonl", "engagements.jsonl", "decay.jsonl"] {
+    for empty in ["engagements.jsonl", "decay.jsonl"] {
         file(empty);
     }
     let out = [
@@ -211,7 +215,12 @@ fn main() {
         file("cpu.jsonl"),
         file("metrics.jsonl"),
     ];
-    let mut driver = driver::Driver::new(driver::Maps(terrains), map.memory.clone(), out);
+    let closed = map
+        .closed
+        .iter()
+        .filter_map(|r| RoomName::parse(r))
+        .collect();
+    let mut driver = driver::Driver::new(driver::Maps(terrains, closed), map.memory.clone(), out);
     driver.heap.atlas.check = args.check;
 
     let mut engine = Engine {
@@ -220,7 +229,17 @@ fn main() {
         draw: args.seed,
         processed: 0,
     };
-    let mut sampler = sample::Sampler::new(&args.room);
+    let memory: serde_json::Value = serde_json::from_str(&map.memory).unwrap_or_default();
+    let declared = |key: &str| -> Vec<String> {
+        let sites = memory["v2"]["declarations"][key]
+            .as_array()
+            .into_iter()
+            .flatten();
+        sites
+            .filter_map(|c| c["room"].as_str().map(str::to_string))
+            .collect()
+    };
+    let mut sampler = sample::Sampler::new(&args.room, &declared("outposts"), declared("claims"));
     let mut levels: Vec<serde_json::Value> = Vec::new();
     let (mut engine_ms, mut sample_ms) = (0.0, 0.0);
     let began = Instant::now();
@@ -263,6 +282,12 @@ fn main() {
     let write = |name: &str, value: serde_json::Value| {
         fs::write(format!("{}/{name}", args.out), format!("{value}\n")).expect("an output file");
     };
+    let bodies: Vec<String> = sampler.bodies().iter().map(ToString::to_string).collect();
+    fs::write(
+        format!("{}/bodies.jsonl", args.out),
+        bodies.iter().map(|b| format!("{b}\n")).collect::<String>(),
+    )
+    .expect("an output file");
     write("levels.json", json!(levels));
     write("refusals.json", json!(driver.refused));
     write("lost.json", json!([]));

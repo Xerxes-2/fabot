@@ -26,6 +26,8 @@ pub struct Map {
     /// The other players, by id, and our GCL: a capture's.
     users: Vec<(String, String)>,
     gcl: i64,
+    /// The rooms whose status is not our colonies' (a capture's `closed`): the engine lets no creep in.
+    pub closed: Vec<String>,
 }
 
 /// Each room's terrain as 2500 digits, row by row; rows or one string.
@@ -44,6 +46,9 @@ pub fn read(path: &str) -> Map {
             .map(|(id, name)| (id.clone(), name.as_str().unwrap_or(id).to_string()))
             .collect(),
         gcl: world["gcl"].as_i64().unwrap_or(0),
+        closed: (world["closed"].as_array().into_iter().flatten())
+            .filter_map(|r| r.as_str().map(str::to_string))
+            .collect(),
     };
     for room in world["rooms"].as_array().expect("rooms") {
         let name = room["name"].as_str().expect("a room's name").to_string();
@@ -149,7 +154,7 @@ impl Map {
             .chain(self.users.iter().map(|(id, name)| user(id, name)))
             .collect();
         let db = json!({
-            "rooms": self.rooms.iter().map(|(n, _)| room_doc(n)).collect::<Vec<_>>(),
+            "rooms": self.rooms.iter().map(|(n, _)| room_doc(n, self.closed.contains(n))).collect::<Vec<_>>(),
             "rooms.terrain": self.rooms.iter().map(|(n, t)| json!({ "room": n, "terrain": t })).collect::<Vec<_>>(),
             "users": users,
             "rooms.objects": objects,
@@ -187,8 +192,9 @@ impl Map {
 
 /// A `rooms` doc as the official world generator lays it out: a highway a
 /// bus with its sector's deposit type, a keeper room marked so.
-fn room_doc(name: &str) -> Value {
-    let mut doc = json!({ "_id": name, "status": "normal" });
+fn room_doc(name: &str, closed: bool) -> Value {
+    let status = if closed { "out of borders" } else { "normal" };
+    let mut doc = json!({ "_id": name, "status": status });
     let Some(xy) = RoomXY::parse_engine(name) else {
         return doc;
     };

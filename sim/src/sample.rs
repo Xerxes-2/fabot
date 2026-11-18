@@ -13,12 +13,14 @@ use screeps::{
 };
 use serde_json::{Map, Value, json};
 
+use crate::lives::{self, Lives};
 use crate::read::build_cost;
 use crate::view::{
     EVENT_ATTACK, EVENT_BUILD, EVENT_HARVEST, EVENT_HEAL, EVENT_REPAIR, EVENT_TRANSFER,
     EVENT_UPGRADE_CONTROLLER, Room, View, num, obj, ours, store, text,
 };
 use crate::world::Map as World;
+use krebs::room_name::RoomXY;
 
 const PAYING: [&str; 6] = [
     "spawn",
@@ -91,6 +93,7 @@ struct Line {
     bodies: f64,
     reserved: f64,
     hostile: f64,
+    carried_out: f64,
     least_downgrade: Option<f64>,
 }
 
@@ -124,6 +127,10 @@ pub struct Sampler {
     taken: BTreeSet<String>,
     graves: BTreeSet<String>,
     placed: BTreeMap<String, i64>,
+    lives: Lives,
+    /// The rooms our spawns stood in at the start (several in a capture), and the claims Memory declared.
+    homes: Vec<String>,
+    claims: Vec<String>,
 }
 
 /// Piles, tombstones (an Invader's corpse is ours to take), and stores nobody's or ours.
@@ -139,9 +146,16 @@ fn stock(room: &Room) -> f64 {
 }
 
 impl Sampler {
-    pub fn new(home: &str) -> Sampler {
+    /// The home, and the outposts and claims Memory declares, followed from the start as `soak-step.mjs` does.
+    pub fn new(home: &str, outposts: &[String], claims: Vec<String>) -> Sampler {
         let mut s = Sampler::default();
-        s.follow(home);
+        for room in std::iter::once(home).chain(outposts.iter().chain(&claims).map(String::as_str))
+        {
+            if !s.lines.contains_key(room) {
+                s.follow(room);
+            }
+        }
+        s.claims = claims;
         s
     }
 
@@ -189,6 +203,18 @@ impl Sampler {
 
     /// One tick of the ledger, off the followed rooms as the tick left them.
     pub fn account(&mut self, v: &View) {
+        if self.homes.is_empty() {
+            let spawn = |r: &&Room| r.of("spawn").any(ours);
+            let others = v.rooms.iter().filter(spawn).map(|r| r.name.to_string());
+            self.homes = std::iter::once(self.rooms[0].clone())
+                .chain(others.filter(|r| *r != self.rooms[0]))
+                .collect();
+            self.homes
+                .clone()
+                .iter()
+                .skip(1)
+                .for_each(|h| self.follow(h));
+        }
         let joined = self.follow_worked(v);
         let time = v.k.time as f64;
         let mut piles = BTreeMap::new();
@@ -324,6 +350,39 @@ impl Sampler {
         self.piles = piles;
         self.ledger.stock0.get_or_insert(total);
         self.ledger.stock = total;
+        let followed: Vec<&Room> = self.rooms.iter().map(|n| v.room(n)).collect();
+        let neighbours = |r: &&Room| {
+            let xy = RoomXY::parse_engine(r.name).expect("a room name");
+            let next = [(0, -1), (1, 0), (0, 1), (-1, 0)].map(|(dx, dy)| RoomXY {
+                x: xy.x + dx,
+                y: xy.y + dy,
+            });
+            followed
+                .iter()
+                .any(|f| next.contains(&RoomXY::parse_engine(f.name).expect("a room name")))
+        };
+        let bordering = v
+            .rooms
+            .iter()
+            .filter(|r| !self.lines.contains_key(r.name))
+            .filter(neighbours);
+        let around: Vec<&Room> = followed.iter().copied().chain(bordering).collect();
+        // The tick the bot reads, as a body's name and ticks to live count it.
+        let read = v.k.time;
+        for (home, out) in self
+            .lives
+            .observe(&around, followed.len(), &self.homes, read)
+        {
+            self.lines
+                .get_mut(&home)
+                .expect("a home is followed")
+                .carried_out += out;
+        }
+    }
+
+    /// Each body's life, `bodies.jsonl`'s rows.
+    pub fn bodies(&mut self) -> Vec<Value> {
+        self.lives.close()
     }
 
     /// The piles our bodies pick up and the bodies our spawns recycle, off this tick's intents.
@@ -356,10 +415,111 @@ impl Sampler {
             "residual": residual })
     }
 
-    /// One sample of the home, and the colony's worth, score and room lines.
+    /// One sample of the first home, each home's when there are several, and the colony's
+    /// worth, score, room lines and what spans its rooms.
     pub fn sample(&mut self, v: &View, t: u64, map: &World) -> Value {
+        let mut row = self.home(v, t, map, &self.rooms[0].clone());
+        let (worth, score) = self.worth(v, map);
+        for (k, value) in [
+            ("ledger", self.ledger()),
+            ("worth", worth),
+            ("score", score),
+            ("rooms", self.lines(v)),
+        ] {
+            row.insert(k.into(), value);
+        }
+        if self.homes.len() > 1 {
+            let mut homes = Map::new();
+            for h in self.homes.clone() {
+                let mut each = self.home(v, t, map, &h);
+                each.remove("bodies");
+                each.remove("foes");
+                homes.insert(h, Value::Object(each));
+            }
+            row.insert("homes".into(), Value::Object(homes));
+        }
+        let ours_in = |kinds: &[&str]| -> Vec<&Obj> {
+            (self.rooms.iter())
+                .flat_map(|n| v.room(n).objects.iter())
+                .filter(|(k, o)| kinds.contains(k) && ours(o))
+                .map(|(_, o)| *o)
+                .collect()
+        };
+        let held =
+            |o: &&Obj, r: &str| obj(o, atom!("store")).map_or(0.0, |s| num(s, Atom::intern(r)));
+        let used = |o: &&Obj| {
+            obj(o, atom!("store")).map_or(0.0, |s| s.iter().filter_map(|(_, v)| v.as_f64()).sum())
+        };
+        let banks = ours_in(&["storage", "terminal"]);
+        let ore: f64 = banks.iter().map(|o| used(o) - held(o, "energy")).sum();
+        let mut made = Map::new();
+        for r in ["OH", "UH", "UH2O"] {
+            made.insert(
+                r.into(),
+                json!(
+                    ours_in(&["storage", "terminal", "lab"])
+                        .iter()
+                        .map(|o| held(o, r))
+                        .sum::<f64>()
+                ),
+            );
+        }
+        let boosted = (ours_in(&["creep"]).iter())
+            .flat_map(|o| match o.get(atom!("body")) {
+                Some(Val::Arr(b)) => b.to_vec(),
+                _ => Vec::new(),
+            })
+            .filter(|p| {
+                p.as_obj().is_some_and(|p| {
+                    !matches!(p.get(Atom::intern("boost")), None | Some(Val::Null))
+                })
+            })
+            .count();
+        let mut claimed = Map::new();
+        let raised = v
+            .rooms
+            .iter()
+            .map(|r| r.name)
+            .filter(|n| !self.homes.iter().any(|h| h == n));
+        let raised = raised.filter(|n| {
+            v.room(n)
+                .of("controller")
+                .any(|c| ours(c) && num(c, atom!("level")) > 0.0)
+        });
+        for name in self.claims.iter().map(String::as_str).chain(raised) {
+            let room = v.room(name);
+            let mine = room.of("controller").any(ours);
+            let towers: Vec<&Obj> = room.of("tower").filter(|o| mine && ours(o)).collect();
+            let level = room
+                .of("controller")
+                .find(|c| ours(c))
+                .map_or(0.0, |c| num(c, atom!("level")));
+            let safe = room
+                .of("controller")
+                .any(|c| ours(c) && num(c, atom!("safeMode")) > v.k.time as f64);
+            claimed.insert(name.into(), json!({ "fire": towers.iter().map(|t| store(t, atom!("energy"))).sum::<f64>(),
+                "towers": towers.len(), "safe": safe, "level": level, "spawns": room.of("spawn").filter(|o| mine && ours(o)).count() }));
+        }
+        for (k, value) in [
+            ("ore", json!(ore)),
+            ("made", Value::Object(made)),
+            ("boosted", json!(boosted)),
+            ("claimed", Value::Object(claimed)),
+            ("bounced", json!(self.lives.bounced)),
+            ("stillLoaded", json!(self.lives.still_loaded)),
+            ("sent", json!({})),
+            ("others", json!({})),
+        ] {
+            row.insert(k.into(), value);
+        }
+        Value::Object(row)
+    }
+
+    /// One home's sample: `soak-step.mjs`'s `sample`.
+    fn home(&mut self, v: &View, t: u64, map: &World, name: &str) -> Map<String, Value> {
         let time = v.k.time as i64;
-        let home = v.room(&self.rooms[0]);
+        let home = v.room(name);
+        let (mut bodies, mut foes) = (Vec::new(), Vec::new());
         let (mut creeps, mut body_parts, mut spawns, mut hostiles) = (0, 0, 0, 0);
         let (mut sources, mut stored, mut dropped, mut cash, mut capacity) =
             (0.0, 0.0, 0.0, 0.0, 0.0);
@@ -397,8 +557,30 @@ impl Sampler {
                 "creep" if mine => {
                     creeps += 1;
                     body_parts += parts(o).len();
+                    let acts = lives::acts(o).join("+");
+                    let at = format!(
+                        "{}@{},{} {}",
+                        text(o, atom!("name")),
+                        num(o, atom!("x")),
+                        num(o, atom!("y")),
+                        lives::letters(&parts(o))
+                    );
+                    bodies.push(format!(
+                        "{at} e{} {}",
+                        store(o, atom!("energy")),
+                        if acts.is_empty() { "-" } else { &acts }
+                    ));
                 }
-                "creep" => hostiles += 1,
+                "creep" => {
+                    hostiles += 1;
+                    let at = format!(
+                        "{}@{},{}",
+                        text(o, atom!("name")),
+                        num(o, atom!("x")),
+                        num(o, atom!("y"))
+                    );
+                    foes.push(format!("{at} {}", lives::letters(&parts(o))));
+                }
                 _ => {}
             }
             let structure = kind
@@ -440,7 +622,7 @@ impl Sampler {
             .iter()
             .filter(|r| solid.iter().any(|s| same(r, s)))
             .count();
-        let terrain = map.terrain(&self.rooms[0]);
+        let terrain = map.terrain(name);
         let extension = |o: &Obj| text(o, atom!("type")) == "extension";
         let extensions: Vec<_> = solid
             .iter()
@@ -467,13 +649,15 @@ impl Sampler {
         let posted = (home.of("link"))
             .filter(|l| source_containers.iter().any(|c| near(c, l, 1)))
             .count();
-        let (worth, score) = self.worth(v, map);
-        json!({ "t": t, "time": time, "rcl": level, "safeMode": safe, "progress": progress, "creeps": creeps,
+        let row = json!({ "t": t, "time": time, "rcl": level, "safeMode": safe, "progress": progress, "creeps": creeps,
             "parts": body_parts, "spawns": spawns, "hostiles": hostiles, "sources": sources, "energy": cash,
             "capacity": capacity, "stored": stored, "dropped": dropped, "sites": sites, "queued": queued,
             "oldestPaying": oldest, "built": built, "sourceContainers": source_containers.len(), "buried": buried,
-            "unroaded": unroaded, "postedLinks": posted, "mineralAmount": mineral, "ledger": self.ledger(),
-            "worth": worth, "score": score, "rooms": self.lines(v), "others": {}, "bodies": [], "foes": [] })
+            "unroaded": unroaded, "postedLinks": posted, "mineralAmount": mineral, "bodies": bodies, "foes": foes });
+        match row {
+            Value::Object(row) => row,
+            _ => unreachable!("a json! object"),
+        }
     }
 
     fn worth(&self, v: &View, map: &World) -> (Value, Value) {
@@ -560,7 +744,7 @@ impl Sampler {
             let bodies = line.bodies.round();
             out.insert(name.clone(), json!({ "dug": line.dug, "decayed": line.decayed, "build": line.build,
                 "upgrade": line.upgrade, "repair": line.repair, "bodies": bodies, "reserved": line.reserved,
-                "hostile": line.hostile, "waves": 0, "carriedOut": 0, "leastDowngrade": line.least_downgrade,
+                "hostile": line.hostile, "waves": 0, "carriedOut": line.carried_out, "leastDowngrade": line.least_downgrade,
                 "net": line.dug - line.decayed - line.repair - bodies, "creeps": creeps, "hostiles": hostiles,
                 "roads": roads, "containers": containers, "cores": cores, "held": held, "ores": ores }));
         }

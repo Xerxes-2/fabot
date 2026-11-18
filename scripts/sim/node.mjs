@@ -92,10 +92,13 @@ const DECAY = { road: 1000, container: 100, rampart: 100 };
 export function built(kind, terrain, t, level) {
   const [hits, extra] = BUILT[kind];
   const full = kind === "road" ? hits * ({ 1: 150, 2: 5 }[terrain] ?? 1) : kind === "rampart" ? RAMPART_HITS_MAX[level] : (extra.hitsMax ?? hits);
-  return { store: energy(0), ...extra, hits: kind === "road" ? full : hits, hitsMax: full, ...(DECAY[kind] && { nextDecayTime: t + DECAY[kind] }) };
+  // An extension holds its level's capacity from the start, as xxscreeps' Extension.create gives it; krebs's
+  // extension tick would set it only after the bot's first read.
+  const capacity = kind === "extension" && { storeCapacityResource: energy(level >= 8 ? 200 : level === 7 ? 100 : 50) };
+  return { store: energy(0), ...extra, ...capacity, hits: kind === "road" ? full : hits, hitsMax: full, ...(DECAY[kind] && { nextDecayTime: t + DECAY[kind] }) };
 }
 // `modern` picks xxscreeps' template with every structure kind, which krebs always has.
-const STOOD = new Set(["level", "built", "stored", "without", "worn", "bodies", "outposts", "alone", "labs", "modern", "buried", "moved"]);
+const STOOD = new Set(["level", "built", "stored", "without", "worn", "bodies", "outposts", "alone", "labs", "modern", "buried", "moved", "claims", "spare", "short", "stale"]);
 const terrainOf = (room) => [room.terrain].flat().join("");
 
 /** Why sim cannot stand node `name`, or null. */
@@ -191,9 +194,14 @@ export function standNode(world, room, name, plan) {
     });
   }
 
-  const declarations = { outposts: node.outposts ? outposts(world, room) : [], ...(node.labs && { labs: { home: room, targets: node.labs } }), ...(node.alone && { avoid: near(room, 3) }) };
-  if (node.outposts && !declarations.outposts.length) throw new Error(`${room}: no neighbour fits an outpost`);
-  return { ...world, simMemory: { v2: { declarations } } };
+  const fits = outposts(world, room);
+  if ((node.outposts || node.claims || node.stale) && !fits.length) throw new Error(`${room}: no neighbour fits an outpost`);
+  const declarations = { outposts: node.outposts ? fits : [], claims: fits.slice(0, node.claims ?? 0), ...(node.labs && { labs: { home: room, targets: node.labs } }), ...(node.alone && { avoid: near(room, 3) }) };
+  // As `engine/node.mjs declare`: the engine's GCL for that many rooms past the first.
+  const rooms = node.spare ?? declarations.claims.length;
+  const gcl = rooms && !node.short ? Math.ceil(1e6 * rooms ** 2.4) : world.gcl;
+  const expansion = node.stale && { expansion: { room: fits[0].room, since: -100000 } };
+  return { ...world, gcl, simMemory: { v2: { ...expansion, declarations } } };
 }
 
 // Mirrors `engine/colony.mjs`'s outposts, which reads xxscreeps' database.

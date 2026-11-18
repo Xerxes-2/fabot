@@ -20,7 +20,10 @@ use crate::view::{View, ms};
 use crate::{act, read};
 
 /// Every room's terrain, read once: the world never changes it.
-pub struct Maps(pub Vec<(RoomName, LocalRoomTerrain)>);
+pub struct Maps(
+    pub Vec<(RoomName, LocalRoomTerrain)>,
+    pub BTreeSet<RoomName>,
+);
 
 impl Terrains for Maps {
     fn terrain(&self, room: RoomName) -> Option<&LocalRoomTerrain> {
@@ -82,6 +85,7 @@ impl<W: Write> Driver<W> {
             read: |declarations: &Declarations, _drain| {
                 let at = Instant::now();
                 let mut world = read::world(v, declarations);
+                world.closed = maps.1.clone();
                 (world.rooms.iter_mut()).for_each(|r| r.terrain = maps.terrain(r.name));
                 read_ms.set(ms(at));
                 (world, maps as &dyn Terrains, ())
