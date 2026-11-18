@@ -58,6 +58,8 @@ const SEEN_AFTER_CAST = 2;
 const SPAWN_TIME_PER_PART = 3;
 // `AGED` in `core/observe/metrics.rs`: fewer ticks to live, a body died of age.
 const AGED = 5;
+// `STRUCK_LATELY` there: struck within these ticks of its death, a body was killed.
+const STRUCK_LATELY = 5;
 const firstClaimed = (samples, met) => samples.find((s) => Object.keys(s.claimed ?? {}).length && Object.values(s.claimed).every(met))?.t ?? Infinity;
 export const measures = {
   metric: (_, a, dir) => {
@@ -253,8 +255,21 @@ export const measures = {
     return spawns[0] - Math.min(...spawns);
   },
   fewestCreeps: (samples, a) => Math.min(...within(samples, a).map((s) => sideOf(a)(s).creeps)),
-  // The first tick our room stood in safe mode (never: Infinity).
-  safeModeAt: (samples, a) => within(samples, a).find((s) => s.safeMode)?.t ?? Infinity,
+  // A death within STRUCK_LATELY ticks of a strike is a kill, as `death.*` reads one: a body
+  // struck, then recycled by its spawn, was not killed.
+  safeModeAfterCull: (samples, a, dir) => {
+    const lives = livesOf(dir);
+    const end = Math.max(...lives.map((b) => b.last));
+    const offset = samples[0].time - samples[0].t;
+    const kills = lives
+      .filter((b) => b.ours && b.at.startsWith(`${a.room} `) && b.last < end && b.ttl > AGED && b.last - b.struckAt <= STRUCK_LATELY)
+      .filter((b) => /^[wcm]+$/.test(b.body) && /[wc]/.test(b.body))
+      .map((b) => b.last - offset)
+      .filter((t) => t >= (a.from ?? 0))
+      .sort((x, y) => x - y);
+    if (kills.length < 2) return 0;
+    return Math.max(0, (within(samples, a).find((s) => s.safeMode)?.t ?? Infinity) - kills[1]);
+  },
   creepsLostBeforeSafeMode: (samples, a) => {
     const seen = within(samples, a);
     const safe = seen.findIndex((s) => s.safeMode);

@@ -19,7 +19,7 @@
 // decayed, once it is gone or the run ends, with its tile's role and the
 // tombstone or ruin it fell out of. `bodies.jsonl`: each body, ours or not,
 // once it is gone from the colony's rooms, their neighbours and the opponents' rooms or the run ends: its parts, the ticks it
-// was first and last seen, its ticks to live then, the damage struck on it, its ticks by room and
+// was first and last seen, its ticks to live then, the damage struck on it and the last tick it was struck (`struckAt`), its ticks by room and
 // by action, each room it entered with the tick, and the tiles it harvested and reserved from (`tiles`).
 // The colony's rooms are <room> (several homes: each sample's `homes` holds
 // one sample a home, the first's at its top), the outposts and claims its Memory
@@ -263,6 +263,8 @@ let lastPiles = new Map();
 const pileLog = new Map();
 const graves = new Map();
 const lives = new Map();
+// A body's key by id: the strike that kills it lands the tick it is gone from the room.
+const byId = new Map();
 const near = (a, b, r) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) <= r;
 function roleOf(pos, objects) {
   const by = (pred) => objects.filter(pred);
@@ -413,6 +415,7 @@ function live(rooms, time) {
     for (const o of room["#objects"]) {
       if (o.body === undefined) continue;
       const key = `${o["#user"]} ${o.name}`;
+      byId.set(o.id, key);
       const cost = o.body.reduce((sum, p) => sum + (PART_COST[p.type] ?? 0), 0);
       const life = lives.get(key) ?? { name: o.name, ours: o["#user"] === ours, body: letters(o.body), cost, first: time, rooms: {}, acts: {} };
       lives.set(key, life);
@@ -430,7 +433,10 @@ function live(rooms, time) {
         life.acts[a.type] = (life.acts[a.type] ?? 0) + 1;
         if ((a.type === "harvest" || a.type === "reserveController") && !life.tiles?.[a.type]?.includes(at)) ((life.tiles ??= {})[a.type] ??= []).push(at);
       }
-      if (struck.has(o.id)) life.struck = (life.struck ?? 0) + struck.get(o.id);
+    }
+    for (const [id, damage] of struck) {
+      const life = lives.get(byId.get(id));
+      if (life) (life.struck = (life.struck ?? 0) + damage), (life.struckAt = time);
     }
   }
   for (const [key, life] of lives)

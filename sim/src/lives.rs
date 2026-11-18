@@ -12,6 +12,8 @@ use crate::view::{EVENT_ATTACK, Room, num, obj, ours, store, text};
 #[derive(Default)]
 pub struct Lives {
     open: BTreeMap<String, Value>,
+    /// A body's key by id: the strike that kills it lands the tick it is gone from the room.
+    keys: BTreeMap<String, String>,
     pub closed: Vec<Value>,
     pub still_loaded: u64,
     stills: BTreeMap<String, (String, f64, u64)>,
@@ -41,6 +43,14 @@ fn letter(part: &str) -> &'static str {
         "claim" => "k",
         _ => "t",
     }
+}
+
+fn array<'a>(v: &'a mut Value, key: &str) -> &'a mut Vec<Value> {
+    let slot = &mut v[key];
+    if slot.is_null() {
+        *slot = json!([]);
+    }
+    slot.as_array_mut().unwrap()
 }
 
 fn edge(o: &Obj) -> bool {
@@ -92,6 +102,8 @@ impl Lives {
                     .filter_map(|p| p.parse::<screeps::Part>().ok())
                     .map(screeps::Part::cost)
                     .sum();
+                self.keys
+                    .insert(text(o, atom!("_id")).to_string(), key.clone());
                 let life = self.open.entry(key).or_insert_with(|| {
                     json!({ "name": name, "ours": ours(o), "body": letters(&body),
                         "cost": cost, "first": time, "rooms": {}, "acts": {} })
@@ -115,15 +127,7 @@ impl Lives {
                     .as_str()
                     .is_some_and(|a| a.starts_with(&format!("{} ", room.name)))
                 {
-                    let entered = life
-                        .as_object_mut()
-                        .unwrap()
-                        .entry("entered")
-                        .or_insert(json!([]));
-                    entered
-                        .as_array_mut()
-                        .unwrap()
-                        .push(json!([room.name, time]));
+                    array(life, "entered").push(json!([room.name, time]));
                 }
                 life["at"] = json!(at);
                 life["last"] = json!(time);
@@ -135,23 +139,11 @@ impl Lives {
                     let n = &mut life["acts"][act];
                     *n = json!(n.as_u64().unwrap_or(0) + 1);
                     if matches!(act, "harvest" | "reserveController") {
-                        let tiles = life
-                            .as_object_mut()
-                            .unwrap()
-                            .entry("tiles")
-                            .or_insert(json!({}));
-                        let list = tiles
-                            .as_object_mut()
-                            .unwrap()
-                            .entry(act)
-                            .or_insert(json!([]));
-                        if !list.as_array().unwrap().iter().any(|t| t == at.as_str()) {
-                            list.as_array_mut().unwrap().push(json!(at));
+                        let list = array(&mut life["tiles"], act);
+                        if !list.iter().any(|t| t == at.as_str()) {
+                            list.push(json!(at));
                         }
                     }
-                }
-                if let Some(d) = struck.get(text(o, atom!("_id"))) {
-                    life["struck"] = json!(life["struck"].as_f64().unwrap_or(0.0) + d);
                 }
                 if !ours(o) {
                     continue;
@@ -189,6 +181,12 @@ impl Lives {
                     *carried_out.entry(b.room.clone()).or_default() += now.energy;
                 }
                 self.last_two.insert(name.to_string(), [b, Some(now)]);
+            }
+            for (id, d) in struck {
+                if let Some(life) = self.keys.get(id).and_then(|k| self.open.get_mut(k)) {
+                    life["struck"] = json!(life["struck"].as_f64().unwrap_or(0.0) + d);
+                    life["struckAt"] = json!(time);
+                }
             }
         }
         let gone: Vec<String> = (self.open.iter())

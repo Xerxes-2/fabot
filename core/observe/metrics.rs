@@ -715,7 +715,7 @@ fn deaths(sums: &mut Sums, tracks: &mut HashMap<String, Track>, world: &World) {
         if t.seen == time {
             return true;
         }
-        // Out of sight it may have died unwounded; we never recycle a body.
+        // Out of sight it may have died unwounded.
         let unseen = world.room(t.at.room).is_none();
         let cause = match t.struck {
             Some((cause, at)) if time - at <= STRUCK_LATELY => Some(cause),

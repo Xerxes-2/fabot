@@ -1,5 +1,5 @@
 {
-  "why": "a player's raid no cast answers, killing the refillers of a home with a tower, spends the safe mode before the economy is razed",
+  "why": "a player's raid no cast answers, killing the refillers of a home with a tower, spends the safe mode within a sample (100 ticks) of its second kill of a body that digs or carries, and before the economy is razed; one whose raid kills fewer spends it at no bound",
   "modules": ["atlas", "economy", "exchange", "fight", "layout", "mv", "tactics"],
   "start": {
     "room": "W8N3",
@@ -18,7 +18,7 @@
   },
   "ticks": 2500,
   "assert": [
-    { "measure": "safeModeAt", "from": 1500, "max": 1900 },
+    { "measure": "safeModeAfterCull", "room": "W8N3", "from": 1500, "max": 100 },
     { "measure": "fewestCreeps", "from": 1500, "min": 4 }
   ]
 }
