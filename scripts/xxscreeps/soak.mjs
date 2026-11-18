@@ -92,6 +92,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { node26 as nodeBin, node26Env } from "./node26.mjs";
 import { patchRuntimeCache } from "./runtime-cache.mjs";
 import { invariants } from "./measures.mjs";
+import { NODES, near } from "../sim/node.mjs";
 
 // Where the run's wall time went, written to timing.json (`scenario.mjs` sums them).
 const began = Date.now();
@@ -130,56 +131,6 @@ const whole = (flag, fallback, min) => {
   const n = Number(flags[flag] ?? fallback);
   if (!(Number.isInteger(n) && n >= min)) fail(`${flag} needs a whole number ≥ ${min}\n${usage}`);
   return n;
-};
-const LATE_BODIES = "harvester:work6carry1move3*2,harvester:work20carry1move10,hauler:carry32move16*2,upgrader:work15carry1move15,worker:work16carry17move17*2";
-// Each node's level and storage stock; N4's links are what it judges, so
-// they are left to the bot, and every node's ramparts, which a node would
-// stand at full hits the bot never paid for.
-const NODES = {
-  N1: { level: 1, stored: 0, without: [] },
-  N2: { level: 3, stored: 0, without: ["rampart"] },
-  N3: { level: 4, stored: 5000, without: ["rampart"] },
-  // N3 as another bot built it: each container on another tile serving its source or controller.
-  T3: { level: 4, stored: 5000, without: ["rampart"], moved: true },
-  N4: { level: 5, stored: 50000, without: ["link", "rampart"] },
-  T4: { level: 5, stored: 50000, without: ["link", "rampart"], moved: true },
-  E1: { level: 5, stored: 50000, without: ["link", "rampart"], outposts: true },
-  E0: { level: 4, stored: 5000, without: ["rampart"], outposts: true },
-  N5: { level: 6, stored: 100000, without: ["rampart"] },
-  // N5 as RCL6 is reached: its quiet reserve (a third of two towers' two lives) stocked, its ore unbuilt.
-  R6: { level: 6, stored: 20000, without: ["rampart", "extractor", "terminal", "lab"] },
-  E2: { level: 6, stored: 100000, without: ["rampart"], claims: 1 },
-  C2: { level: 6, stored: 100000, without: ["rampart"], claims: 2 },
-  G2: { level: 6, stored: 100000, without: ["rampart"], claims: 1, short: true },
-  X2: { level: 6, stored: 100000, without: ["rampart"], spare: 1 },
-  F2: { level: 6, stored: 100000, without: ["rampart"], spare: 1, stale: true },
-  Y2: { level: 6, stored: 20000, without: ["rampart"], spare: 1 },
-  // N5 with the ore for the UH line stocked and its labs declared the cluster.
-  L5: { level: 6, stored: "100000,H:6000,O:6000,U:6000", without: ["rampart"], labs: { UH2O: 3000 } },
-  // L5 without its tower, its first lab holding what a body is boosted with:
-  // the raid must be answered by a cast, and the lab can boost one at once.
-  B5: { level: 6, stored: "100000,H:6000,O:6000,U:6000", without: ["rampart", "tower"], labs: { UH2O: 3000 }, labStock: "energy:2000,UH2O:900" },
-  // B5's lab with no compound: the cast is not held waiting for one.
-  S5: { level: 6, stored: "100000,H:6000,O:6000", without: ["rampart", "tower"], labs: { UH2O: 3000 }, labStock: "energy:2000" },
-  // B5 with the compound in the storage and its labs empty: a hauler fills the
-  // lab the waiting body walks to, as the minerals rest in the terminal first.
-  W5: { level: 6, stored: "100000,H:6000,O:6000,U:6000,UH2O:900", without: ["rampart", "tower"], labs: { UH2O: 3000 } },
-  // W5 at RCL7, six labs to spare one: the cluster reacts in the others.
-  W7: { level: 7, stored: "100000,H:6000,O:6000,U:6000,UH2O:900", without: ["rampart", "tower", "link", "factory"], labs: { UH2O: 3000 } },
-  // An RCL7 node as another bot left it: its roads and containers worn to
-  // half, its links and ramparts sites to build.
-  T7: { level: 7, stored: 100000, without: ["link", "rampart", "factory"], worn: 0.5 },
-  // The late game without its climb: every structure (the modern template's
-  // too) and about the bodies a live RCL8 home carried (captures/live-w11s25.json,
-  // its outposts' bodies aside), so the run starts working, not casting.
-  N6: { level: 7, stored: 300000, without: ["rampart"], modern: true, bodies: LATE_BODIES },
-  N7: { level: 8, stored: 500000, without: ["rampart"], modern: true, bodies: LATE_BODIES },
-  // RCL8 as a from-zero run reaches it: RCL7's plan standing, the stock at
-  // its RCL7 level, and the roads its outposts laid on RCL8's extension tiles;
-  // every room in reach avoided, so the home's dig alone pays (outposts lost).
-  R8: { level: 8, built: 7, stored: 50000, without: ["rampart"], modern: true, bodies: LATE_BODIES, buried: true, alone: true },
-  // N7 with every room in reach avoided.
-  A7: { level: 8, stored: 500000, without: ["rampart"], modern: true, bodies: LATE_BODIES, alone: true },
 };
 const node = flags["--node"] === undefined ? undefined : NODES[flags["--node"]];
 if (flags["--node"] !== undefined && !node) fail(`--node: one of ${Object.keys(NODES).join(", ")}`);
@@ -465,12 +416,6 @@ if (flags["--ended"]) node26([XXSCREEPS, script("node.mjs"), "ended", colony.roo
 else if ((opponents.length && !seated) || flags["--unsafe"]) node26([XXSCREEPS, script("node.mjs"), "unsafe", colony.room], world);
 if ((node?.outposts || node?.claims || node?.stale) && colony.outposts.length === 0) fail(`${colony.room}: no neighbour fits an outpost`);
 const allies = opponents.filter((o) => o.ally).map((o) => o.name);
-const near = (room, hops) => {
-  const [, we, x, ns, y] = /^([WE])(\d+)([NS])(\d+)$/.exec(room);
-  const [cx, cy] = [we === "E" ? +x : -x - 1, ns === "S" ? +y : -y - 1];
-  const name = (i, j) => `${i < 0 ? `W${-i - 1}` : `E${i}`}${j < 0 ? `N${-j - 1}` : `S${j}`}`;
-  return Array.from({ length: (2 * hops + 1) ** 2 }, (_, k) => name(cx + (k % (2 * hops + 1)) - hops, cy + Math.floor(k / (2 * hops + 1)) - hops)).filter((r) => r !== room);
-};
 if (node?.outposts || node?.claims || node?.spare || node?.labs || node?.alone || (allies.length && !seated && !from)) {
   const claims = colony.outposts.slice(0, node?.claims ?? 0);
   const labs = node?.labs ? { labs: { home: colony.room, targets: node.labs } } : {};

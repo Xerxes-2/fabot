@@ -1,4 +1,4 @@
-// sim as `soak:many --native` runs it: the `sim` profile, this machine's CPU,
+// sim as `soak:many` runs it: the `sim` profile, this machine's CPU,
 // and PGO trained on one W8N3 30k soak. The wasm bot and the tests never
 // build this way. The profile is trained once and reused as the code moves,
 // since a stale profile costs speed, never an output; --train trains it

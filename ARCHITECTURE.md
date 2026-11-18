@@ -1052,7 +1052,8 @@ each job over.
   losses (§10.5) are read against a rival that contests the outposts
   (Hivemind over TooAngel: it reaches RCL3 there and walks our outposts,
   where TooAngel stays at RCL2; our safe mode kept, as a live colony keeps
-  its own). The extremes answer differently
+  its own; on xxscreeps alone, `--xxscreeps`, until sim seats a rival).
+  The extremes answer differently
   (a crowd of small bodies works only where seats are many), so they are
   read apart, never as a median.
   `npm run soak` and `soak:many` also hold the economy's invariants
@@ -1168,10 +1169,13 @@ official engine, with no wasm and no JS. It follows the official rules and
 never copies xxscreeps' quirks. It writes the soak's files, and the world
 is `scripts/sim/export.mjs`'s copy of the template.
 - ✅ A respawn soak on the template or a season world (`--world`, `--room`,
-  `--seed`, `--late`, `--ended`): `soak:many --native` runs its starts with
-  neither a node nor a rival on sim, one process per allowed core, from
+  `--seed`, `--late`, `--ended`), and a node, stood in the world's JSON by
+  `scripts/sim/node.mjs` as `soak.mjs --node` stands it: `soak:many` runs
+  its starts on sim, one process per allowed core, from
   `npm run build:sim` (target CPU, PGO, `panic = "abort"`; never the wasm
-  bot's or the tests' build).
+  bot's or the tests' build); `--xxscreeps` runs them on xxscreeps, to
+  cross-check. A node's outposts see the official Invaders, not
+  `soak.mjs`'s scripted waves.
 - An Invader that spawns on a border stays in the room: the official engine
   carries no NPC across an exit (`creeps/tick.js`).
 - The official crons run between ticks on their wall-clock periods, as
@@ -1183,7 +1187,7 @@ is `scripts/sim/export.mjs`'s copy of the template.
   eligible with probability 0.66, fit by maximum likelihood to the harvest
   between 20,745 waves in Season 11's history (95%: 0.64-0.69), at each
   wave's own cadence (87.6 ticks on average).
-- ❓ Still on xxscreeps: the nodes, the rivals and the scenario library. The
+- ❓ Still on xxscreeps: the rivals and the scenario library. The
   soak's `bodies.jsonl`, `decay.jsonl` and `engagements.jsonl` are written empty, and each room line's `carriedOut`
   is 0. Its `waves` and `lost` are 0 because sim pushes no scripted wave and
   loses no tick.

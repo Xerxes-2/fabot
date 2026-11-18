@@ -1,12 +1,13 @@
 // The soak over several rooms, seeds and bundles at once, so an economy change
 // is judged against its base on more than one room's terrain and more than
-// one seed (ARCHITECTURE.md §10.2): `soak.mjs` once per (bundle, seed, room),
-// many at a time, then one table.
+// one seed (ARCHITECTURE.md §10.2): `sim` (krebs, official rules) once per
+// (binary, seed, room), many at a time, then one table.
 //
-// Usage: npm run soak:many -- [--bot [name=]a.js,[name=]b.js] [--seed 1,2,1+7] [--room A,B,...]
-//                             [--ticks T] [--jobs J] [--tag name] [--node N] [--fresh] [--native]
-//   --bot    the bundles to compare (default dist/main.js); the first is the
-//            base the others are read against. A name defaults to the file's.
+// Usage: npm run soak:many -- [--bot [name=]a,[name=]b] [--seed 1,2,1+7] [--room A,B,...]
+//                             [--ticks T] [--jobs J] [--tag name] [--node N] [--fresh] [--xxscreeps]
+//   --bot    the sim binaries to compare (default this tree's, `npm run build:sim`);
+//            the first is the base the others are read against. A name
+//            defaults to the file's.
 //   --seed   the starts for every room (default 1,2,1+7, the contested start
 //            1,2,3,4,1+7,2+7: its spread is wider): an engine seed, or seed+K
 //            for a bot that sits out its first K ticks (soak.mjs --late), a
@@ -27,15 +28,14 @@
 // under the table, and the exit is non-zero.
 //   --ticks  per run (default 30000; a node's 10000)
 //   --node   start every run without its own node at this one
-//   --jobs   runs at once (default a quarter of the hardware threads: a soak
-//            keeps server, processor, runner and stepper threads busy, and
-//            more jobs only slow each other)
+//   --jobs   runs at once (default every allowed core)
 //   --tag    output names: soak-runs/<tag>-<bundle>-s<seed>-<room>/ (default many)
 //   --fresh  run even where the cache holds this bundle, room, seed and ticks
-//   --native each run on `sim` (krebs, official rules) instead of xxscreeps; a
-//            --bot is then a sim binary (default this tree's, `npm run build:sim`), --jobs
-//            defaults to every allowed core, and a start with a node or a
-//            rival, which sim does not stand yet, is left out
+//   --xxscreeps  each run on xxscreeps (`soak.mjs`), to cross-check sim: a
+//            --bot is then a bundle (default dist/main.js), and --jobs
+//            defaults to a quarter of the hardware threads (a soak keeps
+//            server, processor, runner and stepper threads busy)
+// A start sim cannot stand is named under the table.
 //
 // A finished run is cached under soak-runs/.cache/ by its bundle's code (the
 // version stamp aside), start, seed, ticks and the soak scripts (with the
@@ -50,14 +50,16 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sweep } from "./prune.mjs";
 import { invariants } from "./measures.mjs";
+import { standNode, unstood } from "../sim/node.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "../..");
 const SOAK = join(HERE, "soak.mjs");
+const PLAN = join(REPO, "target/release/plan");
 const RUNS = join(REPO, "soak-runs");
 const CACHE = join(RUNS, ".cache");
 const usage =
-  "usage: npm run soak:many -- [--bot [name=]a.js,...] [--seed 1,2,1+7] [--room [world:]A[@N],...] [--ticks T] [--jobs J] [--tag name] [--node N] [--fresh] [--native]";
+  "usage: npm run soak:many -- [--bot [name=]a,...] [--seed 1,2,1+7] [--room [world:]A[@N],...] [--ticks T] [--jobs J] [--tag name] [--node N] [--fresh] [--xxscreeps]";
 const fail = (m) => {
   console.error(m);
   process.exit(1);
@@ -66,7 +68,7 @@ const fail = (m) => {
 const flags = {};
 const rest = process.argv.slice(2);
 for (let i = 0; i < rest.length; i++) {
-  if (rest[i] === "--fresh" || rest[i] === "--native") {
+  if (rest[i] === "--fresh" || rest[i] === "--xxscreeps") {
     flags[rest[i]] = true;
     continue;
   }
@@ -88,7 +90,7 @@ const parseSeeds = (text) =>
     return { seed: whole(seed, "--seed", 0), late: whole(late, "--seed", 0), label: spec };
   });
 const CONTESTED = "season-outpost-ring:E25S9@E1+hivemind:E27S9";
-const native = flags["--native"];
+const native = !flags["--xxscreeps"];
 const SIM_TEMPLATE = join(RUNS, ".template.json");
 const allStarts = (flags["--room"] ?? `W9N8,W8N3,season-outpost-ring:E23S9,season-late-seat:W12S28@N7,${CONTESTED}`).split(",").map((spec) => {
   const m = /^(?:([\w-]+):)?([WE]\d+[NS]\d+)(?:@([A-Za-z0-9]+))?(?:\+([a-z]+):([WE]\d+[NS]\d+))?$/.exec(spec);
@@ -100,8 +102,10 @@ const allStarts = (flags["--room"] ?? `W9N8,W8N3,season-outpost-ring:E23S9,seaso
   if (rival && !existsSync(rival.bot)) fail(`--room: no rival ${rival.bot}`);
   return { label: spec, room: m[2], world, node: at, rival, ended: Boolean(rival || (world && !at)), seeds: parseSeeds(flags["--seed"] ?? (spec === CONTESTED ? "1,2,3,4,1+7,2+7" : "1,2,1+7")), ticks: whole(flags["--ticks"] ?? (at ? 10000 : 30000), "--ticks", 1) };
 });
-const starts = native ? allStarts.filter((s) => !s.node && !s.rival) : allStarts;
-if (starts.length < allStarts.length) console.error(`not yet native: ${allStarts.filter((s) => !starts.includes(s)).map((s) => s.label).join(", ")}`);
+const unstoodOf = (s) => (s.rival ? "a rival" : s.node && unstood(s.node));
+const starts = native ? allStarts.filter((s) => !unstoodOf(s)) : allStarts;
+const unrun = allStarts.filter((s) => !starts.includes(s)).map((s) => `not run: ${s.label} (${unstoodOf(s)})`);
+unrun.forEach((u) => console.error(u));
 if (!starts.length) fail("no start to run");
 const jobs = whole(flags["--jobs"] ?? Math.max(1, Math.floor(availableParallelism() / (native ? 1 : 4))), "--jobs", 1);
 const tag = flags["--tag"] ?? "many";
@@ -128,7 +132,7 @@ const hash = (...parts) => {
   return h.digest("hex").slice(0, 16);
 };
 const scriptsHash = hash(
-  ...[SOAK, ...readdirSync(join(HERE, "engine"), { recursive: true }).map((f) => join(HERE, "engine", f))]
+  ...[SOAK, join(HERE, "../sim/node.mjs"), ...readdirSync(join(HERE, "engine"), { recursive: true }).map((f) => join(HERE, "engine", f))]
     .filter((f) => f.endsWith(".mjs") || f.endsWith(".js"))
     .sort()
     .map((f) => readFileSync(f)),
@@ -169,8 +173,19 @@ function soak(run) {
     if (native) {
       const out = join(RUNS, run.name);
       rmSync(out, { recursive: true, force: true });
-      const args = ["--world", world ?? SIM_TEMPLATE, "--room", room, "--ticks", String(ticks), "--seed", String(run.seed.seed), "--late", String(run.seed.late), "--every", "100", "--out", out, ...(ended ? ["--ended"] : [])];
-      return spawn(run.bot.file, args, { stdio: "ignore" }).on("exit", done);
+      const map = node ? join(RUNS, `${run.name}.world.json`) : (world ?? SIM_TEMPLATE);
+      const finish = (code) => {
+        if (node) rmSync(map, { force: true });
+        done(code);
+      };
+      try {
+        if (node) writeFileSync(map, JSON.stringify(standNode(JSON.parse(readFileSync(world ?? SIM_TEMPLATE, "utf8")), room, node, PLAN)));
+      } catch (e) {
+        console.error(`${run.name}: ${e.message}`);
+        return finish(-1);
+      }
+      const args = ["--world", map, "--room", room, "--ticks", String(ticks), "--seed", String(run.seed.seed), "--late", String(run.seed.late), "--every", "100", "--out", out, ...(ended ? ["--ended"] : [])];
+      return spawn(run.bot.file, args, { stdio: "ignore" }).on("exit", finish).on("error", () => finish(-1));
     }
     const opponents = join(RUNS, `${run.name}.opponents.json`);
     if (rival) writeFileSync(opponents, JSON.stringify([rival]));
@@ -184,7 +199,7 @@ function soak(run) {
 }
 
 // Built once here: parallel builds of one project collide.
-if (todo.length && !native && spawnSync("cargo", ["build", "--release", "--quiet", "--features", "tools", "--bin", "plan", "--manifest-path", join(REPO, "Cargo.toml")], { stdio: "inherit" }).status !== 0)
+if (todo.some((r) => !native || r.start.node) && spawnSync("cargo", ["build", "--release", "--quiet", "--features", "tools", "--bin", "plan", "--manifest-path", join(REPO, "Cargo.toml")], { stdio: "inherit" }).status !== 0)
   fail("the plan tool did not build");
 const codes = {};
 const queue = [...todo];
@@ -263,4 +278,5 @@ for (const start of starts)
     }
 const broken = runs.filter((r) => !failed(r)).flatMap((r) => invariants(dirOf(r)).map((b) => `${r.name}: ${b}`));
 for (const b of broken) console.log(`invariant broken: ${b}`);
+unrun.forEach((u) => console.log(u));
 if (broken.length || Object.values(codes).some((c) => c !== 0)) process.exit(1);

@@ -48,10 +48,10 @@ pub struct Driver<W: Write> {
 }
 
 impl<W: Write> Driver<W> {
-    pub fn new(maps: Maps, out: [W; 3]) -> Driver<W> {
+    pub fn new(maps: Maps, memory: String, out: [W; 3]) -> Driver<W> {
         Driver {
             maps,
-            memory: String::new(),
+            memory,
             heap: drive::Heap::new(),
             intel: Intel::new(),
             metrics: Metrics::default(),

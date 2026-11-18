@@ -215,7 +215,7 @@ fn main() {
         file("cpu.jsonl"),
         file("metrics.jsonl"),
     ];
-    let mut driver = driver::Driver::new(driver::Maps(terrains), out);
+    let mut driver = driver::Driver::new(driver::Maps(terrains), map.memory.clone(), out);
     driver.heap.atlas.check = args.check;
 
     let mut engine = Engine {

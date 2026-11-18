@@ -21,6 +21,8 @@ pub struct Map {
     pub rooms: Vec<(String, String)>,
     objects: Vec<Value>,
     time: i64,
+    /// Memory's text at the start: a node's declarations (`scripts/sim/node.mjs`), as a capture holds them.
+    pub memory: String,
 }
 
 /// Each room's terrain as 2500 digits, row by row; rows or one string.
@@ -31,6 +33,9 @@ pub fn read(path: &str) -> Map {
         rooms: Vec::new(),
         objects: Vec::new(),
         time: world["time"].as_i64().unwrap_or(0),
+        memory: (world.get("declarations")).map_or_else(String::new, |d| {
+            json!({ "v2": { "declarations": d } }).to_string()
+        }),
     };
     for room in world["rooms"].as_array().expect("rooms") {
         let name = room["name"].as_str().expect("a room's name").to_string();
@@ -84,7 +89,8 @@ impl Map {
         (i64::from(pos.x), i64::from(pos.y))
     }
 
-    /// Our user, the room's controller ours at level 1, in safe mode unless `ended`, and Spawn1 on `(x, y)`.
+    /// Our user, the room's controller ours (at level 1 unless the world's already is), in safe mode
+    /// unless `ended`, and Spawn1 on `(x, y)` unless a spawn stands.
     pub fn stand(&self, room: &str, (x, y): (i64, i64), seed: u64, ended: bool) -> World {
         let t = self.time;
         let mut objects: Vec<Value> = Vec::new();
@@ -92,9 +98,16 @@ impl Map {
             let mut o = o.clone();
             match o["type"].as_str() {
                 Some("controller") if o["room"] == room => {
-                    let ours = json!({ "level": 1, "user": US, "progress": 0, "downgradeTime": null,
-                        "safeMode": if ended { 0 } else { t + i64::from(SAFE_MODE_DURATION) }, "safeModeAvailable": 0 });
-                    merge(&mut o, ours);
+                    if o["user"] != US {
+                        let ours = json!({ "level": 1, "user": US, "progress": 0, "downgradeTime": null, "safeModeAvailable": 0 });
+                        merge(&mut o, ours);
+                    }
+                    let safe = if ended {
+                        0
+                    } else {
+                        t + i64::from(SAFE_MODE_DURATION)
+                    };
+                    merge(&mut o, json!({ "safeMode": safe }));
                 }
                 Some("controller") => merge(&mut o, json!({ "level": 0 })),
                 Some("source") => merge(&mut o, json!({ "invaderHarvested": 0 })),
@@ -103,9 +116,11 @@ impl Map {
             objects.push(o);
         }
         // A harness fixture: any id serves, and Spawn1 is a respawn's first spawn's name.
-        objects.push(json!({ "_id": "f0000000000000000000ffff", "type": "spawn", "room": room, "x": x, "y": y,
+        if !self.in_room(room).any(|o| o["type"] == "spawn") {
+            objects.push(json!({ "_id": "f0000000000000000000ffff", "type": "spawn", "room": room, "x": x, "y": y,
             "name": "Spawn1", "user": US, "store": { "energy": SPAWN_ENERGY_START }, "storeCapacityResource": { "energy": SPAWN_ENERGY_CAPACITY },
             "hits": SPAWN_HITS, "hitsMax": SPAWN_HITS, "spawning": null, "notifyWhenAttacked": true }));
+        }
         let user = |id: &str, name: &str| {
             json!({ "_id": id, "username": name, "usernameLower": name.to_lowercase(),
             "cpu": 100, "gcl": 0, "cpuAvailable": 10000, "active": 10000, "rooms": [], "money": 0, "power": 0 })
