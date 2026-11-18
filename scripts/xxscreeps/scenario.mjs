@@ -223,8 +223,8 @@ const play = async ({ name, start, ticks, engine }) => {
     start = { ...start, world };
   }
   if (engine === "sim") {
-    const { world, room, node, seed, late, ended, follow, opponents } = start;
-    return runSim(sim, { world: world && resolve(REPO, world), room, node, ticks, seed, late, ended, follow, rivals: opponents, out: join(REPO, "soak-runs", name) });
+    const { world, room, node, seed, late, ended, unsafe, follow, opponents, invaders, wave, core } = start;
+    return runSim(sim, { world: world && resolve(REPO, world), room, node, ticks, seed, late, ended, unsafe, follow, rivals: opponents, invaders, wave, core, out: join(REPO, "soak-runs", name) });
   }
   if (start.world)
     return soak(["--world", resolve(REPO, start.world), "--seed", String(start.seed), "--ticks", String(ticks), "--run", name, "--bot", bot, ...(start.room ? ["--room", start.room] : []), ...(start.node ? ["--node", start.node] : []), ...(start.late ? ["--late", String(start.late)] : []), ...(start.invaders ? ["--invaders", start.invaders] : []), ...(start.wave ? ["--wave", start.wave] : []), ...(start.follow ? ["--follow", start.follow.join(",")] : []), ...(start.ended ? ["--ended"] : []), ...opponentsOf(name, start.opponents)]);

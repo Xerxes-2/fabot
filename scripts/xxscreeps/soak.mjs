@@ -288,7 +288,7 @@ if (from) {
   rmSync(join(world, "screeps"), { recursive: true });
   cpSync(from, join(world, "screeps"), { recursive: true });
 }
-for (const f of ["seed", "waves", "core", "colony.mjs", "seat-tile.mjs", "node.mjs", "live.mjs", "batch.mjs", "soak-step.mjs"]) cpSync(join(HERE, "engine", f), join(world, f), { recursive: true });
+for (const f of ["seed", "waves", "core", "colony.mjs", "seat-tile.mjs", "node.mjs", "live.mjs", "batch.mjs", "engaged.mjs", "soak-step.mjs"]) cpSync(join(HERE, "engine", f), join(world, f), { recursive: true });
 cpSync(join(HERE, "../metrics.mjs"), join(world, "metrics.mjs"));
 writeFileSync(join(world, ".screepsrc.yaml"), screepsrc);
 // Mods resolve from the cwd only where a package.json stands.

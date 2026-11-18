@@ -1,0 +1,115 @@
+//! A scenario's scheduled Invaders and level-0 cores, stood as the official
+//! engine stands them (cronjobs.js createRaid, strongholds.js expandStronghold);
+//! krebs's processor plays them from there.
+use std::sync::Arc;
+
+use krebs::atom;
+use krebs::constants::{INVADER_CORE_HITS, OBSTACLE_OBJECT_TYPES};
+use krebs::doc::{Doc, Obj, Val};
+use krebs::world::{RoomSnapshot, World};
+use krebs_util::json::Json;
+use serde_json::{Value, json};
+
+use crate::view::num;
+use crate::world::INVADER;
+
+/// `soak.mjs`'s scheduled Invaders: on a tick, in a room, a wave of bodies or a level-0 core.
+pub type Due = (u64, String, Option<Vec<Vec<String>>>);
+
+fn insert(k: &mut World, r: usize, docs: Vec<Value>) {
+    let prev = k.rooms[r].clone();
+    let mut objects = prev.objects.to_vec();
+    for mut doc in docs {
+        doc["_id"] = json!(k.ids.next().as_str());
+        if let Val::Obj(o) = Val::from_json(&Json::parse(&doc.to_string()).expect("JSON")) {
+            objects.push(Doc::new(k.next_seq, o));
+            k.next_seq += 1;
+        }
+    }
+    let (log, view, users) = (
+        prev.event_log.clone(),
+        prev.map_view.clone(),
+        k.user_ids.clone(),
+    );
+    let (info, flags, at) = (prev.info.clone(), prev.flags.clone(), prev.processed_at);
+    let next = RoomSnapshot::from_docs(info, objects, flags, log, view, at, &users);
+    k.set_room(r as u32, Arc::new(next));
+    k.active.insert(r as u32);
+}
+
+fn wall(k: &World, r: usize, (x, y): (i64, i64)) -> bool {
+    k.terrain.raw(r as u32)[(y * 50 + x) as usize] & 1 != 0
+}
+
+fn xy(o: &Obj) -> (i64, i64) {
+    (num(o, atom!("x")) as i64, num(o, atom!("y")) as i64)
+}
+
+/// A wave of `bodies` in `room`, placed as genInvaders places a raid: one exit side at random,
+/// the first body on a random tile of it and each next on the free tile nearest the last. A side
+/// toward a room someone owns or reserves stays open: the schedule, not genInvaders, decides
+/// that a wave lands.
+pub fn wave(k: &mut World, room: &str, bodies: &[Vec<String>], mut random: impl FnMut() -> f64) {
+    let r = (k.meta.rooms.iter())
+        .position(|m| &*m.name == room)
+        .expect(room);
+    let sides: [fn(i64) -> (i64, i64); 4] = [|i| (i, 0), |i| (i, 49), |i| (0, i), |i| (49, i)];
+    let open: Vec<Vec<(i64, i64)>> = (sides.iter())
+        .map(|at| (0..49).map(at).filter(|&p| !wall(k, r, p)).collect())
+        .filter(|tiles: &Vec<_>| !tiles.is_empty())
+        .collect();
+    let mut exits = open[(random() * open.len() as f64) as usize].clone();
+    let mut last: Option<(i64, i64)> = None;
+    let mut docs = Vec::new();
+    for body in bodies {
+        let square = match last {
+            Some((a, b)) => {
+                (exits.iter().copied()).min_by_key(|&(x, y)| (x - a).abs().max((y - b).abs()))
+            }
+            None => exits.get((random() * exits.len() as f64) as usize).copied(),
+        };
+        let Some((x, y)) = square else { break };
+        exits.retain(|&e| e != (x, y));
+        last = square;
+        let parts: Vec<Value> = body
+            .iter()
+            .map(|p| json!({ "type": p, "hits": 100 }))
+            .collect();
+        let name = format!("invader_{room}_{}", (random() * 1000.0) as u32);
+        docs.push(
+            json!({ "type": "creep", "user": INVADER, "body": parts, "hits": body.len() * 100,
+            "hitsMax": body.len() * 100, "ticksToLive": 1500, "x": x, "y": y, "room": room,
+            "fatigue": 0, "store": {}, "storeCapacity": 0, "name": name }),
+        );
+    }
+    insert(k, r, docs);
+}
+
+/// A level-0 core in `room` as a stronghold's expansion stands one: on a free tile within 5 of
+/// the controller, no wall or obstacle beside it. No parent lends it a collapse timer.
+pub fn core(k: &mut World, room: &str, mut random: impl FnMut() -> f64) {
+    let r = (k.meta.rooms.iter())
+        .position(|m| &*m.name == room)
+        .expect(room);
+    let objects: Vec<Arc<Doc>> = k.rooms[r].objects.to_vec();
+    let controller = objects.iter().find(|d| d.kind() == "controller");
+    let (cx, cy) = xy(&controller.expect("a controller").obj);
+    let blocks = |(x, y): (i64, i64)| {
+        let near = |(a, b): (i64, i64)| (a - x).abs() <= 1 && (b - y).abs() <= 1;
+        let obstacle = |d: &Arc<Doc>| {
+            OBSTACLE_OBJECT_TYPES.contains(&d.kind()) || matches!(d.kind(), "rampart" | "portal")
+        };
+        (-1..=1).any(|dx| (-1..=1).any(|dy| wall(k, r, (x + dx, y + dy))))
+            || objects.iter().any(|d| near(xy(&d.obj)) && obstacle(d))
+    };
+    let mut pick = |c: i64| {
+        let (lo, hi) = ((c - 5).max(1), (c + 5).min(48));
+        lo + (random() * (hi - lo) as f64) as i64
+    };
+    let tile = (0..500).map(|_| (pick(cx), pick(cy))).find(|&p| !blocks(p));
+    let Some((x, y)) = tile else { return };
+    let doc = json!({ "type": "invaderCore", "level": 0, "room": room, "x": x, "y": y,
+        "user": INVADER, "hits": INVADER_CORE_HITS, "hitsMax": INVADER_CORE_HITS,
+        "strongholdId": null, "effects": null });
+    insert(k, r, vec![doc]);
+}

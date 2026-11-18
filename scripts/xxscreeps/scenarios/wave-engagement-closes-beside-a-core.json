@@ -1,7 +1,7 @@
 {
   "why": "a wave's engagement in an outpost where a level-0 core stands closes once the wave dies, and the core gets its own engagement and is razed",
   "modules": ["atlas", "economy", "exchange", "fight", "mv", "tactics"],
-  "start": { "room": "W8N3", "seed": 1, "node": "E1", "core": "W8N2:2510" },
+  "start": { "room": "W8N3", "seed": 1, "node": "E1", "invaders": "W7N3:4000:1000,W8N2:4000:2500", "core": "W8N2:2510" },
   "ticks": 5000,
   "assert": [
     { "measure": "heldPastWave", "max": 100 },

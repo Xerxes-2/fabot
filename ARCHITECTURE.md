@@ -1209,15 +1209,18 @@ settles which is right, case by case; neither engine is presumed.
   GCL, other players and `closed` rooms (out of borders); their creeps,
   tombstones and ruins left out), and
   a start's own `declarations`, `memory` and `gcl`.
+- ✅ A scheduled wave or level-0 core (`invaders`, `wave`, `core`) is the
+  official engine's: cronjobs.js's Invader bodies on one exit side as
+  genInvaders places a raid, a core on a free tile within 5 of the
+  controller as expandStronghold stands one, played by krebs's Invader AI.
+  `engagements.jsonl` is `engine/engaged.mjs`'s
+  on both engines, off sim's `fight.jsonl`.
 - ❓ Still on xxscreeps (`scripts/sim/run.mjs` `SIM_START`, `SIM_MEASURES`):
   a start with an opponent that plays (a rival bot, a raid; a scripted
   `keep` rival only holds its room, which sim stands with no code),
-  scripted `invaders`, `wave` or `core`, a resumed world (`at`, `bundle`),
-  or the start's own `unsafe`; a capture's intel segments; a node sim
-  does not stand (`labStock`); and a measure `SIM_MEASURES` does not name.
-  The soak's `decay.jsonl` and `engagements.jsonl` are written empty. Its
-  `waves` and `lost` are 0 because sim pushes no scripted wave and loses no
-  tick.
+  a resumed world (`at`, `bundle`), a capture's intel segments, and a
+  measure `SIM_MEASURES` does not name. The soak's `decay.jsonl` is written
+  empty, and its `waves` and `lost` 0.
 - ❓ A world cut from the map lacks the bus rooms of some sectors, so
   genDeposits finds none there and throws; sim logs it and runs the next
   job, as the backend's cron does.

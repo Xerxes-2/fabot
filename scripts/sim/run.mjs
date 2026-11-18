@@ -7,6 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BUILT, US, built, near, standNode } from "./node.mjs";
 import { seatTile } from "../xxscreeps/engine/seat-tile.mjs";
+import { engagements } from "../xxscreeps/engine/engaged.mjs";
 
 const SAFE_MODE_DURATION = 20000;
 
@@ -16,8 +17,8 @@ const PLAN = join(REPO, "target/release/plan");
 export const TEMPLATE = join(REPO, "soak-runs/.template.json");
 
 // What sim stands (`world.rs`, `node.mjs`) and what `scenario.mjs` reads off what it writes
-// (`sample.rs`, `lives.rs`: no engagements.jsonl, opponent's side or terminal sends).
-export const SIM_START = ["room", "seed", "late", "node", "ended", "world", "declarations", "memory", "gcl", "follow", "opponents"];
+// (`sample.rs`, `lives.rs`, `engaged.rs`: no opponent's side).
+export const SIM_START = ["room", "seed", "late", "node", "ended", "unsafe", "world", "declarations", "memory", "gcl", "follow", "opponents", "invaders", "wave", "core"];
 export const SIM_MEASURES = new Set([
   "metric", "spendError", "decayedAway", "roadsLost", "dug", "upgrade", "build", "linked", "builtAtEnd", "sitesAtEnd",
   "buriedAtEnd", "unroadedAtEnd", "oldestPayingSite", "extensionsBeforeContainer", "sourceContainersAtEnd", "postedLinksAtEnd",
@@ -26,7 +27,8 @@ export const SIM_MEASURES = new Set([
   "threatLookupsMost", "refusals", "faults", "heldAtEnd", "oresAtEnd", "homeLevel", "claimSafeMode", "claimLevelOf", "claimsOwned",
   "rcl2ToTower", "claimSpawned", "claimersCast", "made", "ore", "boosted", "bounced", "stillLoaded", "carriedOut", "castsBelow",
   "spawnStuck", "scoutsCast", "scoutStill", "scoutTicksIn", "reserverOnPost", "castIn", "bodiesOut", "bodiesStruck", "struckOn",
-  "deathsError", "attackersAtEnd", "creepsLostBeforeSafeMode",
+  "deathsError", "attackersAtEnd", "creepsLostBeforeSafeMode", "predictedWinsLost", "engagements", "oscillation", "bodiesLost",
+  "closedOnCore", "heldPastWave", "sentTo",
 ]);
 
 /** Whether a `worlds/`-shaped world holds a spawn of ours: a capture, not a map. */
@@ -111,6 +113,39 @@ function standRival(world, rival, i) {
     ...built("spawn", "0", t, 1), store: { energy: 300 }, spawning: null, notifyWhenAttacked: true });
 }
 
+// cronjobs.js createCreep's bodies, by `{size}{Role}`: part letters and counts.
+const INVADER = { bigHealer: "m24h25m1", bigRanged: "t6m24r18w1m1", bigMelee: "t16m24r3w4a2m1", smallHealer: "m4h5m1", smallRanged: "t2m4r3m1", smallMelee: "t2m4r1w1a1m1" };
+const PART = { m: "move", h: "heal", r: "ranged_attack", w: "work", a: "attack", t: "tough" };
+/** `soak.mjs`'s `--wave role[:size],…` as the official engine's Invader bodies. */
+const bodies = (wave = "melee,healer,ranged") =>
+  wave.split(",").map((spec) => {
+    const [role, size = "small"] = spec.split(":");
+    return [...INVADER[`${size}${role[0].toUpperCase()}${role.slice(1)}`].matchAll(/([a-z])(\d+)/g)].flatMap(([, p, n]) => Array(Number(n)).fill(PART[p]));
+  });
+
+/** `soak.mjs`'s `--invaders room:every[:first],…` and `--core room:tick,…` as sim's `--npc`: [tick, room, a wave's bodies or null for a core]. */
+function npc(invaders = "", wave, core = "", ticks) {
+  const waves = invaders.split(",").filter(Boolean).flatMap((w) => {
+    const [room, every, first = every] = w.split(":").map((v, i) => (i ? Number(v) : v));
+    return Array.from({ length: Math.max(0, Math.ceil((ticks - first) / every)) }, (_, i) => [first + i * every, room, wave]);
+  });
+  return [...waves, ...core.split(",").filter(Boolean).map((c) => [Number(c.split(":")[1]), c.split(":")[0], null])];
+}
+
+/** `engagements.jsonl` off the ticks sim wrote to `fight.jsonl`, as soak-step writes it on xxscreeps. */
+async function engaged(out) {
+  const rows = [];
+  // Every room's objects of the tick being fed: an engagement closes inside `fights.tick`.
+  let tick = { objects: [] };
+  const fights = engagements((row) => rows.push(JSON.stringify(row) + "\n"), async (rooms) => tick.objects.filter((o) => !rooms || rooms.includes(o.room)));
+  for (const line of readFileSync(join(out, "fight.jsonl"), "utf8").split("\n").filter(Boolean)) {
+    tick = JSON.parse(line);
+    await fights.tick(tick.t, tick.fight, tick.objects, new Set(tick.struck));
+  }
+  await fights.end();
+  writeFileSync(join(out, "engagements.jsonl"), rows.join(""));
+}
+
 /** This tree's sim (`npm run build:sim`), its path; null when it did not build. */
 export function simBinary() {
   const res = spawnSync("node", [join(HERE, "build.mjs")], { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
@@ -128,7 +163,7 @@ export const buildPlan = () =>
   spawnSync("cargo", ["build", "--release", "--quiet", "--features", "tools", "--bin", "plan", "--manifest-path", join(REPO, "Cargo.toml")], { stdio: "inherit" }).status === 0;
 
 /** A soak into `out` on `world` (default the template); resolves to sim's exit code, -1 when it never ran. */
-export function runSim(bin, { world, room, node, ticks, seed = 1, late = 0, ended = false, follow = [], rivals = [], out }) {
+export function runSim(bin, { world, room, node, ticks, seed = 1, late = 0, ended = false, unsafe = false, follow = [], rivals = [], invaders, wave, core, out }) {
   return new Promise((done) => {
     rmSync(out, { recursive: true, force: true });
     const base = JSON.parse(readFileSync(world ?? TEMPLATE, "utf8"));
@@ -145,8 +180,8 @@ export function runSim(bin, { world, room, node, ticks, seed = 1, late = 0, ende
     try {
       const stood = node ? standNode(base, room, node, PLAN) : captured ? standCapture(base) : base;
       rivals.forEach((rival, i) => standRival(stood, rival, i));
-      // As `soak.mjs`'s `node.mjs unsafe` beside an opponent: our room has no safe mode, none to activate.
-      if (rivals.length && !seated && !ended)
+      // As `soak.mjs`'s `node.mjs unsafe`, beside an opponent or asked: our room has no safe mode, none to activate.
+      if ((rivals.length || unsafe) && !seated && !ended)
         for (const c of stood.rooms.find((r) => r.name === room).objects.filter((o) => o.type === "controller"))
           Object.assign(c, { safeMode: 0, safeModeAvailable: 0 });
       writeFileSync(map, JSON.stringify(stood));
@@ -155,7 +190,8 @@ export function runSim(bin, { world, room, node, ticks, seed = 1, late = 0, ende
       return finish(-1);
     }
     if (!existsSync(map)) return finish(-1);
-    const args = ["--world", map, "--room", room, "--ticks", String(ticks), "--seed", String(seed), "--late", String(late), "--every", "100", "--out", out, ...(follow.length ? ["--follow", follow.join(",")] : []), ...(ended ? ["--ended"] : [])];
-    spawn(bin, args, { stdio: "ignore" }).on("exit", finish).on("error", () => finish(-1));
+    const args = ["--world", map, "--room", room, "--ticks", String(ticks), "--seed", String(seed), "--late", String(late), "--every", "100", "--out", out, ...(follow.length ? ["--follow", follow.join(",")] : []), ...(ended ? ["--ended"] : []),
+      "--npc", JSON.stringify(npc(invaders, bodies(wave), core, ticks))];
+    spawn(bin, args, { stdio: "ignore" }).on("exit", (code) => (code === 0 ? engaged(out).then(() => finish(0), () => finish(-1)) : finish(code))).on("error", () => finish(-1));
   });
 }

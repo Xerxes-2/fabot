@@ -54,6 +54,7 @@ import { getProcessorChannel, pushIntentsForRoomNextTick, userToIntentRoomsSetKe
 import { kInvaderUserId } from "xxscreeps/mods/classic/invader/game.js";
 import { typedArrayToString } from "xxscreeps/utility/string.js";
 import { METRICS, windows } from "./metrics.mjs";
+import { engagements } from "./engaged.mjs";
 const LETTER = { move: "m", work: "w", carry: "c", attack: "a", ranged_attack: "r", heal: "h", claim: "k", tough: "t" };
 const letters = (body) => body.map((p) => LETTER[p.type]).join("");
 
@@ -558,79 +559,25 @@ function sample(t, time, room, user = ours) {
   return row;
 }
 
-// What `prediction.mjs` reads an engagement's outcome from; `core`: an Invader core was in its group.
-const open = new Map();
 const onEdge = (p) => p.x === 0 || p.x === 49 || p.y === 0 || p.y === 49;
 const engagementsOut = fs.openSync(join(out, "engagements.jsonl"), "w");
 const allRooms = await shard.data.sMembers("rooms");
-async function standing(ids) {
-  for (const name of allRooms) {
-    const r = await shard.loadRoom(name, time).catch(() => null);
-    if (r && [...r["#objects"]].some((o) => ids.has(o.id))) return true;
-  }
-  return false;
-}
-async function closed(e, t) {
-  const { members, swing, ...rest } = e;
-  const swung = Object.fromEntries(Object.entries(swing).map(([n, { ticks, swings }]) => [n, { ticks, swings }]));
-  fs.writeSync(engagementsOut, JSON.stringify({ ...rest, swung, closed: t, outlived: t === null || (await standing(members)) }) + "\n");
-}
-// ibex's A-B-A oscillation. A swing that struck or healed on both its steps,
-// or stepped over a room's edge (out of the towers' reach), is a dance that
-// pays. Struck is read off the event log: the engine logs no dismantle action.
-function swinging(rec, bodies, t, seen) {
+const plain = (o) => {
+  const user = o["#user"] ?? o["#creep"]?.user;
+  const type = o["#lookType"] === "tombstone" ? "tombstone" : o.body !== undefined ? "creep" : o.structureType;
+  return { id: o.id, name: o.name ?? o["#creep"]?.name, room: o.pos.roomName, x: o.pos.x, y: o.pos.y, hits: o.hits, hitsMax: o.hitsMax, type, ours: user === ours, ttl: o["#creep"]?.ticksToLive };
+};
+const loaded = async (names) => (await Promise.all(names.map((n) => shard.loadRoom(n, time).catch(() => null)))).filter(Boolean);
+const fights = engagements(
+  (row) => fs.writeSync(engagementsOut, JSON.stringify(row) + "\n"),
+  async (names = allRooms) => (await loaded(names)).flatMap((r) => [...r["#objects"]].map(plain)),
+);
+async function engaged(t, rooms) {
+  const fight = JSON.parse((await loadUserMemoryString(shard, ours)) || "{}").v2?.fight;
+  // An engagement's room may be one no sample follows.
+  const seen = [...rooms, ...(await loaded([...new Set((fight?.engagements ?? []).map((e) => e.room))].filter((r) => !roomNames.includes(r))))];
   const struck = new Set(seen.flatMap((r) => (r["#eventLog"] ?? []).filter((v) => [ATTACK, HEAL].includes(v.event ?? v._$Variant)).map((v) => v.objectId)));
-  for (const o of bodies) {
-    const s = (rec.swing[o.name] ??= { ticks: 0, swings: 0, last: [] });
-    const now = { t, room: o.pos.roomName, tile: `${o.pos.roomName} ${o.pos.x},${o.pos.y}`, struck: struck.has(o.id) };
-    const [a, b] = s.last;
-    if (a?.t === t - 2 && b?.t === t - 1) {
-      s.ticks++;
-      if (a.tile === now.tile && b.tile !== now.tile && b.room === now.room && !(b.struck && now.struck)) s.swings++;
-    }
-    s.last = [b, now];
-  }
-}
-// `dead`: its own count, or our bodies' tombstones with life left in the rooms
-// it targeted, which catch a death that closed it before it counted one.
-const gravesOf = (rec, objects) => objects.filter((o) => o["#lookType"] === "tombstone" && o["#creep"].user === ours && o["#creep"].ticksToLive > 1 && rec.ours.has(o["#creep"].name));
-function fell(rec, objects) {
-  for (const o of gravesOf(rec, objects)) rec.fell.add(o.id);
-  rec.dead = Math.max(rec.dead, rec.fell.size);
-}
-async function engaged(t, time, rooms) {
-  const fight = JSON.parse((await loadUserMemoryString(shard, ours)) || "{}").v2?.fight ?? {};
-  const now = new Set();
-  for (const e of fight.engagements ?? []) {
-    now.add(e.id);
-    const rec = open.get(e.id) ?? { id: e.id, kind: e.kind ?? "defend", room: e.room, opened: t, members: new Set(), ours: new Set(), rooms: new Set(), fell: new Set(), swing: {}, answered: false, gaveUp: false, disengaged: false, contact: null, seen: null };
-    open.set(e.id, rec);
-    for (const m of (fight.groups ?? []).find((g) => g.id === e.group)?.members ?? []) rec.members.add(m);
-    rec.predicted = e.predicted;
-    rec.dead = Math.max(e.lost, rec.fell.size);
-    rec.rooms.add(e.room);
-    for (const n of e.ours) rec.ours.add(n);
-    rec.answered ||= !e.unanswered;
-    rec.gaveUp ||= rec.answered && e.unanswered;
-    rec.disengaged ||= e.phase === "disengaging";
-    // An engagement's room may be one no sample follows.
-    const rival = roomNames.includes(e.room) ? null : await shard.loadRoom(e.room, time);
-    const seen = rival ? [...rooms, rival] : rooms;
-    const objects = seen.flatMap((r) => [...r["#objects"]]);
-    const theirs = objects.filter((o) => rec.members.has(o.id));
-    if (theirs.length) rec.seen = t;
-    rec.core ||= theirs.some((o) => o.structureType === "invaderCore");
-    const close = objects.some((o) => e.ours.includes(o.name) && o["#user"] === ours && theirs.some((h) => near(h.pos, o.pos, 3) && h.pos.roomName === o.pos.roomName));
-    if (rec.contact === null && (close || theirs.some((h) => h.hits < h.hitsMax))) rec.contact = t;
-    const bodies = objects.filter((o) => o.body !== undefined && o["#user"] === ours && e.ours.includes(o.name));
-    swinging(rec, bodies, t, seen);
-  }
-  for (const [id, rec] of open)
-    if (!now.has(id)) {
-      open.delete(id);
-      for (const r of rec.rooms) fell(rec, [...(await shard.loadRoom(r, time))["#objects"]]);
-      await closed(rec, t);
-    }
+  await fights.tick(t, fight, seen.flatMap((r) => [...r["#objects"]].map(plain)), struck);
 }
 
 // The most ticks a body of ours stood on one tile carrying energy, acting on
@@ -744,7 +691,7 @@ for (let t = 0; t < ticks; t++) {
   account(rooms, time);
   const around = [...rooms, ...(await Promise.all(bordering.map((name) => shard.loadRoom(name, time))))];
   live(around, time);
-  await engaged(t, time, rooms);
+  await engaged(t, rooms);
   stoodLoaded(rooms, time);
   wasted(around);
   for (const o of opponents.filter(({ raid: r }) => r && (t === r.first || (r.every && t > r.first && (t - r.first) % r.every === 0)))) {
@@ -826,7 +773,7 @@ for (let t = 0; t < ticks; t++) {
 }
 for (const log of pileLog.values()) if (log.decayed > 0) pileOut(log);
 for (const life of lives.values()) fs.writeSync(livesOut, JSON.stringify(life) + "\n");
-for (const rec of open.values()) await closed(rec, null);
+await fights.end();
 fs.writeFileSync(join(out, "refusals.json"), JSON.stringify(refusals, null, 2) + "\n");
 fs.writeFileSync(join(out, "observe.json"), JSON.stringify(lastObs, null, 1) + "\n");
 fs.writeFileSync(join(out, "levels.json"), JSON.stringify(levels) + "\n");

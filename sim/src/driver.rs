@@ -37,7 +37,7 @@ impl Terrains for Maps {
 
 pub struct Driver<W: Write> {
     maps: Maps,
-    memory: String,
+    pub memory: String,
     pub heap: drive::Heap,
     intel: Intel,
     metrics: Metrics,

@@ -1,10 +1,12 @@
 //! The soak on krebs, natively: `decide` on krebs's documents each tick,
 //! krebs's processor on our intents, `soak-step.mjs`'s files out.
 //!
-//! Usage: sim --world <world.json> --room <name> --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--follow A,B] [--ended] [--check]
+//! Usage: sim --world <world.json> --room <name> --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--follow A,B] [--npc <[[tick, room, bodies or null for a core]]>] [--ended] [--check]
 mod act;
 mod driver;
+mod engaged;
 mod lives;
+mod npc;
 mod read;
 mod sample;
 mod view;
@@ -47,6 +49,7 @@ struct Args {
     check: bool,
     /// Rooms the samples follow beside the declared ones: an outpost Strategy picks is declared nowhere.
     follow: Vec<String>,
+    npc: Vec<npc::Due>,
 }
 
 fn args() -> Args {
@@ -60,7 +63,7 @@ fn args() -> Args {
         };
         flags.insert(flag, value);
     }
-    let usage = "usage: sim --world <world.json> --room <name> --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--follow A,B] [--ended] [--check]";
+    let usage = "usage: sim --world <world.json> --room <name> --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--follow A,B] [--npc <[[tick, room, bodies or null for a core]]>] [--ended] [--check]";
     let need = |flag: &str| (flags.get(flag).cloned()).unwrap_or_else(|| panic!("{flag}: {usage}"));
     let number = |flag: &str, or: u64| {
         (flags.get(flag)).map_or(or, |v| {
@@ -82,6 +85,7 @@ fn args() -> Args {
             .filter(|r| !r.is_empty())
             .map(str::to_string)
             .collect(),
+        npc: serde_json::from_str(flags.get("--npc").map_or("[]", String::as_str)).expect(usage),
     }
 }
 
@@ -213,10 +217,8 @@ fn main() {
     let file = |name: &str| {
         BufWriter::new(File::create(format!("{}/{name}", args.out)).expect("an output file"))
     };
-    let mut samples = file("samples.jsonl");
-    for empty in ["engagements.jsonl", "decay.jsonl"] {
-        file(empty);
-    }
+    let (mut samples, mut fight) = (file("samples.jsonl"), file("fight.jsonl"));
+    file("decay.jsonl");
     let out = [
         file("faults.jsonl"),
         file("cpu.jsonl"),
@@ -248,6 +250,7 @@ fn main() {
     };
     let followed = [declared("outposts"), args.follow.clone()].concat();
     let mut sampler = sample::Sampler::new(&args.room, &followed, declared("claims"));
+    let mut engaged = false;
     let mut levels: Vec<serde_json::Value> = Vec::new();
     let (mut engine_ms, mut sample_ms) = (0.0, 0.0);
     let began = Instant::now();
@@ -258,6 +261,9 @@ fn main() {
         if let Some(t) = t.checked_sub(1) {
             let at = Instant::now();
             sampler.account(&v);
+            if let Some(row) = engaged::row(&v, &driver.memory, t, &mut engaged) {
+                let _ = writeln!(fight, "{row}");
+            }
             let rcl = sampler.level(&v);
             if levels.last().is_none_or(|l| l["rcl"] != rcl) {
                 levels.push(json!({ "t": t, "time": k.time - 1, "rcl": rcl }));
@@ -284,6 +290,12 @@ fn main() {
 
         let at = Instant::now();
         engine.step(&mut k, intents);
+        for (_, room, wave) in args.npc.iter().filter(|n| n.0 == t) {
+            match wave {
+                Some(bodies) => npc::wave(&mut k, room, bodies, || engine.next()),
+                None => npc::core(&mut k, room, || engine.next()),
+            }
+        }
         engine_ms += ms(at);
     }
 

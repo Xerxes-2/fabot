@@ -98,7 +98,7 @@ export function built(kind, terrain, t, level) {
   return { store: energy(0), ...extra, ...capacity, hits: kind === "road" ? full : hits, hitsMax: full, ...(DECAY[kind] && { nextDecayTime: t + DECAY[kind] }) };
 }
 // `modern` picks xxscreeps' template with every structure kind, which krebs always has.
-const STOOD = new Set(["level", "built", "stored", "without", "worn", "bodies", "outposts", "alone", "labs", "modern", "buried", "moved", "claims", "spare", "short", "stale"]);
+const STOOD = new Set(["level", "built", "stored", "without", "worn", "bodies", "outposts", "alone", "labs", "modern", "buried", "moved", "claims", "spare", "short", "stale", "labStock"]);
 const terrainOf = (room) => [room.terrain].flat().join("");
 
 /** Why sim cannot stand node `name`, or null. */
@@ -167,6 +167,10 @@ export function standNode(world, room, name, plan) {
     if (s.kind !== "road" && s.kind !== "container") o.user = US;
     if (s.kind === "spawn") Object.assign(o, s === first ? { name: "Spawn1", store: energy(300) } : { name: `Node${id}` }, { spawning: null });
     if (s.kind === "storage") o.store = { energy: Number(stock), ...Object.fromEntries(ores.map((m) => m.split(":")).map(([r, n]) => [r, Number(n)])) };
+    if (s.kind === "lab" && s === list.find((l) => l.kind === "lab") && node.labStock) {
+      o.store = Object.fromEntries(node.labStock.split(",").map((p) => p.split(":")).map(([r, n]) => [r, Number(n)]));
+      o.mineralAmount = Object.entries(o.store).find(([r]) => r !== "energy")?.[1] ?? 0;
+    }
     if (s.kind === "road" || s.kind === "container") o.hits = Math.ceil(o.hits * (node.worn ?? 1));
     if (s.kind === "nuker") o.cooldownTime = t + 100000;
     home.objects.push(o);

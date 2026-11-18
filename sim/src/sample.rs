@@ -131,6 +131,9 @@ pub struct Sampler {
     /// The rooms our spawns stood in at the start (several in a capture), and the claims Memory declared.
     homes: Vec<String>,
     claims: Vec<String>,
+    /// Energy our terminals sent, by the room sent to, and the last transaction read: the engine keeps only the newest.
+    sent: BTreeMap<String, f64>,
+    sent_seq: u64,
 }
 
 /// Piles, tombstones (an Invader's corpse is ours to take), and stores nobody's or ours.
@@ -475,6 +478,15 @@ impl Sampler {
                 })
             })
             .count();
+        let read = self.sent_seq;
+        for d in v.k.market.transactions.iter().filter(|d| d.seq > read) {
+            self.sent_seq = d.seq;
+            let of = |k: &str| d.obj.get(Atom::intern(k)).and_then(Val::as_str);
+            if of("sender") == Some(crate::world::US) && of("resourceType") == Some("energy") {
+                let to = self.sent.entry(of("to").unwrap_or_default().into());
+                *to.or_default() += num(&d.obj, Atom::intern("amount"));
+            }
+        }
         let mut claimed = Map::new();
         let raised = v
             .rooms
@@ -507,7 +519,7 @@ impl Sampler {
             ("claimed", Value::Object(claimed)),
             ("bounced", json!(self.lives.bounced)),
             ("stillLoaded", json!(self.lives.still_loaded)),
-            ("sent", json!({})),
+            ("sent", json!(self.sent)),
             ("others", json!({})),
         ] {
             row.insert(k.into(), value);
