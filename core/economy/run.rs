@@ -766,7 +766,7 @@ fn raising(derived: &Derived, body: &Body, slot: &Slot) -> Option<CreepAct> {
     let g = derived.grounds.iter().find(|g| g.room == at.room)?;
     let kept = match slot.job {
         Job::Dig(_) if body.free == 0 => {
-            if let Some(site) = g.sites.iter().find(|s| s.pos == *at) {
+            if let Some(site) = slots::raised_by(g, body) {
                 return Some(CreepAct::Build(site.id));
             }
             (g.repairs.iter()).find(|r| r.pos == *at && r.kind.is_container())

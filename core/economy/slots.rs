@@ -239,6 +239,16 @@ fn drain(per: f64) -> f64 {
         .min(life)
 }
 
+/// A body that digs and holds on a site builds it with its dig (`run::raising`).
+pub fn raised_by<'a>(
+    g: &'a super::derived::Ground,
+    b: &Body,
+) -> Option<&'a super::derived::SiteFact> {
+    (b.work > 0 && b.carry > 0)
+        .then(|| g.sites.iter().find(|s| s.pos == b.pos))
+        .flatten()
+}
+
 /// Half the timer: a level-up lands inside it, and safe mode's grace stays banked.
 pub fn inside_deadline(c: &crate::world::Controller) -> bool {
     c.level > 0 && c.ticks_to_downgrade <= engine::controller_downgrade(c.level) / 2
@@ -434,15 +444,24 @@ impl Plan<'_> {
                 let Some(body) = body else { continue };
                 let post = s.post.unwrap_or(s.pos);
                 fixed += upkeep(&body);
-                dug += f64::from(rate);
-                if !own {
-                    far_dug += f64::from(rate);
-                }
+                // No store holds an outpost's dig raising its site. At home it still
+                // sizes the spend: those workers dig the free seats themselves.
+                let raises = !own
+                    && (derived.bodies.iter()).any(|b| {
+                        b.pos == post && b.pattern.is_harvester() && raised_by(g, b).is_some()
+                    });
                 let dig_id = format!("harvester:{}:0", s.id);
                 if own {
                     digs.push(dig_id.clone());
                 }
                 self.push(ci, g.room, Job::Dig(s.id), post, s.id, 0, body);
+                if raises {
+                    continue;
+                }
+                dug += f64::from(rate);
+                if !own {
+                    far_dug += f64::from(rate);
+                }
                 // A source link carries the dig to a hub without limit, to the
                 // controller's link as fast as the room's bodies drink it.
                 let linked = match (&s.link, &g.receiver) {
@@ -452,9 +471,7 @@ impl Plan<'_> {
                 };
                 drink -= linked;
                 let rate = rate - linked;
-                // An outpost's dig piles on its post until the container
-                // stands, and is hauled from there; at home the crews take it.
-                if s.container.is_none() && own || rate <= 0 {
+                if rate <= 0 {
                     continue;
                 }
                 // A backlog is carried off within the ticks its source fills a
@@ -1228,10 +1245,12 @@ pub fn casts(
         let anchor = mine
             .iter()
             .find(|s| matches!(s.job, Job::Dig(_)) && s.room == colony.room);
-        let supply = (mine.iter()).find(|s| s.job == Job::Fill).or_else(|| {
-            mine.iter()
-                .find(|s| matches!(s.job, Job::Work(_)) && s.room == colony.room)
-        });
+        let supply = (mine.iter())
+            .find(|s| s.job == Job::Fill && fed(s))
+            .or_else(|| {
+                mine.iter()
+                    .find(|s| matches!(s.job, Job::Work(_)) && s.room == colony.room)
+            });
         let sources = &derived.grounds[ci].sources;
         let digging = (mine.iter()).any(|s| {
             matches!(&s.job, Job::Dig(id) if sources.iter().any(|x| &x.id == id)) && held(&s.id)
