@@ -8,7 +8,6 @@ use fabot_core::memory::Memory;
 use fabot_core::observe::metrics::Metrics;
 use fabot_core::strategy::intel::{self, Intel};
 use fabot_core::tactics::{self, Offer};
-use fabot_core::world::World;
 
 /// Read by `npm run observe` and `scripts/capture`.
 pub const OBSERVE_SEGMENT: u8 = 1;
@@ -126,21 +125,6 @@ pub fn write_intel(rows: &Intel) {
 pub fn write_segment(id: u8, text: impl Into<String>) {
     let segments = raw_memory::segments();
     segments.set(id, text.into());
-}
-
-pub fn record(
-    world: &World,
-    pass: &super::world::Pass,
-    memory: &str,
-    rows: &Intel,
-) -> Option<String> {
-    super::record::record(
-        world.time,
-        world.cpu_limit,
-        pass,
-        memory,
-        &intel::to_text(rows),
-    )
 }
 
 /// The bundle's banner, set by `scripts/rust.mjs` on the global.

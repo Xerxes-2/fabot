@@ -1196,12 +1196,8 @@ pub fn counts(world: &World, decided: &tick::Decided) -> Vec<(String, i32)> {
     for room in abandoning.filter_map(|p| world.room(p.room)) {
         counts.push((format!("abandon:{}", room.name), abandon::left(room)));
     }
-    for room in &decided.refused.rooms {
-        counts.push((format!("closed:{room}"), 1));
-    }
-    for rule in &decided.refused.rules {
-        counts.push((format!("refused:{rule}"), 1));
-    }
+    counts.extend((decided.refused.rooms.iter()).map(|room| (format!("closed:{room}"), 1)));
+    counts.extend((decided.refused.rules.iter()).map(|rule| (format!("refused:{rule}"), 1)));
     for intent in &decided.result.intents {
         if let Intent::Count(name, n) = intent {
             counts.push((name.to_string(), *n));

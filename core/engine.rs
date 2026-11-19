@@ -259,13 +259,8 @@ pub fn tough_hits(body: &[Part], boosts: &[Option<ResourceType>], hits: i32) -> 
     body.iter()
         .zip(boosts.iter())
         .enumerate()
-        .map(|(i, (part, boost))| {
-            if damage_ratio(*part, *boost) < 1.0 {
-                part_hits_at(n, hits, i)
-            } else {
-                0
-            }
-        })
+        .filter(|(_, (part, boost))| damage_ratio(**part, **boost) < 1.0)
+        .map(|(i, _)| part_hits_at(n, hits, i))
         .sum()
 }
 

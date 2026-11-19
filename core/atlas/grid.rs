@@ -44,16 +44,9 @@ pub fn factor_of(creep: &Creep) -> FatigueFactor {
     let mut moves = 0;
     for part in &creep.body {
         match part.kind {
-            Part::Move => {
-                if part.hits > 0 {
-                    moves += multiple(Part::Move, part.boost);
-                }
-            }
-            Part::Carry => {
-                if part.hits > 0 {
-                    carry += 1;
-                }
-            }
+            Part::Move if part.hits > 0 => moves += multiple(Part::Move, part.boost),
+            Part::Carry if part.hits > 0 => carry += 1,
+            Part::Move | Part::Carry => {}
             _ => weight += 1,
         }
     }

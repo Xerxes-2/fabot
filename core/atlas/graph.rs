@@ -315,7 +315,7 @@ pub fn search(
 
     let mut reached: Vec<Reached> = Vec::new();
     let mut exits: Vec<(Tile, Tile)> = Vec::new();
-    let mut queue: BinaryHeap<Reverse<(i32, i32, usize)>> = BinaryHeap::new();
+    let mut queue: BinaryHeap<Reverse<(i32, i32, usize)>> = BinaryHeap::default();
     let mut settled = Some(0);
     loop {
         if let Some(i) = settled.take() {

@@ -55,7 +55,7 @@ impl<W: Write> Driver<W> {
         Driver {
             maps,
             memory,
-            heap: drive::Heap::new(),
+            heap: drive::Heap::default(),
             intel: Intel::new(),
             metrics: Metrics::default(),
             faults: BTreeSet::new(),

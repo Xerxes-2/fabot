@@ -103,7 +103,7 @@ fn a_throw_costs_its_own_modules_intents_and_no_others() {
     let mut dice = Dice::new(51);
     for _ in 0..100 {
         let throws = throws_of(&mut dice);
-        let result = run(&throws, State::empty());
+        let result = run(&throws, State::default());
         let expected: Vec<(String, String)> = throws
             .iter()
             .enumerate()
@@ -119,7 +119,7 @@ fn every_module_is_reported_once_in_order_faults_named_then_the_settling() {
     let mut dice = Dice::new(52);
     for _ in 0..100 {
         let throws = throws_of(&mut dice);
-        let result = run(&throws, State::empty());
+        let result = run(&throws, State::default());
         assert_eq!(result.reports.len(), throws.len() + 1);
         assert_eq!(result.reports.last().unwrap().module, "settle");
         for (report, (i, &t)) in result.reports.iter().zip(throws.iter().enumerate()) {
@@ -141,7 +141,7 @@ fn a_switched_off_module_runs_nothing_and_spends_nothing() {
         throws.truncate(NAMES.len() - 1);
         throws.insert(0, false);
         let off = dice.below(throws.len() as i32) as usize;
-        let mut state = State::empty();
+        let mut state = State::default();
         state.off.insert(NAMES[off].to_string());
         let result = run(&throws, state);
         let report = &result.reports[off];

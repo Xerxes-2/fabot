@@ -17,28 +17,12 @@ use crate::tick::{self, Declarations, Outcome};
 use crate::world::{RoomName, Sightings, World};
 
 /// `ARCHITECTURE.md` §4's heap rows `decide` reads and hands back; empty after a reset.
+#[derive(Default)]
 pub struct Heap {
     pub standing: BTreeMap<RoomName, Standing>,
     pub spare: BTreeMap<RoomName, f64>,
     pub sightings: Sightings,
     pub atlas: Atlas,
-}
-
-impl Heap {
-    pub fn new() -> Heap {
-        Heap {
-            standing: BTreeMap::new(),
-            spare: BTreeMap::new(),
-            sightings: Sightings::new(),
-            atlas: Atlas::empty(),
-        }
-    }
-}
-
-impl Default for Heap {
-    fn default() -> Heap {
-        Heap::new()
-    }
 }
 
 /// What the driver reports and writes after the tick.
@@ -91,7 +75,7 @@ where
     let (mut world, maps, pass) = (seam.read)(&declarations, drain);
     let misread = world.drop_misread();
     let sightings = std::mem::take(&mut heap.sightings);
-    let atlas = std::mem::replace(&mut heap.atlas, Atlas::empty());
+    let atlas = std::mem::take(&mut heap.atlas);
     let decided = tick::decide(
         (clock, start),
         phases,

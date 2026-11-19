@@ -18,7 +18,7 @@ use krebs_util::json::Json;
 use screeps::ErrorCode::{self, *};
 use serde_json::{Value, json};
 
-use crate::view::{View, num, obj, on, ours, store, text};
+use crate::view::{View, num, obj, on, ours, store, text, used};
 
 type Found<'a> = (usize, &'a Obj);
 
@@ -63,10 +63,6 @@ fn capacity(o: &Obj, resource: &str) -> f64 {
     own.filter(|c| *c != 0.0).unwrap_or_else(rest)
 }
 
-fn used(o: &Obj) -> f64 {
-    obj(o, atom!("store")).map_or(0.0, |s| s.iter().filter_map(|(_, v)| v.as_f64()).sum())
-}
-
 fn range(a: Found, b: Found) -> f64 {
     if a.0 != b.0 {
         return f64::INFINITY;
@@ -99,12 +95,11 @@ pub struct Stored {
 impl Stored {
     fn named(&mut self, room: usize, object: &str) -> &mut Named {
         let objects = self.rooms.entry(room).or_default();
-        if !objects.iter().any(|(o, _)| o == object) {
+        let i = (objects.iter().position(|(o, _)| o == object)).unwrap_or_else(|| {
             objects.push((object.to_string(), Named::new()));
-        }
-        &mut (objects.iter_mut().find(|(o, _)| o == object))
-            .expect("pushed above")
-            .1
+            objects.len() - 1
+        });
+        &mut objects[i].1
     }
 
     fn put(&mut self, room: usize, object: &str, name: &str, value: Value) {

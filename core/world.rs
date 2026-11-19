@@ -940,12 +940,10 @@ pub mod read {
                 progress: self.n(),
                 progress_total: self.n(),
                 ticks_to_downgrade: self.n(),
-                reservation: if self.flag() {
+                reservation: self.flag().then(|| {
                     let user = self.word().to_string();
-                    Some((self.user(user), self.n()))
-                } else {
-                    None
-                },
+                    (self.user(user), self.n())
+                }),
                 safe_mode: self.n(),
                 safe_mode_available: self.n(),
                 safe_mode_cooldown: self.n(),
@@ -1007,17 +1005,15 @@ pub mod read {
                 id: self.id(),
                 pos: self.pos(),
                 store: self.store(),
-                fallen: if self.flag() {
+                fallen: self.flag().then(|| {
                     let mut creep = self.creep();
                     creep.hits = 0;
                     creep.fatigue = 0;
-                    Some(Fallen {
+                    Fallen {
                         creep,
                         died: self.n(),
-                    })
-                } else {
-                    None
-                },
+                    }
+                }),
             }
         }
 
@@ -1028,11 +1024,7 @@ pub mod read {
                 terrain: None,
                 energy_available: self.n(),
                 energy_capacity: self.n(),
-                controller: if self.flag() {
-                    Some(self.controller())
-                } else {
-                    None
-                },
+                controller: self.flag().then(|| self.controller()),
                 sources: self.list_into(lists.sources, |r| Source {
                     id: r.id(),
                     pos: r.pos(),
@@ -1072,15 +1064,11 @@ pub mod read {
                 id: self.id(),
                 name: self.s(),
                 pos: self.pos(),
-                spawning: if self.flag() {
-                    Some(Oven {
-                        name: self.s(),
-                        remaining: self.n(),
-                        body: self.body(),
-                    })
-                } else {
-                    None
-                },
+                spawning: self.flag().then(|| Oven {
+                    name: self.s(),
+                    remaining: self.n(),
+                    body: self.body(),
+                }),
             }
         }
     }
@@ -1247,13 +1235,12 @@ pub mod hostiles {
     /// The tiles a body can strike before our next decision: its longest
     /// weapon's range plus the two ticks v1's `ReachHorizon` let it close in.
     pub fn reach(creep: &Creep) -> i32 {
-        let range = if creep.body.iter().any(|p| p.kind == Part::RangedAttack) {
+        let ranged = creep.body.iter().any(|p| p.kind == Part::RangedAttack);
+        2 + if ranged {
             engine::RANGED_RANGE
         } else {
             engine::MELEE_RANGE
-        };
-
-        range + 2
+        }
     }
 
     pub fn owned(rooms: &[Room]) -> BTreeSet<RoomName> {
@@ -1345,10 +1332,8 @@ pub mod sightings {
         time: i32,
         room: RoomName,
     ) -> bool {
-        match sightings.get(&room) {
-            Some(seen) => seen.values().all(|s| s.gone <= time || !counts(s)),
-            None => true,
-        }
+        (sightings.get(&room))
+            .is_none_or(|seen| seen.values().all(|s| s.gone <= time || !counts(s)))
     }
 
     pub fn clear(sightings: &Sightings, time: i32, room: RoomName) -> bool {

@@ -38,6 +38,14 @@ pub fn store(o: &Obj, resource: Atom) -> f64 {
     obj(o, atom!("store")).map_or(0.0, |s| num(s, resource))
 }
 
+pub fn used(o: &Obj) -> f64 {
+    obj(o, atom!("store")).map_or(0.0, |s| s.iter().filter_map(|(_, v)| v.as_f64()).sum())
+}
+
+pub fn xy(o: &Obj) -> (i64, i64) {
+    (num(o, atom!("x")) as i64, num(o, atom!("y")) as i64)
+}
+
 pub fn ms(at: std::time::Instant) -> f64 {
     at.elapsed().as_secs_f64() * 1000.0
 }

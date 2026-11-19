@@ -183,16 +183,11 @@ pub fn around(tile: Tile) -> &'static [Tile] {
 /// The neighbour costing least under `bound`, the first in direction order
 /// on a tie.
 pub fn least_around(tile: Tile, bound: i32, mut cost: impl FnMut(Tile) -> i32) -> Option<Tile> {
-    let mut best = None;
-    let mut least = bound;
-    for &n in around(tile) {
-        let c = cost(n);
-        if c < least {
-            best = Some(n);
-            least = c;
-        }
-    }
-    best
+    (around(tile).iter())
+        .map(|&n| (cost(n), n))
+        .filter(|(c, _)| *c < bound)
+        .min_by_key(|(c, _)| *c)
+        .map(|(_, n)| n)
 }
 
 pub fn direction(from: Tile, onto: Tile) -> i32 {
@@ -269,11 +264,7 @@ fn exit_bands() -> &'static Vec<Vec<Tile>> {
 
 /// Shared: never written.
 pub fn exit_tiles(exit: i32) -> &'static [Tile] {
-    if (0..9).contains(&exit) {
-        &exit_bands()[exit as usize]
-    } else {
-        &[]
-    }
+    exit_bands().get(exit as usize).map_or(&[], Vec::as_slice)
 }
 
 pub fn landing(tile: Tile) -> Option<Tile> {

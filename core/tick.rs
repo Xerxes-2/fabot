@@ -9,7 +9,7 @@ use screeps::LocalRoomTerrain;
 use super::atlas::{Atlas, Mover, Target, Tree};
 use super::engine;
 use super::grid::{self, Footprint};
-use super::intents::{Ask, CreepAct, Intent, Rank, SpawnAct};
+use super::intents::{Ask, CreepAct, Intent, SpawnAct};
 use super::mv;
 use super::state::State;
 use super::strategy::{
@@ -65,9 +65,7 @@ pub fn ruling(rules: &[TacticRule], room: RoomName, rivals: &BTreeSet<&str>) -> 
         out.forbid
             .extend(rule.forbid.iter().filter_map(|n| tactics::by_name(n)));
 
-        if let Some(pin) = rule.pin.as_deref().and_then(tactics::by_name) {
-            out.pin = Some(pin);
-        }
+        out.pin = rule.pin.as_deref().and_then(tactics::by_name).or(out.pin);
     }
 
     out
@@ -305,18 +303,12 @@ pub fn nearest<'t>(
 
     let least =
         |atlas: &mut Atlas, measure: &dyn Fn(&mut Atlas, &Pos) -> Option<i32>| -> Option<usize> {
-            let mut best: Option<usize> = None;
-            let mut best_d = i32::MAX;
-            for (i, home) in homes.iter().enumerate() {
-                if can(i)
-                    && let Some(d) = measure(atlas, home)
-                    && d < best_d
-                {
-                    best = Some(i);
-                    best_d = d;
-                }
-            }
-            best
+            (homes.iter().enumerate())
+                .filter(|(i, _)| can(*i))
+                .filter_map(|(i, home)| Some((measure(atlas, home)?, i)))
+                .filter(|(d, _)| *d < i32::MAX)
+                .min_by_key(|(d, _)| *d)
+                .map(|(_, i)| i)
         };
 
     least(atlas, &|atlas, home| {
@@ -380,12 +372,9 @@ fn danger(world: &World, owned: &BTreeSet<RoomName>) -> Vec<(RoomName, TileSet)>
         .filter(|r| !owned.contains(&r.name))
         .filter_map(|r| {
             let reaches = reaches(r);
-            let mut set = TileSet::default();
-            for (at, reach) in &reaches {
-                tiles::within(*reach, *at).into_iter().for_each(|t| {
-                    set.insert(t);
-                });
-            }
+            let set: TileSet = (reaches.iter())
+                .flat_map(|(at, reach)| tiles::within(*reach, *at))
+                .collect();
             (!reaches.is_empty()).then_some((r.name, set))
         })
         .collect()
@@ -516,10 +505,7 @@ fn by_room<'a, T>(pairs: &[(RoomName, &'a T)]) -> Vec<(RoomName, Vec<&'a T>)> {
     }
     rooms
         .into_iter()
-        .map(|room| {
-            let values = groups.remove(&room).unwrap();
-            (room, values)
-        })
+        .map(|room| (room, groups.remove(&room).unwrap()))
         .collect()
 }
 
@@ -544,15 +530,9 @@ fn drawn(r: &Room, spawn: &Pos) -> Vec<Id> {
 /// cannot pay yet holds the economy's behind it, one its capacity never pays
 /// holds nothing.
 pub fn queue(world: &World, asks: &[(RoomName, &Ask)]) -> Vec<Intent> {
-    let rank = |a: &Ask| match a.rank {
-        Rank::Floor => 0,
-        Rank::Fight => 1,
-        Rank::Economy => 2,
-    };
-
     let mut out = Vec::new();
     for (room, mut asks) in by_room(asks) {
-        asks.sort_by_key(|a| rank(a));
+        asks.sort_by_key(|a| a.rank);
         let Some(r) = world.room(room) else {
             continue;
         };
@@ -584,16 +564,12 @@ pub fn queue(world: &World, asks: &[(RoomName, &Ask)]) -> Vec<Intent> {
 /// One arbitration per room over every module's wishes (§3's `Move`); a creep
 /// of ours that wishes nothing holds its tile.
 pub fn arbitrate(context: &Context, wishes: &[(RoomName, &mv::Wish)]) -> Vec<Intent> {
-    let mut wished: BTreeSet<&str> = BTreeSet::new();
     let groups = by_room(wishes);
+    let wished: BTreeSet<&str> = (groups.iter())
+        .flat_map(|(_, ws)| ws.iter().map(|w| w.creep.as_str()))
+        .collect();
     let mut scratch = mv::arbitrate::scratch();
     let mut out = Vec::new();
-
-    for (_, ws) in &groups {
-        for w in ws {
-            wished.insert(&w.creep);
-        }
-    }
 
     for (room, ws) in groups {
         // A wish onto a hostile's tile follows it: the engine moves the body
@@ -663,10 +639,9 @@ pub fn run(
     clock: impl Fn() -> f64,
     modules: &[Module],
     context: &mut Context,
-    state: State,
+    mut state: State,
 ) -> TickResult {
     let mut intents: Vec<Intent> = Vec::new();
-    let mut state = state;
     let mut reports: Vec<Report> = Vec::new();
 
     for m in modules {
@@ -825,8 +800,6 @@ pub const MODULES: [Module; 4] = [
         run: super::layout::decide,
     },
 ];
-
-pub type Effects = BTreeMap<String, String>;
 
 #[cfg(test)]
 mod tests {

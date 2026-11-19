@@ -770,7 +770,7 @@ fn a_route_goes_round_a_stronghold_where_another_way_stands() {
         RoomName::new(2, 0),
     );
     let route = |stronghold: bool| {
-        let atlas = Atlas::following(Atlas::empty(), &world, [(core, None, stronghold)], []);
+        let atlas = Atlas::following(Atlas::default(), &world, [(core, None, stronghold)], []);
         atlas.route(&BTreeSet::new(), 4, from, onto).unwrap()
     };
     assert!(route(false).contains(&core));

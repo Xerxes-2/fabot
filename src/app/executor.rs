@@ -157,10 +157,7 @@ fn act(intent: &Intent) -> (String, i32) {
                 }
             }
         }
-        Intent::Room(_, RoomAct::Destroy(id)) => match world::object_by_id(id) {
-            None => ("destroy".to_string(), NOT_FOUND),
-            Some(s) => outcome("destroy", actor(&s).destroy()),
-        },
+        Intent::Room(_, RoomAct::Destroy(id)) => on("destroy", id, |s| actor(s).destroy()),
         Intent::Tower(id, act) => match world::object_by_id(id) {
             None => ("tower".to_string(), NOT_FOUND),
             Some(tower) => {
@@ -172,14 +169,10 @@ fn act(intent: &Intent) -> (String, i32) {
                 }
             }
         },
-        Intent::Controller(id, ControllerAct::ActivateSafeMode) => match world::object_by_id(id) {
-            None => ("safeMode".to_string(), NOT_FOUND),
-            Some(controller) => outcome("safeMode", actor(&controller).activate_safe_mode()),
-        },
-        Intent::Controller(id, ControllerAct::Unclaim) => match world::object_by_id(id) {
-            None => ("unclaim".to_string(), NOT_FOUND),
-            Some(controller) => outcome("unclaim", actor(&controller).unclaim()),
-        },
+        Intent::Controller(id, ControllerAct::ActivateSafeMode) => {
+            on("safeMode", id, |c| actor(c).activate_safe_mode())
+        }
+        Intent::Controller(id, ControllerAct::Unclaim) => on("unclaim", id, |c| actor(c).unclaim()),
         Intent::Link(id, LinkAct::TransferEnergy(target, amount)) => {
             match world::object_by_id(id) {
                 None => ("link".to_string(), NOT_FOUND),
@@ -202,22 +195,13 @@ fn act(intent: &Intent) -> (String, i32) {
                 _ => ("boostCreep".to_string(), NOT_FOUND),
             }
         }
-        Intent::Terminal(id, TerminalAct::Send(resource, amount, room)) => {
-            match world::object_by_id(id) {
-                None => ("send".to_string(), NOT_FOUND),
-                Some(t) => {
-                    let name = vocabulary::resource_name(resource);
-                    outcome("send", actor(&t).send(&name, *amount, &room.to_string()))
-                }
-            }
-        }
-        Intent::Observe(id, room) => match world::object_by_id(id) {
-            None => ("observeRoom".to_string(), NOT_FOUND),
-            Some(observer) => outcome(
-                "observeRoom",
-                actor(&observer).observe_room(&room.to_string()),
-            ),
-        },
+        Intent::Terminal(id, TerminalAct::Send(resource, amount, room)) => on("send", id, |t| {
+            let name = vocabulary::resource_name(resource);
+            actor(t).send(&name, *amount, &room.to_string())
+        }),
+        Intent::Observe(id, room) => on("observeRoom", id, |o| {
+            actor(o).observe_room(&room.to_string())
+        }),
         Intent::Queue(_, _) | Intent::Wish(_, _) => ("unsettled".to_string(), NOT_FOUND),
         Intent::Trace(creep, scored) => {
             let tiles: Vec<String> = scored
@@ -237,37 +221,28 @@ fn act(intent: &Intent) -> (String, i32) {
                 _ => ("recycle".to_string(), NOT_FOUND),
             }
         }
-        Intent::Spawn(id, SpawnAct::SpawnCreep(body, name, drawn)) => match world::object_by_id(id)
-        {
-            None => ("spawn".to_string(), NOT_FOUND),
-            Some(spawn) => {
-                let parts = Array::new();
-                for part in body {
-                    parts.push(&JsValue::from(*part));
-                }
-                let options: SpawnOptions = Object::new().unchecked_into();
-                if !drawn.is_empty() {
-                    let structures: Array = drawn.iter().filter_map(world::object_by_id).collect();
-                    options.set_energy_structures(&structures);
-                }
-                outcome("spawn", actor(&spawn).spawn_creep(&parts, name, &options))
+        Intent::Spawn(id, SpawnAct::SpawnCreep(body, name, drawn)) => on("spawn", id, |spawn| {
+            let parts: Array = body.iter().map(|p| JsValue::from(*p)).collect();
+            let options: SpawnOptions = Object::new().unchecked_into();
+            if !drawn.is_empty() {
+                let structures: Array = drawn.iter().filter_map(world::object_by_id).collect();
+                options.set_energy_structures(&structures);
             }
-        },
+            actor(spawn).spawn_creep(&parts, name, &options)
+        }),
     }
 }
 
 /// One bad intent costs itself, never the rest of the tick's.
 pub fn run(intents: &[Intent]) -> Vec<Refusal> {
-    let mut out = Vec::new();
-    for intent in intents {
-        let (act_name, code) = act(intent);
-        if code != 0 {
-            out.push(Refusal {
+    (intents.iter())
+        .filter_map(|intent| {
+            let (act, code) = act(intent);
+            (code != 0).then(|| Refusal {
                 actor: intent.actor(),
-                act: act_name,
+                act,
                 code,
-            });
-        }
-    }
-    out
+            })
+        })
+        .collect()
 }

@@ -3,12 +3,12 @@ use std::cell::RefCell;
 
 use wasm_bindgen::prelude::*;
 
-use crate::app::wire;
 use crate::app::world;
+use crate::app::{executor, record, wire};
 use fabot_core::drive::{self, Terrains as _};
 use fabot_core::intents::Intent;
 use fabot_core::observe::metrics::{self, Metrics};
-use fabot_core::strategy::intel::Intel;
+use fabot_core::strategy::intel::{self, Intel};
 use fabot_core::tick::Declarations;
 use fabot_core::world::{World, read};
 
@@ -35,7 +35,7 @@ thread_local! {
     static HOOKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static HEAP: RefCell<Heap> = RefCell::new(Heap {
         faults: Vec::new(),
-        drive: drive::Heap::new(),
+        drive: drive::Heap::default(),
         maps: world::Maps::default(),
         buffers: read::Buffers::default(),
         intel: None,
@@ -54,7 +54,7 @@ fn record_fault(faults: &mut Vec<wire::Fault>, where_: &str, message: &str) {
     faults.truncate(FAULTS_KEPT);
 }
 
-fn run_tick() -> Result<(), String> {
+fn run_tick() {
     let clock = || game_cpu::get_used();
     let mut phases: Vec<(String, f64)> = Vec::new();
 
@@ -104,7 +104,13 @@ fn run_tick() -> Result<(), String> {
             phases.push(("write".to_string(), clock() - start));
             if let Some(text) = &recording {
                 let start = clock();
-                recorded = wire::record(world, pass, text, rows);
+                recorded = record::record(
+                    world.time,
+                    world.cpu_limit,
+                    pass,
+                    text,
+                    &intel::to_text(rows),
+                );
                 phases.push(("record".to_string(), clock() - start));
             }
         },
@@ -163,27 +169,6 @@ fn run_tick() -> Result<(), String> {
         heap.intel = intel;
         heap.metrics = metrics;
     });
-
-    Ok(())
-}
-
-fn faulted_by(faults: &mut Vec<wire::Fault>, error: &str) {
-    let tick = game_cpu::time();
-    record_fault(faults, "tick", error);
-    let observed = wire::Observed {
-        tick,
-        version: wire::version(),
-        bucket: game_cpu::bucket(),
-        total: game_cpu::get_used(),
-        phases: Vec::new(),
-        counts: Vec::new(),
-        off: Vec::new(),
-        faults: faults.clone(),
-        refusals: Vec::new(),
-        offers: Vec::new(),
-        alerts: Vec::new(),
-    };
-    wire::write_observe(&observed);
 }
 
 /// Exported as `loop` on the bundled `main` module, which the engine calls.
@@ -195,23 +180,13 @@ pub fn tick() {
         }
     });
 
-    if let Err(error) = run_tick() {
-        HEAP.with(|heap| {
-            let mut heap = heap.borrow_mut();
-            faulted_by(&mut heap.faults, &error);
-        });
-        wasm_bindgen::throw_str(&error);
-    }
+    run_tick();
 }
 
 mod game_cpu {
-    pub use screeps::game::cpu::{bucket, get_used};
+    pub use screeps::game::cpu::get_used;
 
     pub fn time() -> i32 {
         screeps::game::time() as i32
     }
-}
-
-mod executor {
-    pub use crate::app::executor::*;
 }

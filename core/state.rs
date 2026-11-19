@@ -7,7 +7,7 @@ use super::strategy::expand::Expansions;
 use super::strategy::intel::Scout;
 use super::world::RoomName;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct State {
     /// A module named here is skipped and its last output not replayed.
     pub off: BTreeSet<String>,
@@ -25,22 +25,4 @@ pub struct State {
     pub preyed: Vec<RoomName>,
     pub spare: BTreeMap<RoomName, f64>,
     pub expansion: Expansions,
-}
-
-impl State {
-    pub fn empty() -> State {
-        State {
-            off: BTreeSet::new(),
-            assignments: BTreeMap::new(),
-            layout: BTreeMap::new(),
-            groups: Vec::new(),
-            engagements: Vec::new(),
-            casts: Vec::new(),
-            due: BTreeSet::new(),
-            scouts: Vec::new(),
-            preyed: Vec::new(),
-            spare: BTreeMap::new(),
-            expansion: Expansions::default(),
-        }
-    }
 }

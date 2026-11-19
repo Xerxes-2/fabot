@@ -62,7 +62,7 @@ impl Memory {
             casts: list(fight, "casts"),
             due: list(fight, "due"),
             expansion: Deserialize::deserialize(&v2["expansion"]).unwrap_or_default(),
-            ..State::empty()
+            ..State::default()
         }
     }
 

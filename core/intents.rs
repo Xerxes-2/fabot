@@ -172,21 +172,17 @@ pub enum Intent {
 impl Intent {
     pub fn actor(&self) -> String {
         match self {
-            Intent::Creep(name, _) => name.clone(),
-            Intent::Spawn(id, _) => id.to_string(),
-            Intent::Room(name, _) => name.to_string(),
-            Intent::Tower(id, _) => id.to_string(),
-            Intent::Controller(id, _) => id.to_string(),
-            Intent::Link(id, _) => id.to_string(),
-            Intent::Lab(id, _) => id.to_string(),
-            Intent::Terminal(id, _) => id.to_string(),
-            Intent::Observe(id, _) => id.to_string(),
-            Intent::Queue(room, _) => room.to_string(),
+            Intent::Creep(name, _) | Intent::Trace(name, _) | Intent::Held(name) => name.clone(),
             Intent::Wish(_, wish) => wish.creep.clone(),
-            Intent::Trace(creep, _) => creep.clone(),
+            Intent::Spawn(id, _) | Intent::Tower(id, _) | Intent::Controller(id, _) => {
+                id.to_string()
+            }
+            Intent::Link(id, _) | Intent::Lab(id, _) | Intent::Terminal(id, _) => id.to_string(),
+            Intent::Observe(id, _) => id.to_string(),
+            Intent::Room(room, _) | Intent::Queue(room, _) | Intent::Short(room, _, _) => {
+                room.to_string()
+            }
             Intent::Count(name, _) => name.to_string(),
-            Intent::Short(room, _, _) => room.to_string(),
-            Intent::Held(creep) => creep.clone(),
         }
     }
 

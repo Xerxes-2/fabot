@@ -17,7 +17,7 @@ use crate::lives::{self, Lives};
 use crate::read::build_cost;
 use crate::view::{
     EVENT_ATTACK, EVENT_BUILD, EVENT_HARVEST, EVENT_HEAL, EVENT_REPAIR, EVENT_TRANSFER,
-    EVENT_UPGRADE_CONTROLLER, Room, View, num, obj, ours, store, text,
+    EVENT_UPGRADE_CONTROLLER, Room, View, num, obj, ours, store, text, used, xy,
 };
 use crate::world::Map as World;
 use krebs::room_name::RoomXY;
@@ -69,10 +69,6 @@ fn life(body: &[&str]) -> f64 {
     } else {
         CREEP_LIFE_TIME
     })
-}
-
-fn xy(o: &Obj) -> (i64, i64) {
-    (num(o, atom!("x")) as i64, num(o, atom!("y")) as i64)
 }
 
 fn chebyshev((x, y): (i64, i64), (a, b): (i64, i64)) -> i64 {
@@ -448,13 +444,11 @@ impl Sampler {
                 .map(|(_, o)| *o)
                 .collect()
         };
-        let held =
-            |o: &&Obj, r: &str| obj(o, atom!("store")).map_or(0.0, |s| num(s, Atom::intern(r)));
-        let used = |o: &&Obj| {
-            obj(o, atom!("store")).map_or(0.0, |s| s.iter().filter_map(|(_, v)| v.as_f64()).sum())
-        };
         let banks = ours_in(&["storage", "terminal"]);
-        let ore: f64 = banks.iter().map(|o| used(o) - held(o, "energy")).sum();
+        let ore: f64 = banks
+            .iter()
+            .map(|o| used(o) - store(o, atom!("energy")))
+            .sum();
         let mut made = Map::new();
         for r in ["OH", "UH", "UH2O"] {
             made.insert(
@@ -462,7 +456,7 @@ impl Sampler {
                 json!(
                     ours_in(&["storage", "terminal", "lab"])
                         .iter()
-                        .map(|o| held(o, r))
+                        .map(|o| store(o, Atom::intern(r)))
                         .sum::<f64>()
                 ),
             );

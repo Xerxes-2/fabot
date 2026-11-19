@@ -3,14 +3,13 @@
 //! krebs's processor plays them from there.
 use std::sync::Arc;
 
-use krebs::atom;
 use krebs::constants::{INVADER_CORE_HITS, OBSTACLE_OBJECT_TYPES};
-use krebs::doc::{Doc, Obj, Val};
+use krebs::doc::{Doc, Val};
 use krebs::world::{RoomSnapshot, World};
 use krebs_util::json::Json;
 use serde_json::{Value, json};
 
-use crate::view::num;
+use crate::view::xy;
 use crate::world::INVADER;
 
 /// `soak.mjs`'s scheduled Invaders: on a tick, in a room, a wave of bodies or a level-0 core.
@@ -39,10 +38,6 @@ fn insert(k: &mut World, r: usize, docs: Vec<Value>) {
 
 fn wall(k: &World, r: usize, (x, y): (i64, i64)) -> bool {
     k.terrain.raw(r as u32)[(y * 50 + x) as usize] & 1 != 0
-}
-
-fn xy(o: &Obj) -> (i64, i64) {
-    (num(o, atom!("x")) as i64, num(o, atom!("y")) as i64)
 }
 
 /// A wave of `bodies` in `room`, placed as genInvaders places a raid: one exit side at random,

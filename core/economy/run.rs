@@ -810,7 +810,7 @@ mod tests {
                 trace: false,
             };
 
-            let mut state = State::empty();
+            let mut state = State::default();
             decide(&mut context, &mut state).expect("a world decides");
             let intents = decide(&mut context, &mut state).expect("a world decides again");
 

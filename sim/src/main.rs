@@ -115,14 +115,11 @@ impl Engine {
 
     /// The active rooms this call lands inside the pass of, taken out of the set until it returns.
     fn hide(&mut self, k: &mut Krebs) -> Vec<u32> {
-        let (mut kept, mut hidden) = (Vec::new(), Vec::new());
-        for r in k.active.take() {
-            if self.next() < INSIDE_PASS {
-                hidden.push(r)
-            } else {
-                kept.push(r)
-            }
-        }
+        let (hidden, kept): (Vec<u32>, Vec<u32>) = k
+            .active
+            .take()
+            .into_iter()
+            .partition(|_| self.next() < INSIDE_PASS);
         kept.into_iter().for_each(|r| k.active.insert(r));
         hidden
     }

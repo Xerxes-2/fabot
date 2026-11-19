@@ -263,7 +263,7 @@ pub struct Field {
     pub onward: i32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Atlas {
     rooms: HashMap<Coords, RoomGrid>,
     /// The rooms intel saw whose lairs the name formula misreads.
@@ -336,10 +336,7 @@ impl Field {
 
     /// The ticks onward from a neighbour of `next`, through it.
     pub fn onto(&self, next: Tile) -> Option<i32> {
-        match self.via(next) {
-            d if d == UNREACHED => None,
-            d => Some(d),
-        }
+        Some(self.via(next)).filter(|d| *d != UNREACHED)
     }
 
     /// Out of a strike a body stands in, the shortest way across struck
@@ -407,18 +404,14 @@ impl Atlas {
 
     pub fn controller_link<'a>(room: &'a Room) -> Option<&'a super::world::Structure> {
         let c = room.controller.as_ref()?;
-        let mut links: Vec<&super::world::Structure> = room
-            .structures
-            .iter()
+        (room.structures.iter())
             .filter(|s| {
                 s.kind.is_link()
                     && s.owner.is_ours()
                     && c.pos.within(engine::UPGRADE_RANGE, &s.pos)
                     && !Atlas::is_source_link(room, &s.pos)
             })
-            .collect();
-        links.sort_by_key(|s| (c.pos.range(&s.pos), tiles::of_pos(&s.pos)));
-        links.into_iter().next()
+            .min_by_key(|s| (c.pos.range(&s.pos), tiles::of_pos(&s.pos)))
     }
 
     pub fn buffer<'a>(room: &'a Room) -> Option<&'a super::world::Structure> {
@@ -445,21 +438,15 @@ impl Atlas {
     /// is no post.
     pub fn post_of(room: &Room, source: &Pos) -> Option<(Pos, Option<Id>)> {
         let from_controller = |p: &Pos| Atlas::from_controller(room, p);
-        let mut candidates: Vec<(Pos, Option<Id>)> = Vec::new();
-        for s in &room.structures {
-            if s.kind.is_container() {
-                candidates.push((s.pos, Some(s.id)));
-            }
-        }
-        for s in &room.sites {
-            if s.kind.is_container() && s.owner.is_ours() {
-                candidates.push((s.pos, None));
-            }
-        }
-        candidates.retain(|(p, _)| p.within(1, source) && p != source);
-        candidates
-            .sort_by_key(|(p, built)| (-from_controller(p), built.is_none(), tiles::of_pos(p)));
-        candidates.into_iter().next()
+        let built = (room.structures.iter())
+            .filter(|s| s.kind.is_container())
+            .map(|s| (s.pos, Some(s.id)));
+        let sites = (room.sites.iter())
+            .filter(|s| s.kind.is_container() && s.owner.is_ours())
+            .map(|s| (s.pos, None));
+        (built.chain(sites))
+            .filter(|(p, _)| p.within(1, source) && p != source)
+            .min_by_key(|(p, built)| (-from_controller(p), built.is_none(), tiles::of_pos(p)))
     }
 
     pub fn bare_post(room: &Room, seats: Vec<Pos>) -> Option<Pos> {
@@ -496,21 +483,6 @@ impl Atlas {
             seats.push(tiles::of_pos(&b.pos));
         }
         seats
-    }
-
-    pub fn empty() -> Atlas {
-        Atlas {
-            rooms: HashMap::default(),
-            lairs: HashMap::default(),
-            closed: Vec::new(),
-            misses: Cell::new(0),
-            hits: Cell::new(0),
-            relaxed: Cell::new(0),
-            trees: RefCell::default(),
-            walks: RefCell::default(),
-            recomputed: Cell::new(0),
-            check: false,
-        }
     }
 
     /// The resource a keeper standing at `from` guards: a source before a
@@ -681,28 +653,15 @@ impl Atlas {
                 weights[tile] = grid::weight(grid::SEAT_WEIGHT);
             }
 
-            for s in &room.structures {
-                if !s.walkable {
-                    weights[tiles::of_pos(&s.pos)] = None;
-                }
-            }
-
-            for site in &room.sites {
-                if site.owner.is_ours() && !site.kind.walkable() {
-                    weights[tiles::of_pos(&site.pos)] = None;
-                }
-            }
-
-            for source in &room.sources {
-                weights[tiles::of_pos(&source.pos)] = None;
-            }
-
-            for mineral in &room.minerals {
-                weights[tiles::of_pos(&mineral.pos)] = None;
-            }
-
-            if let Some(c) = &room.controller {
-                weights[tiles::of_pos(&c.pos)] = None;
+            let structures = (room.structures.iter()).filter(|s| !s.walkable);
+            let sites = (room.sites.iter()).filter(|s| s.owner.is_ours() && !s.kind.walkable());
+            let solid = (structures.map(|s| &s.pos))
+                .chain(sites.map(|s| &s.pos))
+                .chain(room.sources.iter().map(|s| &s.pos))
+                .chain(room.minerals.iter().map(|m| &m.pos))
+                .chain(room.controller.iter().map(|c| &c.pos));
+            for pos in solid {
+                weights[tiles::of_pos(pos)] = None;
             }
 
             let standing = Rc::new(weights.clone());
@@ -784,18 +743,15 @@ impl Atlas {
             rooms,
             lairs,
             closed: world.closed.iter().map(|r| r.coords()).collect(),
-            misses: Cell::new(0),
-            hits: Cell::new(0),
-            relaxed: Cell::new(0),
             trees: Atlas::asked(previous.trees),
             walks: Atlas::asked(previous.walks),
-            recomputed: Cell::new(0),
             check: previous.check,
+            ..Atlas::default()
         }
     }
 
     pub fn of_world(world: &World) -> Atlas {
-        Atlas::following(Atlas::empty(), world, [], [])
+        Atlas::following(Atlas::default(), world, [], [])
     }
 
     pub fn misses(&self) -> i32 {
