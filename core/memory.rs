@@ -1,16 +1,13 @@
 //! `Memory`'s text and what it holds: `v2` is ours, keys of others are carried
 //! through in place, and v1's and the engine's `creeps` are dropped.
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
+use serde::Deserialize;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Map, Value, json};
 
 use super::economy::task::{Assignment, of_task_id, task_id};
-use super::exchange::{Losses, Outcome};
-use super::fight::shape::{Group, Objective};
 use super::state::State;
-use super::tactics::{Tactic, by_name, name};
 use super::tick::{ColonyPlan, Declarations, Declared, Flow, Node, Outpost, Stage, undeclared};
 use super::vocabulary::{self, Resource};
 use super::world::{Id, Pos, RoomName};
@@ -189,140 +186,4 @@ fn flows(labs: &Value) -> Vec<Flow> {
         _ => None,
     }))
     .collect()
-}
-
-/// A group as Memory holds it, its room its centre's.
-#[derive(Serialize, Deserialize)]
-pub struct Seen {
-    #[serde(flatten)]
-    centre: Pos,
-    id: i32,
-    seen: i32,
-    members: BTreeSet<Id>,
-}
-
-impl From<Seen> for Group {
-    fn from(s: Seen) -> Group {
-        Group {
-            id: s.id,
-            members: s.members,
-            room: s.centre.room,
-            last_seen: s.seen,
-            centre: s.centre,
-        }
-    }
-}
-
-impl From<Group> for Seen {
-    fn from(g: Group) -> Seen {
-        Seen {
-            centre: g.centre,
-            id: g.id,
-            seen: g.last_seen,
-            members: g.members,
-        }
-    }
-}
-
-/// An objective as Memory holds it: a Defend has no kind.
-#[derive(Serialize, Deserialize)]
-pub struct Kind {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    kind: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    target: Option<Id>,
-}
-
-impl From<Kind> for Objective {
-    fn from(k: Kind) -> Objective {
-        match (k.kind.as_deref(), k.target) {
-            (Some("siege"), Some(target)) => Objective::Siege(target),
-            (Some("sweep"), _) => Objective::Sweep,
-            _ => Objective::Defend,
-        }
-    }
-}
-
-impl From<Objective> for Kind {
-    fn from(o: Objective) -> Kind {
-        let (kind, target) = match o {
-            Objective::Defend => (None, None),
-            Objective::Siege(target) => (Some("siege"), Some(target)),
-            Objective::Sweep => (Some("sweep"), None),
-        };
-        Kind {
-            kind: kind.map(str::to_string),
-            target,
-        }
-    }
-}
-
-/// `JSON.stringify`'s number: a whole one has no `.0`, so Memory's text
-/// survives the round trip.
-pub fn js_number<S: Serializer>(n: &f64, s: S) -> Result<S::Ok, S::Error> {
-    if n.fract() == 0.0 && n.abs() < 1e18 {
-        s.serialize_i64(*n as i64)
-    } else {
-        s.serialize_f64(*n)
-    }
-}
-
-/// As `npm run exchange` writes a prediction.
-#[derive(Clone, Copy, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "lowercase")]
-pub enum Stored {
-    Win { ticks: i32, dead: i32, hits: i32 },
-    Kite { ticks: i32 },
-    Lose,
-}
-
-impl From<Stored> for Outcome {
-    fn from(s: Stored) -> Outcome {
-        match s {
-            Stored::Win { ticks, dead, hits } => Outcome::Win(ticks, Losses { dead, hits }),
-            Stored::Kite { ticks } => Outcome::Kite(ticks),
-            Stored::Lose => Outcome::Lose,
-        }
-    }
-}
-
-impl From<Outcome> for Stored {
-    fn from(o: Outcome) -> Stored {
-        match o {
-            Outcome::Win(ticks, Losses { dead, hits }) => Stored::Win { ticks, dead, hits },
-            Outcome::Kite(ticks) => Stored::Kite { ticks },
-            Outcome::Lose => Stored::Lose,
-        }
-    }
-}
-
-/// A body as Memory holds it, a part a letter.
-pub mod letters {
-    use crate::vocabulary::{ALL_BODY_PARTS, Part, part_letter};
-    use serde::{Deserialize, Deserializer, Serializer, de::Error};
-
-    pub fn serialize<S: Serializer>(body: &[Part], s: S) -> Result<S::Ok, S::Error> {
-        s.collect_str(&body.iter().map(|p| part_letter(*p)).collect::<String>())
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Part>, D::Error> {
-        let letters = String::deserialize(d)?;
-        let part = |c| ALL_BODY_PARTS.into_iter().find(|p| part_letter(*p) == c);
-        (letters.chars())
-            .map(|c| part(c).ok_or_else(|| D::Error::custom("no part")))
-            .collect()
-    }
-}
-
-impl Serialize for Tactic {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(name(*self))
-    }
-}
-
-impl<'de> Deserialize<'de> for Tactic {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let name = String::deserialize(d)?;
-        by_name(&name).ok_or_else(|| serde::de::Error::custom("no tactic"))
-    }
 }

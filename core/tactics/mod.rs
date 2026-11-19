@@ -3,6 +3,8 @@
 /// Emitter and Resolver step functions. Also which tactic a kind picks (§6.3).
 use std::collections::{BTreeMap, BTreeSet};
 
+use serde::{Deserialize, Serialize};
+
 use crate::atlas::{Atlas, Mover, Target};
 use crate::grid::{self, Footprint};
 use crate::intents::CreepAct;
@@ -15,7 +17,8 @@ use crate::{engine, tiles};
 
 /// A phase's own tactic (pursue, retreat) is the phase's; this is what a kind
 /// commits to, a price per candidate (§6.3).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Tactic {
     Kite,
     Close,
@@ -23,6 +26,7 @@ pub enum Tactic {
     Hold,
     /// A blob is a set that walks in as one, then fights by the tactic it names.
     BlobKite,
+    #[serde(rename = "blob")]
     BlobClose,
 }
 
@@ -1069,5 +1073,14 @@ mod tests {
             Some(Tactic::Close)
         );
         assert_eq!(select(&[], Some(Tactic::Kite)), None);
+    }
+
+    #[test]
+    fn a_tactic_is_written_and_read_by_its_name() {
+        use Tactic::*;
+        for t in [Kite, Close, Hold, BlobKite, BlobClose] {
+            assert_eq!(serde_json::to_value(t).unwrap(), name(t));
+            assert_eq!(serde_json::from_value::<Tactic>(name(t).into()).unwrap(), t);
+        }
     }
 }

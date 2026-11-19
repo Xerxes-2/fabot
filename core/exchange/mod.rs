@@ -40,11 +40,40 @@ pub struct Losses {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(from = "crate::memory::Stored", into = "crate::memory::Stored")]
+#[serde(from = "Stored", into = "Stored")]
 pub enum Outcome {
     Win(i32, Losses),
     Kite(i32),
     Lose,
+}
+
+/// As `npm run exchange` writes a prediction.
+#[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+enum Stored {
+    Win { ticks: i32, dead: i32, hits: i32 },
+    Kite { ticks: i32 },
+    Lose,
+}
+
+impl From<Stored> for Outcome {
+    fn from(s: Stored) -> Outcome {
+        match s {
+            Stored::Win { ticks, dead, hits } => Outcome::Win(ticks, Losses { dead, hits }),
+            Stored::Kite { ticks } => Outcome::Kite(ticks),
+            Stored::Lose => Outcome::Lose,
+        }
+    }
+}
+
+impl From<Outcome> for Stored {
+    fn from(o: Outcome) -> Stored {
+        match o {
+            Outcome::Win(ticks, Losses { dead, hits }) => Stored::Win { ticks, dead, hits },
+            Outcome::Kite(ticks) => Stored::Kite { ticks },
+            Outcome::Lose => Stored::Lose,
+        }
+    }
 }
 
 impl Outcome {

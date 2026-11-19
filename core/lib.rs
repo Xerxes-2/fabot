@@ -16,6 +16,7 @@ pub mod strategy;
 pub mod tactics;
 pub mod tick;
 pub mod vocabulary;
+pub mod wire;
 pub mod world;
 
 pub use atlas::{grid, tiles};

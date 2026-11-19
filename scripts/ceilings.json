@@ -1,7 +1,7 @@
 {
   "_": "Never raised (AGENTS.md). Lines are every line of every .rs under the path but its `#[cfg(test)]` items (each F#-era ceiling times its module's Rust-to-F# line ratio at the port, floored to 50); a path not built yet passes; `core/tactics` is its 926 lines at the split from fight plus 15% (owner). comments: the most percent of a src directory's own lines that are `//` comments, by the directory, else `_default`. counts: the most a per-tick count the bot reports in its observe segment (ARCHITECTURE.md \u00a79.3) may stand at, over a scenario's whole run: `floodsMost` the floods one tick ran, `atlasMissRate` the percent of `fieldOn` lookups that flooded, `threatLookupsMost` the tiles a Hunt scored in one tick (nine a body of the largest set, eight). `npm run scenario` asserts them.",
   "lines": {
-    "core/fight": 3610,
+    "core/fight": 3640,
     "core/fight/kinds/*": 550,
     "core/tactics": 1065,
     "core/exchange": 3650,

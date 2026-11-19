@@ -7,7 +7,7 @@ use crate::vocabulary::Part;
 use crate::world::{Id, Pos, RoomName};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(from = "crate::memory::Seen", into = "crate::memory::Seen")]
+#[serde(from = "Seen", into = "Seen")]
 pub struct Group {
     pub id: i32,
     pub members: BTreeSet<Id>,
@@ -41,7 +41,7 @@ pub struct Plan {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(from = "crate::memory::Kind", into = "crate::memory::Kind")]
+#[serde(from = "Kind", into = "Kind")]
 pub enum Objective {
     Defend,
     /// Into its room to the rival structure `target`; the plan's order is the
@@ -49,6 +49,70 @@ pub enum Objective {
     Siege(Id),
     /// A rival's remote, `room`, its economy bodies hunted.
     Sweep,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Seen {
+    #[serde(flatten)]
+    centre: Pos,
+    id: i32,
+    seen: i32,
+    members: BTreeSet<Id>,
+}
+
+impl From<Seen> for Group {
+    fn from(s: Seen) -> Group {
+        Group {
+            id: s.id,
+            members: s.members,
+            room: s.centre.room,
+            last_seen: s.seen,
+            centre: s.centre,
+        }
+    }
+}
+
+impl From<Group> for Seen {
+    fn from(g: Group) -> Seen {
+        Seen {
+            centre: g.centre,
+            id: g.id,
+            seen: g.last_seen,
+            members: g.members,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct Kind {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target: Option<Id>,
+}
+
+impl From<Kind> for Objective {
+    fn from(k: Kind) -> Objective {
+        match (k.kind.as_deref(), k.target) {
+            (Some("siege"), Some(target)) => Objective::Siege(target),
+            (Some("sweep"), _) => Objective::Sweep,
+            _ => Objective::Defend,
+        }
+    }
+}
+
+impl From<Objective> for Kind {
+    fn from(o: Objective) -> Kind {
+        let (kind, target) = match o {
+            Objective::Defend => (None, None),
+            Objective::Siege(target) => (Some("siege"), Some(target)),
+            Objective::Sweep => (Some("sweep"), None),
+        };
+        Kind {
+            kind: kind.map(str::to_string),
+            target,
+        }
+    }
 }
 
 /// A Defend's target is `Group`, and `room` the room held or worked it
@@ -69,7 +133,7 @@ pub struct Engagement {
     pub lost: i32,
     /// The bodies it may lose before it disengages.
     pub budget: i32,
-    #[serde(serialize_with = "crate::memory::js_number")]
+    #[serde(serialize_with = "crate::wire::js_number")]
     pub priority: f64,
     /// Starved: towers and ramparts answer it alone.
     pub unanswered: bool,
@@ -99,6 +163,6 @@ pub struct Cast {
     pub engagement: i32,
     pub name: String,
     pub room: RoomName,
-    #[serde(with = "crate::memory::letters")]
+    #[serde(with = "crate::wire::letters")]
     pub body: Vec<Part>,
 }
