@@ -1319,10 +1319,18 @@ impl Creep {
     }
 
     pub fn live(&self, kind: Part) -> i32 {
-        (self.body.iter())
-            .filter(|p| p.hits > 0 && p.kind == kind)
-            .count() as i32
+        live(&self.body, kind)
     }
+}
+
+pub fn live(body: &[BodyPart], kind: Part) -> i32 {
+    (body.iter())
+        .filter(|p| p.hits > 0 && p.kind == kind)
+        .count() as i32
+}
+
+pub fn cast(body: &[BodyPart], kind: Part) -> i32 {
+    (body.iter()).filter(|p| p.kind == kind).count() as i32
 }
 
 impl World<'_> {

@@ -624,7 +624,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
         let Some((slot, body, task)) = at else {
             // A load held idle is lost to every sink.
             let loaded = creep.store.amount_of(&Resource::Energy) > 0;
-            let works = (creep.body.iter()).any(|p| p.kind == Part::Work && p.hits > 0);
+            let works = creep.live(Part::Work) > 0;
             let sink = (derived.grounds.iter())
                 .filter(|g| g.room == creep.pos.room)
                 .find_map(|g| match (works, &g.controller, g.bank()) {

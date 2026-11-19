@@ -40,7 +40,6 @@ pub fn guards(room: &Room) -> Vec<(Pos, i32, i32)> {
         .collect()
 }
 
-/// Whether a way in reaches beside `goal` crossing no barrier of his.
 pub fn breached(room: &Room, passable: impl Fn(Tile) -> bool, goal: &Pos) -> bool {
     let walls: BTreeSet<Tile> = room
         .structures
@@ -225,14 +224,7 @@ pub fn dance(sight: &mut Sight, room: &Room, members: &[&Creep], c: &Creep) -> W
     let guards = guards(room);
     let healers: Vec<(&Creep, i32)> = (members.iter())
         .filter(|m| m.name != c.name)
-        .map(|m| {
-            let parts = (m.body)
-                .iter()
-                .filter(|p| p.hits > 0 && p.kind == Part::Heal)
-                .count() as i32;
-
-            (*m, parts)
-        })
+        .map(|m| (*m, m.live(Part::Heal)))
         .collect();
     let heal_at = |at: &Pos| -> i32 {
         (healers.iter())
@@ -303,10 +295,7 @@ pub fn dance(sight: &mut Sight, room: &Room, members: &[&Creep], c: &Creep) -> W
 pub fn volley(sight: &Sight, room: &Room, c: &Creep) -> Option<CreepAct> {
     let spares = (sight.spared.get(&c.pos.room))
         .is_some_and(|s| s.iter().any(|p| c.pos.within(engine::RANGED_RANGE, p)));
-    let guns = (c.body)
-        .iter()
-        .filter(|p| p.hits > 0 && p.kind == Part::RangedAttack)
-        .count() as i32;
+    let guns = c.live(Part::RangedAttack);
     if guns == 0 {
         return None;
     }

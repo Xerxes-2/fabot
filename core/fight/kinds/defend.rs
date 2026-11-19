@@ -7,7 +7,7 @@ use crate::engine;
 use crate::tactics::Tactic;
 use crate::tiles::{self};
 use crate::vocabulary::Part;
-use crate::world::{Controller, Creep, Fallen, Id, Kind, Owner, Pos, RoomName, Structure};
+use crate::world::{self, Controller, Creep, Fallen, Id, Kind, Owner, Pos, RoomName, Structure};
 
 /// What a `Defend` may fight as, in the order its ties fall to (§6.3).
 pub const CANDIDATES: &[Tactic] = &[
@@ -143,15 +143,11 @@ const CLAIMER_REACH: i32 = engine::MELEE_RANGE + 2;
 /// Two 16-CARRY haulers: a home that never holds them casts its hands again itself.
 const REFILLING_FLOOR: i32 = 32;
 
-fn live(kind: Part, c: &Creep) -> bool {
-    c.body.iter().any(|p| p.kind == kind && p.hits > 0)
-}
-
 fn reaches(structure: bool, step: i32, raid: &[&Creep], at: &Pos) -> bool {
     raid.iter().any(|h| {
-        let range = if live(Part::RangedAttack, h) {
+        let range = if h.live(Part::RangedAttack) > 0 {
             Some(engine::RANGED_RANGE)
-        } else if live(Part::Attack, h) || structure && live(Part::Work, h) {
+        } else if h.live(Part::Attack) > 0 || structure && h.live(Part::Work) > 0 {
             Some(engine::MELEE_RANGE)
         } else {
             None
@@ -168,7 +164,7 @@ fn half(lost: i32, whole: i32) -> bool {
 }
 
 fn carry(c: &Creep) -> i32 {
-    c.body.iter().filter(|p| p.kind == Part::Carry).count() as i32
+    world::cast(&c.body, Part::Carry)
 }
 
 /// v1's refiller held a Refill, which is Economy's to know; a hauler's body stands in.
@@ -279,7 +275,7 @@ pub fn fireable(c: &Controller) -> bool {
 
 pub fn safe_mode(running: bool, homes: &[Home]) -> Option<Id> {
     let claimer =
-        |c: &Controller, h: &Creep| live(Part::Claim, h) && h.pos.within(CLAIMER_REACH, &c.pos);
+        |c: &Controller, h: &Creep| h.live(Part::Claim) > 0 && h.pos.within(CLAIMER_REACH, &c.pos);
 
     if running {
         None

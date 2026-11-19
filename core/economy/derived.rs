@@ -11,7 +11,7 @@ use crate::tick::{self, Declarations, Outpost};
 use crate::tiles::{self, Tile};
 use crate::vocabulary::{Part, Resource, part_count_in};
 use crate::world::{
-    BodyPart, Controller, Creep, Id, Kind, Owner, Pos, Room, RoomName, Source, Spawn, Store,
+    self, BodyPart, Controller, Creep, Id, Kind, Owner, Pos, Room, RoomName, Source, Spawn, Store,
     Structure, World, terrain,
 };
 
@@ -375,13 +375,8 @@ fn body_of(
     store: &Store,
     life: i32,
 ) -> Body {
-    let count = |kind: Part, cast: bool| {
-        (parts.iter())
-            .filter(|p| p.kind == kind && (cast || p.hits > 0))
-            .count() as i32
-    };
     let [work, carry, moves, claim] =
-        [Part::Work, Part::Carry, Part::Move, Part::Claim].map(|k| count(k, false));
+        [Part::Work, Part::Carry, Part::Move, Part::Claim].map(|k| world::live(parts, k));
     Body {
         id,
         name: name.to_string(),
@@ -391,8 +386,8 @@ fn body_of(
         moves,
         claim,
         size: parts.len() as i32,
-        cast_work: count(Part::Work, true),
-        cast_carry: count(Part::Carry, true),
+        cast_work: world::cast(parts, Part::Work),
+        cast_carry: world::cast(parts, Part::Carry),
         store: store.clone(),
         energy: store.amount_of(&Resource::Energy),
         free: store.free(),
