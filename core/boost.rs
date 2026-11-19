@@ -1,11 +1,4 @@
-use std::collections::BTreeSet;
-
-use super::atlas::Mover;
 use super::engine;
-use super::grid::{self, Footprint};
-use super::intents::{Action, LabAct};
-use super::mv::{self, Wish};
-use super::tick::{Context, target_at};
 use super::vocabulary::{self, Compound, Resource, ResourceType};
 use super::world::{self, Id, Kind, Pos, RoomName, World};
 
@@ -31,7 +24,7 @@ pub fn booster<'a>(
         held(a).cmp(&held(b)).then_with(|| b.id.cmp(&a.id))
     };
     let all: Vec<(Id, Pos)> = labs_in(world, room).map(|l| (l.id, l.pos)).collect();
-    let reagents = crate::economy::labs::roles_of(&all).map(|r| r.reagents);
+    let reagents = roles_of(&all).map(|r| r.reagents);
     let reagent = |l: &world::Structure| reagents.is_some_and(|(a, b)| l.id == a || l.id == b);
     let other = |l: &world::Structure| {
         (l.store.held.iter())
@@ -46,7 +39,10 @@ pub fn booster<'a>(
         .or_else(|| (labs_in(world, room)).min_by_key(|l| (reagent(l), other(l), l.id)))
 }
 
-fn labs_in<'a>(world: &'a World, room: RoomName) -> impl Iterator<Item = &'a world::Structure> {
+pub(crate) fn labs_in<'a>(
+    world: &'a World,
+    room: RoomName,
+) -> impl Iterator<Item = &'a world::Structure> {
     (world.rooms.iter())
         .filter(move |r| r.name == room)
         .flat_map(|r| r.structures.iter())
@@ -86,7 +82,7 @@ fn holds_room_for(lab: &world::Structure, compound: Compound) -> bool {
     (lab.store.held.iter()).all(|(r, n)| *n <= 0 || r == &wanted || !vocabulary::is_mineral(r))
 }
 
-fn can_boost(lab: &world::Structure, compound: Compound) -> bool {
+pub(crate) fn can_boost(lab: &world::Structure, compound: Compound) -> bool {
     lab.store.amount_of(&Resource::Compound(compound)) >= engine::BOOST_MINERAL_PER_PART
         && lab.store.amount_of(&Resource::Energy) >= engine::BOOST_ENERGY_PER_PART
 }
@@ -147,60 +143,38 @@ pub fn waiting<'a>(world: &'a World, home: RoomName, creep: &world::Creep) -> Op
     })
 }
 
-/// A body whose cast asked for a compound and whose parts do not carry it yet
-/// is held at the lab and boosted there: its module's acts and wish are
-/// dropped for the walk, or the boost itself when it stands beside it.
-pub fn stop(
-    context: &mut Context,
-    actions: &mut Vec<Action>,
-    wishes: &[(RoomName, Wish)],
-) -> Option<Vec<(RoomName, Wish)>> {
-    let (home, _) = context.declarations.labs()?;
-    let mut stalls: Vec<(String, Pos, Id, Compound)> = Vec::new();
+/// The two reagent labs, and every lab within reach of both as an output.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Roles {
+    pub reagents: (Id, Id),
+    pub outputs: Vec<Id>,
+}
 
-    for creep in (context.world.creeps.iter()).filter(|c| c.owner.is_ours() && c.pos.room == home) {
-        if let Some(w) = waiting(context.world, home, creep) {
-            stalls.push((creep.name.clone(), w.lab.pos, w.lab.id, w.compound));
-        }
-    }
+/// Off the labs' tiles alone, so they hold from tick to tick: the pair the
+/// most others stand within reach of both of, ties to the lower ids.
+pub fn roles_of(labs: &[(Id, Pos)]) -> Option<Roles> {
+    let mut sorted: Vec<&(Id, Pos)> = labs.iter().collect();
+    sorted.sort_by_key(|a| a.0);
+    let reaches = |a: &Pos, b: &Pos| a.range(b).is_some_and(|r| r <= engine::LAB_REACTION_RANGE);
 
-    if stalls.is_empty() {
-        return None;
-    }
-
-    let stalling: BTreeSet<&str> = stalls.iter().map(|(name, _, _, _)| name.as_str()).collect();
-    actions.retain(|a| !matches!(a, Action::Creep(name, _) if stalling.contains(name.as_str())));
-    let mut walks: Vec<(RoomName, Wish)> = (wishes.iter())
-        .filter(|(_, w)| !stalling.contains(w.creep.as_str()))
-        .cloned()
-        .collect();
-
-    let mut boostable: BTreeSet<Id> = BTreeSet::new();
-    for lab in labs_in(context.world, home) {
-        for compound in stalls.iter().map(|(_, _, _, c)| c) {
-            if can_boost(lab, *compound) {
-                boostable.insert(lab.id);
+    let mut best: Option<Roles> = None;
+    for (i, (a, at_a)) in sorted.iter().map(|l| (&l.0, &l.1)).enumerate() {
+        for (b, at_b) in sorted.iter().skip(i + 1).map(|l| (&l.0, &l.1)) {
+            let outputs: Vec<Id> = sorted
+                .iter()
+                .filter(|(id, at)| id != a && id != b && reaches(at, at_a) && reaches(at, at_b))
+                .map(|(id, _)| *id)
+                .collect();
+            if best
+                .as_ref()
+                .map_or(!outputs.is_empty(), |r| outputs.len() > r.outputs.len())
+            {
+                best = Some(Roles {
+                    reagents: (*a, *b),
+                    outputs,
+                });
             }
         }
     }
-
-    for (name, at, lab, _) in &stalls {
-        let Some(creep) = context.world.creeps.iter().find(|c| &c.name == name) else {
-            continue;
-        };
-        if creep.pos.within(1, at) && boostable.contains(lab) {
-            actions.push(Action::Lab(*lab, LabAct::BoostCreep(creep.id)));
-            continue;
-        }
-        let mover = Mover {
-            footprint: Footprint::One,
-            factor: grid::loaded_factor(&world::body_kinds(creep)),
-        };
-        walks.push((
-            creep.pos.room,
-            mv::plan::toward(context.atlas, creep, mover, &target_at(at, 1), 1),
-        ));
-    }
-
-    Some(walks)
+    best
 }

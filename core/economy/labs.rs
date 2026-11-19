@@ -4,6 +4,7 @@
 /// tick or a reset loses nothing.
 use std::collections::BTreeMap;
 
+use crate::boost::{Roles, roles_of};
 use crate::engine;
 use crate::vocabulary::{Compound, Resource};
 use crate::world::{Id, Pos};
@@ -85,42 +86,6 @@ pub fn ore_short(
         );
     }
     short
-}
-
-/// The two reagent labs, and every lab within reach of both as an output.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Roles {
-    pub reagents: (Id, Id),
-    pub outputs: Vec<Id>,
-}
-
-/// Off the labs' tiles alone, so they hold from tick to tick: the pair the
-/// most others stand within reach of both of, ties to the lower ids.
-pub fn roles_of(labs: &[(Id, Pos)]) -> Option<Roles> {
-    let mut sorted: Vec<&(Id, Pos)> = labs.iter().collect();
-    sorted.sort_by_key(|a| a.0);
-    let reaches = |a: &Pos, b: &Pos| a.range(b).is_some_and(|r| r <= engine::LAB_REACTION_RANGE);
-
-    let mut best: Option<Roles> = None;
-    for (i, (a, at_a)) in sorted.iter().map(|l| (&l.0, &l.1)).enumerate() {
-        for (b, at_b) in sorted.iter().skip(i + 1).map(|l| (&l.0, &l.1)) {
-            let outputs: Vec<Id> = sorted
-                .iter()
-                .filter(|(id, at)| id != a && id != b && reaches(at, at_a) && reaches(at, at_b))
-                .map(|(id, _)| *id)
-                .collect();
-            if best
-                .as_ref()
-                .map_or(!outputs.is_empty(), |r| outputs.len() > r.outputs.len())
-            {
-                best = Some(Roles {
-                    reagents: (*a, *b),
-                    outputs,
-                });
-            }
-        }
-    }
-    best
 }
 
 /// One tick of the cluster: the reaction and the labs that run it, the fills

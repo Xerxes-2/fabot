@@ -7,10 +7,13 @@ use crate::HashMap;
 use screeps::LocalRoomTerrain;
 
 use super::atlas::{Atlas, Mover, Target, Tree};
+use super::boost;
 use super::engine;
 use super::grid::{self, Footprint};
-use super::intents::{Action, Ask, CreepAct, ModuleOutput, Rank, Settled, SpawnAct, Telemetry};
-use super::mv;
+use super::intents::{
+    Action, Ask, CreepAct, LabAct, ModuleOutput, Rank, Settled, SpawnAct, Telemetry,
+};
+use super::mv::{self, Wish};
 use super::state::State;
 use super::strategy::{
     self,
@@ -20,7 +23,7 @@ use super::tactics::{self, Tactic};
 use super::tiles::{self, Tile, TileSet};
 use super::vocabulary::{Compound, Part, Resource};
 use super::world::{
-    Creep, Id, Kind, Owner, Pos, Room, RoomName, Sightings, Structure, World, hostiles,
+    self, Creep, Id, Kind, Owner, Pos, Room, RoomName, Sightings, Structure, World, hostiles,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -610,10 +613,68 @@ pub fn arbitrate(context: &Context, wishes: &[(RoomName, mv::Wish)]) -> (Vec<Act
     (out, stood)
 }
 
+/// A body whose cast asked for a compound and whose parts do not carry it yet
+/// is held at the lab and boosted there: its module's acts and wish are
+/// dropped for the walk, or the boost itself when it stands beside it.
+fn boost_stop(
+    context: &mut Context,
+    actions: &mut Vec<Action>,
+    wishes: &[(RoomName, Wish)],
+) -> Option<Vec<(RoomName, Wish)>> {
+    let (home, _) = context.declarations.labs()?;
+    let mut stalls: Vec<(String, Pos, Id, Compound)> = Vec::new();
+
+    for creep in (context.world.creeps.iter()).filter(|c| c.owner.is_ours() && c.pos.room == home) {
+        if let Some(w) = boost::waiting(context.world, home, creep) {
+            stalls.push((creep.name.clone(), w.lab.pos, w.lab.id, w.compound));
+        }
+    }
+
+    if stalls.is_empty() {
+        return None;
+    }
+
+    let stalling: BTreeSet<&str> = stalls.iter().map(|(name, _, _, _)| name.as_str()).collect();
+    actions.retain(|a| !matches!(a, Action::Creep(name, _) if stalling.contains(name.as_str())));
+    let mut walks: Vec<(RoomName, Wish)> = (wishes.iter())
+        .filter(|(_, w)| !stalling.contains(w.creep.as_str()))
+        .cloned()
+        .collect();
+
+    let mut boostable: BTreeSet<Id> = BTreeSet::new();
+    for lab in boost::labs_in(context.world, home) {
+        for compound in stalls.iter().map(|(_, _, _, c)| c) {
+            if boost::can_boost(lab, *compound) {
+                boostable.insert(lab.id);
+            }
+        }
+    }
+
+    for (name, at, lab, _) in &stalls {
+        let Some(creep) = context.world.creeps.iter().find(|c| &c.name == name) else {
+            continue;
+        };
+        if creep.pos.within(1, at) && boostable.contains(lab) {
+            actions.push(Action::Lab(*lab, LabAct::BoostCreep(creep.id)));
+            continue;
+        }
+        let mover = Mover {
+            footprint: Footprint::One,
+            factor: grid::loaded_factor(&world::body_kinds(creep)),
+        };
+        walks.push((
+            creep.pos.room,
+            mv::plan::toward(context.atlas, creep, mover, &target_at(at, 1), 1),
+        ));
+    }
+
+    Some(walks)
+}
+
 fn settle(context: &mut Context, asked: &ModuleOutput) -> Settled {
     let mut out = queue(context.world, &asked.asks);
     out.extend(asked.actions.iter().cloned());
-    let walks = super::boost::stop(context, &mut out, &asked.wishes);
+    let walks = boost_stop(context, &mut out, &asked.wishes);
     let (moves, held) = arbitrate(context, walks.as_deref().unwrap_or(&asked.wishes));
     out.extend(moves);
     Settled { actions: out, held }
