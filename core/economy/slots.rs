@@ -382,7 +382,7 @@ impl Plan<'_> {
         let fed = fed(&colony.controller);
         let mut drink: i32 = (derived.bodies.iter().chain(derived.ovens.iter()))
             .filter(|b| b.pos.room == colony.room && b.work > 0 && b.carry > 0)
-            .filter(|b| !b.pattern.is_harvester())
+            .filter(|b| b.pattern != Pattern::Harvester)
             .map(|b| b.work * engine::UPGRADE_DRAIN_PER_WORK)
             .sum::<i32>()
             .min(bodies::upgradable_at(colony.controller.level));
@@ -446,7 +446,9 @@ impl Plan<'_> {
                 // sizes the spend: those workers dig the free seats themselves.
                 let raises = !own
                     && (derived.bodies.iter()).any(|b| {
-                        b.pos == post && b.pattern.is_harvester() && raised_by(g, b).is_some()
+                        b.pos == post
+                            && b.pattern == Pattern::Harvester
+                            && raised_by(g, b).is_some()
                     });
                 let dig_id = format!("harvester:{}:0", s.id);
                 if own {
@@ -673,7 +675,7 @@ impl Plan<'_> {
                 (ground.buffer_seats.len() as i32).min(upgradable.saturating_add(work - 1) / work);
             // A standing upgrader's body is paid for: only its drink is owed.
             let standing = (derived.bodies.iter().chain(derived.ovens.iter()))
-                .filter(|b| b.pattern.is_upgrader() && b.pos.room == colony.room)
+                .filter(|b| b.pattern == Pattern::Upgrader && b.pos.room == colony.room)
                 .count() as i32;
             let kept = ((upgraded / f64::from(work)).round() as i32).min(standing);
             let new =
@@ -1095,10 +1097,10 @@ fn outgrown(derived: &Derived, body: &Body, slot: &Slot) -> bool {
     let Job::Dig(id) = &slot.job else {
         return matches!(slot.job, Job::Fill)
             && home
-            && body.pattern.is_hauler()
+            && body.pattern == Pattern::Hauler
             && 2 * body.cast_carry < part_count_in(&slot.body, Part::Carry);
     };
-    if !body.pattern.is_harvester() || !home {
+    if body.pattern != Pattern::Harvester || !home {
         return false;
     }
     let rate = (derived.grounds.iter())
@@ -1134,7 +1136,9 @@ pub fn assign<'a>(
     let mut out: BTreeMap<String, usize> = BTreeMap::new();
     let mut holders: Holders = BTreeMap::new();
     let mut all: Vec<&Body> = derived.bodies.iter().chain(derived.ovens.iter()).collect();
-    all.sort_by_key(|b| (b.pattern.is_hauler()).then_some(std::cmp::Reverse(b.ticks_to_live)));
+    all.sort_by_key(|b| {
+        (b.pattern == Pattern::Hauler).then_some(std::cmp::Reverse(b.ticks_to_live))
+    });
     let mut loose: Vec<&Body> = Vec::new();
     for b in &all {
         let kept = (held.get(&b.name))
@@ -1169,7 +1173,7 @@ pub fn assign<'a>(
         })
         .collect();
     for b in loose {
-        if b.pattern.is_scout() {
+        if b.pattern == Pattern::Scout {
             let free = (slots.iter().enumerate()).find(|(_, s)| {
                 s.job.pattern() == b.pattern && !holders.contains_key(s.id.as_str())
             });

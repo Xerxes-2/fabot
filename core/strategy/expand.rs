@@ -7,7 +7,7 @@ use crate::season;
 use crate::tick::{ColonyPlan, Declarations, Derived, Outpost, REACH_HOPS, Stage, undeclared};
 use crate::tiles;
 use crate::vocabulary::Resource;
-use crate::world::{Room, RoomName, World};
+use crate::world::{Kind, Room, RoomName, World};
 use screeps::LocalRoomTerrain;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -123,7 +123,7 @@ fn free(world: &World, row: &Row) -> bool {
 fn spare(world: &World, p: &ColonyPlan, busy: &BTreeSet<RoomName>) -> Option<i32> {
     let r = world.room(p.room)?;
     let level = r.controller.as_ref().map_or(0, |c| c.level);
-    let storage = (r.structures.iter()).find(|s| s.kind.is_storage() && s.owner.is_ours())?;
+    let storage = (r.structures.iter()).find(|s| s.kind == Kind::Storage && s.owner.is_ours())?;
     (p.stage == Stage::Exploit && !busy.contains(&p.room) && level >= SPONSOR_LEVEL)
         .then(|| storage.store.amount_of(&Resource::Energy) - p.reserve)
 }
@@ -227,7 +227,7 @@ pub fn step<'t>(
         // In flight until it stands on its own: support ends with its storage.
         let stored = world.room(e.room).is_some_and(|r| {
             (r.structures.iter())
-                .any(|s| (s.kind.is_storage() || s.kind.is_terminal()) && s.owner.is_ours())
+                .any(|s| matches!(s.kind, Kind::Storage | Kind::Terminal) && s.owner.is_ours())
         });
         // Nothing holds it once its safe mode is gone: RCL2's grant spent, the
         // cooldown running and no tower up.
@@ -235,7 +235,7 @@ pub fn step<'t>(
             && world.room(e.room).is_some_and(|r| {
                 r.controller.as_ref().is_some_and(|c| {
                     c.safe_mode == 0 && c.safe_mode_available == 0 && c.safe_mode_cooldown > 0
-                }) && !(r.structures.iter()).any(|s| s.kind.is_tower() && s.owner.is_ours())
+                }) && !(r.structures.iter()).any(|s| s.kind == Kind::Tower && s.owner.is_ours())
             });
         match fate(world.time - e.since, owned, theirs || bare, stored) {
             Fate::Failed if owned && may_give_up(e.room, expansion) => give_up(e.room, expansion),

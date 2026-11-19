@@ -8,7 +8,7 @@ use crate::intents::Intent;
 use crate::tick::{self, Declarations, Declared, Outpost};
 use crate::tiles;
 use crate::vocabulary::{Part, Resource, resource_name, resource_of_name};
-use crate::world::{Controller, Id, Owner, Pos, Room, RoomName, Source, World, push_int};
+use crate::world::{Controller, Id, Kind, Owner, Pos, Room, RoomName, Source, World, push_int};
 
 /// A room as it stood when last seen, by username: a stance is the
 /// declarations' and changes without a sight.
@@ -79,10 +79,12 @@ pub fn step(world: &World, intel: &mut Intel) {
                     .collect(),
             ),
             contained: (room.sources.iter()).all(|s| {
-                (room.structures.iter()).any(|c| c.kind.is_container() && c.pos.within(1, &s.pos))
+                (room.structures.iter())
+                    .any(|c| c.kind == Kind::Container && c.pos.within(1, &s.pos))
             }),
             mineral: room.minerals.first().map(|m| m.resource.clone()),
-            stronghold: (room.structures.iter()).any(|s| s.kind.is_invader_core() && s.level > 0),
+            stronghold: (room.structures.iter())
+                .any(|s| s.kind == Kind::InvaderCore && s.level > 0),
         };
         intel.insert(room.name, row);
     }
@@ -224,7 +226,7 @@ pub fn sight(
         .rooms
         .iter()
         .flat_map(|r| r.structures.iter())
-        .filter(|s| s.kind.is_observer() && s.owner.is_ours())
+        .filter(|s| s.kind == Kind::Observer && s.owner.is_ours())
         .collect();
     let mut stale: Vec<(i32, &RoomName)> = intel
         .iter()

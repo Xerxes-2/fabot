@@ -180,7 +180,7 @@ fn to_plan(rules: &Rules, ground: &Ground, built: &Built) -> Plan {
         .collect();
     let mut keyed: Vec<(i32, i32, usize, Item)> = Vec::new();
     let mut push = |kind: Kind, tile: Tile, level: i32| {
-        if !fixed.contains(&tile) || kind.is_extractor() {
+        if !fixed.contains(&tile) || kind == Kind::Extractor {
             let seq = keyed.len();
             let rock = |r: &Tile| tiles::range(*r, tile) == 1;
             let seat = |n: &&Tile| ground.terrain[**n] != place::WALL && !fixed.contains(n);
@@ -239,8 +239,8 @@ fn to_plan(rules: &Rules, ground: &Ground, built: &Built) -> Plan {
     for (_, _, _, i) in keyed {
         if !items.iter().any(|o| {
             o.tile == i.tile
-                && (o.kind.is_road(), o.kind.is_rampart())
-                    == (i.kind.is_road(), i.kind.is_rampart())
+                && (o.kind == Kind::Road, o.kind == Kind::Rampart)
+                    == (i.kind == Kind::Road, i.kind == Kind::Rampart)
         }) {
             items.push(i);
         }
@@ -394,7 +394,7 @@ mod tests {
                 }
             }
             let solid: Vec<Tile> = (plan.items.iter())
-                .filter(|i| !i.kind.is_road() && !i.kind.is_rampart())
+                .filter(|i| i.kind != Kind::Road && i.kind != Kind::Rampart)
                 .map(|i| i.tile)
                 .collect();
             assert_eq!(
@@ -409,11 +409,13 @@ mod tests {
             for i in plan.items.iter().chain(&plan.ring) {
                 assert!(!tiles::on_edge(i.tile), "{i:?} on the edge");
                 assert!(
-                    i.kind.is_extractor() == rocks.contains(&i.tile),
+                    (i.kind == Kind::Extractor) == rocks.contains(&i.tile),
                     "{i:?} on rock"
                 );
                 assert!(
-                    ground.terrain[i.tile] != 1 || i.kind.is_road() || i.kind.is_extractor(),
+                    ground.terrain[i.tile] != 1
+                        || i.kind == Kind::Road
+                        || i.kind == Kind::Extractor,
                     "{i:?} on a wall"
                 );
             }
@@ -422,7 +424,7 @@ mod tests {
 
     fn source_posts(ground: &Ground, plan: &Plan) -> Vec<Tile> {
         (plan.items.iter())
-            .filter(|i| i.kind.is_container())
+            .filter(|i| i.kind == Kind::Container)
             .filter(|i| ground.sources.iter().any(|s| tiles::range(*s, i.tile) == 1))
             .map(|i| i.tile)
             .collect()
@@ -528,12 +530,12 @@ mod tests {
             for i in plan.items.iter().chain(&plan.ring) {
                 let reach = tiles::range(i.tile, at);
                 assert!(
-                    !(i.kind.is_road() && reach <= crate::tick::MUSTER_RANGE),
+                    !(i.kind == Kind::Road && reach <= crate::tick::MUSTER_RANGE),
                     "road at {}",
                     i.tile
                 );
                 assert!(
-                    !(i.kind.is_spawn() && reach <= crate::tick::MUSTER_RANGE + 1),
+                    !(i.kind == Kind::Spawn && reach <= crate::tick::MUSTER_RANGE + 1),
                     "spawn at {}",
                     i.tile
                 );
@@ -550,7 +552,7 @@ mod tests {
             let at = |t: Tile| plan.items.iter().filter(move |i| i.tile == t);
             for s in &ground.sources {
                 let Some(c) = (plan.items.iter())
-                    .find(|i| i.kind.is_container() && tiles::range(i.tile, *s) == 1)
+                    .find(|i| i.kind == Kind::Container && tiles::range(i.tile, *s) == 1)
                 else {
                     continue;
                 };
@@ -561,8 +563,8 @@ mod tests {
                 let bare: Vec<Tile> = (tiles::around(c.tile).iter().copied())
                     .filter(|t| ground.terrain[*t] != 1 && !exit(*t) && at(*t).next().is_none())
                     .collect();
-                let roads =
-                    (tiles::around(c.tile).iter()).filter(|t| at(**t).any(|i| i.kind.is_road()));
+                let roads = (tiles::around(c.tile).iter())
+                    .filter(|t| at(**t).any(|i| i.kind == Kind::Road));
                 assert!(
                     bare.is_empty() && roads.count() >= 1,
                     "{bare:?} bare beside {c:?}"

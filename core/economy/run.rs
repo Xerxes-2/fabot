@@ -9,9 +9,9 @@ use crate::state::State;
 use crate::tick::{self, Context};
 use crate::tiles::{self, TileSet};
 use crate::vocabulary::{Part, Resource};
-use crate::world::{Creep, Id, Pos, RoomName};
+use crate::world::{Creep, Id, Kind, Pos, RoomName};
 
-use super::bodies;
+use super::bodies::{self, Pattern};
 use super::derived::{self, Body, Derived, Ground, LinkFact, RefillFact};
 use super::jobs::Jobs;
 use super::slots::{self, Job, Slot, distance};
@@ -25,7 +25,7 @@ type Assignments = BTreeMap<String, String>;
 /// shares a held one rather than idle.
 fn scouting(atlas: &Atlas, derived: &Derived, held: &Assignments) -> Assignments {
     let mut scouts: Vec<&Body> = (derived.bodies.iter())
-        .filter(|b| b.pattern.is_scout())
+        .filter(|b| b.pattern == Pattern::Scout)
         .collect();
     scouts.sort_by(|a, b| a.name.cmp(&b.name));
     let kept = |b: &Body| match (held.get(&b.name))
@@ -73,7 +73,7 @@ fn ring_members<'a>(derived: &'a Derived, task: &Task, at: &Pos) -> Vec<&'a Refi
     };
     let g = (derived.grounds.iter()).find(|g| g.room == *room);
     let mut members: Vec<&RefillFact> = (g.iter().flat_map(|g| &g.refills))
-        .filter(|f| !f.kind.is_tower() && f.free > 0)
+        .filter(|f| f.kind != Kind::Tower && f.free > 0)
         .collect();
     members.sort_by_key(|f| (at.range(&f.pos).unwrap_or(i32::MAX), &f.id));
     members
@@ -167,7 +167,7 @@ fn pickups(derived: &Derived, taken: &BTreeSet<String>) -> Vec<Intent> {
 
     for b in &derived.bodies {
         if b.free > 0
-            && !b.pattern.is_harvester()
+            && b.pattern != Pattern::Harvester
             && !taken.contains(&b.name)
             && b.store.held.iter().all(|(r, _)| r.is_energy())
         {
@@ -575,7 +575,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
     // A scout walks where `scouting` sends it, with a slot to count it or
     // without, as where no colony casts one.
     let strays: BTreeMap<&str, Slot> = (derived.bodies.iter())
-        .filter(|b| b.pattern.is_scout() && !assigned.contains_key(&b.name))
+        .filter(|b| b.pattern == Pattern::Scout && !assigned.contains_key(&b.name))
         .filter_map(|b| {
             let Task::Scout(room) = task::of_task_id(scouted.get(&b.name)?)? else {
                 return None;
@@ -769,7 +769,7 @@ fn raising(derived: &Derived, body: &Body, slot: &Slot) -> Option<CreepAct> {
             if let Some(site) = slots::raised_by(g, body) {
                 return Some(CreepAct::Build(site.id));
             }
-            (g.repairs.iter()).find(|r| r.pos == *at && r.kind.is_container())
+            (g.repairs.iter()).find(|r| r.pos == *at && r.kind == Kind::Container)
         }
         Job::Upgrade => {
             (g.repairs.iter()).find(|r| g.buffer.as_ref().is_some_and(|b| b.id == r.id.into()))

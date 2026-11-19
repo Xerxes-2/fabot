@@ -1,7 +1,7 @@
 //! Built from the room alone, so a plan drawn on it moves only when the
 //! ground does.
 use crate::tiles::{self, Tile};
-use crate::world::{Room, RoomName, terrain};
+use crate::world::{Kind, Room, RoomName, terrain};
 
 use super::place::{SWAMP, WALL};
 
@@ -25,7 +25,7 @@ pub fn obstacles(room: &Room) -> Vec<Tile> {
         .filter(|s| !s.owner.is_ours() && !s.walkable)
         .map(|s| (s, tiles::of_pos(&s.pos)))
         // A wall has no owner: off the border, where the server alone builds, it is our ring's.
-        .filter_map(|(s, t)| (!s.kind.is_wall() || tiles::on_edge(t)).then_some(t))
+        .filter_map(|(s, t)| (s.kind != Kind::Wall || tiles::on_edge(t)).then_some(t))
         .collect();
     found.sort_unstable();
     found

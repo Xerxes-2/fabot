@@ -15,7 +15,7 @@ pub const SITES_IN_FLIGHT: i32 = 5;
 /// A site of any other kind under a creep is placed but not built while the
 /// creep stays.
 fn standable(kind: &Kind) -> bool {
-    kind.is_road() || kind.is_container() || kind.is_rampart()
+    matches!(kind, Kind::Road | Kind::Container | Kind::Rampart)
 }
 
 fn kinds() -> i32 {
@@ -82,9 +82,9 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
     for s in &room.structures {
         let t = tiles::of_pos(&s.pos);
 
-        if s.kind.is_road() {
+        if s.kind == Kind::Road {
             road[t] = 1;
-        } else if s.kind.is_rampart() {
+        } else if s.kind == Kind::Rampart {
             rampart[t] = 1;
         } else {
             solid[t] = 1;
@@ -210,7 +210,7 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
         rocked,
         posts,
         buffer: buffer
-            .filter(|(_, b)| b.kind.is_container())
+            .filter(|(_, b)| b.kind == Kind::Container)
             .map(|(c, b)| (c, tiles::of_pos(&b.pos))),
         seat,
         held,
@@ -262,7 +262,7 @@ pub fn may_place(rules: &Rules, census: &Census, level: i32) -> bool {
 }
 
 pub fn posted(plan: &Plan, t: Tile) -> bool {
-    (plan.items.iter()).any(|i| i.kind.is_container() && i.tile == t)
+    (plan.items.iter()).any(|i| i.kind == Kind::Container && i.tile == t)
 }
 
 /// Each rock and our container beside it off the plan's post: seated before
@@ -276,7 +276,7 @@ pub fn astray(plan: &Plan, census: &Census) -> Vec<(Tile, Tile)> {
 }
 
 pub fn placeable(item: &Item, level: i32) -> bool {
-    item.level <= level && (!item.kind.is_lab() || engine::topped_out(level))
+    item.level <= level && (item.kind != Kind::Lab || engine::topped_out(level))
 }
 
 /// The engine stacks a road only with a rampart, any other kind only with a
@@ -307,7 +307,7 @@ pub fn place(
         if !i.kind.walkable() {
             solid[i.tile] = 1;
         }
-        if !i.kind.is_road() && !i.kind.is_rampart() && placeable(i, level) {
+        if i.kind != Kind::Road && i.kind != Kind::Rampart && placeable(i, level) {
             under[i.tile] = 1;
         }
     }
@@ -320,16 +320,16 @@ pub fn place(
     // tile is the miner's way in.
     // A claim's first spawn may stand in a harvest bay, where a pioneer digs:
     // its site waits under the creep and is built once it steps off.
-    let founding = |kind: &Kind| kind.is_spawn() && held_of(census, &Kind::Spawn) == 0;
+    let founding = |kind: &Kind| *kind == Kind::Spawn && held_of(census, &Kind::Spawn) == 0;
     let tile_of = |item: &Item| -> Option<Tile> {
         let post = census
             .posts
             .iter()
-            .find(|(rock, _)| item.kind.is_link() && tiles::range(item.tile, *rock) <= 2);
+            .find(|(rock, _)| item.kind == Kind::Link && tiles::range(item.tile, *rock) <= 2);
 
         match post {
             Some((_, None)) => None,
-            None if item.kind.is_link()
+            None if item.kind == Kind::Link
                 && census.seat[item.tile] > 0
                 && census.buffer.is_some_and(|(_, b)| !posted(plan, b)) =>
             {
@@ -357,7 +357,9 @@ pub fn place(
             {
                 let head = (beside.iter().copied())
                     .filter(|t| {
-                        plan.items.iter().all(|i| i.tile != *t || i.kind.is_road())
+                        plan.items
+                            .iter()
+                            .all(|i| i.tile != *t || i.kind == Kind::Road)
                             && !closes(census, *post, *t)
                     })
                     .min_by_key(|t| {
@@ -393,7 +395,7 @@ pub fn place(
                         census.pending + placed.len() as i32
                     } < SITES_IN_FLIGHT
                     && census.site[t] == 0
-                    && (if item.kind.is_rampart() {
+                    && (if item.kind == Kind::Rampart {
                         (census.solid[t] > 0 || under[t] == 0) && census.rampart[t] == 0
                     } else {
                         census.solid[t] == 0
@@ -402,8 +404,8 @@ pub fn place(
                         || census.occupied[t] == 0
                         || founding(&item.kind))
                     && !taken.contains(&t)
-                    && (!item.kind.is_container() || census.served[t] == 0 || replaces(t))
-                    && (!item.kind.is_road() || census.road[t] == 0)
+                    && (item.kind != Kind::Container || census.served[t] == 0 || replaces(t))
+                    && (item.kind != Kind::Road || census.road[t] == 0)
                     && held_of(census, &item.kind) + added_of(&added, &item.kind)
                         < rules.allowed(&item.kind.name(), level) =>
             {
@@ -458,7 +460,10 @@ mod tests {
                 .filter(|t| {
                     ground.terrain[*t] != 1
                         && rocks.iter().all(|r| tiles::range(*r, *t) > 1)
-                        && plan.items.iter().all(|i| i.tile != *t || i.kind.is_road())
+                        && plan
+                            .items
+                            .iter()
+                            .all(|i| i.tile != *t || i.kind == Kind::Road)
                 })
                 .collect();
 
@@ -479,7 +484,7 @@ mod tests {
 
             let census = census_of(&room, &[]);
 
-            for i in plan.items.iter().filter(|i| i.kind.is_link()) {
+            for i in plan.items.iter().filter(|i| i.kind == Kind::Link) {
                 let mut one = plan.clone();
                 one.items = vec![i.clone()];
 
@@ -570,17 +575,18 @@ mod tests {
             let paying_after = paying + paid(&mut placed.iter().map(|p| &p.kind));
             let after = room.sites.len() as i32 + placed.len() as i32;
 
-            let solid = |s: &Structure| !s.kind.is_road() && !s.kind.is_rampart();
+            let solid = |s: &Structure| s.kind != Kind::Road && s.kind != Kind::Rampart;
 
             // What a kind may go down over: a rampart only over a standing
             // structure no rampart covers yet; a road shares a rampart, any
             // other kind a road or a rampart.
             let clear = |kind: &Kind, here: &[Structure]| -> bool {
-                if kind.is_rampart() {
-                    here.iter().any(solid) && !here.iter().any(|s| s.kind.is_rampart())
+                if *kind == Kind::Rampart {
+                    here.iter().any(solid) && !here.iter().any(|s| s.kind == Kind::Rampart)
                 } else {
-                    here.iter()
-                        .all(|s| s.kind.is_rampart() || (s.kind.is_road() && !kind.is_road()))
+                    here.iter().all(|s| {
+                        s.kind == Kind::Rampart || (s.kind == Kind::Road && *kind != Kind::Road)
+                    })
                 }
             };
 
@@ -604,7 +610,7 @@ mod tests {
                 placeable(i, case.level)
                     && !room.sites.iter().any(|x| tiles::of_pos(&x.pos) == t)
                     && !tiles_placed.contains(&t)
-                    && !(i.kind.is_container() && counted.served[t] > 0)
+                    && !(i.kind == Kind::Container && counted.served[t] > 0)
                     && clear(&i.kind, &standing(t))
                     && held(&i.kind) + added < rules.allowed(&i.kind.name(), case.level)
             };
@@ -661,7 +667,7 @@ mod tests {
             };
             let level = plan.ring.iter().map(|i| i.level).min().unwrap_or(0);
             let ring: Vec<Tile> = (plan.ring.iter())
-                .filter(|i| i.kind.is_rampart())
+                .filter(|i| i.kind == Kind::Rampart)
                 .map(|i| i.tile)
                 .collect();
             plan.items.append(&mut plan.ring);
@@ -684,7 +690,7 @@ mod tests {
             for t in ring {
                 assert!(
                     (room.structures.iter())
-                        .any(|s| s.kind.is_rampart() && tiles::of_pos(&s.pos) == t),
+                        .any(|s| s.kind == Kind::Rampart && tiles::of_pos(&s.pos) == t),
                     "{t} open"
                 );
             }
@@ -698,7 +704,7 @@ mod tests {
             let Some((_, mut plan)) = fx::plan_of(&colony) else {
                 continue;
             };
-            plan.items.retain(|i| i.kind.is_lab());
+            plan.items.retain(|i| i.kind == Kind::Lab);
             for level in 6..=engine::CONTROLLER_MAX_LEVEL {
                 let placed = place(
                     &rules,
@@ -725,7 +731,7 @@ mod tests {
             };
             for rock in &ground.sources {
                 let Some(post) = (plan.items.iter())
-                    .find(|i| i.kind.is_container() && tiles::range(i.tile, *rock) == 1)
+                    .find(|i| i.kind == Kind::Container && tiles::range(i.tile, *rock) == 1)
                 else {
                     continue;
                 };

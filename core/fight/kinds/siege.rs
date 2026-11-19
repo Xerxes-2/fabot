@@ -90,7 +90,8 @@ pub fn next_razed<'a>(room: &'a Room, walk: impl Fn(&Structure) -> i32) -> Optio
     let theirs = || structures.iter().filter(|s| s.owner.is_theirs());
     let charged: Vec<&Pos> = theirs()
         .filter(|t| {
-            t.kind.is_tower() && t.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST
+            t.kind == Kind::Tower
+                && t.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST
         })
         .map(|t| &t.pos)
         .collect();
@@ -212,7 +213,7 @@ pub fn replanned(time: i32, held: bool, e: &Engagement) -> Engagement {
 pub fn barrier_at<'a>(room: &'a Room) -> BTreeMap<Id, &'a Structure> {
     room.structures
         .iter()
-        .filter(|s| !s.owner.is_ours() && (s.kind.is_rampart() || s.kind.is_wall()))
+        .filter(|s| !s.owner.is_ours() && matches!(s.kind, Kind::Rampart | Kind::Wall))
         .map(|s| (s.id, s))
         .collect()
 }

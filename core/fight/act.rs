@@ -14,7 +14,7 @@ use crate::tactics::{self, Tactic};
 use crate::tick;
 use crate::tiles::Tile;
 use crate::vocabulary::Part;
-use crate::world::{self, Creep, Id, Owner, Pos, RoomName, Structure};
+use crate::world::{self, Creep, Id, Kind, Owner, Pos, RoomName, Structure};
 use crate::{engine, tiles};
 
 pub(super) fn act(
@@ -54,7 +54,7 @@ pub(super) fn act(
                 let ours = r
                     .structures
                     .iter()
-                    .filter(|s| s.kind.is_rampart() && s.owner.is_ours());
+                    .filter(|s| s.kind == Kind::Rampart && s.owner.is_ours());
                 (r.name, ours.map(|s| s.pos).collect())
             })
             .collect(),
@@ -442,7 +442,7 @@ fn homes_of(scene: &Scene, decided: &[Engagement]) -> Vec<Home> {
 
             homes_lost.push(Home {
                 controller: controller.clone(),
-                towered: own.iter().any(|s| s.kind.is_tower()),
+                towered: own.iter().any(|s| s.kind == Kind::Tower),
                 raid: room
                     .hostiles()
                     .filter(|h| raid.contains(&h.id))

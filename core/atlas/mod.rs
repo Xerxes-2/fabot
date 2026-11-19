@@ -409,7 +409,7 @@ impl Atlas {
         let c = room.controller.as_ref()?;
         (room.structures.iter())
             .filter(|s| {
-                s.kind.is_link()
+                s.kind == Kind::Link
                     && s.owner.is_ours()
                     && c.pos.within(engine::UPGRADE_RANGE, &s.pos)
                     && !Atlas::is_source_link(room, &s.pos)
@@ -421,7 +421,7 @@ impl Atlas {
         Atlas::controller_link(room).or_else(|| {
             room.structures
                 .iter()
-                .find(|s| s.kind.is_container() && Atlas::is_buffer(room, &s.pos))
+                .find(|s| s.kind == Kind::Container && Atlas::is_buffer(room, &s.pos))
         })
     }
 
@@ -442,10 +442,10 @@ impl Atlas {
     pub fn post_of(room: &Room, source: &Pos) -> Option<(Pos, Option<Id>)> {
         let from_controller = |p: &Pos| Atlas::from_controller(room, p);
         let built = (room.structures.iter())
-            .filter(|s| s.kind.is_container())
+            .filter(|s| s.kind == Kind::Container)
             .map(|s| (s.pos, Some(s.id)));
         let sites = (room.sites.iter())
-            .filter(|s| s.kind.is_container() && s.owner.is_ours())
+            .filter(|s| s.kind == Kind::Container && s.owner.is_ours())
             .map(|s| (s.pos, None));
         (built.chain(sites))
             .filter(|(p, _)| p.within(1, source) && p != source)
@@ -481,7 +481,7 @@ impl Atlas {
             .map(tiles::of_pos)
             .collect();
         if let Some(b) = Atlas::buffer(room)
-            && b.kind.is_container()
+            && b.kind == Kind::Container
         {
             seats.push(tiles::of_pos(&b.pos));
         }
@@ -503,7 +503,10 @@ impl Atlas {
     /// Each lair and the resource its keeper guards, for intel to place
     /// the keepers of a room out of sight.
     pub fn posts(room: &Room) -> Vec<Post> {
-        let lairs = room.structures.iter().filter(|s| s.kind.is_keeper_lair());
+        let lairs = room
+            .structures
+            .iter()
+            .filter(|s| s.kind == Kind::KeeperLair);
         let post = |t: Tile| (t, Atlas::guarded(room, t).unwrap_or(t));
         lairs.map(|l| post(tiles::of_pos(&l.pos))).collect()
     }
@@ -565,7 +568,11 @@ impl Atlas {
                 striker(tiles::of_pos(&c.pos), f)
             })
             .collect();
-        for lair in room.structures.iter().filter(|s| s.kind.is_keeper_lair()) {
+        for lair in room
+            .structures
+            .iter()
+            .filter(|s| s.kind == Kind::KeeperLair)
+        {
             if lair.spawn.is_some_and(|t| t <= Atlas::crossing_ticks()) {
                 let f = fighter::cast(&engine::keeper_body());
                 strikers.push(striker(tiles::of_pos(&lair.pos), f));

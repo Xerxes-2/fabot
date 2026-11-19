@@ -508,7 +508,7 @@ fn links_of(
     storage: Option<&Structure>,
 ) -> Vec<LinkFact> {
     let role_of = |s: &Structure| {
-        if !s.kind.is_link() || !s.owner.is_ours() {
+        if s.kind != Kind::Link || !s.owner.is_ours() {
             None
         } else if Atlas::is_source_link(room, &s.pos) {
             Some(LinkRole::Source)
@@ -539,7 +539,7 @@ fn minerals_of(room: &Room) -> Vec<MineralFact> {
     (room.minerals.iter())
         .filter_map(|m| {
             let extractor = (room.structures.iter())
-                .find(|s| s.kind.is_extractor() && s.owner.is_ours() && s.pos == m.pos)?;
+                .find(|s| s.kind == Kind::Extractor && s.owner.is_ours() && s.pos == m.pos)?;
             let post = Atlas::post_of(room, &m.pos);
             let container = post.as_ref().and_then(|(_, id)| *id);
             let held = container
@@ -574,17 +574,17 @@ fn stores_of(
     for s in &room.structures {
         match s.kind {
             Kind::Container | Kind::Storage | Kind::Terminal
-                if !s.kind.is_terminal() || s.owner.is_ours() =>
+                if s.kind != Kind::Terminal || s.owner.is_ours() =>
             {
                 let energy = s.store.amount_of(&Resource::Energy);
-                let owned = s.kind.is_storage() && s.owner.is_ours();
-                let dug = if s.kind.is_container() {
+                let owned = s.kind == Kind::Storage && s.owner.is_ours();
+                let dug = if s.kind == Kind::Container {
                     served_dug(&s.pos)
                 } else {
                     0
                 };
 
-                let kind = if s.kind.is_storage() || s.kind.is_terminal() {
+                let kind = if matches!(s.kind, Kind::Storage | Kind::Terminal) {
                     StoreKind::Storage
                 } else if buffered && is_buffer(s.id) {
                     StoreKind::Buffer
@@ -629,7 +629,7 @@ fn stores_of(
 fn labs_of(room: &Room) -> Vec<LabFact> {
     room.structures
         .iter()
-        .filter(|s| s.kind.is_lab() && s.owner.is_ours())
+        .filter(|s| s.kind == Kind::Lab && s.owner.is_ours())
         .map(|s| LabFact {
             id: s.id,
             pos: s.pos,
@@ -647,7 +647,7 @@ fn labs_of(room: &Room) -> Vec<LabFact> {
 fn ores_of(room: &Room) -> Vec<(Id, Pos, Resource, i32)> {
     room.structures
         .iter()
-        .filter(|s| (s.kind.is_storage() || s.kind.is_terminal()) && s.owner.is_ours())
+        .filter(|s| matches!(s.kind, Kind::Storage | Kind::Terminal) && s.owner.is_ours())
         .flat_map(|s| {
             s.store
                 .held
@@ -685,7 +685,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
     let storage = room
         .structures
         .iter()
-        .find(|s| s.kind.is_storage() && s.owner.is_ours());
+        .find(|s| s.kind == Kind::Storage && s.owner.is_ours());
 
     let links = links_of(room, &is_buffer, storage);
 
@@ -816,7 +816,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
         buffer_tile: built.map(|b| b.pos).or_else(|| {
             room.sites
                 .iter()
-                .find(|s| s.kind.is_container() && Atlas::is_buffer(room, &s.pos))
+                .find(|s| s.kind == Kind::Container && Atlas::is_buffer(room, &s.pos))
                 .map(|s| s.pos)
         }),
         feed: feed.or_else(|| buffer.clone()),
@@ -829,7 +829,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
         terminal: room
             .structures
             .iter()
-            .find(|s| s.kind.is_terminal() && s.owner.is_ours())
+            .find(|s| s.kind == Kind::Terminal && s.owner.is_ours())
             .map(|s| TerminalFact {
                 id: s.id,
                 pos: s.pos,
@@ -1233,7 +1233,7 @@ pub fn of_world<'t>(
     for g in &mut grounds {
         let kept = |r: &RefillFact| {
             (bodies.iter()).any(|b| {
-                b.pattern.is_harvester() && b.store.capacity > 0 && b.pos.within(1, &r.pos)
+                b.pattern == Pattern::Harvester && b.store.capacity > 0 && b.pos.within(1, &r.pos)
             })
         };
         g.refills.extend(g.bays.extract_if(.., |r| !kept(r)));

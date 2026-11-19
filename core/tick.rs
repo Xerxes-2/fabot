@@ -360,7 +360,7 @@ fn danger(world: &World, owned: &BTreeSet<RoomName>) -> Vec<(RoomName, TileSet)>
             .map(|c| (tiles::of_pos(&c.pos), hostiles::reach(c)));
         let towers = (r.structures.iter())
             .filter(|s| {
-                s.kind.is_tower()
+                s.kind == Kind::Tower
                     && s.owner.is_theirs()
                     && !s.owner.is_ally()
                     && s.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST
@@ -438,7 +438,7 @@ fn open(world: &World, sightings: &Sightings, owned: &BTreeSet<RoomName>, room: 
     let core = seen
         .structures
         .iter()
-        .any(|s| s.kind.is_invader_core() && s.level > 0);
+        .any(|s| s.kind == Kind::InvaderCore && s.level > 0);
     let foes: Vec<Creep> = seen.hostiles().cloned().collect();
     let work: Vec<&Pos> = seen
         .sources
@@ -447,7 +447,7 @@ fn open(world: &World, sightings: &Sightings, owned: &BTreeSet<RoomName>, room: 
         .chain(
             seen.structures
                 .iter()
-                .filter(|s| s.kind.is_container())
+                .filter(|s| s.kind == Kind::Container)
                 .map(|s| &s.pos),
         )
         .collect();
@@ -516,12 +516,12 @@ fn drawn(r: &Room, spawn: &Pos) -> Vec<Id> {
     let bay = |s: &&Structure| in_bay(&s.kind, &s.pos);
     let ours = (r.structures.iter()).filter(|s| s.owner.is_ours());
     let mut energy: Vec<&Structure> = ours
-        .filter(|s| s.kind.is_spawn() || s.kind == Kind::Extension)
+        .filter(|s| matches!(s.kind, Kind::Spawn | Kind::Extension))
         .collect();
     if !energy.iter().any(bay) {
         return Vec::new();
     }
-    energy.sort_by_key(|s| (!bay(s), !s.kind.is_spawn(), spawn.range(&s.pos)));
+    energy.sort_by_key(|s| (!bay(s), s.kind != Kind::Spawn, spawn.range(&s.pos)));
     energy.into_iter().map(|s| s.id).collect()
 }
 

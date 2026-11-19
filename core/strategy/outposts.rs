@@ -6,7 +6,7 @@ use crate::fight::shape::{Engagement, Objective};
 use crate::tick::{ColonyPlan, Declarations, Derived, Outpost, REACH_HOPS};
 use crate::tiles;
 use crate::vocabulary::Part;
-use crate::world::{RoomName, World};
+use crate::world::{Kind, RoomName, World};
 
 /// What one intent costs the engine; a body acts about once a tick.
 const INTENT_CPU: f64 = 0.2;
@@ -103,7 +103,7 @@ pub fn chosen(
     // A young home opens every room that pays at once, as The International does.
     let stocked = |home: RoomName| {
         world.room(home).is_some_and(|r| {
-            (r.structures.iter()).any(|s| s.kind.is_storage() && s.owner.is_ours())
+            (r.structures.iter()).any(|s| s.kind == Kind::Storage && s.owner.is_ours())
         })
     };
     // Before a storage the spawns' other half is the spend's.
@@ -181,7 +181,7 @@ pub fn survey(
         };
         // `ARCHITECTURE.md` §7.2.
         let level = room.controller.as_ref().map_or(0, |c| c.level);
-        let banks = (room.structures.iter()).any(|s| s.kind.is_storage() && s.owner.is_ours())
+        let banks = (room.structures.iter()).any(|s| s.kind == Kind::Storage && s.owner.is_ours())
             || plans.iter().any(|p| p.room == *home && p.pile.is_some());
         let picks = banks && level >= 2;
         let walk = |hops: i32, outpost: &Outpost| {

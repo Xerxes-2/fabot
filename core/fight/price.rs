@@ -11,7 +11,7 @@ use crate::grid::{self, Footprint};
 use crate::tactics::{self, Offer, Tactic};
 use crate::tick::{self, Declarations};
 use crate::tiles::Tile;
-use crate::world::{self, Creep, Id, Pos, Room, RoomName, Structure};
+use crate::world::{self, Creep, Id, Kind, Pos, Room, RoomName, Structure};
 use crate::{engine, tiles};
 
 /// `Casting.price`'s say in how many copies of a block to ask for.
@@ -107,7 +107,7 @@ impl<'a> Scene<'a> {
                 .filter(|b| tiles::of_pos(&b.pos) == tile)
                 .collect();
 
-            at.sort_by_key(|b| (!b.kind.is_rampart(), b.id));
+            at.sort_by_key(|b| (b.kind != Kind::Rampart, b.id));
             at.into_iter().map(|b| b.id).collect()
         };
 
@@ -710,7 +710,7 @@ impl<'a> Scene<'a> {
             && room
                 .structures
                 .iter()
-                .any(|s| s.kind.is_rampart() && s.owner.is_ours())
+                .any(|s| s.kind == Kind::Rampart && s.owner.is_ours())
         {
             Stance::Hold
         } else {

@@ -12,7 +12,7 @@ use super::layout::{RING_LEVEL, Standing};
 use super::tick::{ColonyPlan, Context, Declarations, Derived, Outpost, Stage};
 use super::tiles;
 use super::vocabulary::{Part, ResourceType, multiple};
-use super::world::{RoomName, Rules, World, sightings};
+use super::world::{Kind, RoomName, Rules, World, sightings};
 use expand::Expansions;
 use intel::Intel;
 use screeps::LocalRoomTerrain;
@@ -138,7 +138,8 @@ pub fn plan<'t>(
             );
             let (rampart_hits, outheals) =
                 wall(&world.rules, threat.unwrap_or(level), level, threatened);
-            let stored = (room.structures.iter()).any(|s| s.kind.is_storage() && s.owner.is_ours());
+            let stored =
+                (room.structures.iter()).any(|s| s.kind == Kind::Storage && s.owner.is_ours());
             let plan = layout.get(&room.name).and_then(|s| s.plan.as_ref());
             let pile = (level >= 2 && !stored).then(|| plan?.pile()).flatten();
             let muster = plan.and_then(|p| p.muster);

@@ -9,6 +9,7 @@ use crate::engine;
 use crate::vocabulary::Resource;
 use crate::world::{Id, Kind, Pos};
 
+use super::bodies::Pattern;
 use super::derived::{Body, Derived, Ground, RAMPART_SAFE, StoreKind};
 use super::slots::{self, Job, Slot};
 use super::task::{Target, Task};
@@ -105,7 +106,7 @@ fn inflow(g: &Ground) -> i32 {
 fn drink(derived: &Derived, g: &Ground) -> i32 {
     let level = g.controller.as_ref().map_or(0, |c| c.level);
     (derived.bodies.iter())
-        .filter(|b| b.pos.room == g.room && b.pattern.is_upgrader())
+        .filter(|b| b.pos.room == g.room && b.pattern == Pattern::Upgrader)
         .map(|b| b.work * engine::UPGRADE_DRAIN_PER_WORK)
         .sum::<i32>()
         .min(super::bodies::upgradable_at(level))
@@ -148,7 +149,7 @@ fn sinks_of(derived: &Derived, ci: usize) -> Vec<Spot> {
     };
     // The spawn and its extensions are one sink, so a carrier walks the ring
     // and never re-chooses within it.
-    let (towers, ring): (Vec<_>, Vec<_>) = g.refills.iter().partition(|r| r.kind.is_tower());
+    let (towers, ring): (Vec<_>, Vec<_>) = g.refills.iter().partition(|r| r.kind == Kind::Tower);
     if let Some(spawn) = derived.colonies.get(ci).and_then(|c| c.spawns.first()) {
         let open: Vec<_> = ring.iter().filter(|r| r.free > 0).collect();
         let of = Of::Ring {

@@ -537,49 +537,6 @@ impl Kind {
             Kind::Road | Kind::Container | Kind::Rampart | Kind::Portal
         )
     }
-
-    pub fn is_spawn(&self) -> bool {
-        *self == Kind::Spawn
-    }
-    pub fn is_tower(&self) -> bool {
-        *self == Kind::Tower
-    }
-    pub fn is_road(&self) -> bool {
-        *self == Kind::Road
-    }
-    pub fn is_container(&self) -> bool {
-        *self == Kind::Container
-    }
-    pub fn is_storage(&self) -> bool {
-        *self == Kind::Storage
-    }
-    pub fn is_link(&self) -> bool {
-        *self == Kind::Link
-    }
-    pub fn is_rampart(&self) -> bool {
-        *self == Kind::Rampart
-    }
-    pub fn is_wall(&self) -> bool {
-        *self == Kind::Wall
-    }
-    pub fn is_extractor(&self) -> bool {
-        *self == Kind::Extractor
-    }
-    pub fn is_terminal(&self) -> bool {
-        *self == Kind::Terminal
-    }
-    pub fn is_observer(&self) -> bool {
-        *self == Kind::Observer
-    }
-    pub fn is_lab(&self) -> bool {
-        *self == Kind::Lab
-    }
-    pub fn is_keeper_lair(&self) -> bool {
-        *self == Kind::KeeperLair
-    }
-    pub fn is_invader_core(&self) -> bool {
-        *self == Kind::InvaderCore
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -964,8 +921,10 @@ pub mod read {
                 Store::empty()
             };
             let cooldown = if kind.has_cooldown() { self.n() } else { 0 };
-            let spawn = kind.is_keeper_lair().then(|| self.n()).filter(|t| *t >= 0);
-            let (collapse, level) = if kind.is_invader_core() {
+            let spawn = (kind == Kind::KeeperLair)
+                .then(|| self.n())
+                .filter(|t| *t >= 0);
+            let (collapse, level) = if kind == Kind::InvaderCore {
                 let running = self.flag();
                 let ticks = self.n();
                 let collapse = if running {
@@ -977,7 +936,7 @@ pub mod read {
             } else {
                 (0, 0)
             };
-            let walkable = if kind.is_rampart() {
+            let walkable = if kind == Kind::Rampart {
                 let public = self.flag();
                 owner.is_ours() || public
             } else {
@@ -1276,7 +1235,7 @@ pub struct Seen {
 pub type Sightings = BTreeMap<RoomName, BTreeMap<Id, Seen>>;
 
 pub mod sightings {
-    use super::{Creep, Id, RoomName, Seen, Sightings, World, hostiles};
+    use super::{Creep, Id, Kind, RoomName, Seen, Sightings, World, hostiles};
     use std::collections::BTreeMap;
 
     pub fn step(world: &World, previous: Sightings) -> Sightings {
@@ -1305,7 +1264,7 @@ pub mod sightings {
             }
 
             for s in &room.structures {
-                if s.kind.is_invader_core() {
+                if s.kind == Kind::InvaderCore {
                     seen.insert(
                         s.id,
                         Seen {

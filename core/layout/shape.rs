@@ -32,7 +32,8 @@ impl Plan {
     /// None where a structure takes it, as the controller's container can: a
     /// drop there fills the container and spills beside it unread.
     pub fn pile(&self) -> Option<Pos> {
-        let built = |i: &Item| i.tile == self.anchor && !i.kind.is_road() && !i.kind.is_rampart();
+        let built =
+            |i: &Item| i.tile == self.anchor && i.kind != Kind::Road && i.kind != Kind::Rampart;
         (!self.items.iter().any(built)).then(|| tiles::to_pos(self.room, self.anchor))
     }
 }
@@ -61,10 +62,10 @@ pub fn muster(
     let mut barred = [false; tiles::COUNT];
     for i in planned {
         taken[i.tile] = true;
-        if i.kind.is_road() {
+        if i.kind == Kind::Road {
             barred[i.tile] = true;
         }
-        if i.kind.is_spawn() {
+        if i.kind == Kind::Spawn {
             for n in tiles::within(1, i.tile) {
                 barred[n] = true;
             }

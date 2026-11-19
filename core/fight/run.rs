@@ -12,7 +12,7 @@ use crate::intents::{Ask, Intent, Rank};
 use crate::state::State;
 use crate::tactics::{self, Tactic};
 use crate::tick::{self, Context, Module};
-use crate::world::{Creep, Id, Pos, RoomName, hostiles};
+use crate::world::{Creep, Id, Kind, Pos, RoomName, hostiles};
 
 /// A merge keeps the older group's id; two engagements on one group are one,
 /// the older surviving with both's bodies, losses and budget. Also each
@@ -88,7 +88,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
         let razed = r
             .structures
             .iter()
-            .filter(|s| s.kind.is_invader_core() && s.level == 0);
+            .filter(|s| s.kind == Kind::InvaderCore && s.level == 0);
         all.extend(razed.map(casting::core_as_hostile));
         cores.extend(all[seen..].iter().map(|c| c.id));
         foes.insert(r.name, all);

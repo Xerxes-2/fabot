@@ -4,7 +4,7 @@ use crate::engine;
 use crate::tick::{ColonyPlan, Stage};
 use crate::tiles::{self, Tile, TileSet};
 use crate::vocabulary::Resource;
-use crate::world::{Creep, Id, Pos, RoomName, Structure, World};
+use crate::world::{Creep, Id, Kind, Pos, RoomName, Structure, World};
 
 use super::ground;
 use super::plan;
@@ -87,7 +87,7 @@ pub fn colonies(
             .structures
             .iter()
             .filter(|s| {
-                s.kind.is_tower()
+                s.kind == Kind::Tower
                     && s.owner.is_ours()
                     && s.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST
             })
@@ -122,22 +122,22 @@ pub fn colonies(
             struck: room
                 .structures
                 .iter()
-                .filter(|s| s.owner.is_ours() && !s.kind.is_road() && !s.kind.is_container())
+                .filter(|s| s.owner.is_ours() && s.kind != Kind::Road && s.kind != Kind::Container)
                 .map(|s| &s.pos)
                 .chain(ours.iter().map(|c| &c.pos))
                 .copied()
                 .collect(),
             ours,
             ramparts: (room.structures.iter())
-                .filter(|s| s.kind.is_rampart() && s.owner.is_ours())
+                .filter(|s| s.kind == Kind::Rampart && s.owner.is_ours())
                 .cloned()
                 .collect(),
             buried: (room.structures.iter())
-                .filter(|r| r.kind.is_road() && blocked.contains(tiles::of_pos(&r.pos)))
+                .filter(|r| r.kind == Kind::Road && blocked.contains(tiles::of_pos(&r.pos)))
                 .map(|r| r.id)
                 .collect(),
             astray: (room.structures.iter())
-                .filter(|c| c.kind.is_container() && astray.contains(&tiles::of_pos(&c.pos)))
+                .filter(|c| c.kind == Kind::Container && astray.contains(&tiles::of_pos(&c.pos)))
                 .map(|c| c.id)
                 .collect(),
         });

@@ -14,7 +14,7 @@ use crate::tick::{self, TacticRule};
 use crate::tiles::Tile;
 use crate::vocabulary::{Part, ResourceType};
 use crate::world::{
-    Creep, Id, Owner, Pos, Room, RoomName, Sightings, Structure, World, hostiles, sightings,
+    Creep, Id, Kind, Owner, Pos, Room, RoomName, Sightings, Structure, World, hostiles, sightings,
 };
 use crate::{engine, tiles};
 
@@ -81,7 +81,7 @@ impl<'a> Scene<'a> {
     }
 
     pub(super) fn rival(s: &Structure) -> bool {
-        !s.owner.is_ours() && (s.kind.is_rampart() || s.kind.is_wall())
+        !s.owner.is_ours() && matches!(s.kind, Kind::Rampart | Kind::Wall)
     }
 
     pub(super) fn safe(room: &Room) -> bool {
@@ -167,11 +167,11 @@ impl<'a> Scene<'a> {
         let foes: Vec<Fighter> = escort.iter().map(casting::fighter_of).collect();
         let weights = atlas.weights(room.name);
         let shields: BTreeSet<Tile> = (room.structures.iter())
-            .filter(|s| s.kind.is_rampart() && !s.owner.is_ours())
+            .filter(|s| s.kind == Kind::Rampart && !s.owner.is_ours())
             .map(|s| tiles::of_pos(&s.pos))
             .collect();
         let solid: BTreeSet<Tile> = (room.structures.iter())
-            .filter(|s| !s.walkable && !s.kind.is_rampart())
+            .filter(|s| !s.walkable && s.kind != Kind::Rampart)
             .map(|s| tiles::of_pos(&s.pos))
             .collect();
         // A shot on a body under its owner's rampart lands on the rampart.
@@ -234,14 +234,14 @@ impl<'a> Scene<'a> {
         marks.extend(
             room.structures
                 .iter()
-                .filter(|s| s.kind.is_container() || s.kind.is_link() && !s.owner.is_ours())
+                .filter(|s| s.kind == Kind::Container || s.kind == Kind::Link && !s.owner.is_ours())
                 .filter(|s| siege::beside(&reached, &s.pos))
                 .map(|s| tactics::Mark {
                     id: s.id,
                     pos: s.pos,
                     worth: s.hits,
                     hits: s.hits,
-                    massed: !s.kind.is_container(),
+                    massed: s.kind != Kind::Container,
                     shielded: shields.contains(&tiles::of_pos(&s.pos)),
                     fleeting: false,
                     next: vec![shot(tiles::of_pos(&s.pos))],
@@ -263,7 +263,7 @@ impl<'a> Scene<'a> {
     pub(super) fn towers_in(&self, room: &'a Room<'a>) -> Vec<&'a Structure> {
         room.structures
             .iter()
-            .filter(|s| s.kind.is_tower() && !s.owner.is_ours())
+            .filter(|s| s.kind == Kind::Tower && !s.owner.is_ours())
             .collect()
     }
 

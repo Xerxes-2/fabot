@@ -188,7 +188,7 @@ fn razed(home: &Home) -> bool {
     let covered: BTreeSet<Pos> = home
         .ours
         .iter()
-        .filter(|s| s.kind.is_rampart())
+        .filter(|s| s.kind == Kind::Rampart)
         .map(|s| s.pos)
         .collect();
 

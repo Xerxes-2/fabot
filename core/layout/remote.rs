@@ -43,7 +43,7 @@ fn opened(
     }
 
     let mut tiles_open: TileSet = (room.structures.iter())
-        .filter(|s| !s.kind.is_rampart())
+        .filter(|s| s.kind != Kind::Rampart)
         .map(|s| &s.pos)
         .chain(room.sites.iter().map(|s| &s.pos))
         .map(tiles::of_pos)
@@ -113,7 +113,7 @@ fn sink_for<'t>(
     let sink = |i: usize| {
         let home = rooms.get(&homes[i].room)?;
         (home.structures.iter())
-            .find(|s| s.kind.is_storage() && s.owner.is_ours())
+            .find(|s| s.kind == Kind::Storage && s.owner.is_ours())
             .map(|s| s.pos)
             .or_else(|| bank(home.name))
     };

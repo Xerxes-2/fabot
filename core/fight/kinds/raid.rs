@@ -22,7 +22,7 @@ pub fn raids(e: &Engagement) -> bool {
 
 pub fn charged(room: &Room) -> Vec<Pos> {
     (room.structures.iter())
-        .filter(|s| s.kind.is_tower() && !s.owner.is_ours())
+        .filter(|s| s.kind == Kind::Tower && !s.owner.is_ours())
         .filter(|s| s.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST)
         .map(|s| s.pos)
         .collect()
@@ -45,7 +45,7 @@ pub fn breached(room: &Room, passable: impl Fn(Tile) -> bool, goal: &Pos) -> boo
     let walls: BTreeSet<Tile> = room
         .structures
         .iter()
-        .filter(|s| s.kind.is_rampart() || s.kind.is_wall())
+        .filter(|s| matches!(s.kind, Kind::Rampart | Kind::Wall))
         .map(|s| tiles::of_pos(&s.pos))
         .collect();
     let open = |t: Tile| !walls.contains(&t) && passable(t);
@@ -321,8 +321,8 @@ pub fn volley(sight: &Sight, room: &Room, c: &Creep) -> Option<CreepAct> {
     for s in theirs().filter(|s| siege::razed(&s.kind)) {
         let Some(r) = reach(&s.pos) else { continue };
         let struck = cover(s).unwrap_or(s);
-        let charged =
-            s.kind.is_tower() && s.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST;
+        let charged = s.kind == Kind::Tower
+            && s.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST;
 
         marks.push((
             struck.id,

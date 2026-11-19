@@ -163,10 +163,10 @@ impl Reader<'_> {
             cooldown: if kind.has_cooldown() { cooldown } else { 0 },
             collapse: 0,
             level: 0,
-            spawn: (kind.is_keeper_lair())
+            spawn: (kind == Kind::KeeperLair)
                 .then(|| num(o, atom!("nextSpawnTime")) as i32 - self.time)
                 .filter(|t| *t >= 0),
-            walkable: if kind.is_rampart() {
+            walkable: if kind == Kind::Rampart {
                 owner.is_ours() || public
             } else {
                 kind.walkable()

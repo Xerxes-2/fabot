@@ -8,7 +8,7 @@ use super::intents::{Intent, LabAct};
 use super::mv;
 use super::tick::{Context, target_at};
 use super::vocabulary::{self, Compound, Resource, ResourceType};
-use super::world::{self, Id, Pos, RoomName, World};
+use super::world::{self, Id, Kind, Pos, RoomName, World};
 
 /// A cast name's last token names the compound its body walks to a lab for.
 pub fn of_name(name: &str) -> Option<Compound> {
@@ -66,7 +66,7 @@ pub fn home_holds(world: &World, room: RoomName, compound: Compound) -> (i32, i3
         .filter(|r| r.name == room)
         .flat_map(|r| r.structures.iter())
         .filter(|s| {
-            s.owner.is_ours() && (s.kind.is_lab() || s.kind.is_terminal() || s.kind.is_storage())
+            s.owner.is_ours() && matches!(s.kind, Kind::Lab | Kind::Terminal | Kind::Storage)
         })
         .map(|s| held(&s.store))
         .chain(

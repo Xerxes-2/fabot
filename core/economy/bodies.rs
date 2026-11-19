@@ -12,21 +12,6 @@ pub enum Pattern {
     Scout,
 }
 
-impl Pattern {
-    pub fn is_harvester(self) -> bool {
-        self == Pattern::Harvester
-    }
-    pub fn is_hauler(self) -> bool {
-        self == Pattern::Hauler
-    }
-    pub fn is_upgrader(self) -> bool {
-        self == Pattern::Upgrader
-    }
-    pub fn is_scout(self) -> bool {
-        self == Pattern::Scout
-    }
-}
-
 pub const ALL_PATTERNS: [Pattern; 6] = [
     Pattern::Worker,
     Pattern::Harvester,

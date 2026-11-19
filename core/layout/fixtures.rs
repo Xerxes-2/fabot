@@ -246,7 +246,7 @@ pub fn plan_of(colony: &Colony) -> Option<(Ground, Plan)> {
 }
 
 pub fn walkable(kind: &Kind) -> bool {
-    kind.is_road() || kind.is_container() || kind.is_rampart()
+    matches!(kind, Kind::Road | Kind::Container | Kind::Rampart)
 }
 
 pub fn distinct<T: PartialEq + Copy>(values: &[T]) -> Vec<T> {
@@ -267,7 +267,7 @@ pub fn reached(ground: &Ground, plan: &Plan) -> Vec<bool> {
         blocked[*t] = true;
     }
     for i in &plan.items {
-        blocked[i.tile] = !walkable(&i.kind) || (blocked[i.tile] && !i.kind.is_road());
+        blocked[i.tile] = !walkable(&i.kind) || (blocked[i.tile] && i.kind != Kind::Road);
     }
 
     let mut seen = vec![false; tiles::COUNT];

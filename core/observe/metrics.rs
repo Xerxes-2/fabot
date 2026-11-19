@@ -516,7 +516,7 @@ fn returned(
         };
         if let CreepAct::Transfer(id, Resource::Energy) = act
             && let Some(s) = (world.rooms.iter().flat_map(|r| r.structures.iter()))
-                .find(|s| s.id == *id && (s.kind.is_spawn() || s.kind == Kind::Extension))
+                .find(|s| s.id == *id && matches!(s.kind, Kind::Spawn | Kind::Extension))
             && !refused.contains(&(name, "transfer"))
             && bodies::pattern_of_name(name) == Some(Pattern::Hauler)
         {
@@ -626,7 +626,7 @@ fn cause_of(room: Option<&Room>, by: &Id) -> Cause {
     match room
         .structures
         .iter()
-        .find(|s| s.id == *by && s.kind.is_tower())
+        .find(|s| s.id == *by && s.kind == Kind::Tower)
     {
         Some(s) if npc(&s.owner) => Cause::Npc,
         Some(_) => Cause::Tower,
@@ -760,7 +760,7 @@ fn armed(r: &Room) -> bool {
 
 fn towers(r: &Room) -> bool {
     (r.structures.iter()).any(|s| {
-        s.kind.is_tower()
+        s.kind == Kind::Tower
             && s.owner.is_ours()
             && s.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST
     })
@@ -1036,7 +1036,7 @@ impl Metrics {
                 continue;
             }
             let stored = (r.structures.iter())
-                .filter(|s| s.kind.is_storage() || s.kind.is_terminal() || s.kind.is_container())
+                .filter(|s| matches!(s.kind, Kind::Storage | Kind::Terminal | Kind::Container))
                 .map(|s| s.store.amount_of(&Resource::Energy));
             let carried = (world.creeps.iter())
                 .filter(|c| c.pos.room == r.name)
