@@ -235,6 +235,13 @@ export const measures = {
     const end = Math.max(...lives.map((b) => b.last));
     return new Set(lives.filter((b) => b.ours && b.last < end && b.ttl > 1).map((b) => b.name)).size;
   },
+  // Our bodies gone below full hits, with life left and no strike lately: recycled
+  // wounded, since no other end leaves a body unstruck before its age.
+  recycledWounded: (_, __, dir) => {
+    const lives = livesOf(dir);
+    const end = Math.max(...lives.map((b) => b.last));
+    return lives.filter((b) => b.ours && b.last < end && b.ttl > AGED && b.hits < 100 * b.body.length && !(b.last - b.struckAt <= STRUCK_LATELY)).length;
+  },
   bodiesStruck: (_, __, dir) => livesOf(dir).reduce((n, b) => n + (b.ours ? (b.struck ?? 0) : 0), 0),
   // The damage struck on the body called `name`.
   struckOn: (_, a, dir) => livesOf(dir).reduce((n, b) => n + (b.name === a.name ? (b.struck ?? 0) : 0), 0),

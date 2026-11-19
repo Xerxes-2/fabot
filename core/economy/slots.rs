@@ -1097,7 +1097,7 @@ fn outgrown(derived: &Derived, body: &Body, slot: &Slot) -> bool {
         return matches!(slot.job, Job::Fill)
             && home
             && body.pattern.is_hauler()
-            && 2 * body.carry < part_count_in(&slot.body, Part::Carry);
+            && 2 * body.cast_carry < part_count_in(&slot.body, Part::Carry);
     };
     let rate = (derived.grounds.iter())
         .filter(|g| g.room == slot.room)
@@ -1107,7 +1107,7 @@ fn outgrown(derived: &Derived, body: &Body, slot: &Slot) -> bool {
     let dug = |work: i32| (work * engine::HARVEST_PER_WORK).min(rate);
     body.pattern.is_harvester()
         && home
-        && dug(body.work) < dug(part_count_in(&slot.body, Part::Work))
+        && dug(body.cast_work) < dug(part_count_in(&slot.body, Part::Work))
 }
 
 fn expires(body: &Body, home_walk: i32) -> bool {

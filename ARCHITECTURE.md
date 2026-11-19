@@ -250,7 +250,9 @@ dig, one carrier pool for its own and its outposts' dig, the ring, the
 controller's drink and the ore, a reserver per outpost, workers for its sites
 and repairs, and upgraders on the buffer's seats. Casts are slots less the
 bodies that stand; a body keeps its slot until the slot goes or the body
-dies, so an arriving body never re-matches the others. A carrier past its
+dies, so an arriving body never re-matches the others. An outgrown body is
+weighed by the parts it was cast with, dead ones too: a wound a tower heals
+never retires it. A carrier past its
 slot's one takes an open carrier slot first, and the outposts' carrier
 slots are numbered apart from home's: a shrinking pool never parks an
 outpost's carrier at home while an outpost slot stands empty. While the pool's

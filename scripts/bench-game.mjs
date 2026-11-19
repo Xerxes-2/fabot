@@ -17,7 +17,7 @@ Module._load = function (request, parent, ...rest) {
 
 const VERBS = ["move", "say", "harvest", "transfer", "withdraw", "pickup", "build", "repair", "dismantle", "upgradeController", "reserveController",
   "attackController", "claimController", "signController", "claimReactor", "drop", "attack", "heal", "rangedHeal", "rangedAttack", "rangedMassAttack",
-  "spawnCreep", "transferEnergy", "setPublic", "destroy", "remove", "observeRoom", "runReaction", "send", "activateSafeMode"];
+  "spawnCreep", "recycleCreep", "transferEnergy", "setPublic", "destroy", "remove", "observeRoom", "runReaction", "send", "activateSafeMode"];
 const FREE = new Set(["say"]);
 
 let tick;

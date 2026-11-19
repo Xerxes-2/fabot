@@ -31,6 +31,10 @@ pub struct Body {
     pub claim: i32,
     /// Dead parts counted: the length a successor is spawned at.
     pub size: i32,
+    /// Dead parts counted too: a wound a tower heals never makes a body too
+    /// small for its seat.
+    pub cast_work: i32,
+    pub cast_carry: i32,
     pub store: Store,
     pub energy: i32,
     pub free: i32,
@@ -397,6 +401,8 @@ fn body_of(
         moves,
         claim,
         size: parts.len() as i32,
+        cast_work: parts.iter().filter(|p| p.kind == Part::Work).count() as i32,
+        cast_carry: parts.iter().filter(|p| p.kind == Part::Carry).count() as i32,
         store: store.clone(),
         energy: store.amount_of(&Resource::Energy),
         free: store.free(),

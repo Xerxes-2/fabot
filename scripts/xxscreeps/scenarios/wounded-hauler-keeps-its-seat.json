@@ -1,0 +1,21 @@
+{
+  "why": "home haulers shot below half their CARRY by a raid camped in a home with a tower keep their seats and are healed, never recycled as outgrown",
+  "modules": ["economy"],
+  "start": {
+    "room": "W8N3",
+    "seed": 2,
+    "node": "N3",
+    "ended": true,
+    "opponents": [
+      {
+        "name": "raider",
+        "bot": "scripts/xxscreeps/engine/rival",
+        "room": "W7N3",
+        "config": { "role": "raid", "target": "W8N3" },
+        "raid": { "first": 1500, "bodies": [{ "tough": 4, "move": 10, "ranged_attack": 8, "heal": 6, "boosts": { "tough": "XGHO2", "ranged_attack": "XKHO2", "heal": "XLHO2" } }, { "tough": 4, "move": 10, "ranged_attack": 8, "heal": 6, "boosts": { "tough": "XGHO2", "ranged_attack": "XKHO2", "heal": "XLHO2" } }] }
+      }
+    ]
+  },
+  "ticks": 2500,
+  "assert": [{ "measure": "recycledWounded", "max": 0 }]
+}
