@@ -6,12 +6,12 @@ use super::kinds::{defend, raid, siege, sweep};
 use super::scene::{Asked, Hunting, Scene, fresh};
 use super::shape::{Cast, Engagement, FightState, Group, Objective, Phase};
 use super::{casting, tracker};
-use crate::tactics::{self, Tactic};
 use fabot_atlas::{self as atlas, Atlas, Context};
 use fabot_base::declarations;
 use fabot_base::engine;
 use fabot_base::intents::{Ask, ModuleOutput, Rank};
 use fabot_base::world::{Creep, Id, Kind, Pos, RoomName, hostiles};
+use fabot_tactics::{self as tactics, Tactic};
 
 /// A merge keeps the older group's id; two engagements on one group are one,
 /// the older surviving with both's bodies, losses and budget. Also each

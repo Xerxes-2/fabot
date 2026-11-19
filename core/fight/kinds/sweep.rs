@@ -2,10 +2,10 @@
 use std::collections::BTreeSet;
 
 use super::super::shape::{Engagement, Phase, enter};
-use crate::tactics::Tactic;
 use fabot_base::engine;
 use fabot_base::vocabulary::Part;
 use fabot_base::world::{Creep, Owner, Pos, Room, RoomName, Source};
+use fabot_tactics::Tactic;
 
 pub const CANDIDATES: &[Tactic] = &[Tactic::BlobKite, Tactic::Kite];
 

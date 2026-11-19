@@ -1,6 +1,5 @@
 use std::collections::BTreeSet;
 
-use crate::layout::{ground, plan};
 use crate::season;
 use fabot_atlas::Derived;
 use fabot_base::declarations::{ColonyPlan, Declarations, Outpost, REACH_HOPS, Stage, undeclared};
@@ -9,6 +8,7 @@ use fabot_base::intel::{self, Intel, Row};
 use fabot_base::tiles;
 use fabot_base::vocabulary::Resource;
 use fabot_base::world::{Kind, Room, RoomName, World};
+use fabot_layout::{ground, plan};
 use screeps::LocalRoomTerrain;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

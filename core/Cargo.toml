@@ -13,12 +13,12 @@ path = "lib.rs"
 fabot-base = { path = "base" }
 fabot-atlas = { path = "atlas" }
 fabot-exchange = { path = "exchange" }
+fabot-mv = { path = "mv" }
+fabot-layout = { path = "layout" }
+fabot-tactics = { path = "tactics" }
 screeps-game-api.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-
-[features]
-tools = ["fabot-base/tools"]
 
 [dev-dependencies]
 fabot-base = { path = "base", features = ["test-support"] }

@@ -149,8 +149,8 @@ pub fn colonies(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::fixtures as fx;
-    use crate::layout::shape::Plan;
+    use crate::fixtures as fx;
+    use crate::shape::Plan;
     use fabot_base::tiles;
     use fabot_base::world::{Kind, Owner, hostiles};
 

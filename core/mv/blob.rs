@@ -3,7 +3,7 @@
 use std::cmp::Reverse;
 use std::collections::BTreeSet;
 
-use crate::mv::plan;
+use crate::plan;
 use fabot_atlas::{Atlas, Field, Mover, Target};
 use fabot_base::engine;
 use fabot_base::grid::{self, FatigueFactor, Footprint, factor_of, step_ticks};

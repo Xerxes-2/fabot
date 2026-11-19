@@ -20,6 +20,7 @@ fn covered(footprint: Footprint, anchor: Tile) -> Vec<Tile> {
 
 // A stayer only ever asks back onto its work or its own tile, so movers go
 // first. Names are unique, so the order is total and the input's never shows.
+#[inline]
 fn offered(a: &Wish, b: &Wish) -> std::cmp::Ordering {
     (a.stays().cmp(&b.stays()))
         .then_with(|| b.weight.max(1).cmp(&a.weight.max(1)))

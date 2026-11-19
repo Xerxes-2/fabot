@@ -5,7 +5,6 @@ use super::casting;
 use super::kinds::{defend, raid, siege, sweep};
 use super::scene::{Asked, Hunting, Scene, fresh, middle, picket};
 use super::shape::{Engagement, Group, Objective, Phase, Plan};
-use crate::tactics::{self, Offer, Tactic};
 use fabot_atlas::{self as atlas, Atlas, Mover, Target};
 use fabot_base::declarations::{self, Declarations};
 use fabot_base::grid::{self, Footprint};
@@ -13,6 +12,7 @@ use fabot_base::tiles::Tile;
 use fabot_base::world::{self, Creep, Id, Kind, Pos, Room, RoomName, Structure};
 use fabot_base::{engine, tiles};
 use fabot_exchange::{self as exchange, Fighter, Ground, Losses, Outcome, Side, Stance, fighter};
+use fabot_tactics::{self as tactics, Offer, Tactic};
 
 /// `Casting.price`'s say in how many copies of a block to ask for.
 type CopiesOf<'a> = Box<dyn Fn(&casting::Body) -> i32 + 'a>;

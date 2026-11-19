@@ -358,8 +358,8 @@ pub fn first_of(rules: &Rules, ground: &Ground) -> Option<Plan> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::fixtures as fx;
-    use crate::layout::ground;
+    use crate::fixtures as fx;
+    use crate::ground;
 
     #[test]
     fn the_allowance_never_falls_as_the_level_rises() {

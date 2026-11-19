@@ -1,0 +1,16 @@
+[package]
+name = "fabot-mv"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "mod.rs"
+doctest = false
+
+[dependencies]
+fabot-base = { path = "../base" }
+fabot-atlas = { path = "../atlas" }
+
+[lints]
+workspace = true

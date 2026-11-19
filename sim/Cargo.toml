@@ -8,7 +8,8 @@ publish = false
 # without its V8 server.
 [dependencies]
 fabot-base = { path = "../core/base", features = ["tools"] }
-fabot-core = { path = "../core", features = ["tools"] }
+fabot-core = { path = "../core" }
+fabot-layout = { path = "../core/layout", features = ["tools"] }
 krebs = { package = "engine", git = "https://github.com/DefaultO/krebs", rev = "04a5394d00b05bbff4e472e07e0bf07ac811c315" }
 krebs-util = { package = "util", git = "https://github.com/DefaultO/krebs", rev = "04a5394d00b05bbff4e472e07e0bf07ac811c315" }
 mimalloc = "0.1.52"

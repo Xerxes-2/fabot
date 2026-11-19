@@ -3,8 +3,8 @@ use std::collections::BTreeSet;
 
 use super::economy::EconomyState;
 use super::fight::shape::FightState;
-use super::layout::shape::LayoutState;
 use super::strategy::StrategyState;
+use fabot_layout::shape::LayoutState;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct State {

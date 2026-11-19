@@ -1,0 +1,21 @@
+[package]
+name = "fabot-tactics"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "mod.rs"
+doctest = false
+
+[dependencies]
+fabot-base = { path = "../base" }
+fabot-atlas = { path = "../atlas" }
+fabot-mv = { path = "../mv" }
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

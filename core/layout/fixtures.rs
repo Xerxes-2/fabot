@@ -3,9 +3,9 @@
 //! mineral, a controller and none, one or two spawns of ours.
 use std::collections::BTreeSet;
 
-use crate::layout::ground::{self, Ground};
-use crate::layout::plan;
-use crate::layout::shape::Plan;
+use crate::ground::{self, Ground};
+use crate::plan;
+use crate::shape::Plan;
 use fabot_base::declarations::{ColonyPlan, Stage};
 use fabot_base::tiles::{self, Tile};
 use fabot_base::vocabulary::Resource;

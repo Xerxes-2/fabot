@@ -427,7 +427,7 @@ pub fn place(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::fixtures as fx;
+    use crate::fixtures as fx;
     use fabot_base::world::{Owner, Structure};
 
     #[test]

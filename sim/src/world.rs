@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use fabot_base::world::{Pos, RoomName, Rules};
-use fabot_core::layout;
+use fabot_layout as layout;
 use krebs::mapgen::{self, RoomKind};
 use krebs::room_name::RoomXY;
 use krebs::scenario::GlobalScenario;

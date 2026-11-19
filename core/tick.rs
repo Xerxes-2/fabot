@@ -5,10 +5,8 @@ use fabot_base::HashMap;
 
 use screeps::LocalRoomTerrain;
 
-use super::mv;
 use super::state::State;
 use super::strategy::{self, intel};
-use super::tactics;
 use fabot_atlas::{Atlas, Context, Derived, Mover, derive, target_at, worked};
 use fabot_base::boost;
 use fabot_base::declarations::{Declarations, Refused};
@@ -22,6 +20,8 @@ use fabot_base::tiles::{self, Tile};
 use fabot_base::vocabulary::Compound;
 use fabot_base::wish::Wish;
 use fabot_base::world::{self, Id, Kind, Pos, Room, RoomName, Sightings, Structure, World};
+use fabot_mv as mv;
+use fabot_tactics as tactics;
 
 pub type ModuleRun = fn(&mut Context, &mut State) -> ModuleOutput;
 
@@ -374,6 +374,6 @@ pub const MODULES: [Module; 4] = [
     },
     Module {
         name: "layout",
-        run: |c, s| super::layout::decide(c, &mut s.layout),
+        run: |c, s| fabot_layout::decide(c, &mut s.layout),
     },
 ];

@@ -3,13 +3,13 @@
 use std::collections::BTreeSet;
 
 use super::super::shape::{Engagement, Group, Phase, enter};
-use crate::tactics::Tactic;
 use fabot_base::engine;
 use fabot_base::tiles::{self};
 use fabot_base::vocabulary::Part;
 use fabot_base::world::{
     self, Controller, Creep, Fallen, Id, Kind, Owner, Pos, RoomName, Structure,
 };
+use fabot_tactics::Tactic;
 
 /// What a `Defend` may fight as, in the order its ties fall to (§6.3).
 pub const CANDIDATES: &[Tactic] = &[

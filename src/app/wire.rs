@@ -7,7 +7,7 @@ use wasm_bindgen::{JsCast, JsValue};
 use fabot_base::intel::{self, Intel};
 use fabot_core::memory::Memory;
 use fabot_core::observe::metrics::Metrics;
-use fabot_core::tactics::{self, Offer};
+use fabot_tactics::{self as tactics, Offer};
 
 /// Read by `npm run observe` and `scripts/capture`.
 pub const OBSERVE_SEGMENT: u8 = 1;

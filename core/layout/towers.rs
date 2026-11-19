@@ -137,9 +137,9 @@ pub fn fire(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::derive;
-    use crate::layout::fixtures as fx;
-    use crate::layout::run;
+    use crate::derive;
+    use crate::fixtures as fx;
+    use crate::run;
     use fabot_base::intents::Action;
     use fabot_base::tiles::{self};
     use fabot_base::world::{Id, Owner};

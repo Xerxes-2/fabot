@@ -2,9 +2,9 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::tactics::{Offer, Tactic};
 use fabot_base::vocabulary::Part;
 use fabot_base::world::{Id, Pos, RoomName};
+use fabot_tactics::{Offer, Tactic};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FightState {

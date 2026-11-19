@@ -12,7 +12,7 @@ use std::io::Read;
 
 use fabot_base::tiles::{self, Tile};
 use fabot_base::world::{Kind, Owner, Pos, Room, RoomName, Rules, Store, Structure};
-use fabot_core::layout::{self, sites};
+use fabot_layout::{self as layout, sites};
 use serde_json::{Value, json};
 
 fn main() {

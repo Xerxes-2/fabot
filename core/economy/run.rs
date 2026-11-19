@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::mv::plan;
 use fabot_atlas::{self as atlas, Atlas, Context, Mover, Target};
 use fabot_base::declarations;
 use fabot_base::engine;
@@ -13,6 +12,7 @@ use fabot_base::tiles::{self, TileSet};
 use fabot_base::vocabulary::{Part, Resource};
 use fabot_base::wish::Wish;
 use fabot_base::world::{Creep, Id, Kind, Pos, RoomName};
+use fabot_mv::plan;
 
 use super::bodies::{self, Pattern};
 use super::derived::{self, Body, Derived, Ground, LinkFact, RefillFact};

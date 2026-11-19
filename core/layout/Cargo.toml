@@ -1,0 +1,24 @@
+[package]
+name = "fabot-layout"
+version = "0.1.0"
+edition = "2024"
+publish = false
+# build.rs is the planner's builder, not a build script.
+build = false
+
+[lib]
+path = "mod.rs"
+doctest = false
+
+[dependencies]
+fabot-base = { path = "../base" }
+fabot-atlas = { path = "../atlas" }
+
+[features]
+tools = ["fabot-base/tools"]
+
+[dev-dependencies]
+fabot-base = { path = "../base", features = ["test-support"] }
+
+[lints]
+workspace = true

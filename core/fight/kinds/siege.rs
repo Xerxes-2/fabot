@@ -4,13 +4,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::super::casting;
 use super::super::shape::{self, Engagement, Phase};
 use super::sweep;
-use crate::tactics::{self, Offer, Tactic};
 use fabot_atlas::Atlas;
 use fabot_base::engine;
 use fabot_base::tiles::{self, Tile, TileSet};
 use fabot_base::vocabulary::Resource;
 use fabot_base::world::{Controller, Id, Kind, Owner, Pos, Room, RoomName, Structure};
 use fabot_exchange::{self as exchange, Outcome};
+use fabot_tactics::{self as tactics, Offer, Tactic};
 
 pub const CANDIDATES: &[Tactic] = &[Tactic::BlobClose];
 
