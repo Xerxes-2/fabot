@@ -56,10 +56,7 @@ pub fn cast_name(pattern: Pattern, time: i32, spawn: &str) -> String {
 /// Read off the name, not the parts: damage strips parts head-first, so no
 /// reading of the standing parts holds the pattern for the body's life.
 pub fn pattern_of_name(name: &str) -> Option<Pattern> {
-    let prefix = match name.find('-') {
-        Some(at) => &name[..at],
-        None => name,
-    };
+    let prefix = name.split_once('-').map_or(name, |(p, _)| p);
     ALL_PATTERNS.into_iter().find(|p| name_of(*p) == prefix)
 }
 
@@ -113,9 +110,7 @@ fn worker_body(most: i32, capacity: i32) -> Vec<Part> {
     let mut slots = dearest - 3 * repeats;
     let carry_cost = engine::part_cost(Part::Carry);
     let move_cost = engine::part_cost(Part::Move);
-    let mut go = true;
-
-    while go {
+    loop {
         if slots >= 1 && budget >= carry_cost && work + carry < 2 * moves {
             carry += 1;
             budget -= carry_cost;
@@ -130,7 +125,7 @@ fn worker_body(most: i32, capacity: i32) -> Vec<Part> {
             budget -= move_cost;
             slots -= 1;
         } else {
-            go = false;
+            break;
         }
     }
 
@@ -157,16 +152,10 @@ fn harvester_body(moves: impl Fn(i32) -> i32, most: i32, capacity: i32) -> Vec<P
 
     let n = n.max(2);
 
-    let mut with_carry = vec![Part::Carry];
-    with_carry.extend(dig(n));
-    let carry = if engine::body_cost(&with_carry) <= capacity {
-        vec![Part::Carry]
-    } else {
-        Vec::new()
-    };
-
     let mut body = replicate(n, Part::Work);
-    body.extend(carry);
+    if engine::body_cost(&dig(n)) + engine::part_cost(Part::Carry) <= capacity {
+        body.push(Part::Carry);
+    }
     body.extend(replicate(moves(n), Part::Move));
     body
 }
@@ -222,9 +211,7 @@ fn whole_blocks(block: &[Part], most: i32, capacity: i32) -> Vec<Part> {
     let mut body = Vec::new();
     for (i, part) in block.iter().enumerate() {
         if block.iter().position(|p| p == part) == Some(i) {
-            for _ in 0..repeats * part_count_in(block, *part) {
-                body.push(*part);
-            }
+            body.extend(replicate(repeats * part_count_in(block, *part), *part));
         }
     }
     body
@@ -235,19 +222,18 @@ pub const MINER_WORK: i32 = 20;
 
 pub fn sized(pattern: Pattern, most: i32, capacity: i32) -> Option<Vec<Part>> {
     if capacity < engine::body_cost(block_of(pattern)) {
-        None
-    } else {
-        let most = most.max(1);
-        let body = match pattern {
-            Pattern::Worker => worker_body(most, capacity),
-            Pattern::Harvester => harvester_body(|n| (n + 1) / 2, most.max(2), capacity),
-            Pattern::Hauler => whole_blocks(block_of(pattern), (most + 1) / 2, capacity),
-            Pattern::Upgrader => upgrader_body(0, 0, most, capacity),
-            Pattern::Claimer => whole_blocks(block_of(pattern), most, capacity),
-            Pattern::Scout => block_of(pattern).to_vec(),
-        };
-        Some(engine::with_move_last(body))
+        return None;
     }
+    let most = most.max(1);
+    let body = match pattern {
+        Pattern::Worker => worker_body(most, capacity),
+        Pattern::Harvester => harvester_body(|n| (n + 1) / 2, most.max(2), capacity),
+        Pattern::Hauler => whole_blocks(block_of(pattern), (most + 1) / 2, capacity),
+        Pattern::Upgrader => upgrader_body(0, 0, most, capacity),
+        Pattern::Claimer => whole_blocks(block_of(pattern), most, capacity),
+        Pattern::Scout => block_of(pattern).to_vec(),
+    };
+    Some(engine::with_move_last(body))
 }
 
 /// A route's walk for a loaded body at each full-speed pace, and back empty.
@@ -296,14 +282,13 @@ pub fn upgradable_at(level: i32) -> i32 {
 /// never cost it a Work.
 pub fn home_harvester(most: i32, capacity: i32) -> Option<Vec<Part>> {
     if capacity < engine::body_cost(block_of(Pattern::Harvester)) {
-        None
-    } else {
-        let mut body = harvester_body(|_| 1, most.max(2), capacity);
-        let legs = (part_count_in(&body, Part::Work) + 1) / 2 - 1;
-        let spare = (capacity - engine::body_cost(&body)) / engine::part_cost(Part::Move);
-        body.extend(replicate(legs.min(spare), Part::Move));
-        Some(engine::with_move_last(body))
+        return None;
     }
+    let mut body = harvester_body(|_| 1, most.max(2), capacity);
+    let legs = (part_count_in(&body, Part::Work) + 1) / 2 - 1;
+    let spare = (capacity - engine::body_cost(&body)) / engine::part_cost(Part::Move);
+    body.extend(replicate(legs.min(spare), Part::Move));
+    Some(engine::with_move_last(body))
 }
 
 #[cfg(test)]

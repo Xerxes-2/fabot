@@ -722,16 +722,11 @@ fn deaths(sums: &mut Sums, tracks: &mut HashMap<String, Track>, world: &World) {
             _ => (t.wounded || unseen).then_some(Cause::Unknown),
         };
         if t.ttl > AGED
-            && let Some(cause) = cause
+            && let Some(cause) = cause.map(Cause::name)
         {
             let row = Some(t.at.room);
-            add(sums, row, &format!("{DEATH}{}", cause.name()), 1.0);
-            add(
-                sums,
-                row,
-                &format!("{LOSS}{}", cause.name()),
-                f64::from(t.cost),
-            );
+            add(sums, row, &format!("{DEATH}{cause}"), 1.0);
+            add(sums, row, &format!("{LOSS}{cause}"), f64::from(t.cost));
         }
         false
     });
@@ -743,13 +738,9 @@ fn lost(sums: &mut Sums, world: &World) {
         let struck = (world.attacks.iter())
             .any(|(by, at)| at == id && !world.creeps.iter().any(|c| &c.id == by));
         if struck && world.room(*room).is_some_and(ours) {
-            add(sums, Some(*room), LOST, 1.0);
-            add(
-                sums,
-                Some(*room),
-                &format!("{LOSS}structure"),
-                f64::from(*cost),
-            );
+            let row = Some(*room);
+            add(sums, row, LOST, 1.0);
+            add(sums, row, &format!("{LOSS}structure"), f64::from(*cost));
         }
     }
 }
@@ -860,13 +851,12 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
             Intent::Spawn(id, SpawnAct::SpawnCreep(..))
                 if !refused.contains(&(&*id.text(), "spawn")) =>
             {
-                spawned.extend(
-                    world
-                        .spawns
-                        .iter()
-                        .filter(|s| s.id == *id)
-                        .map(|s| s.pos.room),
-                );
+                let rooms = world
+                    .spawns
+                    .iter()
+                    .filter(|s| s.id == *id)
+                    .map(|s| s.pos.room);
+                spawned.extend(rooms);
             }
             Intent::Held(name) => asked.entry(name.as_str()).or_default().held = true,
             Intent::Short(room, pattern, n) => {
@@ -980,19 +970,10 @@ impl Metrics {
         let mut sums = std::mem::take(&mut self.sums);
         add(&mut sums, None, BUCKET, f64::from(world.bucket));
         for (p, pace) in std::mem::take(&mut self.paces) {
+            let name = bodies::name_of(p);
             add(&mut sums, None, BODIES, pace.bodies);
-            add(
-                &mut sums,
-                None,
-                &format!("{BODIES_OF}{}", bodies::name_of(p)),
-                pace.bodies,
-            );
-            add(
-                &mut sums,
-                None,
-                &format!("{IDLE_OF}{}", bodies::name_of(p)),
-                pace.idle,
-            );
+            add(&mut sums, None, &format!("{BODIES_OF}{name}"), pace.bodies);
+            add(&mut sums, None, &format!("{IDLE_OF}{name}"), pace.idle);
         }
         for (phase, sum) in std::mem::take(&mut self.cpu) {
             add(&mut sums, None, &format!("{CPU}{phase}"), sum);
@@ -1041,20 +1022,11 @@ impl Metrics {
             let carried = (world.creeps.iter())
                 .filter(|c| c.pos.room == r.name)
                 .map(energy);
-            add(
-                &mut sums,
-                row,
-                STOCK,
-                f64::from(stored.chain(carried).sum::<i32>()),
-            );
+            let stock: i32 = stored.chain(carried).sum();
+            add(&mut sums, row, STOCK, f64::from(stock));
             let piles = r.piles.iter().map(|p| p.amount);
-            let remains = r.remains.iter().map(|x| x.store.used());
-            add(
-                &mut sums,
-                row,
-                FLOOR,
-                f64::from(piles.chain(remains).sum::<i32>()),
-            );
+            let floor: i32 = piles.chain(r.remains.iter().map(|x| x.store.used())).sum();
+            add(&mut sums, row, FLOOR, f64::from(floor));
         }
 
         let ticks = f64::from(self.ticks);

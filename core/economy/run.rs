@@ -570,6 +570,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
         .collect();
     let mut jobs = Jobs::new(&*context.atlas, &derived, (&slots, &owners), &held);
     let mut order: Vec<&Creep> = seen;
+    // The mover settles a tie by the order it is asked.
     order.sort_by_cached_key(|&c| (kept(&c.name).is_none(), c.name.as_str()));
 
     // A scout walks where `scouting` sends it, with a slot to count it or
@@ -582,16 +583,16 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
             };
             let slot = Slot {
                 id: String::new(),
-                colony: 0,
-                room,
-                job: Job::Scout(room),
-                seat: Pos::new(room, 25, 25),
-                body: Vec::new(),
-                fed_by: None,
-                spends: false,
                 rank: 0,
-                closed: false,
-                home_walk: 0,
+                ..Slot::new(
+                    0,
+                    false,
+                    Job::Scout(room),
+                    Pos::new(room, 25, 25),
+                    "",
+                    0,
+                    Vec::new(),
+                )
             };
             Some((b.name.as_str(), slot))
         })
@@ -613,10 +614,6 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
             (creep, at)
         })
         .collect();
-    // The booking order is not the wishes' order: the mover settles a tie
-    // by the order it is asked.
-    let mut tasks = tasks;
-    tasks.sort_by_cached_key(|&(c, _)| (kept(&c.name).is_none(), c.name.as_str()));
 
     let mut next = Assignments::new();
     let mut acts: Vec<Intent> = Vec::new();

@@ -1,16 +1,17 @@
 /// A colony's flows as slots: each slot casts one body and is the work that
 /// body does, so what is cast and what is offered are one list.
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Display;
 
 use crate::atlas::{Atlas, Mover, Target};
 use crate::engine;
 use crate::grid::{self, Footprint};
 use crate::tick;
 use crate::vocabulary::{Part, part_count_in};
-use crate::world::{Id, Pos, RoomName};
+use crate::world::{Controller, Id, Pos, RoomName, Spawn};
 
 use super::bodies::{self, Leg, Pattern};
-use super::derived::{Body, Derived, dig_work};
+use super::derived::{Body, Derived, Ground, SiteFact, dig_work, drawn_for};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Job {
@@ -64,6 +65,30 @@ pub struct Slot {
 }
 
 impl Slot {
+    pub fn new(
+        ci: usize,
+        own: bool,
+        job: Job,
+        seat: Pos,
+        key: impl Display,
+        k: usize,
+        body: Vec<Part>,
+    ) -> Slot {
+        Slot {
+            id: format!("{}:{key}:{k}", bodies::name_of(job.pattern())),
+            colony: ci,
+            room: seat.room,
+            rank: rank_of(&job, own),
+            job,
+            seat,
+            body,
+            fed_by: None,
+            spends: false,
+            closed: false,
+            home_walk: 0,
+        }
+    }
+
     /// A lost controller loses the room; a lost road costs more than its repair.
     pub fn draws_reserve(&self) -> bool {
         matches!((self.rank, &self.job), (DEADLINE, _) | (MEND, Job::Work(_)))
@@ -190,25 +215,17 @@ fn banks(derived: &Derived, ci: usize) -> bool {
 /// banks the haul (`ARCHITECTURE.md` §5).
 pub fn owners(atlas: &mut Atlas, derived: &Derived) -> Vec<Option<usize>> {
     let homes: Vec<Pos> = derived.colonies.iter().map(|c| c.spawns[0].pos).collect();
-    let mut out = Vec::new();
-    for (gi, ground) in derived.grounds.iter().enumerate() {
-        if gi < derived.colonies.len() {
-            out.push(Some(gi));
-            continue;
-        }
-        let at = (ground.controller.as_ref().map(|c| c.pos))
-            .or_else(|| ground.sources.first().map(|s| s.pos));
-        out.push(at.and_then(|at| {
-            tick::nearest(
-                atlas,
-                &|room| derived.route(room),
-                &homes,
-                |ci| banks(derived, ci),
-                &at,
-            )
-        }));
-    }
-    out
+    (derived.grounds.iter().enumerate())
+        .map(|(gi, ground)| {
+            if gi < derived.colonies.len() {
+                return Some(gi);
+            }
+            let at = (ground.controller.as_ref().map(|c| c.pos))
+                .or_else(|| ground.sources.first().map(|s| s.pos))?;
+            let route = |room| derived.route(room);
+            tick::nearest(atlas, &route, &homes, |ci| banks(derived, ci), &at)
+        })
+        .collect()
 }
 
 /// The engine drops what a part adds at the cap; one claim life short of it
@@ -236,23 +253,18 @@ fn drain(per: f64) -> f64 {
 }
 
 /// A body that digs and holds on a site builds it with its dig (`run::raising`).
-pub fn raised_by<'a>(
-    g: &'a super::derived::Ground,
-    b: &Body,
-) -> Option<&'a super::derived::SiteFact> {
-    (b.work > 0 && b.carry > 0)
-        .then(|| g.sites.iter().find(|s| s.pos == b.pos))
-        .flatten()
+pub fn raised_by<'a>(g: &'a Ground, b: &Body) -> Option<&'a SiteFact> {
+    (g.sites.iter()).find(|s| b.work > 0 && b.carry > 0 && s.pos == b.pos)
 }
 
 /// Half the timer: a level-up lands inside it, and safe mode's grace stays banked.
-pub fn inside_deadline(c: &crate::world::Controller) -> bool {
+pub fn inside_deadline(c: &Controller) -> bool {
     c.level > 0 && c.ticks_to_downgrade <= engine::controller_downgrade(c.level) / 2
 }
 
 /// Owner, 2026-11-13: past the last level upgrading only feeds GCL, so the
 /// controller is fed only to keep its level.
-pub fn fed(c: &crate::world::Controller) -> bool {
+pub fn fed(c: &Controller) -> bool {
     !engine::topped_out(c.level) || inside_deadline(c)
 }
 
@@ -309,32 +321,17 @@ struct Plan<'a> {
 }
 
 impl Plan<'_> {
-    #[allow(clippy::too_many_arguments)]
     fn push(
         &mut self,
         ci: usize,
-        room: RoomName,
         job: Job,
         seat: Pos,
-        key: impl std::fmt::Display,
+        key: impl Display,
         k: usize,
         body: Vec<Part>,
     ) {
-        let tag = bodies::name_of(job.pattern());
-        let own = room == self.derived.colonies[ci].room;
-        self.out.push(Slot {
-            id: format!("{tag}:{key}:{k}"),
-            colony: ci,
-            room,
-            rank: rank_of(&job, own),
-            job,
-            seat,
-            body,
-            fed_by: None,
-            spends: false,
-            closed: false,
-            home_walk: 0,
-        });
+        let own = seat.room == self.derived.colonies[ci].room;
+        self.out.push(Slot::new(ci, own, job, seat, key, k, body));
     }
 
     fn colony(&mut self, ci: usize, owners: &[Option<usize>], sponsors: &[Option<usize>]) {
@@ -352,7 +349,6 @@ impl Plan<'_> {
                 let body = bodies::hauler(2, engine::MAX_BODY_PARTS as i32, capacity);
                 self.push(
                     ci,
-                    colony.room,
                     Job::Fill,
                     drop,
                     colony.room,
@@ -397,7 +393,7 @@ impl Plan<'_> {
             if own || raised || colony.controller.level >= TOWER_LEVEL {
                 owed += g.sites.iter().map(|s| s.left).sum::<i32>();
                 payback += (g.sites.iter())
-                    .filter(|s| super::derived::drawn_for(&s.kind))
+                    .filter(|s| drawn_for(&s.kind))
                     .map(|s| s.left)
                     .sum::<i32>();
             }
@@ -454,7 +450,7 @@ impl Plan<'_> {
                 if own {
                     digs.push(dig_id.clone());
                 }
-                self.push(ci, g.room, Job::Dig(s.id), post, s.id, 0, body);
+                self.push(ci, Job::Dig(s.id), post, s.id, 0, body);
                 if raises {
                     continue;
                 }
@@ -510,7 +506,7 @@ impl Plan<'_> {
                         })
                     {
                         fixed += upkeep(&body);
-                        self.push(ci, g.room, Job::Reserve(c.id), c.pos, c.id, 0, body);
+                        self.push(ci, Job::Reserve(c.id), c.pos, c.id, 0, body);
                     }
                 }
                 _ => (),
@@ -542,7 +538,7 @@ impl Plan<'_> {
                 mined +=
                     f64::from(part_count_in(&body, Part::Work) * engine::MINERAL_HARVEST_PER_WORK)
                         / f64::from(engine::MINERAL_HARVEST_CYCLE);
-                self.push(ci, colony.room, Job::Dig(m.id), post, m.id, 0, body);
+                self.push(ci, Job::Dig(m.id), post, m.id, 0, body);
                 self.out.last_mut().expect("pushed").rank = MINE;
             }
         }
@@ -682,15 +678,7 @@ impl Plan<'_> {
                 ((upgraded - f64::from(kept * work)) / (f64::from(work) + upkeep(body))).max(0.0);
             let n = (kept + new.floor() as i32).clamp(0, most);
             for (k, &seat) in ground.buffer_seats.iter().enumerate().take(n as usize) {
-                self.push(
-                    ci,
-                    colony.room,
-                    Job::Upgrade,
-                    seat,
-                    colony.room,
-                    k,
-                    body.clone(),
-                );
+                self.push(ci, Job::Upgrade, seat, colony.room, k, body.clone());
                 let slot = self.out.last_mut().expect("pushed");
                 slot.spends = true;
                 if banked > 0.0 {
@@ -799,7 +787,7 @@ impl Plan<'_> {
         }
         let first_far = home_carriers.max(1);
         for (k, body) in carriers.into_iter().enumerate() {
-            self.push(ci, colony.room, Job::Fill, drop, colony.room, k, body);
+            self.push(ci, Job::Fill, drop, colony.room, k, body);
             let slot = self.out.last_mut().expect("pushed");
             if let Some(j) = k.checked_sub(first_far) {
                 slot.id = format!("{outposts}{j}");
@@ -839,7 +827,7 @@ impl Plan<'_> {
         } else {
             format!("{room}<{caster}")
         };
-        self.push(ci, room, Job::Work(builds), seat, &key, k, body);
+        self.push(ci, Job::Work(builds), seat, &key, k, body);
         let slot = self.out.last_mut().expect("pushed");
         slot.rank = rank;
         slot.spends = spends;
@@ -856,19 +844,7 @@ fn errand(atlas: &mut Atlas, derived: &Derived, job: Job, seat: Pos, key: &str) 
     };
     let ci = tick::nearest(atlas, &|room| derived.route(room), &homes, can, &seat)?;
     let body = bodies::sized(pattern, 1, derived.colonies[ci].bank_capacity)?;
-    Some(Slot {
-        id: format!("{}:{key}:0", bodies::name_of(pattern)),
-        rank: rank_of(&job, false),
-        colony: ci,
-        room: seat.room,
-        job,
-        seat,
-        body,
-        fed_by: None,
-        spends: false,
-        closed: false,
-        home_walk: 0,
-    })
+    Some(Slot::new(ci, false, job, seat, key, 0, body))
 }
 
 pub fn plan(
@@ -911,17 +887,8 @@ pub fn plan(
             )));
         for (job, seat, key) in jobs {
             out.push(Slot {
-                id: format!("{}:{key}:0", bodies::name_of(job.pattern())),
-                colony: ci,
-                room: o.room,
-                rank: rank_of(&job, false),
-                job,
-                seat,
-                body: Vec::new(),
-                fed_by: None,
-                spends: false,
                 closed: true,
-                home_walk: 0,
+                ..Slot::new(ci, false, job, seat, key, 0, Vec::new())
             });
         }
     }
@@ -1279,32 +1246,26 @@ pub fn casts(
     let mut casts = Vec::new();
     let mut short: BTreeMap<(RoomName, Pattern), i32> = BTreeMap::new();
     for (ci, colony) in derived.colonies.iter().enumerate() {
-        let mut idle: Vec<&crate::world::Spawn> = colony
+        let mut idle: Vec<&Spawn> = colony
             .spawns
             .iter()
             .filter(|s| s.spawning.is_none())
             .collect();
         let mut bank = colony.bank;
-        let cast = |slot: &Slot,
-                    body: Vec<Part>,
-                    floor: bool,
-                    idle: &mut Vec<&crate::world::Spawn>,
-                    bank: &mut i32| {
-            let spawn = idle.remove(0);
-            *bank -= engine::body_cost(&body);
-            Cast {
-                colony: colony.room,
-                name: bodies::cast_name(slot.job.pattern(), derived.time, &spawn.name),
-                body,
-                floor,
-                slot: slot.id.clone(),
-            }
-        };
-        let mine: Vec<&Slot> = {
-            let mut v: Vec<&Slot> = slots.iter().filter(|s| s.colony == ci).collect();
-            v.sort_by_key(|s| s.rank);
-            v
-        };
+        let cast =
+            |slot: &Slot, body: Vec<Part>, floor: bool, idle: &mut Vec<&Spawn>, bank: &mut i32| {
+                let spawn = idle.remove(0);
+                *bank -= engine::body_cost(&body);
+                Cast {
+                    colony: colony.room,
+                    name: bodies::cast_name(slot.job.pattern(), derived.time, &spawn.name),
+                    body,
+                    floor,
+                    slot: slot.id.clone(),
+                }
+            };
+        let mut mine: Vec<&Slot> = slots.iter().filter(|s| s.colony == ci).collect();
+        mine.sort_by_key(|s| s.rank);
 
         // The floors: nothing digs the bank full, or nothing carries it.
         let anchor = mine
@@ -1326,11 +1287,7 @@ pub fn casts(
         if let Some(s) =
             anchor.filter(|_| !digging && bank < colony.bank_capacity && !idle.is_empty())
             && let Job::Dig(id) = &s.job
-            && let Some(rate) = derived.grounds[ci]
-                .sources
-                .iter()
-                .find(|x| &x.id == id)
-                .map(|x| x.rate)
+            && let Some(rate) = sources.iter().find(|x| &x.id == id).map(|x| x.rate)
             && let Some(body) = bodies::home_harvester(dig_work(rate), bank)
             && engine::body_cost(&body) <= bank
         {
