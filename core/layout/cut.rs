@@ -28,9 +28,10 @@ pub struct Rect {
     pub y2: i32,
 }
 
+#[derive(Clone, Copy, Default)]
 struct Edge {
     v: usize,
-    r: usize,
+    rev: usize,
     c: i64,
     f: i64,
 }
@@ -123,22 +124,40 @@ fn grid(wall: &dyn Fn(i32, i32) -> bool, safe: [bool; 4]) -> Grid {
     a
 }
 
+/// Edges keep the order Hivemind pushed them: replay depends on it.
 struct Graph {
     level: Vec<i32>,
-    edges: Vec<Vec<Edge>>,
+    start: Vec<usize>,
+    edges: Vec<Edge>,
 }
 
 impl Graph {
-    fn add(&mut self, u: usize, v: usize, c: i64) {
-        let r = self.edges[v].len();
-        self.edges[u].push(Edge { v, r, c, f: 0 });
-        let r = self.edges[u].len() - 1;
-        self.edges[v].push(Edge {
-            v: u,
-            r,
-            c: 0,
-            f: 0,
-        });
+    fn of(n: usize, adds: &[(usize, usize, i64)]) -> Graph {
+        let mut start = vec![0; n + 1];
+        for &(u, v, _) in adds {
+            start[u + 1] += 1;
+            start[v + 1] += 1;
+        }
+        for i in 0..n {
+            start[i + 1] += start[i];
+        }
+        let mut next = start.clone();
+        let mut edges = vec![Edge::default(); start[n]];
+        for &(u, v, c) in adds {
+            let (i, j) = (next[u], next[v]);
+            (next[u], next[v]) = (i + 1, j + 1);
+            edges[i] = Edge { v, rev: j, c, f: 0 };
+            edges[j] = Edge {
+                v: u,
+                rev: i,
+                ..Edge::default()
+            };
+        }
+        Graph {
+            level: vec![-1; n],
+            start,
+            edges,
+        }
     }
 
     fn levels(&mut self, s: usize, t: usize) -> bool {
@@ -146,8 +165,7 @@ impl Graph {
         self.level[s] = 0;
         let mut queue = std::collections::VecDeque::from([s]);
         while let Some(u) = queue.pop_front() {
-            for i in 0..self.edges[u].len() {
-                let e = &self.edges[u][i];
+            for e in &self.edges[self.start[u]..self.start[u + 1]] {
                 if self.level[e.v] < 0 && e.f < e.c {
                     self.level[e.v] = self.level[u] + 1;
                     queue.push_back(e.v);
@@ -161,18 +179,18 @@ impl Graph {
         if u == t {
             return f;
         }
-        while c[u] < self.edges[u].len() {
-            let (v, cap, used) = {
-                let e = &self.edges[u][c[u]];
-                (e.v, e.c, e.f)
-            };
+        while c[u] < self.start[u + 1] {
+            let Edge {
+                v,
+                rev,
+                c: cap,
+                f: used,
+            } = self.edges[c[u]];
             if self.level[v] == self.level[u] + 1 && used < cap {
                 let sent = self.flow(v, f.min(cap - used), t, c);
                 if sent > 0 {
-                    let e = &mut self.edges[u][c[u]];
-                    e.f += sent;
-                    let r = e.r;
-                    self.edges[v][r].f -= sent;
+                    self.edges[c[u]].f += sent;
+                    self.edges[rev].f -= sent;
                     return sent;
                 }
             }
@@ -187,7 +205,7 @@ impl Graph {
         self.level[s] = 1;
         let mut queue = std::collections::VecDeque::from([s]);
         while let Some(u) = queue.pop_front() {
-            for e in &self.edges[u] {
+            for e in &self.edges[self.start[u]..self.start[u + 1]] {
                 if e.f < e.c && self.level[e.v] < 1 {
                     self.level[e.v] = 1;
                     queue.push_back(e.v);
@@ -225,10 +243,7 @@ pub fn tiles_of(wall: &dyn Fn(i32, i32) -> bool, rects: &[Rect], safe: [bool; 4]
 
     let n = 2 * tiles::COUNT + 2;
     let (source, sink) = (n - 2, n - 1);
-    let mut g = Graph {
-        level: vec![-1; n],
-        edges: (0..n).map(|_| Vec::new()).collect(),
-    };
+    let mut adds: Vec<(usize, usize, i64)> = Vec::new();
     for x in 1..49i32 {
         for y in 1..49i32 {
             let top = (y * 50 + x) as usize;
@@ -236,24 +251,25 @@ pub fn tiles_of(wall: &dyn Fn(i32, i32) -> bool, rects: &[Rect], safe: [bool; 4]
             let cell = a[x as usize][y as usize];
             if cell == NORMAL || cell == PROTECTED {
                 if cell == PROTECTED {
-                    g.add(source, top, INFINITY);
+                    adds.push((source, top, INFINITY));
                 }
-                g.add(top, bot, 1);
+                adds.push((top, bot, 1));
                 for (dx, dy) in AROUND {
                     let next = a[(x + dx) as usize][(y + dy) as usize];
                     if next == NORMAL || next == TO_EXIT {
-                        g.add(bot, ((y + dy) * 50 + x + dx) as usize, INFINITY);
+                        adds.push((bot, ((y + dy) * 50 + x + dx) as usize, INFINITY));
                     }
                 }
             } else if cell == TO_EXIT {
-                g.add(top, sink, INFINITY);
+                adds.push((top, sink, INFINITY));
             }
         }
     }
 
+    let mut g = Graph::of(n, &adds);
     let mut total = 0;
     while g.levels(source, sink) {
-        let mut count = vec![0usize; n + 1];
+        let mut count = g.start.clone();
         while let f @ 1.. = g.flow(source, INFINITY, sink, &mut count) {
             total += f;
         }
