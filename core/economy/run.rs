@@ -48,7 +48,7 @@ fn scouting(atlas: &Atlas, derived: &Derived, held: &Assignments) -> Assignments
             // reach the trees hold.
             let far = |at: &Pos| {
                 let rooms = atlas.route(&BTreeSet::new(), tick::SIEGE_HOPS, b.pos.room, at.room)?;
-                Some(Atlas::crossing_ticks() * (rooms.len() as i32 - 1))
+                Some(Atlas::CROSSING_TICKS * (rooms.len() as i32 - 1))
             };
             atlas::onward(rooms.filter_map(|(at, age, _)| {
                 let walk = distance(atlas, derived, &b.pos, at).or_else(|| far(at))?;

@@ -573,7 +573,7 @@ impl Atlas {
             .iter()
             .filter(|s| s.kind == Kind::KeeperLair)
         {
-            if lair.spawn.is_some_and(|t| t <= Atlas::crossing_ticks()) {
+            if lair.spawn.is_some_and(|t| t <= Atlas::CROSSING_TICKS) {
                 let f = fighter::cast(&engine::keeper_body());
                 strikers.push(striker(tiles::of_pos(&lair.pos), f));
             }
@@ -1158,9 +1158,7 @@ impl Atlas {
             .and_then(|field| field.ticks(tiles::of_pos(from)))
     }
 
-    pub fn crossing_ticks() -> i32 {
-        engine::ROOM_SIDE
-    }
+    pub const CROSSING_TICKS: i32 = engine::ROOM_SIDE;
 
     /// `ticks_to` off `tree`, grown from the target's room: each room the
     /// mover's walk from where it lands to where the tree leaves it.
@@ -1186,9 +1184,8 @@ impl Atlas {
             let mut last = out;
             while last.next != root {
                 let way = tree.ways(last.next).get(last.onward)?;
-                let walk = flood(last.next, &way.exit).map_or(Some(Atlas::crossing_ticks()), |d| {
-                    landed(&d, &last.exit, own)
-                });
+                let walk = flood(last.next, &way.exit)
+                    .map_or(Some(Atlas::CROSSING_TICKS), |d| landed(&d, &last.exit, own));
                 ticks = ticks.saturating_add(walk?);
                 own = None;
                 last = way;
@@ -1198,7 +1195,7 @@ impl Atlas {
                 .map(|g| self.flood_seats(g, mover, target, None));
             let entry = match seats {
                 Some(seats) => landed(&seats, &last.exit, own)?,
-                None => Atlas::crossing_ticks(),
+                None => Atlas::CROSSING_TICKS,
             };
             Some(ticks.saturating_add(entry))
         };

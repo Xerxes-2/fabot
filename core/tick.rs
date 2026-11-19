@@ -320,7 +320,7 @@ pub fn nearest<'t>(
     })
     .or_else(|| {
         least(atlas, &|_atlas, home| {
-            (trees(home.room)?.crossings(at.room, home.room)).map(|n| Atlas::crossing_ticks() * n)
+            (trees(home.room)?.crossings(at.room, home.room)).map(|n| Atlas::CROSSING_TICKS * n)
         })
     })
 }

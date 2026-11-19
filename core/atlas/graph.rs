@@ -140,7 +140,7 @@ impl Ways {
                 let node = &self.nodes[n];
                 let land = |l: Tile| match &node.dist {
                     Some(d) => d[Atlas::anchor(mover.footprint, l)],
-                    None => Atlas::crossing_ticks(),
+                    None => Atlas::CROSSING_TICKS,
                 };
                 let mut exit = Vec::new();
                 let mut landing = UNREACHED;
@@ -334,7 +334,7 @@ pub fn search(
                 let entry = |&(_, l): &(Tile, Tile)| match (&node.dist, node.next) {
                     (Some(dist), _) => on(dist, l),
                     (None, None) => 0,
-                    (None, Some(_)) => Atlas::crossing_ticks(),
+                    (None, Some(_)) => Atlas::CROSSING_TICKS,
                 };
                 let first = exits.len();
                 let mut ticks = UNREACHED;

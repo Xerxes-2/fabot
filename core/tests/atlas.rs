@@ -622,8 +622,8 @@ fn every_tile_a_keeper_strikes_is_walled_and_a_room_of_keepers_not_due_walls_non
         let pos = |t: Tile| tiles::to_pos(ROOM, t);
         let room = &mut world.rooms[0];
         let mut lair_of = structure(Kind::KeeperLair, false, pos(lair).x, pos(lair).y);
-        lair_of.spawn = Some(dice.between(-1, 2 * Atlas::crossing_ticks())).filter(|t| *t >= 0);
-        let spawns = lair_of.spawn.is_some_and(|t| t <= Atlas::crossing_ticks());
+        lair_of.spawn = Some(dice.between(-1, 2 * Atlas::CROSSING_TICKS)).filter(|t| *t >= 0);
+        let spawns = lair_of.spawn.is_some_and(|t| t <= Atlas::CROSSING_TICKS);
         room.structures.push(lair_of);
         room.sources.push(Source {
             id: "rock".into(),

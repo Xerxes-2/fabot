@@ -86,7 +86,7 @@ pub fn distance(atlas: &Atlas, derived: &Derived, a: &Pos, b: &Pos) -> Option<i3
         None => (atlas.route(&BTreeSet::new(), tick::REACH_HOPS, a.room, b.room))
             .map(|r| r.len() as i32 - 1),
     };
-    crossed.map(|n| Atlas::crossing_ticks() * n)
+    crossed.map(|n| Atlas::CROSSING_TICKS * n)
 }
 
 pub fn ticks_to(
