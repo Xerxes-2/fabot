@@ -636,9 +636,8 @@ impl<'a> Jobs<'a> {
             && (10 * used <= cap && !ore || 10 * used < 9 * cap && kept.is_none_or(Task::is_intake))
     }
 
-    pub fn task(&mut self, slot: &Slot, body: &Body, kept: Option<Task>) -> Option<Task> {
+    pub fn task(&mut self, slot: &Slot, body: &Body, kept: Option<&Task>) -> Option<Task> {
         let ci = slot.colony;
-        let kept = kept.as_ref();
         match &slot.job {
             Job::Dig(id) => Some(Task::Harvest((*id).into())),
             Job::Upgrade => {

@@ -231,7 +231,7 @@ mod tests {
                 vec![dismantle.clone(), mass.clone()],
                 vec![dismantle.clone(), mass.clone()],
             ),
-            (vec![shot.clone(), mass.clone()], vec![mass.clone()]),
+            (vec![shot.clone(), mass.clone()], vec![mass]),
             (vec![heal.clone(), ranged_heal, shot], vec![heal.clone()]),
             (
                 vec![CreepAct::AttackCreep("a".into()), attack.clone()],

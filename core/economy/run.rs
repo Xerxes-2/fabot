@@ -605,7 +605,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
             let at = at.map(|(slot, body)| {
                 let task = match &slot.job {
                     Job::Scout(_) => scouted.get(&creep.name).and_then(|id| task::of_task_id(id)),
-                    _ => jobs.task(slot, body, kept(&creep.name)),
+                    _ => jobs.task(slot, body, kept(&creep.name).as_ref()),
                 };
                 (slot, body, task)
             });
@@ -834,16 +834,12 @@ mod tests {
                 .map(crate::intents::Intent::actor)
                 .collect();
 
-            let fought: Vec<String> = g
-                .world
-                .creeps
-                .iter()
+            let fought = (g.world.creeps.iter())
                 .filter(|c| tick::fights(&c.name))
-                .map(|c| c.name.clone())
-                .collect();
+                .count();
 
             assert_eq!(
-                wished.len() + fought.len(),
+                wished.len() + fought,
                 g.world.creeps.len(),
                 "every body not in a fight wishes once"
             );

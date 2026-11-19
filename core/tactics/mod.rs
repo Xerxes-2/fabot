@@ -357,32 +357,30 @@ impl Safety<'_> {
 
     fn search(
         &self,
-        ring: Vec<(Tile, Option<Tile>)>,
+        ring: &[(Tile, Option<Tile>)],
         mut seen: BTreeSet<Tile>,
         depth: i32,
     ) -> Option<Tile> {
-        let safe: Vec<(Tile, Option<Tile>)> =
-            ring.iter().copied().filter(|at| self.safe(*at)).collect();
-
-        match safe.as_slice() {
-            [] if depth == 0 || ring.is_empty() => None,
-            [] => {
-                let mut next: Vec<(Tile, Option<Tile>)> = Vec::new();
-                let open = |at: &(Tile, Option<Tile>)| at.1.is_none() || !tiles::on_edge(at.0);
-                for at in ring.iter().copied().filter(open) {
-                    for n in tiles::around(at.0) {
-                        if !seen.contains(n) && self.atlas.passable(self.room, *n) {
-                            next.push((*n, at.1.or(Some(*n))));
-                        }
-                    }
-                }
-                next.retain(|(t, _)| seen.insert(*t));
-                self.search(next, seen, depth - 1)
-            }
-            found => (found.iter())
-                .min_by_key(|at| (self.apart(at.0), at.0))
-                .and_then(|at| at.1),
+        if let Some(at) = (ring.iter())
+            .filter(|at| self.safe(**at))
+            .min_by_key(|at| (self.apart(at.0), at.0))
+        {
+            return at.1;
         }
+        if depth == 0 || ring.is_empty() {
+            return None;
+        }
+        let mut next: Vec<(Tile, Option<Tile>)> = Vec::new();
+        let open = |at: &&(Tile, Option<Tile>)| at.1.is_none() || !tiles::on_edge(at.0);
+        for at in ring.iter().filter(open) {
+            for n in tiles::around(at.0) {
+                if !seen.contains(n) && self.atlas.passable(self.room, *n) {
+                    next.push((*n, at.1.or(Some(*n))));
+                }
+            }
+        }
+        next.retain(|(t, _)| seen.insert(*t));
+        self.search(&next, seen, depth - 1)
     }
 }
 
@@ -408,7 +406,7 @@ pub fn step_back(
         };
 
         safety.search(
-            vec![(here, None)],
+            &[(here, None)],
             BTreeSet::from([here]),
             2 * engine::RANGED_RANGE,
         )

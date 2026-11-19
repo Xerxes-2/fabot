@@ -813,8 +813,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
                 .find(|s| s.kind.is_container() && Atlas::is_buffer(room, &s.pos))
                 .map(|s| s.pos)
         }),
-        buffer: buffer.clone(),
-        feed: feed.or(buffer.clone()),
+        feed: feed.or_else(|| buffer.clone()),
         links,
         receiver: controller_link.or(hub_link),
         labs: labs_of(room),
@@ -835,6 +834,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
         ship_to: None,
         abandoned: false,
         buffer_seats: buffer_seats_of(atlas, room, buffer.as_ref()),
+        buffer,
     }
 }
 
@@ -1158,11 +1158,10 @@ pub fn of_world<'t>(
         .collect();
 
     for g in &mut grounds {
-        let plan = (declarations.colonies.iter()).find(|p| p.room == g.room);
-        if let Some(pos) = plan.and_then(|p| p.pile) {
-            let (energy, rest): (Vec<PileFact>, Vec<PileFact>) =
-                (g.piles.drain(..)).partition(|p| p.pos == pos && p.resource.is_energy());
-            g.piles = rest;
+        if let Some(pos) = plan_of(g.room).and_then(|p| p.pile) {
+            let energy: Vec<PileFact> = (g.piles)
+                .extract_if(.., |p| p.pos == pos && p.resource.is_energy())
+                .collect();
             // A draw picks up the pile by its id; a drop needs none.
             let id = energy
                 .first()
@@ -1231,9 +1230,7 @@ pub fn of_world<'t>(
                 b.pattern.is_harvester() && b.store.capacity > 0 && b.pos.within(1, &r.pos)
             })
         };
-        let (kept, left): (Vec<_>, Vec<_>) = g.bays.drain(..).partition(kept);
-        g.bays = kept;
-        g.refills.extend(left);
+        g.refills.extend(g.bays.extract_if(.., |r| !kept(r)));
     }
 
     let mut routes: BTreeMap<RoomName, Cow<Tree>> = (ours.trees.iter())

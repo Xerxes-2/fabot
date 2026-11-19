@@ -685,11 +685,7 @@ impl<'a> Scene<'a> {
             .filter(|n| self.ours.get(n.as_str()).is_some_and(lasts))
             .collect();
 
-        let mut fielding_names: Vec<String> = e.ours.iter().cloned().collect();
-        fielding_names.extend(joining.iter().cloned());
-
-        let fielding: Vec<&Creep> = fielding_names
-            .iter()
+        let fielding: Vec<&Creep> = (e.ours.iter().chain(&joining))
             .filter_map(|n| self.ours.get(n.as_str()).copied())
             .filter(lasts)
             .collect();

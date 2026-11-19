@@ -1623,7 +1623,7 @@ mod tests {
         let struck = engine::HEAL_POWER * 25;
 
         let one = [dismantler.clone(), dismantler.clone(), medic.clone()];
-        let two = [dismantler.clone(), dismantler.clone(), medic.clone(), medic];
+        let two = [dismantler.clone(), dismantler, medic.clone(), medic];
 
         assert_eq!(crowded(&one, 2, 2, struck), None);
         assert!(crowded(&two, 2, 2, struck).is_some());
