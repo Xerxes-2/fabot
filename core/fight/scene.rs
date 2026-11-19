@@ -12,7 +12,7 @@ use crate::grid::{self, Footprint};
 use crate::tactics::{self, Tactic};
 use crate::tick::{self, TacticRule};
 use crate::tiles::Tile;
-use crate::vocabulary::{Part, Resource, ResourceType};
+use crate::vocabulary::{Part, ResourceType};
 use crate::world::{
     Creep, Id, Owner, Pos, Room, RoomName, Sightings, Structure, World, hostiles, sightings,
 };
@@ -248,7 +248,7 @@ impl<'a> Scene<'a> {
                 }),
         );
         Hunting {
-            threat: exchange::damage_map(room.name, &self.charged(room), &foes),
+            threat: exchange::damage_map(room.name, &raid::charged(room), &foes),
             worth: sweep::room_worth(room, &prey, &exposed, held),
             at: exposed
                 .first()
@@ -258,14 +258,6 @@ impl<'a> Scene<'a> {
             escort,
             marks,
         }
-    }
-
-    pub(super) fn charged(&self, room: &'a Room<'a>) -> Vec<Pos> {
-        self.towers_in(room)
-            .into_iter()
-            .filter(|s| s.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST)
-            .map(|s| s.pos)
-            .collect()
     }
 
     pub(super) fn towers_in(&self, room: &'a Room<'a>) -> Vec<&'a Structure> {
@@ -534,7 +526,7 @@ impl<'a> Scene<'a> {
         gate: Option<&tactics::Gate>,
     ) -> SiegeFacts {
         let room = self.in_sight(e.room);
-        let towers = room.map_or_else(Vec::new, |r| self.charged(r));
+        let towers = room.map_or_else(Vec::new, |r| raid::charged(r));
 
         SiegeFacts {
             time: self.world.time,

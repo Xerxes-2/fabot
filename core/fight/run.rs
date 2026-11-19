@@ -63,7 +63,6 @@ fn changed(e: &Engagement, events: &[tracker::Event], by_id: &BTreeMap<i32, Grou
         tracker::Event::Merged { into, .. } => *into == e.group,
         tracker::Event::Left(id) => *id == e.group,
         tracker::Event::Newcomer(id) => by_id.get(id).is_some_and(|g| g.room == e.room),
-        _ => false,
     })
 }
 
@@ -314,7 +313,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
         .filter(|e| matches!(e.objective, Objective::Siege(_)) && !raid::raids(e))
         .filter_map(|e| {
             let room = scene.in_sight(e.room)?;
-            let towers = scene.charged(room);
+            let towers = raid::charged(room);
             let drains = !towers.is_empty()
                 && matches!(e.phase, Phase::Approaching | Phase::Draining)
                 && (Scene::safe(room) || scene.outstruck(e, &towers));
@@ -421,7 +420,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
         .filter_map(|room| {
             let room = scene.in_sight(*room)?;
             let target = siege::next_target(room, None)?;
-            let towers = scene.charged(room);
+            let towers = raid::charged(room);
             if !Scene::safe(room) {
                 return Some((&room.name, target));
             }

@@ -101,7 +101,7 @@ pub(super) fn act(
     let fortified: BTreeSet<RoomName> = world
         .rooms
         .iter()
-        .filter(|r| !scene.charged(r).is_empty())
+        .filter(|r| !raid::charged(r).is_empty())
         .map(|r| r.name)
         .chain(
             decided
@@ -309,7 +309,8 @@ pub(super) fn act(
                 .filter(|m| m.pos.room == front.breach.room)
                 .collect();
 
-            tactics::focus_of(front, &members).map(|focus| (focus.name.clone(), front.strike))
+            tactics::focus_of(front, &members)
+                .map(|focus| (focus.name.clone(), front.breach_strike))
         })
         .collect();
 
@@ -366,12 +367,12 @@ fn front_of(scene: &Scene, atlas: &Atlas, e: &Engagement) -> Option<tactics::Fro
     else {
         return None;
     };
-    let towers = scene.charged(room);
+    let towers = raid::charged(room);
     let fired: BTreeSet<&Id> = scene.towers_in(room).iter().map(|t| &t.id).collect();
     let struck = (scene.world.attacks.iter())
         .find(|(by, _)| fired.contains(by))
         .map(|(_, at)| *at);
-    let strike = (towers.iter())
+    let breach_strike = (towers.iter())
         .map(|t| t.range(&wall.pos).map_or(0, engine::tower_attack_at))
         .sum();
     let posts = if scene.members_of(e).iter().any(|c| tactics::picket_of(c)) {
@@ -396,7 +397,7 @@ fn front_of(scene: &Scene, atlas: &Atlas, e: &Engagement) -> Option<tactics::Fro
         posts,
         towers,
         struck,
-        strike,
+        breach_strike,
     })
 }
 

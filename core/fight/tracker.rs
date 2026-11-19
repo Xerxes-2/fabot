@@ -17,10 +17,8 @@ pub enum Event {
         into: i32,
         from: i32,
     },
-    Lost(i32),
     /// Some of its members are seen nowhere now (dead, or out of sight).
     Left(i32),
-    Dropped(i32),
 }
 
 /// Ranged reach plus one step.
@@ -234,24 +232,12 @@ pub fn step(
 
     let seen: BTreeSet<&Id> = hostiles.iter().map(|h| &h.id).collect();
 
-    for gi in 0..prev.len() {
-        let g = &prev[gi];
-
-        if best[gi].is_some() && g.members.iter().any(|m| !seen.contains(m)) {
+    for (g, best) in prev.iter().zip(&best) {
+        if best.is_some() && g.members.iter().any(|m| !seen.contains(m)) {
             events.push(Event::Left(g.id));
         }
-
-        if best[gi].is_none() {
-            if tick - g.last_seen > grace {
-                events.push(Event::Dropped(g.id));
-            } else {
-                groups.push(g.clone());
-
-                // A skipped tick misses it; `Dropped` still comes.
-                if g.last_seen == tick - 1 {
-                    events.push(Event::Lost(g.id));
-                }
-            }
+        if best.is_none() && tick - g.last_seen <= grace {
+            groups.push(g.clone());
         }
     }
 

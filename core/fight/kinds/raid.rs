@@ -196,7 +196,6 @@ pub fn plan(
 /// buys no set that lands more heal on the struck body.
 const SETS: usize = 16;
 
-/// The fewest raiders beside `fielded` whose price walks in.
 pub fn reinforce<T>(
     capacity: i32,
     fielded: &[casting::Body],

@@ -85,6 +85,14 @@ pub struct Engagement {
     pub predicted: Option<crate::exchange::Outcome>,
 }
 
+pub fn enter(phase: Phase, time: i32, e: &Engagement) -> Engagement {
+    Engagement {
+        phase,
+        since: time,
+        ..e.clone()
+    }
+}
+
 /// A body asked of `room`'s spawns under `name`, until it stands.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Cast {

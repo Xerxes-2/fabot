@@ -191,8 +191,7 @@ pub fn close(sight: &mut Sight, order: &[Id], centre: &Pos, creep: &Creep) -> Wi
     toward(sight, creep, &at, engine::MELEE_RANGE)
 }
 
-/// How far `kind` of `h` strikes next tick, a step nearer.
-fn reach(kind: Part, h: &Creep) -> Option<i32> {
+fn reach_next_tick(kind: Part, h: &Creep) -> Option<i32> {
     let ranged = kind == Part::RangedAttack;
     let range = if ranged {
         engine::RANGED_RANGE
@@ -203,7 +202,7 @@ fn reach(kind: Part, h: &Creep) -> Option<i32> {
 }
 
 fn struck(kind: Part, h: &Creep, at: &Pos) -> bool {
-    reach(kind, h).is_some_and(|r| at.within(r, &h.pos))
+    reach_next_tick(kind, h).is_some_and(|r| at.within(r, &h.pos))
 }
 
 /// A tired body's step waits where it stands: the engine refuses it.
@@ -262,10 +261,7 @@ pub fn kite(
             .min_by_key(|t| (-gap(*t), *t))
             .filter(|t| gap(*t) > gap(here));
 
-        match step {
-            Some(t) => step_to(creep, t),
-            _ => hold(sight, creep),
-        }
+        step.map_or_else(|| hold(sight, creep), |t| step_to(creep, t))
     }
 }
 
@@ -312,7 +308,12 @@ fn rescued(raid: &[Creep], members: &[&Creep], creep: &Creep) -> bool {
 
     let ticks_out = 1 + raid
         .iter()
-        .flat_map(|h| [reach(Part::RangedAttack, h), reach(Part::Attack, h)])
+        .flat_map(|h| {
+            [
+                reach_next_tick(Part::RangedAttack, h),
+                reach_next_tick(Part::Attack, h),
+            ]
+        })
         .flatten()
         .fold(0, i32::max);
 
@@ -357,7 +358,7 @@ impl Safety<'_> {
     fn search(
         &self,
         ring: Vec<(Tile, Option<Tile>)>,
-        seen: BTreeSet<Tile>,
+        mut seen: BTreeSet<Tile>,
         depth: i32,
     ) -> Option<Tile> {
         let safe: Vec<(Tile, Option<Tile>)> =
@@ -367,7 +368,6 @@ impl Safety<'_> {
             [] if depth == 0 || ring.is_empty() => None,
             [] => {
                 let mut next: Vec<(Tile, Option<Tile>)> = Vec::new();
-
                 let open = |at: &(Tile, Option<Tile>)| at.1.is_none() || !tiles::on_edge(at.0);
                 for at in ring.iter().copied().filter(open) {
                     for n in tiles::around(at.0) {
@@ -376,38 +376,12 @@ impl Safety<'_> {
                         }
                     }
                 }
-
-                let mut distinct: Vec<(Tile, Option<Tile>)> = Vec::new();
-
-                for at in next {
-                    if !distinct.iter().any(|(t, _)| *t == at.0) {
-                        distinct.push(at);
-                    }
-                }
-
-                let mut seen = seen;
-
-                for (t, _) in &distinct {
-                    seen.insert(*t);
-                }
-
-                self.search(distinct, seen, depth - 1)
+                next.retain(|(t, _)| seen.insert(*t));
+                self.search(next, seen, depth - 1)
             }
-            found => {
-                let mut best: Option<Tile> = None;
-                let mut best_key = None;
-
-                for at in found {
-                    let key = (self.apart(at.0), at.0);
-
-                    if best_key.is_none_or(|b| key < b) {
-                        best = at.1;
-                        best_key = Some(key);
-                    }
-                }
-
-                best
-            }
+            found => (found.iter())
+                .min_by_key(|at| (self.apart(at.0), at.0))
+                .and_then(|at| at.1),
         }
     }
 }
@@ -440,10 +414,7 @@ pub fn step_back(
         )
     };
 
-    match found {
-        Some(t) => step_to(creep, t),
-        _ => hold(sight, creep),
-    }
+    found.map_or_else(|| hold(sight, creep), |t| step_to(creep, t))
 }
 
 pub fn blob(
@@ -486,8 +457,7 @@ pub struct Front {
     pub line: Vec<Pos>,
     pub towers: Vec<Pos>,
     pub struck: Option<Id>,
-    /// What the towers deal a body working the breach.
-    pub strike: i32,
+    pub breach_strike: i32,
     /// The rival's sources outside its ramparts, where pickets stand, and
     /// how many each holds against the towers.
     pub posts: Vec<(Pos, usize)>,
@@ -608,8 +578,8 @@ pub fn siege(
 
     let dismantles = |c: &Creep| c.body.iter().any(|p| p.kind == Part::Work);
 
-    let net =
-        front.strike - engine::HEAL_POWER * members.iter().map(|m| m.live(Part::Heal)).sum::<i32>();
+    let net = front.breach_strike
+        - engine::HEAL_POWER * members.iter().map(|m| m.live(Part::Heal)).sum::<i32>();
 
     let relieved = |c: &Creep| c.live(Part::Work) == 0 || c.hits < 2 * net;
 
@@ -640,10 +610,7 @@ pub fn siege(
 
             (
                 None,
-                match off {
-                    Some(t) => step_to(creep, t),
-                    _ => hold(sight, creep),
-                },
+                off.map_or_else(|| hold(sight, creep), |t| step_to(creep, t)),
             )
         } else if at_breach(creep) {
             (
@@ -718,7 +685,6 @@ pub fn siege(
     }
 }
 
-/// Onto the nearest of our ramparts; where none stands, where it stands.
 pub fn rampart(sight: &mut Sight, creep: &Creep) -> Wish {
     let ramparts: Vec<Pos> = sight
         .ramparts

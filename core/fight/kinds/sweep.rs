@@ -1,7 +1,7 @@
 /// `Sweep` (`ARCHITECTURE.md` §6.2); `step` closes it with None.
 use std::collections::BTreeSet;
 
-use super::super::shape::{Engagement, Phase};
+use super::super::shape::{Engagement, Phase, enter};
 use crate::engine;
 use crate::tactics::Tactic;
 use crate::vocabulary::Part;
@@ -64,14 +64,6 @@ pub fn room_worth(room: &Room, prey: &[&Creep], exposed: &[Pos], held: i32) -> i
 
 pub fn yield_of(s: &Source, held: i32) -> i32 {
     s.energy_capacity * held.max(0) / engine::SOURCE_REGEN_TIME
-}
-
-fn enter(phase: Phase, time: i32, e: &Engagement) -> Engagement {
-    Engagement {
-        phase,
-        since: time,
-        ..e.clone()
-    }
 }
 
 /// Never home (owner).

@@ -185,7 +185,7 @@ impl<'a> Scene<'a> {
                 })
                 .flatten();
             let planned = raid.clone().or(siege).and_then(|(set, (order, outcome))| {
-                let charged = self.charged(room);
+                let charged = raid::charged(room);
                 let mut set = set;
 
                 if raid.is_none() {
@@ -422,7 +422,7 @@ impl<'a> Scene<'a> {
             .filter(|p| p.room == room.name);
         let strike = seen
             .map(|p| ground.threat[tiles::of_pos(p)])
-            .fold(exchange::tower_strike(&self.charged(room), at), i32::max);
+            .fold(exchange::tower_strike(&raid::charged(room), at), i32::max);
         let holds = |set: &[casting::Body]| {
             let mut all = ours.clone();
             all.extend(set.iter().map(|b| fighter::cast(b)));

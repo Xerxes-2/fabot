@@ -2,7 +2,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::super::casting;
-use super::super::shape::{Engagement, Phase};
+use super::super::shape::{self, Engagement, Phase};
 use super::sweep;
 use crate::atlas::Atlas;
 use crate::atlas::tiles::{self, Tile, TileSet};
@@ -138,15 +138,14 @@ pub fn tap_due(c: &Controller, spawn: i32) -> bool {
 }
 
 fn enter(phase: Phase, time: i32, e: &Engagement) -> Engagement {
+    let ignored = if phase == Phase::Draining {
+        0
+    } else {
+        e.ignored
+    };
     Engagement {
-        phase,
-        since: time,
-        ignored: if phase == Phase::Draining {
-            0
-        } else {
-            e.ignored
-        },
-        ..e.clone()
+        ignored,
+        ..shape::enter(phase, time, e)
     }
 }
 

@@ -36,10 +36,6 @@ const RANGER: [Part; 6] = [
 ];
 const DEFENDER: [Part; 2] = [Part::Move, Part::Attack];
 
-fn blocks() -> [Body; 3] {
-    [GUARD.to_vec(), RANGER.to_vec(), DEFENDER.to_vec()]
-}
-
 /// v1's `guardCap`: a home's Defend never disengages, and its loss budget,
 /// not a yield, bounds what it asks (§6.2).
 pub fn home_copies(_: &Body) -> i32 {
@@ -51,25 +47,19 @@ pub fn copies_within(worth: i32, spawn_ticks: i32, body: &[Part]) -> i32 {
         .min(spawn_ticks / (engine::SPAWN_TICKS_PER_PART * body.len() as i32))
 }
 
+fn blocks_fit(capacity: i32, block: &[Part]) -> usize {
+    let n = (capacity / engine::body_cost(block))
+        .min(engine::MAX_BODY_PARTS as i32 / block.len() as i32);
+    n.max(0) as usize
+}
+
 pub fn affordable(capacity: i32) -> Vec<Body> {
-    let mut out = Vec::new();
-
-    for block in blocks() {
-        let most = (capacity / engine::body_cost(&block))
-            .min(engine::MAX_BODY_PARTS as i32 / block.len() as i32);
-
-        for n in 0..most.max(0) as usize {
-            let mut body = Vec::new();
-
-            for _ in 0..=n {
-                body.extend(block.iter().copied());
-            }
-
-            out.push(engine::with_move_last(body));
-        }
-    }
-
-    out
+    [&GUARD[..], &RANGER, &DEFENDER]
+        .into_iter()
+        .flat_map(|block| {
+            (1..=blocks_fit(capacity, block)).map(|n| engine::with_move_last(block.repeat(n)))
+        })
+        .collect()
 }
 
 /// The bodies a set that walks into a rival room is priced from: every one
@@ -260,15 +250,7 @@ pub fn spent(set: &[Body], losses: exchange::Losses, ticks: i32, tick_worth: i32
 const AROUND_ONE: i32 = 8;
 
 pub fn most(capacity: i32, block: &[Part]) -> Body {
-    let n = (capacity / engine::body_cost(block))
-        .min(engine::MAX_BODY_PARTS as i32 / block.len() as i32);
-    let mut body = Vec::new();
-
-    for _ in 0..n.max(0) {
-        body.extend(block.iter().copied());
-    }
-
-    engine::with_move_last(body)
+    engine::with_move_last(block.repeat(blocks_fit(capacity, block)))
 }
 
 /// Two dismantlers of the most WORK the bank buys, then the fewest MOVE:HEAL
@@ -281,19 +263,13 @@ pub fn siege<T>(
     let medic = most(capacity, &[Part::Move, Part::Heal]);
 
     if dismantler.is_empty() {
-        None
-    } else {
-        for n in 1..=AROUND_ONE {
-            let mut set = vec![dismantler.clone(), dismantler.clone()];
-            set.extend((0..n).map(|_| medic.clone()));
-
-            if let Some(plan) = priced(&set) {
-                return Some((set, plan));
-            }
-        }
-
-        None
+        return None;
     }
+    (1..=AROUND_ONE).find_map(|n| {
+        let mut set = vec![dismantler.clone(), dismantler.clone()];
+        set.extend((0..n).map(|_| medic.clone()));
+        priced(&set).map(|plan| (set, plan))
+    })
 }
 
 /// The dismantlers the fielded set lacks of two, then the fewest medics, that

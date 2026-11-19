@@ -2,7 +2,7 @@
 /// `step` closes it with None.
 use std::collections::BTreeSet;
 
-use super::super::shape::{Engagement, Group, Phase};
+use super::super::shape::{Engagement, Group, Phase, enter};
 use crate::engine;
 use crate::tactics::Tactic;
 use crate::tiles::{self};
@@ -31,14 +31,6 @@ pub struct Facts {
     pub on_our_ground: bool,
     pub clear: bool,
     pub raided: bool,
-}
-
-fn enter(phase: Phase, time: i32, e: &Engagement) -> Engagement {
-    Engagement {
-        phase,
-        since: time,
-        ..e.clone()
-    }
 }
 
 /// A home's Defend never disengages: it stops asking, holds and is unanswered.
