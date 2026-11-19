@@ -1,8 +1,10 @@
 /// A colony's flows as slots: each slot casts one body and is the work that
 /// body does, so what is cast and what is offered are one list.
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 
+use crate::HashMap;
 use crate::atlas::{self, Atlas, Mover, Target};
 use crate::declarations;
 use crate::engine;
@@ -113,6 +115,21 @@ pub fn distance(atlas: &Atlas, derived: &Derived, a: &Pos, b: &Pos) -> Option<i3
             .map(|r| r.len() as i32 - 1),
     };
     crossed.map(|n| Atlas::CROSSING_TICKS * n)
+}
+
+pub type PairTicks = RefCell<HashMap<(RoomName, RoomName), Option<i32>>>;
+
+pub fn distance_memo(
+    atlas: &Atlas,
+    derived: &Derived,
+    kept: &PairTicks,
+    a: &Pos,
+    b: &Pos,
+) -> Option<i32> {
+    if a.room == b.room {
+        return a.range(b);
+    }
+    *(kept.borrow_mut().entry((a.room, b.room))).or_insert_with(|| distance(atlas, derived, a, b))
 }
 
 pub fn ticks_to(
@@ -1140,6 +1157,7 @@ pub fn assign<'a>(
                 .flatten()
         })
         .collect();
+    let kept = PairTicks::default();
     for b in loose {
         if b.pattern == Pattern::Scout {
             let free = (slots.iter().enumerate()).find(|(_, s)| {
@@ -1163,7 +1181,11 @@ pub fn assign<'a>(
                 .filter(|(i, s)| !outgrown(derived, b, s) && (!far(s) || serves_far(b, trips[*i])))
                 .filter_map(|(i, s)| {
                     let first = (s.body.is_empty(), s.rank != DEADLINE);
-                    Some((first, distance(atlas, derived, &b.pos, &s.seat)?, i))
+                    Some((
+                        first,
+                        distance_memo(atlas, derived, &kept, &b.pos, &s.seat)?,
+                        i,
+                    ))
                 })
                 .min()
                 .map(|(_, _, i)| i)

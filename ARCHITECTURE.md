@@ -97,6 +97,10 @@ World ──▶ Derived ──▶ decisions (read Derived & Atlas, never World) 
   and outpost road walks carry across ticks in `atlas.carried` (§4), keyed by a
   fingerprint of every room they read, never hand-invalidated, and verified
   against fresh computation by `--check`.
+- **One search's room pairs (`slots::PairTicks`):** `assign` and `Jobs` each
+  keep the ticks of every room pair they price and drop them at their end:
+  between rooms a distance reads only the pair, and not walking the tree per
+  body and seat saves ~3% of warm economy.
 - **Counts are a gate (§9.3):** deterministic per-tick counts (floods, Atlas
   miss rate, Hunt threat lookups) have ceilings in `scripts/ceilings.json`.
 

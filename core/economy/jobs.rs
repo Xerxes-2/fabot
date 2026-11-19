@@ -51,6 +51,7 @@ pub struct Jobs<'a> {
     sinks: Vec<Vec<Spot>>,
     takes: Vec<Vec<Spot>>,
     booked_load: HashMap<Task, i32>,
+    pair_ticks: slots::PairTicks,
     digging: HashMap<Id, i32>,
     /// Per colony: a carrier stands, so a worker refills the ring only
     /// without one.
@@ -421,6 +422,7 @@ impl<'a> Jobs<'a> {
             sinks,
             takes,
             booked_load: HashMap::default(),
+            pair_ticks: slots::PairTicks::default(),
             digging,
             carried,
             booked,
@@ -431,7 +433,8 @@ impl<'a> Jobs<'a> {
     }
 
     fn distance(&self, a: &Pos, b: &Pos) -> i32 {
-        slots::distance(self.atlas, self.derived, a, b).unwrap_or(i32::MAX / 2)
+        slots::distance_memo(self.atlas, self.derived, &self.pair_ticks, a, b)
+            .unwrap_or(i32::MAX / 2)
     }
 
     /// Hivemind's (`dispatcher/resource-*`) priority and weight; `None` where
