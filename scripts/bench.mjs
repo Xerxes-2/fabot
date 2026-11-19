@@ -10,7 +10,7 @@
 // intents and Memory).
 //
 // --counts replays A once and prints §9.3's Atlas counts a tick per window
-// instead: floods, flood-table hits, tiles relaxed.
+// instead: floods, flood-table hits, tiles relaxed, carried values recomputed.
 //
 // Usage: npm run bench -- --a A.js [--b B.js] [--rounds R] [--cold K] capture.jsonl…
 //        npm run bench -- --a A.js --counts capture.jsonl…
@@ -73,17 +73,18 @@ if (flags.counts) {
   const windows = [];
   let bot;
   for await (const [tick, i] of replay()) {
-    if (i === 0) (windows.push({ length: 0, floods: 0, hits: 0, tiles: 0 }), (bot = load(bundles.A)));
+    if (i === 0) (windows.push({ length: 0, floods: 0, hits: 0, tiles: 0, carried: 0 }), (bot = load(bundles.A)));
     const { counts } = runTick(bot, tick);
     const w = windows.at(-1);
     w.length++;
     w.floods += counts.atlasMisses ?? 0;
     w.hits += counts.atlasHits ?? 0;
     w.tiles += counts.flood ?? 0;
+    w.carried += counts.recomputed ?? 0;
   }
   for (const [wi, w] of windows.entries()) {
     const per = (x) => (x / w.length).toFixed(1);
-    console.log(`window ${wi} (${w.length} ticks): ${per(w.floods)} floods a tick, hit rate ${((100 * w.hits) / (w.hits + w.floods)).toFixed(1)}%, ${(w.tiles / w.floods).toFixed(0)} tiles a flood`);
+    console.log(`window ${wi} (${w.length} ticks): ${per(w.floods)} floods a tick, hit rate ${((100 * w.hits) / (w.hits + w.floods)).toFixed(1)}%, ${(w.tiles / w.floods).toFixed(0)} tiles a flood, ${per(w.carried)} trees and walks recomputed a tick`);
   }
   process.exit(0);
 }

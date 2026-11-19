@@ -51,6 +51,8 @@ pub struct RoomGrid {
     pub struck: Option<Rc<TileSet>>,
     /// The weights without creeps or strikes: what stands once out of sight.
     standing: Rc<Table<Weight>>,
+    /// Out of sight, the keepers' posts the strikes were placed from.
+    placed: Option<Vec<Post>>,
     seen: bool,
     /// A keeper room out of sight whose lairs no intel places: crossed last.
     blind: bool,
@@ -686,6 +688,7 @@ impl Atlas {
                 weights,
                 struck,
                 standing,
+                placed: None,
                 seen: true,
                 blind: false,
                 stronghold: false,
@@ -712,31 +715,44 @@ impl Atlas {
             if rooms.contains_key(&c) {
                 continue;
             }
+            let placed = posts.get(&name).copied().flatten().filter(|_| keeper(c));
+            let blind = keeper(c) && placed.is_none();
+            let unseen = |standing: &Rc<Table<Weight>>| {
+                let mut weights = (**standing).clone();
+                let keeper_of = |&(lair, resource): &Post| (lair, resource, Atlas::keeper_reach());
+                let strikers: Vec<_> = placed.unwrap_or(&[]).iter().map(keeper_of).collect();
+                let struck = Atlas::walled(&mut weights, Atlas::strikes(terrain, &strikers));
+                (weights, struck)
+            };
             let grid = match previous.rooms.remove(&c) {
-                Some(grid) if !grid.seen => {
+                Some(grid)
+                    if !grid.seen && grid.blind == blind && grid.placed.as_deref() == placed =>
+                {
+                    if previous.check {
+                        let (weights, struck) = unseen(&grid.standing);
+                        let fresh = (weights == *grid.weights) && struck == grid.struck;
+                        assert!(fresh, "a kept unseen grid differs from a fresh one");
+                    }
                     if grid.floods.borrow().len() >= Atlas::KEPT_FLOODS {
                         grid.floods.borrow_mut().clear();
                     }
                     grid
                 }
                 last => {
-                    let mut weights = match &last {
-                        Some(grid) => (*grid.standing).clone(),
-                        None => Atlas::ground(terrain),
+                    let standing = match &last {
+                        Some(grid) => grid.standing.clone(),
+                        None => Rc::new(Atlas::ground(terrain)),
                     };
-                    let placed = posts.get(&name).copied().flatten().filter(|_| keeper(c));
-                    let keeper_of =
-                        |&(lair, resource): &Post| (lair, resource, Atlas::keeper_reach());
-                    let strikers: Vec<_> = placed.unwrap_or(&[]).iter().map(keeper_of).collect();
-                    let struck = Atlas::walled(&mut weights, Atlas::strikes(terrain, &strikers));
+                    let (weights, struck) = unseen(&standing);
                     let weights = Atlas::reused(last.as_ref(), weights);
                     RoomGrid {
                         floods: Atlas::kept(last, &weights),
-                        standing: weights.clone(),
                         weights,
+                        standing,
+                        placed: placed.map(<[Post]>::to_vec),
                         struck,
                         seen: false,
-                        blind: keeper(c) && placed.is_none(),
+                        blind,
                         stronghold: false,
                     }
                 }

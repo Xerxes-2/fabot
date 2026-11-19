@@ -796,3 +796,31 @@ fn a_walk_round_a_set_never_steps_on_it() {
         }
     }
 }
+
+#[test]
+fn an_unseen_keeper_room_reads_as_its_intel_once_intel_arrives() {
+    let (from, keeper, onto) = (
+        RoomName::new(3, 4),
+        RoomName::new(4, 4),
+        RoomName::new(5, 4),
+    );
+    let rooms: Vec<Room> = (3..=5)
+        .flat_map(|x| (3..=4).map(move |y| RoomName::new(x, y)))
+        .filter(|name| *name != keeper)
+        .map(|name| room_of(name, vec![0; tiles::COUNT], Vec::new()))
+        .collect();
+    let world = world_of_rooms(rooms);
+    let open = [0u8; tiles::COUNT];
+    let posts = [(tiles::index(25, 25), tiles::index(25, 27))];
+    let route = |atlas: &Atlas| atlas.route(&BTreeSet::new(), 4, from, onto).unwrap();
+    let cold = Atlas::following(Atlas::default(), &world, [], [(keeper, &open)]);
+    assert!(!route(&cold).contains(&keeper));
+    let intel = || [(keeper, Some(&posts[..]), false)];
+    let mut warm = Atlas::following(cold, &world, intel(), [(keeper, &open)]);
+    let fresh = Atlas::following(Atlas::default(), &world, intel(), [(keeper, &open)]);
+    assert!(route(&fresh).contains(&keeper));
+    assert_eq!(route(&warm), route(&fresh));
+    warm.check = true;
+    let kept = Atlas::following(warm, &world, intel(), [(keeper, &open)]);
+    assert_eq!(route(&kept), route(&fresh));
+}
