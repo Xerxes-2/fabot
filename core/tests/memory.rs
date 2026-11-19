@@ -36,6 +36,8 @@ fn state_written_back_is_the_text_read() {
         (1, 3)
     );
     assert_eq!(memory.written(&state).as_deref(), Some(OURS));
+    let mut memory = Memory::of_text(OURS.to_string());
+    assert_eq!(memory.written(&memory.state()), None);
 }
 
 #[test]

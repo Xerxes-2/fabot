@@ -26,7 +26,8 @@ fn assignment(held: &str) -> Assignment {
 }
 
 pub struct Memory {
-    /// As the tick found it, for the recorder.
+    /// As the tick found it: the recorder reads it, and `written` skips a text
+    /// equal to it.
     pub text: String,
     root: Map<String, Value>,
     /// Text `JSON.parse` may take but serde refuses is never written over.
@@ -104,7 +105,10 @@ impl Memory {
             "due": state.fight.due,
         });
         v2["expansion"] = json!(state.strategy.expansion);
-        serde_json::to_string(&self.root).ok()
+        // Unchanged, `RawMemory.set` would only copy the text across the seam.
+        serde_json::to_string(&self.root)
+            .ok()
+            .filter(|text| *text != self.text)
     }
 
     pub fn recording(&self) -> bool {
