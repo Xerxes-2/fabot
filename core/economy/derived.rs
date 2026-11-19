@@ -375,23 +375,13 @@ fn body_of(
     store: &Store,
     life: i32,
 ) -> Body {
-    let mut work = 0;
-    let mut carry = 0;
-    let mut moves = 0;
-    let mut claim = 0;
-
-    for part in parts {
-        if part.hits > 0 {
-            match part.kind {
-                Part::Work => work += 1,
-                Part::Carry => carry += 1,
-                Part::Move => moves += 1,
-                Part::Claim => claim += 1,
-                _ => (),
-            }
-        }
-    }
-
+    let count = |kind: Part, cast: bool| {
+        (parts.iter())
+            .filter(|p| p.kind == kind && (cast || p.hits > 0))
+            .count() as i32
+    };
+    let [work, carry, moves, claim] =
+        [Part::Work, Part::Carry, Part::Move, Part::Claim].map(|k| count(k, false));
     Body {
         id,
         name: name.to_string(),
@@ -401,8 +391,8 @@ fn body_of(
         moves,
         claim,
         size: parts.len() as i32,
-        cast_work: parts.iter().filter(|p| p.kind == Part::Work).count() as i32,
-        cast_carry: parts.iter().filter(|p| p.kind == Part::Carry).count() as i32,
+        cast_work: count(Part::Work, true),
+        cast_carry: count(Part::Carry, true),
         store: store.clone(),
         energy: store.amount_of(&Resource::Energy),
         free: store.free(),
