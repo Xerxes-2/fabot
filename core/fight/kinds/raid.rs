@@ -2,18 +2,16 @@
 /// walls off, on the line his towers fire into the heal it pools there.
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::super::casting;
 use super::super::shape::{Engagement, Objective};
+use super::super::{casting, price};
 use super::siege;
+use crate::atlas::Atlas;
 use crate::atlas::tiles::{self, Tile};
-use crate::atlas::{Atlas, Mover, Target};
 use crate::engine;
 use crate::exchange::{self, Fighter, Ground, Losses, Outcome};
-use crate::grid::{self, Footprint};
 use crate::intents::CreepAct;
 use crate::mv::Wish;
 use crate::tactics::{self, Sight, Tactic};
-use crate::tick;
 use crate::vocabulary::{Part, Resource};
 use crate::world::{Creep, Id, Kind, Pos, Room, Structure};
 
@@ -22,7 +20,6 @@ pub fn raids(e: &Engagement) -> bool {
     matches!(e.objective, Objective::Siege(_)) && e.plan.tactic == Tactic::BlobKite
 }
 
-/// His towers that still hold a shot.
 pub fn charged(room: &Room) -> Vec<Pos> {
     (room.structures.iter())
         .filter(|s| s.kind.is_tower() && !s.owner.is_ours())
@@ -167,50 +164,13 @@ pub fn plan(
     standing: &[&Creep],
 ) -> Option<(Vec<Id>, Outcome)> {
     let weights = atlas.weights(room.name)?;
-    let gait = (set.iter())
-        .map(|f| f.gait)
-        .filter(|g| g.moves > 0)
-        .min_by_key(|g| std::cmp::Reverse(grid::step_ticks(*g, engine::PLAIN_WEIGHT)))?;
+    let gait = price::gait(set)?;
     let ground = Ground {
         room: room.name,
         weights,
         barriers: BTreeMap::new(),
     };
-    let open = |t: &Tile| ground.weights[*t].is_some();
-    let sources: Vec<(Tile, i32, i32)> = if standing.is_empty() {
-        let mover = Mover {
-            footprint: Footprint::One,
-            factor: gait,
-        };
-        [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT]
-            .into_iter()
-            .flat_map(|exit| tiles::exit_tiles(exit).split(|t| !open(t)))
-            .filter(|stretch| !stretch.is_empty())
-            .filter_map(|stretch| {
-                let onto = Target {
-                    room: room.name,
-                    tiles: stretch.to_vec(),
-                    range: engine::MELEE_RANGE,
-                    avoid: BTreeSet::new(),
-                    max_hops: tick::SIEGE_HOPS,
-                };
-                let walk = atlas.ticks_to(mover, &onto, from)?;
-
-                Some(
-                    stretch
-                        .iter()
-                        .map(move |t| (*t, walk, stretch.len() as i32)),
-                )
-            })
-            .flatten()
-            .collect()
-    } else {
-        let n = set.len() as i32;
-        standing
-            .iter()
-            .map(|c| (tiles::of_pos(&c.pos), 0, n))
-            .collect()
-    };
+    let sources = price::entries(atlas, &ground, gait, from, set, standing);
 
     let ring = |t: Tile| tactics::seats_at(atlas, &[], room.name, t);
     let plan = exchange::breach_plan(

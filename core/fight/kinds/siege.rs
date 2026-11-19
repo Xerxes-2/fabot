@@ -218,11 +218,10 @@ pub fn barrier_at<'a>(room: &'a Room) -> BTreeMap<Id, &'a Structure> {
         .collect()
 }
 
-/// Whether a walk from the room's exits reaches beside `at`.
-pub fn beside(reached: &TileSet, at: &Pos) -> bool {
+pub fn beside(reached_from_exits: &TileSet, at: &Pos) -> bool {
     tiles::around(tiles::of_pos(at))
         .iter()
-        .any(|t| reached.contains(*t))
+        .any(|t| reached_from_exits.contains(*t))
 }
 
 /// A picket's worth, as a sweep's: the harvest its post denies.
@@ -238,10 +237,10 @@ pub fn exposed(atlas: &Atlas, room: &Room) -> Vec<Pos> {
     exposed_in(&atlas.from_exits(room.name), room)
 }
 
-pub fn exposed_in(reached: &TileSet, room: &Room) -> Vec<Pos> {
+pub fn exposed_in(reached_from_exits: &TileSet, room: &Room) -> Vec<Pos> {
     room.sources
         .iter()
-        .filter(|s| beside(reached, &s.pos))
+        .filter(|s| beside(reached_from_exits, &s.pos))
         .map(|s| s.pos)
         .collect()
 }

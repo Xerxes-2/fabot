@@ -113,10 +113,7 @@ fn between(a: &Foe, b: &Foe) -> Option<i32> {
     if a.at == b.at {
         Some(0)
     } else {
-        match &a.f.pos {
-            Some(p) => range_to(p, &b.f),
-            None => None,
-        }
+        a.f.pos.as_ref().and_then(|p| range_to(p, &b.f))
     }
 }
 
@@ -136,10 +133,7 @@ fn heal_onto(weight: i32, horizon: i32, healer: &Healer, target: &Foe) -> i32 {
             let closes = if horizon <= 0 || range <= engine::MELEE_RANGE {
                 0
             } else {
-                match step_ticks(healer.mender.f.gait, weight) {
-                    Some(ticks) => horizon / ticks,
-                    None => 0,
-                }
+                step_ticks(healer.mender.f.gait, weight).map_or(0, |ticks| horizon / ticks)
             };
 
             let range = range - closes;
@@ -174,10 +168,9 @@ fn heal_from(weight: i32, horizon: i32, healers: &[Healer], target: &Foe) -> i32
 }
 
 fn rampart_over(side: &Side, f: &Fighter) -> i32 {
-    match &f.pos {
-        Some(at) => side.ramparts.get(at).copied().unwrap_or(0),
-        None => 0,
-    }
+    (f.pos.as_ref())
+        .and_then(|at| side.ramparts.get(at).copied())
+        .unwrap_or(0)
 }
 
 /// A raid's price at a horizon: its striking bodies' hits in three phases (the
@@ -256,11 +249,7 @@ fn price_as(
         raid
     };
 
-    let focus: Option<Foe> = if patients.is_empty() {
-        None
-    } else {
-        patients.iter().rev().max_by_key(|h| heal_on(h)).cloned()
-    };
+    let focus: Option<Foe> = patients.iter().rev().max_by_key(|h| heal_on(h)).cloned();
 
     let dropped: i32 = match &focus {
         None => 0,
@@ -289,10 +278,7 @@ fn price_as(
             .sum(),
     };
 
-    let healed = match &focus {
-        Some(focus) => heal_on(focus),
-        None => 0,
-    };
+    let healed = focus.as_ref().map_or(0, &heal_on);
     let tough: Vec<Foe> = striking
         .iter()
         .filter(|h| fighter::tough_hits(&h.f) > 0)
@@ -310,15 +296,10 @@ fn price_as(
             .sum::<i32>()
             - dropped,
         healing: healed,
-        tough_healing: if tough.is_empty() {
-            healed
-        } else {
-            tough
-                .iter()
-                .map(|h| fighter::damage_for(&h.f, heal_on(h)))
-                .max()
-                .unwrap_or(healed)
-        },
+        tough_healing: (tough.iter())
+            .map(|h| fighter::damage_for(&h.f, heal_on(h)))
+            .max()
+            .unwrap_or(healed),
         shield: striking.iter().map(|h| rampart_over(theirs, &h.f)).sum(),
         tough: tough
             .iter()
@@ -431,14 +412,10 @@ fn focused_against(
     let whole: Vec<(Focused, f64)> = bodies.iter().map(|b| (*b, f64::from(b.hits))).collect();
     let total = price.damage + bodies.iter().map(|b| b.back).sum::<i32>();
 
-    let price = if price.shield + price.tough + price.hits == 0 {
-        Price {
-            hits: price.razing,
-            ..price.clone()
-        }
-    } else {
-        price.clone()
-    };
+    let mut price = price.clone();
+    if price.shield + price.tough + price.hits == 0 {
+        price.hits = price.razing;
+    }
 
     let worn = |span: f64, alive: &[(Focused, f64)]| -> Vec<(Focused, f64)> {
         alive
@@ -725,13 +702,9 @@ fn ranges_between(terrain: Terrain, raid: &[Foe], fighters: &[Fighter]) -> (Stan
         .map(|(i, _)| {
             let ranges: Vec<i32> = rows.iter().map(|(_, ranges)| ranges[i]).collect();
 
-            if ranges.is_empty() {
-                (engine::MELEE_RANGE, engine::MELEE_RANGE)
-            } else {
-                let furthest = ranges.iter().copied().max().unwrap_or(engine::MELEE_RANGE);
-                let nearest = ranges.iter().copied().min().unwrap_or(engine::MELEE_RANGE);
-                (engine::MELEE_RANGE.max(furthest), nearest)
-            }
+            let furthest = ranges.iter().copied().max().unwrap_or(engine::MELEE_RANGE);
+            let nearest = ranges.iter().copied().min().unwrap_or(engine::MELEE_RANGE);
+            (engine::MELEE_RANGE.max(furthest), nearest)
         })
         .collect();
 
@@ -748,22 +721,12 @@ fn range_of(
     hostile: &Foe,
 ) -> i32 {
     match rows.iter().find(|(h, _)| h.at == hostile.at) {
-        Some((_, ranges)) if !ranges.is_empty() => {
-            ranges.iter().copied().min().unwrap_or(engine::MELEE_RANGE)
-        }
-        Some(_) => engine::MELEE_RANGE,
-        None => {
-            if fighters.is_empty() {
-                engine::MELEE_RANGE
-            } else {
-                fighters
-                    .iter()
-                    .map(|f| standoff(terrain, raid, f, hostile))
-                    .min()
-                    .unwrap_or(engine::MELEE_RANGE)
-            }
-        }
+        Some((_, ranges)) => ranges.iter().copied().min(),
+        None => (fighters.iter())
+            .map(|f| standoff(terrain, raid, f, hostile))
+            .min(),
     }
+    .unwrap_or(engine::MELEE_RANGE)
 }
 
 #[derive(Debug)]
@@ -834,17 +797,10 @@ fn hit_back(
     let struck: Vec<(Fighter, i32)> = swings
         .iter()
         .filter_map(|(h, _, ranges)| {
-            let least =
-                fighters
-                    .iter()
-                    .zip(ranges.iter())
-                    .fold(None, |least: Option<i32>, (f, range)| {
-                        if *range <= engine::MELEE_RANGE {
-                            Some(f.strikes_back.min(least.unwrap_or(f.strikes_back)))
-                        } else {
-                            least
-                        }
-                    });
+            let least = (fighters.iter().zip(ranges))
+                .filter(|(_, range)| **range <= engine::MELEE_RANGE)
+                .map(|(f, _)| f.strikes_back)
+                .min();
 
             least.filter(|back| *back > 0).map(|back| (h.clone(), back))
         })
@@ -934,30 +890,24 @@ fn on_ramparts(
 }
 
 fn broken_by(terrain: Terrain, horizon: i32, price: &Price, ramparts: &[(Pos, i32)]) -> i32 {
-    if ramparts.is_empty() {
-        0
-    } else {
-        price
-            .dismantlers
-            .iter()
-            .map(|(h, rate)| {
-                let ticks = step_ticks(h.gait, terrain.weight).unwrap_or(i32::MAX);
+    (price.dismantlers.iter())
+        .map(|(h, rate)| {
+            let ticks = step_ticks(h.gait, terrain.weight).unwrap_or(i32::MAX);
 
-                let reaches = |tile: &Pos| {
-                    range_to(tile, h).is_some_and(|r| {
-                        r <= engine::MELEE_RANGE
-                            || i64::from(r - 1) * i64::from(ticks) <= i64::from(horizon)
-                    })
-                };
+            let reaches = |tile: &Pos| {
+                range_to(tile, h).is_some_and(|r| {
+                    r <= engine::MELEE_RANGE
+                        || i64::from(r - 1) * i64::from(ticks) <= i64::from(horizon)
+                })
+            };
 
-                if ramparts.iter().any(|(tile, _)| reaches(tile)) {
-                    *rate
-                } else {
-                    0
-                }
-            })
-            .sum()
-    }
+            if ramparts.iter().any(|(tile, _)| reaches(tile)) {
+                *rate
+            } else {
+                0
+            }
+        })
+        .sum()
 }
 
 /// The slowest of our walks to within reach of the raid; every heal that
@@ -966,17 +916,9 @@ fn arrival_of(terrain: Terrain, fighters: &[Fighter], raid: &[Fighter]) -> i32 {
     fighters.iter().fold(0, |most, f| {
         let walk = match &f.pos {
             None => CAST_WALK,
-            Some(at) => {
-                let tiles: Vec<i32> = raid.iter().filter_map(|h| range_to(at, h)).collect();
-
-                if tiles.is_empty() {
-                    0
-                } else {
-                    let nearest = tiles.iter().copied().min().unwrap_or(0);
-                    (nearest - f.reach).max(0)
-                        * step_ticks(f.gait, terrain.weight).unwrap_or(CAST_WALK)
-                }
-            }
+            Some(at) => (raid.iter().filter_map(|h| range_to(at, h)).min()).map_or(0, |nearest| {
+                (nearest - f.reach).max(0) * step_ticks(f.gait, terrain.weight).unwrap_or(CAST_WALK)
+            }),
         };
 
         most.max(walk)
@@ -1010,12 +952,10 @@ fn approach_of(terrain: Terrain, stance: Stance, fighters: &[Fighter], raid: &[F
         }
     };
 
-    let all: Vec<f64> = fighters
-        .iter()
+    (fighters.iter())
         .flat_map(|f| raid.iter().filter_map(|h| closing(f, h)))
-        .collect();
-
-    all.into_iter().reduce(f64::min).unwrap_or(0.0)
+        .reduce(f64::min)
+        .unwrap_or(0.0)
 }
 
 /// A raider that walks in strikes from its range of the body it strikes, the
@@ -1238,17 +1178,8 @@ fn exchange(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> Out
 /// the reach of any striker of ours and outlasts our towers picks its range,
 /// and the fight is a standoff (owner's call).
 pub fn stance_against(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> Stance {
-    let striking: Vec<&Fighter> = ours.bodies.iter().filter(|f| fighter::strikes(f)).collect();
-
-    let reach = if striking.is_empty() {
-        0
-    } else {
-        striking
-            .iter()
-            .map(|f| f.reach)
-            .min()
-            .unwrap_or(engine::MELEE_RANGE)
-    };
+    let striking = ours.bodies.iter().filter(|f| fighter::strikes(f));
+    let reach = striking.map(|f| f.reach).min().unwrap_or(0);
 
     if stance == Stance::Hold
         && theirs.bodies.iter().any(|h| h.reach > reach)

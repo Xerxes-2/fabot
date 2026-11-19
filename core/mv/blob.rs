@@ -17,28 +17,25 @@ pub fn radius(n: usize) -> i32 {
 
 fn slowest(members: &[&Creep]) -> Mover {
     let factors: Vec<FatigueFactor> = members.iter().map(|c| factor_of(c)).collect();
-    let mut moving: Vec<FatigueFactor> = factors.iter().copied().filter(|f| f.moves > 0).collect();
-    moving.sort_by_key(|f| {
-        Reverse((
-            step_ticks(*f, engine::PLAIN_WEIGHT),
-            step_ticks(*f, engine::SWAMP_WEIGHT),
-            step_ticks(*f, engine::ROAD_WEIGHT),
-        ))
-    });
+    let slowest = (factors.iter().copied())
+        .filter(|f| f.moves > 0)
+        .min_by_key(|f| {
+            Reverse((
+                step_ticks(*f, engine::PLAIN_WEIGHT),
+                step_ticks(*f, engine::SWAMP_WEIGHT),
+                step_ticks(*f, engine::ROAD_WEIGHT),
+            ))
+        });
     Mover {
         footprint: Footprint::One,
-        factor: moving.first().copied().unwrap_or(factors[0]),
+        factor: slowest.unwrap_or(factors[0]),
     }
 }
 
 /// None for a body that cannot move.
 fn fatigue_ticks(creep: &Creep) -> Option<i32> {
     let moves = factor_of(creep).moves;
-    if moves == 0 {
-        None
-    } else {
-        Some((creep.fatigue + 2 * moves - 1) / (2 * moves))
-    }
+    (moves != 0).then(|| (creep.fatigue + 2 * moves - 1) / (2 * moves))
 }
 
 pub fn wishes(

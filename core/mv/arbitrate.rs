@@ -4,10 +4,6 @@ use crate::grid::Footprint;
 use crate::mv::Wish;
 use crate::tiles::{self, Tile};
 
-pub struct Resolution {
-    pub steps: Vec<(String, i32)>,
-}
-
 fn covered(footprint: Footprint, anchor: Tile) -> Vec<Tile> {
     match footprint {
         Footprint::One => vec![anchor],
@@ -25,13 +21,9 @@ fn covered(footprint: Footprint, anchor: Tile) -> Vec<Tile> {
 // A stayer only ever asks back onto its work or its own tile, so movers go
 // first. Names are unique, so the order is total and the input's never shows.
 fn offered(a: &Wish, b: &Wish) -> std::cmp::Ordering {
-    match a.stays().cmp(&b.stays()) {
-        std::cmp::Ordering::Equal => match (b.weight.max(1)).cmp(&a.weight.max(1)) {
-            std::cmp::Ordering::Equal => a.creep.cmp(&b.creep),
-            c => c,
-        },
-        c => c,
-    }
+    (a.stays().cmp(&b.stays()))
+        .then_with(|| b.weight.max(1).cmp(&a.weight.max(1)))
+        .then_with(|| a.creep.cmp(&b.creep))
 }
 
 fn above(s: i32, h: i32, s0: i32, h0: i32) -> bool {
@@ -58,12 +50,12 @@ pub fn scratch() -> Scratch {
 }
 
 /// `held`: the tiles of bodies outside the wishes (theirs, and ours with none).
-pub fn resolve(
+pub fn arbitrate_with(
     scratch: &mut Scratch,
     passable: impl Fn(Tile) -> bool,
     held: &[Tile],
     wishes: &[&Wish],
-) -> Resolution {
+) -> Vec<(String, i32)> {
     let blocked = &mut scratch.blocked;
     let steps_onto = &mut scratch.steps_onto;
     let holder = &mut scratch.holder;
@@ -237,7 +229,7 @@ pub fn resolve(
         .collect();
     steps.sort_by(|a, b| a.0.cmp(&b.0));
 
-    Resolution { steps }
+    steps
 }
 
 struct Search<'a> {
@@ -335,15 +327,6 @@ impl<'a> Search<'a> {
 
         self.path.pop();
     }
-}
-
-pub fn arbitrate_with(
-    scratch: &mut Scratch,
-    passable: impl Fn(Tile) -> bool,
-    held: &[Tile],
-    wishes: &[&Wish],
-) -> Vec<(String, i32)> {
-    resolve(scratch, passable, held, wishes).steps
 }
 
 pub fn arbitrate(

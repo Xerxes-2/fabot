@@ -177,7 +177,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
 
     let alive: BTreeSet<i32> = engagements.iter().map(|e| e.id).collect();
 
-    let (landed, waiting): (Vec<Cast>, Vec<Cast>) = state
+    let (landed, spawning): (Vec<Cast>, Vec<Cast>) = state
         .casts
         .iter()
         .map(|c| match into.get(&c.engagement) {
@@ -232,7 +232,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
         ours,
         armed,
         landed,
-        waiting,
+        spawning,
         boost: casting::cluster_boost(world, declarations),
     };
 
@@ -345,7 +345,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
                         time: world.time,
                         standing: standing.clone(),
                         aging_out: aging_out.clone(),
-                        asked: scene.waiting.iter().any(|c| c.engagement == e.id),
+                        asked: scene.spawning.iter().any(|c| c.engagement == e.id),
                         arrived: scene.members_of(e).iter().all(|c| c.pos.room == e.room),
                         worth: grounds
                             .get(&e.room)
@@ -476,11 +476,11 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
         .collect();
 
     let mut asked = Asked {
-        casts: scene.waiting.clone(),
+        casts: scene.spawning.clone(),
         ..Asked::default()
     };
 
-    for c in &scene.waiting {
+    for c in &scene.spawning {
         asked.queue(c.room, &c.body);
     }
 

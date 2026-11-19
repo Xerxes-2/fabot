@@ -348,7 +348,6 @@ fn pair_price() -> i32 {
     pair().iter().map(|b| engine::body_cost(b)).sum()
 }
 
-/// The pairs the bank buys, three at most.
 pub fn pairs(capacity: i32) -> i32 {
     (capacity / pair_price()).clamp(0, 3)
 }

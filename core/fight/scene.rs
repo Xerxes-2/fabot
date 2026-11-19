@@ -63,9 +63,8 @@ pub(super) struct Scene<'a> {
     pub(super) hostile_at: BTreeMap<Id, Pos>,
     pub(super) ours: BTreeMap<&'a str, &'a Creep>,
     pub(super) armed: BTreeSet<Id>,
-    /// The cast bodies standing, and the ones still in an oven.
     pub(super) landed: Vec<Cast>,
-    pub(super) waiting: Vec<Cast>,
+    pub(super) spawning: Vec<Cast>,
     /// The compound the declared lab cluster covers, and the parts it buys.
     pub(super) boost: Option<(ResourceType, i32)>,
 }
@@ -503,7 +502,7 @@ impl<'a> Scene<'a> {
                 .get(n.as_str())
                 .is_some_and(|c| self.homes.contains(&c.pos.room))
         });
-        let threatens = group
+        let on_our_ground = group
             .as_ref()
             .is_some_and(|g| self.homes.contains(&g.room) || self.worked.contains(&g.room));
 
@@ -515,8 +514,8 @@ impl<'a> Scene<'a> {
             in_reach,
             home,
             held: self.homes.contains(&e.room),
-            asked: self.waiting.iter().any(|c| c.engagement == e.id),
-            threatens,
+            asked: self.spawning.iter().any(|c| c.engagement == e.id),
+            on_our_ground,
             // A room in sight shows where its groups stand: one gone from it
             // has left, whoever else stands there (a core, or Invaders the
             // raid passed), and they open engagements of their own.
@@ -541,7 +540,7 @@ impl<'a> Scene<'a> {
             time: self.world.time,
             standing: standing.clone(),
             aging_out: aging_out.clone(),
-            asked: self.waiting.iter().any(|c| c.engagement == e.id),
+            asked: self.spawning.iter().any(|c| c.engagement == e.id),
             home: e.ours.iter().all(|n| {
                 self.ours
                     .get(n.as_str())
@@ -616,7 +615,7 @@ impl<'a> Scene<'a> {
     /// A pair of the drain stands or is in an oven, or one has tripped: a drain
     /// with none of those holds nothing.
     pub(super) fn pair_worked(&self, e: &Engagement) -> bool {
-        e.ignored > 0 || self.paired(e, &self.waiting, &casting::drains(e.capacity)) > 0
+        e.ignored > 0 || self.paired(e, &self.spawning, &casting::drains(e.capacity)) > 0
     }
 
     /// Whole, as cast: a part struck off is healed back, and only a body lost
@@ -638,7 +637,7 @@ impl<'a> Scene<'a> {
             .collect();
 
         bodies.extend(
-            self.waiting
+            self.spawning
                 .iter()
                 .filter(|c| c.engagement == e.id)
                 .map(|c| (slot_of(&c.name), c.body.clone())),

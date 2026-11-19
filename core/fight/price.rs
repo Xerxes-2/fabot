@@ -30,16 +30,8 @@ impl<'a> Scene<'a> {
         let barriers: Vec<&Structure> = siege::barrier_at(room).values().copied().collect();
         let line: Vec<Pos> = barriers.iter().map(|b| b.pos).collect();
 
-        let gaits: Vec<grid::FatigueFactor> =
-            set.iter().map(|f| f.gait).filter(|g| g.moves > 0).collect();
-
-        let gait = gaits
-            .iter()
-            .copied()
-            .min_by_key(|g| std::cmp::Reverse(grid::step_ticks(*g, engine::PLAIN_WEIGHT)));
-
         let mut weights = atlas.weights(room.name)?;
-        let gait = gait?;
+        let gait = gait(set)?;
 
         for b in &barriers {
             if room
@@ -79,45 +71,10 @@ impl<'a> Scene<'a> {
 
         let towers: Vec<Pos> = self.towers_in(room).into_iter().map(|s| s.pos).collect();
 
-        let mover = Mover {
-            footprint: Footprint::One,
-            factor: gait,
-        };
-        let open = |t: &Tile| ground.weights[*t].is_some();
-        // The atlas walks no body out of the room it stands in: a set inside
-        // is planned from where it stands.
-        let sources: Vec<(Tile, i32, i32)> = if standing.is_empty() {
-            let from = (self.world.spawns.iter())
-                .find(|s| s.pos.room == colony)
-                .map_or_else(|| middle(colony), |s| s.pos);
-            [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT]
-                .into_iter()
-                .flat_map(|exit| tiles::exit_tiles(exit).split(|t| !open(t)))
-                .filter(|stretch| !stretch.is_empty())
-                .filter_map(|stretch| {
-                    let onto = Target {
-                        room: room.name,
-                        tiles: stretch.to_vec(),
-                        range: engine::MELEE_RANGE,
-                        avoid: BTreeSet::new(),
-                        max_hops: tick::SIEGE_HOPS,
-                    };
-                    let walk = atlas.ticks_to(mover, &onto, &from)?;
-                    Some(
-                        stretch
-                            .iter()
-                            .map(move |t| (*t, walk, stretch.len() as i32)),
-                    )
-                })
-                .flatten()
-                .collect()
-        } else {
-            let n = set.len() as i32;
-            standing
-                .iter()
-                .map(|c| (tiles::of_pos(&c.pos), 0, n))
-                .collect()
-        };
+        let from = (self.world.spawns.iter())
+            .find(|s| s.pos.room == colony)
+            .map_or_else(|| middle(colony), |s| s.pos);
+        let sources = entries(atlas, &ground, gait, &from, set, standing);
 
         let attempt = |seated: i32| {
             exchange::breach_plan(
@@ -829,13 +786,13 @@ impl<'a> Scene<'a> {
             Some((set, outcome, landed)) => {
                 // The set asked here holds the rest: priced again without a
                 // body that would not outlast it. Each pass drops one.
-                let after = wait.max(waiting(&[asked_bodies.clone(), set.clone()].concat()));
+                let after = wait.max(waiting(&[&asked_bodies[..], &set[..]].concat()));
                 let held = (Some(after), outcome.ticks());
                 if after > 0 && fielding.iter().any(|c| !outlives(c, after, held.1)) {
                     return self.priced_after(atlas, asked, e, free, declarations, held);
                 }
 
-                let mut priced_bodies: Vec<Fighter> = bodies.clone();
+                let mut priced_bodies: Vec<Fighter> = bodies;
                 priced_bodies.extend(asked_fighters.iter().cloned());
                 priced_bodies.extend(set.iter().map(|b| fighter::cast(b)));
 
@@ -913,6 +870,52 @@ impl<'a> Scene<'a> {
 
 fn cast_all(set: &[casting::Body]) -> Vec<Fighter> {
     set.iter().map(|b| fighter::cast(b)).collect()
+}
+
+pub(super) fn gait(set: &[Fighter]) -> Option<grid::FatigueFactor> {
+    (set.iter())
+        .map(|f| f.gait)
+        .filter(|g| g.moves > 0)
+        .min_by_key(|g| std::cmp::Reverse(grid::step_ticks(*g, engine::PLAIN_WEIGHT)))
+}
+
+pub(super) fn entries(
+    atlas: &Atlas,
+    ground: &Ground,
+    gait: grid::FatigueFactor,
+    from: &Pos,
+    set: &[Fighter],
+    standing: &[&Creep],
+) -> Vec<(Tile, i32, i32)> {
+    // The atlas walks no body out of the room it stands in: a set inside
+    // is planned from where it stands.
+    if !standing.is_empty() {
+        return (standing.iter())
+            .map(|c| (tiles::of_pos(&c.pos), 0, set.len() as i32))
+            .collect();
+    }
+    let mover = Mover {
+        footprint: Footprint::One,
+        factor: gait,
+    };
+    let open = |t: &Tile| ground.weights[*t].is_some();
+    [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT]
+        .into_iter()
+        .flat_map(|exit| tiles::exit_tiles(exit).split(|t| !open(t)))
+        .filter(|stretch| !stretch.is_empty())
+        .filter_map(|stretch| {
+            let onto = Target {
+                room: ground.room,
+                tiles: stretch.to_vec(),
+                range: engine::MELEE_RANGE,
+                avoid: BTreeSet::new(),
+                max_hops: tick::SIEGE_HOPS,
+            };
+            let walk = atlas.ticks_to(mover, &onto, from)?;
+            Some((stretch.iter()).map(move |t| (*t, walk, stretch.len() as i32)))
+        })
+        .flatten()
+        .collect()
 }
 
 /// What a `Defend`'s price found, for its candidates to read (§6.3).

@@ -28,8 +28,7 @@ pub struct Facts {
     /// It defends a home, which it never leaves to its towers alone.
     pub held: bool,
     pub asked: bool,
-    /// The group stands in a room we hold or work.
-    pub threatens: bool,
+    pub on_our_ground: bool,
     pub clear: bool,
     pub raided: bool,
 }
@@ -101,7 +100,7 @@ pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
 
     let left = facts.group.as_ref().is_some_and(|g| g.room != e.room);
 
-    if e.phase == Phase::Forming && left && !facts.threatens {
+    if e.phase == Phase::Forming && left && !facts.on_our_ground {
         return quit();
     }
 
@@ -113,7 +112,7 @@ pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
         return Some(e.clone());
     }
 
-    if matches!(e.phase, Phase::Approaching | Phase::Fighting) && left && facts.threatens {
+    if matches!(e.phase, Phase::Approaching | Phase::Fighting) && left && facts.on_our_ground {
         return toward(Phase::Pursuing);
     }
 
@@ -125,7 +124,7 @@ pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
         return toward(Phase::Fighting);
     }
 
-    if e.phase == Phase::Pursuing && !facts.threatens {
+    if e.phase == Phase::Pursuing && !facts.on_our_ground {
         return quit();
     }
 
@@ -732,7 +731,7 @@ mod tests {
                 home: rng.flip(),
                 held: false,
                 asked: rng.flip(),
-                threatens: rng.flip(),
+                on_our_ground: rng.flip(),
                 clear: rng.flip(),
                 raided: true,
             };
