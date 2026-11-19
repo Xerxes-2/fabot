@@ -1,10 +1,10 @@
 /// What crosses a tick (`ARCHITECTURE.md` §4); each field has one owner.
 use std::collections::BTreeSet;
 
-use super::strategy::StrategyState;
 use fabot_economy::EconomyState;
 use fabot_fight::shape::FightState;
 use fabot_layout::shape::LayoutState;
+use fabot_strategy::StrategyState;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct State {

@@ -1,0 +1,21 @@
+[package]
+name = "fabot-observe"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "mod.rs"
+doctest = false
+
+[dependencies]
+fabot-base = { path = "../base" }
+fabot-atlas = { path = "../atlas" }
+fabot-economy = { path = "../economy" }
+fabot-fight = { path = "../fight" }
+
+[dev-dependencies]
+fabot-base = { path = "../base", features = ["test-support"] }
+
+[lints]
+workspace = true

@@ -7,7 +7,6 @@ use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
 
 use super::state::State;
-use super::strategy::StrategyState;
 use fabot_base::declarations::{
     ColonyPlan, Declarations, Declared, Flow, Node, Outpost, Stage, undeclared,
 };
@@ -16,6 +15,7 @@ use fabot_base::world::{Id, Pos, RoomName};
 use fabot_economy::EconomyState;
 use fabot_economy::task::{Assignment, of_task_id, task_id};
 use fabot_fight::shape::FightState;
+use fabot_strategy::StrategyState;
 
 fn assignment(held: &str) -> Assignment {
     let (slot, task) = held.split_once('|').unwrap_or((held, ""));

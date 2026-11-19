@@ -6,7 +6,7 @@ use wasm_bindgen::{JsCast, JsValue};
 
 use fabot_base::intel::{self, Intel};
 use fabot_core::memory::Memory;
-use fabot_core::observe::metrics::Metrics;
+use fabot_observe::metrics::Metrics;
 use fabot_tactics::{self as tactics, Offer};
 
 /// Read by `npm run observe` and `scripts/capture`.

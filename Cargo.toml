@@ -1,5 +1,5 @@
 [workspace]
-members = ["core/base", "core/atlas", "core/exchange", "core/mv", "core/layout", "core/tactics", "core/economy", "core/fight", "core", "sim"]
+members = ["core/base", "core/atlas", "core/exchange", "core/mv", "core/layout", "core/tactics", "core/economy", "core/fight", "core/strategy", "core/observe", "core", "sim"]
 # Old commits' trees build under .scratch/, an agent's workspace under .claude/: cargo must not claim them.
 exclude = [".scratch", ".claude"]
 
@@ -76,6 +76,7 @@ panic = "abort"
 talc = "5.1.1"
 fabot-core = { path = "core" }
 fabot-tactics = { path = "core/tactics" }
+fabot-observe = { path = "core/observe" }
 js-sys = "0.3"
 wasm-bindgen = "0.2"
 miniz_oxide = { version = "0.9", default-features = false, features = ["with-alloc"] }

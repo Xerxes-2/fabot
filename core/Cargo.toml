@@ -17,6 +17,8 @@ fabot-layout = { path = "layout" }
 fabot-tactics = { path = "tactics" }
 fabot-economy = { path = "economy" }
 fabot-fight = { path = "fight" }
+fabot-strategy = { path = "strategy" }
+fabot-observe = { path = "observe" }
 screeps-game-api.workspace = true
 serde.workspace = true
 serde_json.workspace = true

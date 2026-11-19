@@ -1,0 +1,20 @@
+[package]
+name = "fabot-strategy"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "mod.rs"
+doctest = false
+
+[dependencies]
+fabot-base = { path = "../base" }
+fabot-atlas = { path = "../atlas" }
+fabot-layout = { path = "../layout" }
+fabot-fight = { path = "../fight" }
+screeps-game-api.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

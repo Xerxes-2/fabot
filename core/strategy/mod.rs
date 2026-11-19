@@ -1,6 +1,7 @@
 pub mod expand;
 pub mod intel;
 pub mod outposts;
+mod season;
 
 use fabot_base::intel::Scout;
 use fabot_base::intents::ModuleOutput;

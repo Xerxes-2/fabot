@@ -103,6 +103,7 @@ dependencies = [
  "fabot-core",
  "fabot-exchange",
  "fabot-layout",
+ "fabot-observe",
  "fabot-tactics",
  "js-sys",
  "miniz_oxide",
@@ -139,6 +140,8 @@ dependencies = [
  "fabot-fight",
  "fabot-layout",
  "fabot-mv",
+ "fabot-observe",
+ "fabot-strategy",
  "fabot-tactics",
  "screeps-game-api",
  "serde",
@@ -187,6 +190,28 @@ version = "0.1.0"
 dependencies = [
  "fabot-atlas",
  "fabot-base",
+]
+
+[[package]]
+name = "fabot-observe"
+version = "0.1.0"
+dependencies = [
+ "fabot-atlas",
+ "fabot-base",
+ "fabot-economy",
+ "fabot-fight",
+]
+
+[[package]]
+name = "fabot-strategy"
+version = "0.1.0"
+dependencies = [
+ "fabot-atlas",
+ "fabot-base",
+ "fabot-fight",
+ "fabot-layout",
+ "screeps-game-api",
+ "serde",
 ]
 
 [[package]]
@@ -484,6 +509,7 @@ dependencies = [
  "fabot-base",
  "fabot-core",
  "fabot-layout",
+ "fabot-observe",
  "mimalloc",
  "screeps-game-api",
  "serde_json",

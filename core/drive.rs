@@ -6,7 +6,6 @@ use std::collections::BTreeMap;
 use screeps::LocalRoomTerrain;
 
 use crate::memory::Memory;
-use crate::observe::metrics::{self, Metrics};
 use crate::tick;
 use fabot_atlas::Atlas;
 use fabot_base::declarations::Declarations;
@@ -17,6 +16,7 @@ use fabot_base::world::Pos;
 use fabot_base::world::{RoomName, Sightings, World};
 use fabot_fight::shape::Phase;
 use fabot_layout::shape::Standing;
+use fabot_observe::metrics::{self, Metrics};
 use fabot_tactics::Offer;
 
 /// `ARCHITECTURE.md` §4's heap rows `decide` reads and hands back; empty after a reset.

@@ -6,7 +6,6 @@ use fabot_base::HashMap;
 use screeps::LocalRoomTerrain;
 
 use super::state::State;
-use super::strategy::{self, intel};
 use fabot_atlas::{Atlas, Context, Derived, Mover, derive, target_at, worked};
 use fabot_base::boost;
 use fabot_base::declarations::{Declarations, Refused};
@@ -21,6 +20,7 @@ use fabot_base::vocabulary::Compound;
 use fabot_base::wish::Wish;
 use fabot_base::world::{self, Id, Kind, Pos, Room, RoomName, Sightings, Structure, World};
 use fabot_mv as mv;
+use fabot_strategy::{self as strategy, intel};
 use fabot_tactics as tactics;
 
 pub type ModuleRun = fn(&mut Context, &mut State) -> ModuleOutput;
@@ -362,7 +362,7 @@ const STRATEGY: &str = "strategy";
 pub const MODULES: [Module; 4] = [
     Module {
         name: STRATEGY,
-        run: |c, s| super::strategy::decide(c, &mut s.strategy),
+        run: |c, s| fabot_strategy::decide(c, &mut s.strategy),
     },
     Module {
         name: "fight",

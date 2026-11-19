@@ -11,7 +11,7 @@ use fabot_base::tiles;
 use fabot_base::world::{RoomName, World};
 use fabot_core::drive::{self, Terrains};
 use fabot_core::memory::Memory;
-use fabot_core::observe::metrics::{self, Metrics};
+use fabot_observe::metrics::{self, Metrics};
 use krebs::intents::RoomIntents;
 use screeps::LocalRoomTerrain;
 use serde_json::{Value, json};
@@ -162,7 +162,7 @@ mod tests {
     use std::collections::{BTreeMap, VecDeque};
 
     use fabot_base::world::RoomName;
-    use fabot_core::observe::metrics::{Metrics, Window};
+    use fabot_observe::metrics::{Metrics, Window};
     use serde_json::{Value, json};
 
     #[test]

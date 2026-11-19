@@ -137,18 +137,24 @@ segments over multiple ticks (economy first); a cold tick never spends more than
 | `Exchange` | `fabot-exchange` | Pure combat arithmetic (`outcome`, `cheapest_win`, breach planning) | fighters, terrain | — |
 | `Fight` | `fabot-fight` | Hostile `Tracker`, engagements (`kinds/`: defend, siege, sweep, raid), casting | `Derived`, `Atlas`, `Exchange`, `declarations`, `intel`, `FightState`, Strategy's `preyed` | fight actions, asks, wishes, casts, `FightState` |
 | `Tactics` | `fabot-tactics` | Per-creep combat actions, stepping, and the operator's tactic rules (`ruling`, `checked`) (no `Fight` import) | `Atlas`, `Move`, `Sight` + plan | creep actions, wishes |
-| `Strategy` | `fabot-core` | Intel, observers/scouts, `ColonyPlan` & outpost selection, expansion/abandon, operation opening & global force priority | `World`, `Derived`, `Exchange`, `intel`, `Season`, `standing.layout`, `spare`, fight state | `declarations` (`ColonyPlan`, outposts, claims), `intel`, `expansion` |
-| `Season` | `fabot-core` | Disposable seasonal rules (`worth`, `spent`, season structures/scoring) | `World` | declarations to `Strategy`, season actions |
+| `Strategy` | `fabot-strategy` | Intel, observers/scouts, `ColonyPlan` & outpost selection, expansion/abandon, operation opening & global force priority | `World`, `Derived`, `intel`, `Season`, `standing.layout`, `spare`, fight state | `declarations` (`ColonyPlan`, outposts, claims), `intel`, `expansion` |
+| `Season` | `fabot-strategy` (private `season`) | Disposable seasonal rules (`worth`, `spent`, season structures/scoring) | `World` | declarations to `Strategy`, season actions |
 | `Move` | `fabot-mv` | Room-level movement arbitration (augmenting-path matching) and stepping (`plan`, `blob`) | wishes, `Atlas` | moves & held bodies (`Settled`) |
 | `Executor` | `fabot` | Turning settled actions into API calls | `Settled.actions` | `Game`, refusals |
-| `Observe` | `fabot-core` | Operator views (`health`, faults, CPU, counts, tactic offers) & windowed metrics (§10.5) | world, actions, held, telemetry, refusals, state | observe & metrics segments |
+| `Observe` | `fabot-observe` | Operator views (`health`, faults, CPU, counts, tactic offers) & windowed metrics (§10.5) | world, actions, held, telemetry, refusals, state | observe & metrics segments |
 
 `fabot-base` (`core/base`) also holds what every module shares (`tiles`, `grid`,
 `wish`, `intents`, `declarations`, intel rows, boost queries, `HashMap`) and
 imports no module above it: a crate, so the compiler holds that floor.
+`fabot-core` (`core/`) keeps only the tick (`state`, `memory`, `tick`,
+`drive`) over the module crates.
 
-**Dependency direction:** top to bottom. `Fight` and `Economy` never import each
-other; only `Strategy` imports `Season`. Declarations flow down only.
+**Dependency direction:** top to bottom, enforced at compile time by the Cargo
+workspace: each crate depends only on crates earlier in this chain (`‖` joins
+crates that do not depend on each other): `fabot-base`, `atlas ‖ exchange`,
+`mv`, `layout ‖ tactics`, `economy ‖ fight`, `strategy ‖ observe`, `fabot-core`.
+`fabot-economy` and `fabot-fight` cannot import each other; `season` is a
+private module of `fabot-strategy`. Declarations flow down only.
 
 **Line, comment, and count ceilings** live in `scripts/ceilings.json` (checked
 by `npm run ceiling` and `npm run scenario`).
@@ -549,11 +555,11 @@ expansion, and operation priorities.
 
 ## 8. Season (disposable)
 
-`core/season/` isolates all seasonal rules: scoring, season structures and
-resources, `season::worth` (added to expansion score), and `season::spent`
-(triggers abandon once mined out). Vanilla returns `0.0` / `false`. Only
-`Strategy` imports `Season`; at season end the directory is deleted and
-rewritten without touching the rest of the bot.
+`core/strategy/season.rs`, a private module of `fabot-strategy`, isolates all
+seasonal rules: scoring, season structures and resources, `season::worth`
+(added to expansion score), and `season::spent` (triggers abandon once mined
+out). Vanilla returns `0.0` / `false`. Only `Strategy` imports `Season`; at
+season end the file is rewritten without touching the rest of the bot.
 
 ## 9. Performance
 
