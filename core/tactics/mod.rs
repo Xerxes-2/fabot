@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::atlas::{Atlas, Mover, Target};
 use crate::mv::{blob, plan};
+use fabot_atlas::{Atlas, Mover, Target};
 use fabot_base::declarations::{self, TacticRule};
 use fabot_base::grid::{self, Footprint};
 use fabot_base::intents::CreepAct;

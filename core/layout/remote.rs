@@ -2,7 +2,7 @@
 //! road are placed off the haul's own walk home.
 use std::collections::BTreeMap;
 
-use crate::atlas::{self, Atlas, Mover, Tree};
+use fabot_atlas::{self as atlas, Atlas, Mover, Tree};
 use fabot_base::declarations;
 use fabot_base::grid::Footprint;
 use fabot_base::intents::{Action, RoomAct};

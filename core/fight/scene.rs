@@ -6,9 +6,8 @@ use super::kinds::defend::Facts as DefendFacts;
 use super::kinds::siege::{self, Facts as SiegeFacts};
 use super::kinds::{raid, sweep};
 use super::shape::{Cast, Engagement, Group, Objective, Phase, Plan};
-use crate::atlas::{Atlas, Mover, Target, Tree};
-use crate::exchange::{self, Fighter, fighter};
 use crate::tactics::{self, Tactic};
+use fabot_atlas::{Atlas, Mover, Target, Tree};
 use fabot_base::declarations::{self, TacticRule};
 use fabot_base::grid::{self, Footprint};
 use fabot_base::tiles::Tile;
@@ -17,6 +16,7 @@ use fabot_base::world::{
     Creep, Id, Kind, Owner, Pos, Room, RoomName, Sightings, Structure, World, hostiles, sightings,
 };
 use fabot_base::{engine, tiles};
+use fabot_exchange::{self as exchange, Fighter, fighter};
 
 #[derive(Default)]
 pub(super) struct Asked {

@@ -155,7 +155,7 @@ pub struct Engagement {
     /// What `Exchange` said each time it was answered after standing
     /// unanswered (at open, or a given-up home's re-answered), set against
     /// what happened (§10.1); None while it never was.
-    pub predicted: Option<crate::exchange::Outcome>,
+    pub predicted: Option<fabot_exchange::Outcome>,
 }
 
 pub fn enter(phase: Phase, time: i32, e: &Engagement) -> Engagement {

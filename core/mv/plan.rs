@@ -1,5 +1,5 @@
 /// The caller reads the creep's pace once (`Grid.factorOf`) and hands it in.
-use crate::atlas::{Atlas, Field, Mover, Target};
+use fabot_atlas::{Atlas, Field, Mover, Target};
 use fabot_base::grid::{self, FatigueFactor, Footprint};
 use fabot_base::tiles::{self, Tile, TileSet};
 use fabot_base::wish::Wish;

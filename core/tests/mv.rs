@@ -3,8 +3,8 @@
 //! wishes `plan` builds over generated rooms.
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::atlas::{Atlas, Mover, Target};
 use crate::mv::{arbitrate::arbitrate, plan};
+use fabot_atlas::{Atlas, Mover, Target};
 use fabot_base::grid::{Footprint, factor_of};
 use fabot_base::testing::Dice;
 use fabot_base::tiles::{self, Tile, TileSet};

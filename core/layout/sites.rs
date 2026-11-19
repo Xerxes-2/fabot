@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use crate::atlas::Atlas;
+use fabot_atlas::Atlas;
 use fabot_base::engine;
 use fabot_base::tiles::{self, Tile};
 use fabot_base::world::{Creep, Kind, Pos, Room, Rules, Structure, terrain};

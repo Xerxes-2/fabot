@@ -101,6 +101,7 @@ version = "0.1.0"
 dependencies = [
  "fabot-base",
  "fabot-core",
+ "fabot-exchange",
  "js-sys",
  "miniz_oxide",
  "screeps-game-api",
@@ -108,6 +109,13 @@ dependencies = [
  "serde_json",
  "talc",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "fabot-atlas"
+version = "0.1.0"
+dependencies = [
+ "fabot-base",
 ]
 
 [[package]]
@@ -123,10 +131,20 @@ dependencies = [
 name = "fabot-core"
 version = "0.1.0"
 dependencies = [
+ "fabot-atlas",
  "fabot-base",
+ "fabot-exchange",
  "screeps-game-api",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "fabot-exchange"
+version = "0.1.0"
+dependencies = [
+ "fabot-base",
+ "serde",
 ]
 
 [[package]]

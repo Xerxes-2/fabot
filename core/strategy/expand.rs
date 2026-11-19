@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
-use crate::atlas::Derived;
 use crate::layout::{ground, plan};
 use crate::season;
+use fabot_atlas::Derived;
 use fabot_base::declarations::{ColonyPlan, Declarations, Outpost, REACH_HOPS, Stage, undeclared};
 use fabot_base::engine;
 use fabot_base::intel::{self, Intel, Row};

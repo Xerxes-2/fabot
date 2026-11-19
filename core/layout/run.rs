@@ -1,4 +1,4 @@
-use crate::atlas::Context;
+use fabot_atlas::Context;
 use fabot_base::engine;
 use fabot_base::intents::{Action, ModuleOutput, RoomAct};
 use fabot_base::world::Rules;

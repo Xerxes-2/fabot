@@ -5,15 +5,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::super::shape::{Engagement, Objective};
 use super::super::{casting, price};
 use super::siege;
-use crate::atlas::Atlas;
-use crate::exchange::{self, Fighter, Ground, Losses, Outcome};
 use crate::tactics::{self, Sight, Tactic};
+use fabot_atlas::Atlas;
 use fabot_base::engine;
 use fabot_base::intents::CreepAct;
 use fabot_base::tiles::{self, Tile};
 use fabot_base::vocabulary::{Part, Resource};
 use fabot_base::wish::Wish;
 use fabot_base::world::{Creep, Id, Kind, Pos, Room, Structure};
+use fabot_exchange::{self as exchange, Fighter, Ground, Losses, Outcome};
 
 /// A siege whose set shoots its way in: a ranged blob, no dismantler.
 pub fn raids(e: &Engagement) -> bool {

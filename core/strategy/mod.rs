@@ -8,8 +8,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::fight::shape::{Cast, Engagement};
 use super::layout::{RING_LEVEL, Standing};
-use crate::atlas::{Context, Derived};
 use expand::Expansions;
+use fabot_atlas::{Context, Derived};
 use fabot_base::declarations::{ColonyPlan, Declarations, Outpost, Stage};
 use fabot_base::engine;
 use fabot_base::intel::Intel;

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::atlas::Atlas;
+use fabot_atlas::Atlas;
 use fabot_base::declarations::{self, Declarations, Declared};
 use fabot_base::engine;
 use fabot_base::intel::{Intel, Row, STALE, Scout};

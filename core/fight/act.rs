@@ -6,9 +6,8 @@ use super::kinds::defend::{self, Home};
 use super::kinds::{raid, siege};
 use super::scene::{Hunting, Scene, middle, picket};
 use super::shape::{Engagement, Objective, Phase};
-use crate::atlas::Atlas;
-use crate::exchange;
 use crate::tactics::{self, Tactic};
+use fabot_atlas::Atlas;
 use fabot_base::declarations;
 use fabot_base::intents::{self, Action, ControllerAct, CreepAct, ModuleOutput};
 use fabot_base::tiles::Tile;
@@ -16,6 +15,7 @@ use fabot_base::vocabulary::Part;
 use fabot_base::wish::Wish;
 use fabot_base::world::{self, Creep, Id, Kind, Owner, Pos, RoomName, Structure};
 use fabot_base::{engine, tiles};
+use fabot_exchange as exchange;
 
 pub(super) fn act(
     scene: &Scene,

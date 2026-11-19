@@ -20,6 +20,7 @@ pub struct Context<'a> {
     pub trace: bool,
 }
 
+#[inline]
 pub fn target_at(pos: &Pos, range: i32) -> Target {
     Target {
         room: pos.room,
@@ -86,6 +87,7 @@ impl Derived {
         (self.danger.iter()).find_map(|(r, d)| (*r == room).then_some(d))
     }
 
+    #[inline]
     pub fn tree(&self, home: RoomName) -> Option<&Tree> {
         (self.trees.iter()).find_map(|(h, t)| (*h == home).then_some(t))
     }

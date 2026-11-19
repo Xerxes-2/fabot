@@ -2,7 +2,7 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::atlas::{self, Atlas, Tree};
+use fabot_atlas::{self as atlas, Atlas, Tree};
 use fabot_base::HashMap;
 use fabot_base::declarations::{self, Declarations, Outpost};
 use fabot_base::engine;

@@ -11,6 +11,8 @@ path = "lib.rs"
 
 [dependencies]
 fabot-base = { path = "base" }
+fabot-atlas = { path = "atlas" }
+fabot-exchange = { path = "exchange" }
 screeps-game-api.workspace = true
 serde.workspace = true
 serde_json.workspace = true

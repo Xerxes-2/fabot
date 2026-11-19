@@ -4,11 +4,11 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write;
 
-use crate::atlas::{Atlas, Derived};
 use crate::economy::abandon;
 use crate::economy::bodies::{self, Pattern};
 use crate::economy::task::{Assignment, Task};
 use crate::fight::shape::{Cast, Engagement, Phase};
+use fabot_atlas::{Atlas, Derived};
 use fabot_base::HashMap;
 use fabot_base::declarations::{self, Declarations, Refused};
 use fabot_base::engine;

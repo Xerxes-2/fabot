@@ -3,7 +3,7 @@
 //! the level its room manager builds it at.
 use std::borrow::Cow;
 
-use crate::atlas::Atlas;
+use fabot_atlas::Atlas;
 use fabot_base::engine;
 use fabot_base::tiles::{self, Tile};
 use fabot_base::world::{Kind, Rules};

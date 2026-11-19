@@ -5,13 +5,13 @@ use std::collections::BTreeMap;
 
 use screeps::LocalRoomTerrain;
 
-use crate::atlas::Atlas;
 use crate::fight::shape::Phase;
 use crate::layout::shape::Standing;
 use crate::memory::Memory;
 use crate::observe::metrics::{self, Metrics};
 use crate::tactics::Offer;
 use crate::tick;
+use fabot_atlas::Atlas;
 use fabot_base::declarations::Declarations;
 use fabot_base::intel::Intel;
 use fabot_base::intents::{Action, Refusal};

@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::atlas::Derived;
 use crate::fight::shape::{Engagement, Objective};
+use fabot_atlas::Derived;
 use fabot_base::declarations::{ColonyPlan, Declarations, Outpost, REACH_HOPS};
 use fabot_base::engine;
 use fabot_base::intel::Intel;

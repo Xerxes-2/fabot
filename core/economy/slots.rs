@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 
-use crate::atlas::{self, Atlas, Mover, Target};
+use fabot_atlas::{self as atlas, Atlas, Mover, Target};
 use fabot_base::HashMap;
 use fabot_base::declarations;
 use fabot_base::engine;

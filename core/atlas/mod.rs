@@ -828,6 +828,7 @@ impl Atlas {
         self.grid(room).is_some()
     }
 
+    #[inline]
     pub fn has_terrain(&self, room: RoomName) -> bool {
         self.rooms.contains_key(&room.coords())
     }

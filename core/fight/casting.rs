@@ -3,13 +3,13 @@
 /// to the home's.
 use std::collections::BTreeMap;
 
-use crate::exchange::{self, Fighter, fighter};
 use fabot_base::declarations::Declarations;
 use fabot_base::engine;
 use fabot_base::vocabulary::{Compound, Part, Resource, ResourceType};
 use fabot_base::world::{
     Creep, Id, Kind, Owner, Pos, Room, RoomName, Spawn, Store, Structure, World, terrain,
 };
+use fabot_exchange::{self as exchange, Fighter, fighter};
 
 pub type Body = Vec<Part>;
 

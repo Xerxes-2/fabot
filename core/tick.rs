@@ -5,11 +5,11 @@ use fabot_base::HashMap;
 
 use screeps::LocalRoomTerrain;
 
-use super::atlas::{Atlas, Context, Derived, Mover, derive, target_at, worked};
 use super::mv;
 use super::state::State;
 use super::strategy::{self, intel};
 use super::tactics;
+use fabot_atlas::{Atlas, Context, Derived, Mover, derive, target_at, worked};
 use fabot_base::boost;
 use fabot_base::declarations::{Declarations, Refused};
 use fabot_base::engine;

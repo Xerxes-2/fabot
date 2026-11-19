@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::atlas::{self, Atlas, Context, Mover, Target};
 use crate::mv::plan;
+use fabot_atlas::{self as atlas, Atlas, Context, Mover, Target};
 use fabot_base::declarations;
 use fabot_base::engine;
 use fabot_base::grid::{self, Footprint};

@@ -3,8 +3,8 @@
 use std::cmp::Reverse;
 use std::collections::BTreeSet;
 
-use crate::atlas::{Atlas, Field, Mover, Target};
 use crate::mv::plan;
+use fabot_atlas::{Atlas, Field, Mover, Target};
 use fabot_base::engine;
 use fabot_base::grid::{self, FatigueFactor, Footprint, factor_of, step_ticks};
 use fabot_base::tiles::{self, Tile};

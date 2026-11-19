@@ -3,7 +3,7 @@
 /// still be done, so a walk is not turned mid-way.
 use std::collections::BTreeMap;
 
-use crate::atlas::Atlas;
+use fabot_atlas::Atlas;
 use fabot_base::HashMap;
 use fabot_base::engine;
 use fabot_base::vocabulary::Resource;

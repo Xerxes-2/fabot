@@ -3,9 +3,9 @@
 use std::cell::Cell;
 use std::collections::BTreeMap;
 
-use crate::atlas::{self, Atlas, Context};
 use crate::state::State;
 use crate::tick::{self, Module, TickResult};
+use fabot_atlas::{self as atlas, Atlas, Context};
 use fabot_base::declarations;
 use fabot_base::intents::{Action, CreepAct, ModuleOutput};
 use fabot_base::testing::Dice;

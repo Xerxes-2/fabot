@@ -2,7 +2,7 @@
 //! arithmetic it rests on.
 use std::collections::BTreeSet;
 
-use crate::atlas::{Atlas, Mover, Target};
+use fabot_atlas::{Atlas, Mover, Target};
 use fabot_base::engine;
 use fabot_base::grid::{
     FatigueFactor, Footprint, empty_factor, factor_of, loaded_factor, on_edge, step_ticks,
