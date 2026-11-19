@@ -519,7 +519,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
     state.spare = slots::spare(&derived, &slots);
     let (assigned, holders, retired) =
         slots::assign(&*context.atlas, &derived, &slots, &state.assignments);
-    let (casts, short) = slots::casts(&*context.atlas, &derived, &slots, &holders);
+    let (casts, short) = slots::casts(&derived, &slots, &holders);
 
     let mut intents: Vec<Intent> = (casts.iter())
         .map(|cast| {
@@ -591,6 +591,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
                 spends: false,
                 rank: 0,
                 closed: false,
+                home_walk: 0,
             };
             Some((b.name.as_str(), slot))
         })

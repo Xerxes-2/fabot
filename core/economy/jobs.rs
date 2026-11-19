@@ -822,7 +822,10 @@ impl<'a> Jobs<'a> {
         };
         let repair = |fits: &dyn Fn(&super::derived::RepairFact, i32) -> bool| {
             (grounds.iter())
-                .flat_map(|g| g.repairs.iter().filter(move |r| fits(r, haul(g))))
+                .flat_map(|g| {
+                    let haul = haul(g);
+                    g.repairs.iter().filter(move |r| fits(r, haul))
+                })
                 .min_by_key(|r| near(&r.pos))
                 .map(|r| Task::Repair(r.id.into()))
         };

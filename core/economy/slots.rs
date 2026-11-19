@@ -60,6 +60,7 @@ pub struct Slot {
     pub rank: i32,
     /// Its outpost is stood down: its body keeps it, and waits at home.
     pub closed: bool,
+    pub home_walk: i32,
 }
 
 impl Slot {
@@ -332,6 +333,7 @@ impl Plan<'_> {
             fed_by: None,
             spends: false,
             closed: false,
+            home_walk: 0,
         });
     }
 
@@ -592,10 +594,8 @@ impl Plan<'_> {
         };
         fixed += f64::from(floor) * worker.as_deref().map_or(0.0, upkeep);
         let carried: Vec<(f64, Leg)> = local.iter().chain(&remote).copied().collect();
-        fixed += haulers(&carried, capacity)
-            .iter()
-            .map(|b| upkeep(b))
-            .sum::<f64>();
+        let shapes = haulers(&carried, capacity);
+        fixed += shapes.iter().map(|b| upkeep(b)).sum::<f64>();
         // With no reserve to draw down, spend sized to dig no carrier brings
         // home drinks the bank that would cast those carriers.
         let carry = |flows: &[(f64, Leg)]| {
@@ -604,10 +604,7 @@ impl Plan<'_> {
                 .sum::<i32>()
         };
         let outposts = far_id(colony.room);
-        let shape = haulers(&carried, capacity)
-            .into_iter()
-            .next()
-            .unwrap_or_default();
+        let shape = shapes.into_iter().next().unwrap_or_default();
         let far_digs = (self.out.iter()).filter(|s| far.contains(&s.id));
         let trip = round_trip(atlas, derived, ci, &shape, far_digs);
         // An oven carries nothing yet.
@@ -868,6 +865,7 @@ fn errand(atlas: &mut Atlas, derived: &Derived, job: Job, seat: Pos, key: &str) 
         fed_by: None,
         spends: false,
         closed: false,
+        home_walk: 0,
     })
 }
 
@@ -921,6 +919,7 @@ pub fn plan(
                 fed_by: None,
                 spends: false,
                 closed: true,
+                home_walk: 0,
             });
         }
     }
@@ -962,6 +961,14 @@ pub fn plan(
             out.push(slot);
         }
     }
+    for s in &mut out {
+        s.home_walk = walk_to(atlas, derived, s.colony, &s.body, &s.seat).unwrap_or(0);
+    }
+    debug_assert_eq!(
+        (out.iter().map(|s| &s.id)).collect::<BTreeSet<_>>().len(),
+        out.len(),
+        "a slot id is its holders' key"
+    );
     out
 }
 
@@ -1055,14 +1062,6 @@ pub fn parked(slots: &[Slot], holders: &Holders) -> i32 {
         .count() as i32
 }
 
-pub fn expiring(atlas: &Atlas, derived: &Derived, body: &Body, slot: &Slot) -> bool {
-    expires(body, home_walk(atlas, derived, slot))
-}
-
-fn home_walk(atlas: &Atlas, derived: &Derived, slot: &Slot) -> i32 {
-    walk_to(atlas, derived, slot.colony, &slot.body, &slot.seat).unwrap_or(0)
-}
-
 fn walk_to(atlas: &Atlas, derived: &Derived, ci: usize, body: &[Part], to: &Pos) -> Option<i32> {
     let home = derived.colonies[ci].spawns[0].pos;
     walk(atlas, derived, body, &home, to).or_else(|| distance(atlas, derived, &home, to))
@@ -1099,15 +1098,16 @@ fn outgrown(derived: &Derived, body: &Body, slot: &Slot) -> bool {
             && body.pattern.is_hauler()
             && 2 * body.cast_carry < part_count_in(&slot.body, Part::Carry);
     };
+    if !body.pattern.is_harvester() || !home {
+        return false;
+    }
     let rate = (derived.grounds.iter())
         .filter(|g| g.room == slot.room)
         .flat_map(|g| g.sources.iter())
         .find(|s| &s.id == id)
         .map_or(0, |s| s.rate);
     let dug = |work: i32| (work * engine::HARVEST_PER_WORK).min(rate);
-    body.pattern.is_harvester()
-        && home
-        && dug(body.cast_work) < dug(part_count_in(&slot.body, Part::Work))
+    dug(body.cast_work) < dug(part_count_in(&slot.body, Part::Work))
 }
 
 fn expires(body: &Body, home_walk: i32) -> bool {
@@ -1144,7 +1144,7 @@ pub fn assign<'a>(
                 let s = &slots[**i];
                 s.job != Job::Fill
                     || outgrown(derived, b, s)
-                    || expiring(atlas, derived, b, s)
+                    || expires(b, s.home_walk)
                     || !holders.contains_key(s.id.as_str())
             });
         match kept {
@@ -1155,11 +1155,10 @@ pub fn assign<'a>(
             None => loose.push(b),
         }
     }
-    let walks: Vec<i32> = if loose.iter().all(|b| b.pattern.is_scout()) {
-        Vec::new()
-    } else {
-        slots.iter().map(|s| home_walk(atlas, derived, s)).collect()
-    };
+    let stands = |b: &Body, s: &Slot| !expires(b, s.home_walk) && !outgrown(derived, b, s);
+    let mut taken: Vec<bool> = (slots.iter())
+        .map(|s| (holders.get(s.id.as_str())).is_some_and(|h| h.iter().any(|h| stands(h, s))))
+        .collect();
     let trips: Vec<Option<i32>> = (slots.iter())
         .map(|s| {
             let ids = s.fed_by.as_deref().filter(|_| far(s)).unwrap_or_default();
@@ -1184,27 +1183,23 @@ pub fn assign<'a>(
         // left that home's work, and a young one's.
         let near = |open: bool| {
             (slots.iter().enumerate())
-                .filter(|(_, s)| s.rank != MENDER || b.size == s.body.len() as i32)
-                .filter(|(_, s)| s.job.pattern() == b.pattern && !outgrown(derived, b, s))
-                .filter(|(i, s)| !far(s) || serves_far(b, trips[*i]))
                 .filter(|(i, s)| {
-                    let taken = holders.get(s.id.as_str()).is_some_and(|h| {
-                        h.iter()
-                            .any(|h| !expires(h, walks[*i]) && !outgrown(derived, h, s))
-                    });
-                    if open { !taken } else { !s.job.seated() }
+                    s.job.pattern() == b.pattern
+                        && (if open { !taken[*i] } else { !s.job.seated() })
                 })
+                .filter(|(_, s)| s.rank != MENDER || b.size == s.body.len() as i32)
+                .filter(|(i, s)| !outgrown(derived, b, s) && (!far(s) || serves_far(b, trips[*i])))
                 .filter_map(|(i, s)| {
                     let first = (s.body.is_empty(), s.rank != DEADLINE);
                     Some((first, distance(atlas, derived, &b.pos, &s.seat)?, i))
                 })
                 .min()
-                .map(|(_, d, i)| (d, i))
-                .map(|(_, i)| i)
+                .map(|(_, _, i)| i)
         };
         if let Some(i) = near(true).or_else(|| near(false)) {
             out.insert(b.name.clone(), i);
             holders.entry(slots[i].id.as_str()).or_default().push(b);
+            taken[i] |= stands(b, &slots[i]);
         }
     }
     let relieved = |s: &Slot, h: &[&Body]| {
@@ -1258,7 +1253,6 @@ pub struct Cast {
 /// while the bank pays; the first it cannot pay waits for the bank. With no
 /// harvester or no carrier of its own, a colony casts one at the bank it has.
 pub fn casts(
-    atlas: &Atlas,
     derived: &Derived,
     slots: &[Slot],
     holders: &Holders,
@@ -1266,7 +1260,7 @@ pub fn casts(
     let open = |s: &Slot| {
         holders.get(s.id.as_str()).is_none_or(|h| {
             h.iter()
-                .all(|b| expiring(atlas, derived, b, s) || outgrown(derived, b, s))
+                .all(|b| expires(b, s.home_walk) || outgrown(derived, b, s))
         })
     };
     let held = |id: &str| holders.get(id).is_some_and(|h| !h.is_empty());
@@ -1348,9 +1342,9 @@ pub fn casts(
         // pool, so casts are slots less standing bodies.
         let mut spare: BTreeMap<(RoomName, Pattern, bool), usize> = BTreeMap::new();
         for s in mine.iter().filter(|s| !s.job.seated()) {
-            let standing = holders.get(s.id.as_str()).map_or(0, |h| {
-                h.iter().filter(|b| !expiring(atlas, derived, b, s)).count()
-            });
+            let standing = holders
+                .get(s.id.as_str())
+                .map_or(0, |h| h.iter().filter(|b| !expires(b, s.home_walk)).count());
             *spare.entry((s.room, s.job.pattern(), far(s))).or_default() +=
                 standing.saturating_sub(1);
         }
