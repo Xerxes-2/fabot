@@ -8,7 +8,7 @@ use super::scene::{Hunting, Scene, middle, picket};
 use super::shape::{Engagement, Objective, Phase};
 use crate::atlas::Atlas;
 use crate::exchange;
-use crate::intents::{self, ControllerAct, CreepAct, Intent};
+use crate::intents::{self, Action, ControllerAct, CreepAct, ModuleOutput};
 use crate::mv::Wish;
 use crate::tactics::{self, Tactic};
 use crate::tick;
@@ -25,7 +25,7 @@ pub(super) fn act(
     gates: &BTreeMap<i32, tactics::Gate>,
     given_up: &BTreeSet<i32>,
     grounds: &BTreeMap<RoomName, Hunting>,
-) -> Vec<Intent> {
+) -> ModuleOutput {
     let world = scene.world;
     let mut sight = tactics::Sight {
         atlas,
@@ -164,7 +164,7 @@ pub(super) fn act(
         })
         .collect();
 
-    let mut traced: Vec<Intent> = Vec::new();
+    let mut traced = Vec::new();
     let mut lookups = 0;
     let mut step = |sight: &mut tactics::Sight, c: &Creep| -> (Option<CreepAct>, Wish) {
         let Some(&e) = engaged_in.get(c.name.as_str()) else {
@@ -260,10 +260,7 @@ pub(super) fn act(
                     lookups += scored.len() as i32;
                     let at = |(t, s): &(Tile, i64)| (tiles::to_pos(c.pos.room, *t), *s);
                     if trace && !scored.is_empty() {
-                        traced.push(Intent::Trace(
-                            c.name.clone(),
-                            scored.iter().map(at).collect(),
-                        ));
+                        traced.push((c.name.clone(), scored.iter().map(at).collect()));
                     }
                     return (strike, wish);
                 }
@@ -293,10 +290,11 @@ pub(super) fn act(
             .is_some_and(|c| c.owner.is_ours() && c.safe_mode > 0)
     });
 
-    let mut acts: Vec<Intent> = Vec::new();
+    let mut out = ModuleOutput::default();
 
     if let Some(id) = defend::safe_mode(running, &homes_of(scene, decided)) {
-        acts.push(Intent::Controller(id, ControllerAct::ActivateSafeMode));
+        out.actions
+            .push(Action::Controller(id, ControllerAct::ActivateSafeMode));
     }
 
     let incoming: BTreeMap<String, i32> = decided
@@ -335,11 +333,11 @@ pub(super) fn act(
             }
         }
         chosen.insert(c.name.clone(), wanted);
-        acts.push(Intent::Wish(c.pos.room, wish));
+        out.wishes.push((c.pos.room, wish));
     }
 
-    acts.extend(traced);
-    acts.push(Intent::Count("threatLookups", lookups));
+    out.telemetry.traces = traced;
+    out.telemetry.counts.push(("threatLookups", lookups));
     let busy = |slot: u8| -> BTreeSet<String> {
         let taken = chosen
             .iter()
@@ -351,12 +349,13 @@ pub(super) fn act(
         chosen.entry(healer).or_default().push(act);
     }
 
-    acts.extend(chosen.into_iter().flat_map(|(name, wanted)| {
-        let done = intents::performed(&wanted);
-        done.into_iter()
-            .map(move |a| Intent::Creep(name.clone(), a))
-    }));
-    acts
+    out.actions
+        .extend(chosen.into_iter().flat_map(|(name, wanted)| {
+            let done = intents::performed(&wanted);
+            done.into_iter()
+                .map(move |a| Action::Creep(name.clone(), a))
+        }));
+    out
 }
 
 /// A siege's wall and what holds it: his line, his towers' strike on it, and

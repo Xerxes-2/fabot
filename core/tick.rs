@@ -9,7 +9,7 @@ use screeps::LocalRoomTerrain;
 use super::atlas::{Atlas, Mover, Target, Tree};
 use super::engine;
 use super::grid::{self, Footprint};
-use super::intents::{Ask, CreepAct, Intent, Rank, SpawnAct};
+use super::intents::{Action, Ask, CreepAct, ModuleOutput, Rank, Settled, SpawnAct, Telemetry};
 use super::mv;
 use super::state::State;
 use super::strategy::{
@@ -257,7 +257,7 @@ pub struct Context<'a> {
     pub sightings: &'a Sightings,
     pub intel: &'a Intel,
     pub derived: &'a Derived,
-    /// The harness's trace is wanted (`Intent::Trace`); never live.
+    /// The harness's trace is wanted (`Telemetry.traces`); never live.
     pub trace: bool,
 }
 
@@ -457,7 +457,7 @@ fn open(world: &World, sightings: &Sightings, owned: &BTreeSet<RoomName>, room: 
 
 /// A module writes its rows of the state only once it cannot fault: a fault
 /// leaves the state as it found it.
-pub type ModuleRun = fn(&mut Context, &mut State) -> Result<Vec<Intent>, String>;
+pub type ModuleRun = fn(&mut Context, &mut State) -> Result<ModuleOutput, String>;
 
 pub struct Module {
     pub name: &'static str,
@@ -479,15 +479,17 @@ pub struct Report {
 }
 
 pub struct TickResult {
-    pub intents: Vec<Intent>,
+    pub settled: Settled,
+    pub telemetry: Telemetry,
     pub state: State,
     pub reports: Vec<Report>,
 }
 
-fn by_room<'a, T>(pairs: &[(RoomName, &'a T)]) -> Vec<(RoomName, Vec<&'a T>)> {
+fn by_room<T>(pairs: &[(RoomName, T)]) -> Vec<(RoomName, Vec<&T>)> {
     let mut groups: HashMap<RoomName, Vec<&T>> = HashMap::default();
     let mut rooms: Vec<RoomName> = Vec::new();
-    for &(room, value) in pairs {
+    for (room, value) in pairs {
+        let room = *room;
         groups
             .entry(room)
             .or_insert_with(|| {
@@ -522,7 +524,7 @@ fn drawn(r: &Room, spawn: &Pos) -> Vec<Id> {
 /// economy's, on its idle spawns while the bank pays; a fight ask the bank
 /// cannot pay yet holds the economy's behind it, one its capacity never pays
 /// holds nothing.
-pub fn queue(world: &World, asks: &[(RoomName, &Ask)]) -> Vec<Intent> {
+pub fn queue(world: &World, asks: &[(RoomName, Ask)]) -> Vec<Action> {
     let mut out = Vec::new();
     for (room, mut asks) in by_room(asks) {
         asks.sort_by_key(|a| a.rank);
@@ -544,7 +546,7 @@ pub fn queue(world: &World, asks: &[(RoomName, &Ask)]) -> Vec<Intent> {
             let Some(spawn) = idle.next() else {
                 break;
             };
-            out.push(Intent::Spawn(
+            out.push(Action::Spawn(
                 spawn.id,
                 SpawnAct::SpawnCreep(a.body.clone(), a.name.clone(), drawn(r, &spawn.pos)),
             ));
@@ -556,13 +558,14 @@ pub fn queue(world: &World, asks: &[(RoomName, &Ask)]) -> Vec<Intent> {
 
 /// One arbitration per room over every module's wishes (§3's `Move`); a creep
 /// of ours that wishes nothing holds its tile.
-pub fn arbitrate(context: &Context, wishes: &[(RoomName, &mv::Wish)]) -> Vec<Intent> {
+pub fn arbitrate(context: &Context, wishes: &[(RoomName, mv::Wish)]) -> (Vec<Action>, Vec<String>) {
     let groups = by_room(wishes);
     let wished: BTreeSet<&str> = (groups.iter())
         .flat_map(|(_, ws)| ws.iter().map(|w| w.creep.as_str()))
         .collect();
     let mut scratch = mv::arbitrate::scratch();
     let mut out = Vec::new();
+    let mut stood = Vec::new();
 
     for (room, ws) in groups {
         // A wish onto a hostile's tile follows it: the engine moves the body
@@ -573,7 +576,7 @@ pub fn arbitrate(context: &Context, wishes: &[(RoomName, &mv::Wish)]) -> Vec<Int
         let (glued, ws): (Vec<&mv::Wish>, Vec<&mv::Wish>) =
             (ws.into_iter()).partition(|w| w.head != w.at && theirs.contains(&w.head));
         out.extend(glued.iter().map(|w| {
-            Intent::Creep(
+            Action::Creep(
                 w.creep.clone(),
                 CreepAct::Move(tiles::direction(w.at, w.head)),
             )
@@ -593,39 +596,27 @@ pub fn arbitrate(context: &Context, wishes: &[(RoomName, &mv::Wish)]) -> Vec<Int
             &ws,
         );
         let stepped: BTreeSet<&str> = steps.iter().map(|(name, _)| name.as_str()).collect();
-        out.extend(
+        stood.extend(
             (ws.iter())
                 .filter(|w| w.moves && !w.stays() && !stepped.contains(w.creep.as_str()))
-                .map(|w| Intent::Held(w.creep.clone())),
+                .map(|w| w.creep.clone()),
         );
         out.extend(
             steps
                 .into_iter()
-                .map(|(name, direction)| Intent::Creep(name, CreepAct::Move(direction))),
+                .map(|(name, direction)| Action::Creep(name, CreepAct::Move(direction))),
         );
     }
-    out
+    (out, stood)
 }
 
-fn settle(context: &mut Context, intents: &[Intent]) -> Vec<Intent> {
-    let intents = super::boost::stop(context, intents);
-    let mut asks = Vec::new();
-    let mut wishes = Vec::new();
-    for i in intents.iter() {
-        match i {
-            Intent::Queue(room, ask) => asks.push((*room, ask)),
-            Intent::Wish(room, wish) => wishes.push((*room, wish)),
-            _ => (),
-        }
-    }
-    let mut out = queue(context.world, &asks);
-    out.extend(
-        (intents.iter())
-            .filter(|i| !i.is_queue() && !i.is_wish())
-            .cloned(),
-    );
-    out.extend(arbitrate(context, &wishes));
-    out
+fn settle(context: &mut Context, asked: &ModuleOutput) -> Settled {
+    let mut out = queue(context.world, &asked.asks);
+    out.extend(asked.actions.iter().cloned());
+    let walks = super::boost::stop(context, &mut out, &asked.wishes);
+    let (moves, held) = arbitrate(context, walks.as_deref().unwrap_or(&asked.wishes));
+    out.extend(moves);
+    Settled { actions: out, held }
 }
 
 pub fn run(
@@ -634,7 +625,7 @@ pub fn run(
     context: &mut Context,
     mut state: State,
 ) -> TickResult {
-    let mut intents: Vec<Intent> = Vec::new();
+    let mut asked = ModuleOutput::default();
     let mut reports: Vec<Report> = Vec::new();
 
     for m in modules {
@@ -649,43 +640,33 @@ pub fn run(
         let start = clock();
         let (produced, outcome) = match (m.run)(context, &mut state) {
             Ok(produced) => (produced, Outcome::Ran),
-            Err(error) => (Vec::new(), Outcome::Faulted(error)),
+            Err(error) => (ModuleOutput::default(), Outcome::Faulted(error)),
         };
         reports.push(Report {
             module: m.name,
             cpu: clock() - start,
             outcome,
         });
-        intents.extend(produced);
+        asked.extend(produced);
     }
 
     let start = clock();
 
     // A fault settling the fight's asks and wishes costs only the fight's.
-    let is_fight = |i: &Intent| -> bool {
-        match i {
-            Intent::Queue(_, ask) => ask.rank == Rank::Fight,
-            Intent::Wish(_, wish) => fights(&wish.creep),
-            _ => false,
-        }
-    };
-
     let (settled, outcome) = if let Ok(settled) =
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| settle(context, &intents)))
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| settle(context, &asked)))
     {
         (settled, Outcome::Ran)
     } else {
-        let rest: Vec<Intent> = intents.iter().filter(|i| !is_fight(i)).cloned().collect();
-        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| settle(context, &rest))) {
-            Ok(settled) => (settled, Outcome::Faulted("settle".to_string())),
-            Err(_) => (
-                intents
-                    .into_iter()
-                    .filter(|i| !i.is_queue() && !i.is_wish())
-                    .collect(),
-                Outcome::Faulted("settle".to_string()),
-            ),
-        }
+        asked.asks.retain(|(_, a)| a.rank != Rank::Fight);
+        asked.wishes.retain(|(_, w)| !fights(&w.creep));
+        let settled =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| settle(context, &asked)))
+                .unwrap_or_else(|_| Settled {
+                    actions: asked.actions.clone(),
+                    held: Vec::new(),
+                });
+        (settled, Outcome::Faulted("settle".to_string()))
     };
 
     reports.push(Report {
@@ -695,7 +676,8 @@ pub fn run(
     });
 
     TickResult {
-        intents: settled,
+        settled,
+        telemetry: asked.telemetry,
         state,
         reports,
     }

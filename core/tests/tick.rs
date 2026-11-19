@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use super::Dice;
 use crate::atlas::Atlas;
-use crate::intents::{CreepAct, Intent};
+use crate::intents::{Action, CreepAct, ModuleOutput};
 use crate::state::State;
 use crate::tick::{self, Context, Module, Outcome, TickResult};
 use crate::world::World;
@@ -14,14 +14,15 @@ use crate::world::World;
 const NAMES: [&str; 8] = ["m0", "m1", "m2", "m3", "m4", "m5", "m6", "m7"];
 
 /// Module `I` says its name once, as creep `cI`.
-fn say<const I: usize>(_: &mut Context, _: &mut State) -> Result<Vec<Intent>, String> {
-    Ok(vec![Intent::Creep(
+fn say<const I: usize>(_: &mut Context, _: &mut State) -> Result<ModuleOutput, String> {
+    Ok(vec![Action::Creep(
         format!("c{I}"),
         CreepAct::Say(NAMES[I].to_string()),
-    )])
+    )]
+    .into())
 }
 
-fn broke<const I: usize>(_: &mut Context, _: &mut State) -> Result<Vec<Intent>, String> {
+fn broke<const I: usize>(_: &mut Context, _: &mut State) -> Result<ModuleOutput, String> {
     Err(format!("{} broke", NAMES[I]))
 }
 
@@ -88,11 +89,11 @@ fn run(throws: &[bool], state: State) -> TickResult {
 }
 
 /// What a module said.
-fn said(intents: &[Intent]) -> Vec<(String, String)> {
+fn said(intents: &[Action]) -> Vec<(String, String)> {
     intents
         .iter()
         .filter_map(|i| match i {
-            Intent::Creep(name, CreepAct::Say(message)) => Some((name.clone(), message.clone())),
+            Action::Creep(name, CreepAct::Say(message)) => Some((name.clone(), message.clone())),
             _ => None,
         })
         .collect()
@@ -110,7 +111,7 @@ fn a_throw_costs_its_own_modules_intents_and_no_others() {
             .filter(|(_, t)| !**t)
             .map(|(i, _)| (format!("c{i}"), NAMES[i].to_string()))
             .collect();
-        assert_eq!(said(&result.intents), expected, "{throws:?}");
+        assert_eq!(said(&result.settled.actions), expected, "{throws:?}");
     }
 }
 
@@ -147,6 +148,8 @@ fn a_switched_off_module_runs_nothing_and_spends_nothing() {
         let report = &result.reports[off];
         assert_eq!(report.outcome, Outcome::Off);
         assert_eq!(report.cpu, 0.0);
-        assert!(!said(&result.intents).contains(&(format!("c{off}"), NAMES[off].to_string())));
+        assert!(
+            !said(&result.settled.actions).contains(&(format!("c{off}"), NAMES[off].to_string()))
+        );
     }
 }

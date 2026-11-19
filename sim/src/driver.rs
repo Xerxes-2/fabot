@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use fabot_core::atlas::tiles;
 use fabot_core::drive::{self, Terrains};
-use fabot_core::intents::Intent;
+use fabot_core::intents::Action;
 use fabot_core::memory::Memory;
 use fabot_core::observe::metrics::{self, Metrics};
 use fabot_core::strategy::intel::Intel;
@@ -90,7 +90,7 @@ impl<W: Write> Driver<W> {
                 read_ms.set(ms(at));
                 (world, maps as &dyn Terrains, ())
             },
-            execute: |intents: &[Intent]| {
+            execute: |intents: &[Action]| {
                 let (intents, refusals) = act::run(v, intents);
                 stored = Some(intents);
                 refusals

@@ -36,7 +36,7 @@ abstractions.
 ## 1. The tick
 
 ```
-Game ──World.ofGame──▶ World ──decide──▶ Intents ──Executor──▶ Game
+Game ──World.ofGame──▶ World ──decide──▶ Actions ──Executor──▶ Game
             ▲                    │
          State (Memory + segments + heap, §4) ──── writes back ────┘
 ```
@@ -45,16 +45,20 @@ Game ──World.ofGame──▶ World ──decide──▶ Intents ──Execu
   in `src/app/`; nothing in `core/` touches `Game`. `core/drive.rs` is the
   shared tick seam called by both the WASM driver (`src/app/driver.rs`) and the
   native simulator (`sim/`).
-- **Deterministic `decide`:** `decide(State, World) -> (Intents, State')` has no
+- **Deterministic `decide`:** `decide(State, World) -> (Settled, Telemetry, State')` has no
   unseeded randomness and reads no clock except for phase timing (never read by
   decisions). Any recorded `(State, World)` replays identically (§10.4). Inside
   module boundaries, code is imperative (§9.2).
-- **Central settlement:** modules emit spawn asks and move wishes; `Tick`
-  settles them once after all modules run (one spawn queue and one movement
-  arbitration per room).
-- **`Executor`** turns actor-typed intents (`Creep`, `Spawn`, `Room`, `Tower`,
-  `Controller`, `Link`, `Lab`, `Terminal`, `Observe`) into API calls and never
-  decides.
+- **Central settlement:** a module returns a `ModuleOutput`: engine actions,
+  spawn asks, move wishes and telemetry (counts, short casts, traces) that
+  never reaches the game. `Tick` settles every module's asks and wishes once
+  (one spawn queue and one movement arbitration per room) into `Settled`: the
+  actions, and the bodies arbitration left standing for the metrics. Split by
+  type, so the executor matches only what reaches the game and `intents`
+  imports neither `Fight` nor `Economy`.
+- **`Executor`** turns each `Action` (`Creep`, `Spawn`, `Room`, `Tower`,
+  `Controller`, `Link`, `Lab`, `Terminal`, `Observe`) into an API call and
+  never decides; the driver prints the traces.
 
 **No full/light tick.** Instead of alternating whole ticks, each module names
 its own invalidation key and recomputes when the key changes or its due tick
@@ -74,7 +78,7 @@ degrades.
 **Within the tick, derive once:**
 
 ```
-World ──▶ Derived ──▶ decisions (read Derived & Atlas, never World) ──▶ Intents
+World ──▶ Derived ──▶ decisions (read Derived & Atlas, never World) ──▶ ModuleOutput
 ```
 
 - `Derived` (`core/tick.rs`) is built once per tick below `Fight` and `Economy`
@@ -121,15 +125,15 @@ segments over multiple ticks (economy first); a cold tick never spends more than
 | `World` | Single-pass tick snapshot, event-log strikes/destroys, per-tick `rules` (`CONTROLLER_STRUCTURES`) | `Game` | — |
 | `Atlas` | Room graph (region nodes, border-stretch crossings, keeper-strike avoidance, blind keeper & stronghold penalty) and per-room tile grid (weights, reverse floods, seats, footprint queries); out-of-sight grids hold what stood when last seen (else terrain) and stay kept with their floods under the same bound as part of the flood table, not a second cache | `World`, `terrain`, `intel.rooms` | flood table, `atlas.carried` |
 | `Economy` | Slots, casts, sticky tasks, logistics dispatcher, links, labs, terminals, abandon | `Derived`, `Atlas`, `declarations`, `State` | tasks, casts, `assignments`, `spare` |
-| `Layout` | Colony placement plan (Hivemind planner + xxscreeps JPS), rampart ring, construction sites, buried-road destroy, tower firing | `Derived`, `Atlas`, `declarations` | sites, destroys, tower intents, `standing.layout` |
+| `Layout` | Colony placement plan (Hivemind planner + xxscreeps JPS), rampart ring, construction sites, buried-road destroy, tower firing | `Derived`, `Atlas`, `declarations` | sites, destroys, tower actions, `standing.layout` |
 | `Exchange` | Pure combat arithmetic (`outcome`, `cheapest_win`, breach planning) | fighters, terrain | — |
-| `Fight` | Hostile `Tracker`, engagements (`kinds/`: defend, siege, sweep, raid), casting | `Derived`, `Atlas`, `Exchange`, `declarations`, `intel`, `State` | fight intents, casts, `State` fight rows |
-| `Tactics` | Per-creep combat actions & stepping (no `Fight` import) | `Atlas`, `Move`, `Sight` + plan | creep intents, wishes |
+| `Fight` | Hostile `Tracker`, engagements (`kinds/`: defend, siege, sweep, raid), casting | `Derived`, `Atlas`, `Exchange`, `declarations`, `intel`, `State` | fight actions, asks, wishes, casts, `State` fight rows |
+| `Tactics` | Per-creep combat actions & stepping (no `Fight` import) | `Atlas`, `Move`, `Sight` + plan | creep actions, wishes |
 | `Strategy` | Intel, observers/scouts, `ColonyPlan` & outpost selection, expansion/abandon, operation opening & global force priority | `World`, `Derived`, `Exchange`, `intel`, `Season`, `standing.layout`, `spare`, fight state | `declarations` (`ColonyPlan`, outposts, claims), `intel`, `expansion` |
-| `Season` | Disposable seasonal rules (`worth`, `spent`, season structures/scoring) | `World` | declarations to `Strategy`, season intents |
-| `Move` | Room-level movement arbitration (augmenting-path matching) and stepping (`plan`, `blob`) | wishes, `Atlas` | move & `Held` intents |
-| `Executor` | Turning settled intents into API calls | intents | `Game`, refusals |
-| `Observe` | Operator views (`health`, faults, CPU, counts, tactic offers) & windowed metrics (§10.5) | world, intents, refusals, state | observe & metrics segments |
+| `Season` | Disposable seasonal rules (`worth`, `spent`, season structures/scoring) | `World` | declarations to `Strategy`, season actions |
+| `Move` | Room-level movement arbitration (augmenting-path matching) and stepping (`plan`, `blob`) | wishes, `Atlas` | moves & held bodies (`Settled`) |
+| `Executor` | Turning settled actions into API calls | `Settled.actions` | `Game`, refusals |
+| `Observe` | Operator views (`health`, faults, CPU, counts, tactic offers) & windowed metrics (§10.5) | world, actions, held, telemetry, refusals, state | observe & metrics segments |
 
 **Dependency direction:** top to bottom. `Fight` and `Economy` never import each
 other; only `Strategy` imports `Season`. Declarations flow down only.
@@ -431,7 +435,7 @@ and `cheapest_win` (adds only to already-standing `ours`).
 
 ### 6.4 Tactics — what a committed body does
 
-`core/tactics` (no `Fight` import) maps `(Sight, plan, body)` to intents:
+`core/tactics` (no `Fight` import) maps `(Sight, plan, body)` to actions and wishes:
 
 | Tactic | Behaviour |
 |---|---|
@@ -693,7 +697,7 @@ progress), **exposure** (ticks a raid could cost a colony a level — a foe in i
 or its nearest outposts while below RCL3, lacking a stocked tower, or unable to
 fire safe mode), and **losses** (energy). Tracks idle share, churn, returned
 loads, spend split (within 2% of engine ledger), spawn use, stale sites,
-refusals, CPU/phase, deaths, hostile dwell, and `Intent::Held` steps. Alert
+refusals, CPU/phase, deaths, hostile dwell, and held steps (`Settled.held`). Alert
 thresholds (`observe health`) are `1.5 × healthy p99` from
 `npm run metrics:baseline` (0 for invariants); a metric a healthy run already
 fires is a fault or a wrong definition, never a looser bound. CPU budget ≤ 1% on

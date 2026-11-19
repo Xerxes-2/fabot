@@ -135,7 +135,7 @@ pub struct Refusal {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Intent {
+pub enum Action {
     Creep(String, CreepAct),
     Spawn(Id, SpawnAct),
     Room(RoomName, RoomAct),
@@ -146,44 +146,68 @@ pub enum Intent {
     Terminal(Id, TerminalAct),
     /// An observer and the room it brings in sight next tick.
     Observe(Id, RoomName),
-    /// Tick serves these from the room's queue; none reaches `Executor`.
-    Queue(RoomName, Ask),
-    /// Tick arbitrates every module's wishes in a room as one.
-    Wish(RoomName, Wish),
-    /// A body's scored tiles, for the harness's trace; nothing reaches the game.
-    Trace(String, Vec<(crate::world::Pos, i64)>),
-    /// Summed into the observe segment's counts (§9.3).
-    Count(&'static str, i32),
-    /// A colony's open slots of a pattern left uncast; nothing reaches the game.
-    Short(RoomName, crate::economy::bodies::Pattern, i32),
-    /// A movable body the arbitration left standing: read by the metrics alone, nothing reaches the game.
-    Held(String),
 }
 
-impl Intent {
+impl Action {
     pub fn actor(&self) -> String {
         match self {
-            Intent::Creep(name, _) | Intent::Trace(name, _) | Intent::Held(name) => name.clone(),
-            Intent::Wish(_, wish) => wish.creep.clone(),
-            Intent::Spawn(id, _) | Intent::Tower(id, _) | Intent::Controller(id, _) => {
+            Action::Creep(name, _) => name.clone(),
+            Action::Spawn(id, _) | Action::Tower(id, _) | Action::Controller(id, _) => {
                 id.to_string()
             }
-            Intent::Link(id, _) | Intent::Lab(id, _) | Intent::Terminal(id, _) => id.to_string(),
-            Intent::Observe(id, _) => id.to_string(),
-            Intent::Room(room, _) | Intent::Queue(room, _) | Intent::Short(room, _, _) => {
-                room.to_string()
-            }
-            Intent::Count(name, _) => name.to_string(),
+            Action::Link(id, _) | Action::Lab(id, _) | Action::Terminal(id, _) => id.to_string(),
+            Action::Observe(id, _) => id.to_string(),
+            Action::Room(room, _) => room.to_string(),
         }
     }
+}
 
-    pub fn is_queue(&self) -> bool {
-        matches!(self, Intent::Queue(_, _))
-    }
+/// What a tick tells the operator; nothing reaches the game.
+#[derive(Clone, Default)]
+pub struct Telemetry {
+    /// Summed into the observe segment's counts (§9.3).
+    pub counts: Vec<(&'static str, i32)>,
+    /// A colony's open slots of a pattern, by its name, left uncast.
+    pub short: Vec<(RoomName, &'static str, i32)>,
+    /// A body's scored tiles, for the harness's trace.
+    pub traces: Vec<(String, Vec<(crate::world::Pos, i64)>)>,
+}
 
-    pub fn is_wish(&self) -> bool {
-        matches!(self, Intent::Wish(_, _))
+/// A module's tick: `Tick` settles the asks and wishes of every module as one.
+#[derive(Clone, Default)]
+pub struct ModuleOutput {
+    pub actions: Vec<Action>,
+    pub asks: Vec<(RoomName, Ask)>,
+    pub wishes: Vec<(RoomName, Wish)>,
+    pub telemetry: Telemetry,
+}
+
+impl ModuleOutput {
+    pub fn extend(&mut self, other: ModuleOutput) {
+        self.actions.extend(other.actions);
+        self.asks.extend(other.asks);
+        self.wishes.extend(other.wishes);
+        self.telemetry.counts.extend(other.telemetry.counts);
+        self.telemetry.short.extend(other.telemetry.short);
+        self.telemetry.traces.extend(other.telemetry.traces);
     }
+}
+
+impl From<Vec<Action>> for ModuleOutput {
+    fn from(actions: Vec<Action>) -> Self {
+        ModuleOutput {
+            actions,
+            ..ModuleOutput::default()
+        }
+    }
+}
+
+/// What `Executor` runs, and the movable bodies arbitration left standing,
+/// which the metrics alone read.
+#[derive(Default)]
+pub struct Settled {
+    pub actions: Vec<Action>,
+    pub held: Vec<String>,
 }
 
 #[cfg(test)]

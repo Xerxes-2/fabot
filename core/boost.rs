@@ -1,11 +1,10 @@
-use std::borrow::Cow;
 use std::collections::BTreeSet;
 
 use super::atlas::Mover;
 use super::engine;
 use super::grid::{self, Footprint};
-use super::intents::{Intent, LabAct};
-use super::mv;
+use super::intents::{Action, LabAct};
+use super::mv::{self, Wish};
 use super::tick::{Context, target_at};
 use super::vocabulary::{self, Compound, Resource, ResourceType};
 use super::world::{self, Id, Kind, Pos, RoomName, World};
@@ -151,10 +150,12 @@ pub fn waiting<'a>(world: &'a World, home: RoomName, creep: &world::Creep) -> Op
 /// A body whose cast asked for a compound and whose parts do not carry it yet
 /// is held at the lab and boosted there: its module's acts and wish are
 /// dropped for the walk, or the boost itself when it stands beside it.
-pub fn stop<'a>(context: &mut Context, intents: &'a [Intent]) -> Cow<'a, [Intent]> {
-    let Some((home, _)) = context.declarations.labs() else {
-        return Cow::Borrowed(intents);
-    };
+pub fn stop(
+    context: &mut Context,
+    actions: &mut Vec<Action>,
+    wishes: &[(RoomName, Wish)],
+) -> Option<Vec<(RoomName, Wish)>> {
+    let (home, _) = context.declarations.labs()?;
     let mut stalls: Vec<(String, Pos, Id, Compound)> = Vec::new();
 
     for creep in (context.world.creeps.iter()).filter(|c| c.owner.is_ours() && c.pos.room == home) {
@@ -164,15 +165,13 @@ pub fn stop<'a>(context: &mut Context, intents: &'a [Intent]) -> Cow<'a, [Intent
     }
 
     if stalls.is_empty() {
-        return Cow::Borrowed(intents);
+        return None;
     }
 
     let stalling: BTreeSet<&str> = stalls.iter().map(|(name, _, _, _)| name.as_str()).collect();
-    let mut out: Vec<Intent> = (intents.iter())
-        .filter(|i| {
-            let actor = i.actor();
-            i.is_queue() || !stalling.contains(actor.as_str())
-        })
+    actions.retain(|a| !matches!(a, Action::Creep(name, _) if stalling.contains(name.as_str())));
+    let mut walks: Vec<(RoomName, Wish)> = (wishes.iter())
+        .filter(|(_, w)| !stalling.contains(w.creep.as_str()))
         .cloned()
         .collect();
 
@@ -190,18 +189,18 @@ pub fn stop<'a>(context: &mut Context, intents: &'a [Intent]) -> Cow<'a, [Intent
             continue;
         };
         if creep.pos.within(1, at) && boostable.contains(lab) {
-            out.push(Intent::Lab(*lab, LabAct::BoostCreep(creep.id)));
+            actions.push(Action::Lab(*lab, LabAct::BoostCreep(creep.id)));
             continue;
         }
         let mover = Mover {
             footprint: Footprint::One,
             factor: grid::loaded_factor(&world::body_kinds(creep)),
         };
-        out.push(Intent::Wish(
+        walks.push((
             creep.pos.room,
             mv::plan::toward(context.atlas, creep, mover, &target_at(at, 1), 1),
         ));
     }
 
-    Cow::Owned(out)
+    Some(walks)
 }

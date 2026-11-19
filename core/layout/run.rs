@@ -1,5 +1,5 @@
 use crate::engine;
-use crate::intents::{Intent, RoomAct};
+use crate::intents::{Action, ModuleOutput, RoomAct};
 use crate::state::State;
 use crate::tick::{Context, Module};
 use crate::world::Rules;
@@ -9,8 +9,8 @@ use super::remote;
 use super::sites;
 use super::towers;
 
-pub fn decide_over(rules: &Rules, colonies: &[derive::Colony], mut budget: i32) -> Vec<Intent> {
-    let mut intents: Vec<Intent> = Vec::new();
+pub fn decide_over(rules: &Rules, colonies: &[derive::Colony], mut budget: i32) -> Vec<Action> {
+    let mut intents: Vec<Action> = Vec::new();
 
     for colony in colonies {
         if let Some(plan) = &colony.plan
@@ -20,7 +20,7 @@ pub fn decide_over(rules: &Rules, colonies: &[derive::Colony], mut budget: i32) 
         {
             for p in sites::place(rules, &colony.census, colony.target, plan, budget) {
                 budget -= 1;
-                intents.push(Intent::Room(
+                intents.push(Action::Room(
                     colony.room,
                     RoomAct::CreateSite(p.x, p.y, p.kind),
                 ));
@@ -31,7 +31,7 @@ pub fn decide_over(rules: &Rules, colonies: &[derive::Colony], mut budget: i32) 
         intents.extend(
             (colony.buried.iter().chain(&colony.astray))
                 .filter(|_| colony.hostiles.is_empty())
-                .map(|id| Intent::Room(colony.room, RoomAct::Destroy(*id))),
+                .map(|id| Action::Room(colony.room, RoomAct::Destroy(*id))),
         );
         intents.extend(towers::fire(
             &colony.towers,
@@ -45,7 +45,7 @@ pub fn decide_over(rules: &Rules, colonies: &[derive::Colony], mut budget: i32) 
     intents
 }
 
-pub fn decide(ctx: &mut Context, state: &mut State) -> Result<Vec<Intent>, String> {
+pub fn decide(ctx: &mut Context, state: &mut State) -> Result<ModuleOutput, String> {
     let world = ctx.world;
     let (colonies, standing) = derive::colonies(
         world,
@@ -58,7 +58,7 @@ pub fn decide(ctx: &mut Context, state: &mut State) -> Result<Vec<Intent>, Strin
     let home = decide_over(&world.rules, &colonies, budget);
 
     let placed = (home.iter())
-        .filter(|i| matches!(i, Intent::Room(_, RoomAct::CreateSite(..))))
+        .filter(|i| matches!(i, Action::Room(_, RoomAct::CreateSite(..))))
         .count() as i32;
 
     let piles = |room| {
@@ -82,7 +82,7 @@ pub fn decide(ctx: &mut Context, state: &mut State) -> Result<Vec<Intent>, Strin
     intents.extend(sites);
 
     state.layout = standing;
-    Ok(intents)
+    Ok(intents.into())
 }
 
 pub fn layout() -> Module {

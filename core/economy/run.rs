@@ -3,7 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::atlas::{self, Atlas, Mover, Target};
 use crate::engine;
 use crate::grid::{self, Footprint};
-use crate::intents::{Ask, CreepAct, Intent, LabAct, LinkAct, Rank, SpawnAct, TerminalAct};
+use crate::intents::{
+    Action, Ask, CreepAct, LabAct, LinkAct, ModuleOutput, Rank, SpawnAct, Telemetry, TerminalAct,
+};
 use crate::mv::{Wish, plan};
 use crate::state::State;
 use crate::tick::{self, Context};
@@ -162,7 +164,7 @@ fn act_of(derived: &Derived, task: &Task) -> Option<CreepAct> {
 /// beside it, beside its Task's own act: the engine's pickup conflicts with no
 /// other, and a pile no Task reaches decays. Not a harvester, whose dig falls
 /// where it stands. `taken`: the bodies whose act already fills them.
-fn pickups(derived: &Derived, taken: &BTreeSet<String>) -> Vec<Intent> {
+fn pickups(derived: &Derived, taken: &BTreeSet<String>) -> Vec<Action> {
     let mut picks = Vec::new();
 
     for b in &derived.bodies {
@@ -176,7 +178,7 @@ fn pickups(derived: &Derived, taken: &BTreeSet<String>) -> Vec<Intent> {
             });
 
             if let Some(p) = pile {
-                picks.push(Intent::Creep(b.name.clone(), CreepAct::Pickup(p.id)));
+                picks.push(Action::Creep(b.name.clone(), CreepAct::Pickup(p.id)));
             }
         }
     }
@@ -188,7 +190,7 @@ fn pickups(derived: &Derived, taken: &BTreeSet<String>) -> Vec<Intent> {
 const LINK_MIN_SEND: i32 = 200;
 
 /// Hivemind's `process/rooms/owned/links.ts`.
-fn link_send(g: &Ground) -> Option<Intent> {
+fn link_send(g: &Ground) -> Option<Action> {
     let hubs = || g.links.iter().filter(|l| l.role.is_hub());
     type Side<'a> = Option<(&'a LinkFact, i32)>;
     fn pick<'a>(best: Side<'a>, hub: Side<'a>) -> Side<'a> {
@@ -211,7 +213,7 @@ fn link_send(g: &Ground) -> Option<Intent> {
         .map(|l| (l, l.free));
     let (to, room) = pick(under, hub)?;
     let amount = out.min(room);
-    (from.id != to.id && amount >= LINK_MIN_SEND).then_some(Intent::Link(
+    (from.id != to.id && amount >= LINK_MIN_SEND).then_some(Action::Link(
         from.id,
         LinkAct::TransferEnergy(to.id, amount),
     ))
@@ -221,7 +223,7 @@ fn link_send(g: &Ground) -> Option<Intent> {
 /// resource still owed, as much as its energy pays for and the receiver has
 /// room for, never under the engine's least. Energy sent leaves the fee of
 /// what is still owed.
-fn terminal_send(g: &Ground) -> Option<Intent> {
+fn terminal_send(g: &Ground) -> Option<Action> {
     let (t, (home, free)) = (g.terminal.as_ref()?, g.ship_to.as_ref()?);
     if t.cooldown > 0 {
         return None;
@@ -246,7 +248,7 @@ fn terminal_send(g: &Ground) -> Option<Intent> {
             amount = amount * 9 / 10;
         }
         (amount >= engine::TERMINAL_MIN_SEND.min(*owed))
-            .then(|| Intent::Terminal(t.id, TerminalAct::Send(ore.clone(), amount, *home)))
+            .then(|| Action::Terminal(t.id, TerminalAct::Send(ore.clone(), amount, *home)))
     })
 }
 
@@ -276,8 +278,8 @@ fn dug_out(derived: &Derived) -> BTreeSet<Id> {
         .collect()
 }
 
-fn sends(derived: &Derived) -> Vec<Intent> {
-    let mut sends: Vec<Intent> = Vec::new();
+fn sends(derived: &Derived) -> Vec<Action> {
+    let mut sends: Vec<Action> = Vec::new();
     for g in &derived.grounds {
         sends.extend(link_send(g));
         sends.extend(terminal_send(g));
@@ -286,7 +288,7 @@ fn sends(derived: &Derived) -> Vec<Intent> {
             let held = |id: Id| lab(id).and_then(|l| l.held.clone());
             let cooldown = |id: Id| lab(id).map_or(0, |l| l.cooldown);
             for (output, a, b) in super::labs::ready_runs(plan, &held, &cooldown) {
-                sends.push(Intent::Lab(output, LabAct::RunReaction(a, b)));
+                sends.push(Action::Lab(output, LabAct::RunReaction(a, b)));
             }
         }
     }
@@ -402,7 +404,7 @@ fn work(
     (slot, task): (&Slot, &Task),
     stood: &BTreeSet<Pos>,
     ready: &dyn Fn(&Task) -> bool,
-    acts: &mut Vec<Intent>,
+    acts: &mut Vec<Action>,
 ) -> Wish {
     let members = ring_members(derived, task, &creep.pos);
     let ring = match (task, members.first()) {
@@ -429,14 +431,14 @@ fn work(
         && body.free > 0
         && body.energy < body.work * engine::UPGRADE_DRAIN_PER_WORK
     {
-        acts.push(Intent::Creep(
+        acts.push(Action::Creep(
             creep.name.clone(),
             CreepAct::Withdraw(id, Resource::Energy),
         ));
     }
     let digs = matches!(slot.job, Job::Dig(_));
     if let Some(act) = raising(derived, body, slot) {
-        acts.push(Intent::Creep(creep.name.clone(), act));
+        acts.push(Action::Creep(creep.name.clone(), act));
     } else {
         let arrived = creep.pos.within(task.range_of(), &at)
             && seats
@@ -457,7 +459,7 @@ fn work(
             && can
             && let Some(act) = act_of(derived, task)
         {
-            acts.push(Intent::Creep(creep.name.clone(), act));
+            acts.push(Action::Creep(creep.name.clone(), act));
         }
     }
     if digs && let Some(g) = derived.grounds.iter().find(|g| g.room == creep.pos.room) {
@@ -468,7 +470,7 @@ fn work(
             .map(|l| l.id);
         if let Some(to) = bay.or(link) {
             if body.energy > 0 {
-                acts.push(Intent::Creep(
+                acts.push(Action::Creep(
                     creep.name.clone(),
                     CreepAct::Transfer(to, Resource::Energy),
                 ));
@@ -477,7 +479,7 @@ fn work(
             if let Some(c) = under.filter(|_| body.free > 0)
                 && let Some(id) = c.id.object()
             {
-                acts.push(Intent::Creep(
+                acts.push(Action::Creep(
                     creep.name.clone(),
                     CreepAct::Withdraw(id, Resource::Energy),
                 ));
@@ -487,7 +489,7 @@ fn work(
     plan::toward_round(atlas, creep, mover, &target, weight_of(&slot.job), danger)
 }
 
-pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, String> {
+pub fn decide(context: &mut Context, state: &mut State) -> Result<ModuleOutput, String> {
     // `{ World with Creeps = filtered }`: a creep a fight holds is not in the
     // economy, and only the creep list differs.
     let seen: Vec<&Creep> = (context.world.creeps.iter())
@@ -521,14 +523,14 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
         slots::assign(&*context.atlas, &derived, &slots, &state.assignments);
     let (casts, short) = slots::casts(&derived, &slots, &holders);
 
-    let mut intents: Vec<Intent> = (casts.iter())
+    let asks = (casts.iter())
         .map(|cast| {
             let rank = if cast.floor {
                 Rank::Floor
             } else {
                 Rank::Economy
             };
-            Intent::Queue(
+            (
                 cast.colony,
                 Ask {
                     body: cast.body.clone(),
@@ -538,15 +540,13 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
             )
         })
         .collect();
-    intents.push(Intent::Count(
-        "parkedCarriers",
-        slots::parked(&slots, &holders),
-    ));
-    intents.extend(
-        short
-            .into_iter()
-            .map(|(room, p, n)| Intent::Short(room, p, n)),
-    );
+    let telemetry = Telemetry {
+        counts: vec![("parkedCarriers", slots::parked(&slots, &holders))],
+        short: (short.into_iter())
+            .map(|(room, p, n)| (room, bodies::name_of(p), n))
+            .collect(),
+        traces: Vec::new(),
+    };
 
     let scouted = scouting(&*context.atlas, &derived, &state.assignments);
     let dug = dug_out(&derived);
@@ -616,7 +616,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
         .collect();
 
     let mut next = Assignments::new();
-    let mut acts: Vec<Intent> = Vec::new();
+    let mut acts: Vec<Action> = Vec::new();
     let mut wishes: Vec<(RoomName, Vec<Wish>)> = Vec::new();
     for (creep, at) in tasks {
         let mover = movers[creep.name.as_str()];
@@ -645,7 +645,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
                 });
             if let Some((to, reach, act)) = sink.filter(|_| loaded) {
                 if creep.pos.within(reach, &to) {
-                    acts.push(Intent::Creep(creep.name.clone(), act));
+                    acts.push(Action::Creep(creep.name.clone(), act));
                 } else {
                     let wish = plan::toward_round(
                         context.atlas,
@@ -666,7 +666,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
             {
                 if creep.pos.within(1, &s.pos) {
                     let recycle = SpawnAct::RecycleCreep(creep.id);
-                    acts.push(Intent::Spawn(s.id, recycle));
+                    acts.push(Action::Spawn(s.id, recycle));
                 }
                 let to = tick::target_at(&s.pos, 1);
                 let wish = plan::toward_round(context.atlas, creep, mover, &to, 1, danger);
@@ -709,26 +709,30 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
         next.insert(c.name.clone(), c.slot.clone() + "|");
     }
 
-    let moves = (wishes.into_iter())
-        .flat_map(|(room, list)| list.into_iter().map(move |w| Intent::Wish(room, w)));
     let taken: BTreeSet<String> = (acts.iter())
         .filter_map(|act| match act {
-            Intent::Creep(
+            Action::Creep(
                 name,
                 CreepAct::Pickup(_) | CreepAct::Withdraw(..) | CreepAct::Harvest(_),
             ) => Some(name.clone()),
             _ => None,
         })
         .collect();
-    intents.extend(acts);
-    intents.extend(pickups(&derived, &taken));
-    intents.extend(sends(&derived));
-    intents.extend(moves);
+    let mut actions = acts;
+    actions.extend(pickups(&derived, &taken));
+    actions.extend(sends(&derived));
     let given_up = (context.world.rooms.iter()).filter(|r| context.declarations.abandoning(r.name));
-    intents.extend(given_up.flat_map(super::abandon::raze));
+    actions.extend(given_up.flat_map(super::abandon::raze));
 
     state.assignments = next;
-    Ok(intents)
+    Ok(ModuleOutput {
+        actions,
+        asks,
+        wishes: (wishes.into_iter())
+            .flat_map(|(room, list)| list.into_iter().map(move |w| (room, w)))
+            .collect(),
+        telemetry,
+    })
 }
 
 /// A body with no slot walks home, where one may open, the last of equal
@@ -811,7 +815,7 @@ mod tests {
 
             let mut state = State::default();
             decide(&mut context, &mut state).expect("a world decides");
-            let intents = decide(&mut context, &mut state).expect("a world decides again");
+            let out = decide(&mut context, &mut state).expect("a world decides again");
 
             for (name, held) in &state.assignments {
                 assert!(!slots::slot_of(held).is_empty(), "{name} {held}");
@@ -821,17 +825,12 @@ mod tests {
                 );
             }
 
-            for intent in &intents {
-                if let Intent::Queue(_, ask) = intent {
-                    assert!(ask.body.len() <= crate::engine::MAX_BODY_PARTS);
-                }
+            for (_, ask) in &out.asks {
+                assert!(ask.body.len() <= crate::engine::MAX_BODY_PARTS);
             }
 
-            let wished: BTreeSet<String> = intents
-                .iter()
-                .filter(|i| i.is_wish())
-                .map(crate::intents::Intent::actor)
-                .collect();
+            let wished: BTreeSet<&str> =
+                (out.wishes.iter()).map(|(_, w)| w.creep.as_str()).collect();
 
             let fought = (g.world.creeps.iter())
                 .filter(|c| tick::fights(&c.name))

@@ -5,7 +5,7 @@ use wasm_bindgen::{JsCast, JsValue};
 
 use crate::app::world;
 use fabot_core::intents::{
-    ControllerAct, CreepAct, Intent, LabAct, LinkAct, Refusal, RoomAct, SpawnAct, TerminalAct,
+    Action, ControllerAct, CreepAct, LabAct, LinkAct, Refusal, RoomAct, SpawnAct, TerminalAct,
     TowerAct,
 };
 use fabot_core::vocabulary;
@@ -108,9 +108,9 @@ fn on(verb: &str, target: &Id, f: impl FnOnce(&JsValue) -> Result<f64, JsValue>)
     }
 }
 
-fn act(intent: &Intent) -> (String, i32) {
+fn act(intent: &Action) -> (String, i32) {
     match intent {
-        Intent::Creep(name, act) => {
+        Action::Creep(name, act) => {
             let Some(creep) = world::creep_by_name(name) else {
                 return ("creep".to_string(), NOT_FOUND);
             };
@@ -147,7 +147,7 @@ fn act(intent: &Intent) -> (String, i32) {
                 CreepAct::Dismantle(id) => on("dismantle", id, |t| creep.dismantle(t)),
             }
         }
-        Intent::Room(name, RoomAct::CreateSite(x, y, kind)) => {
+        Action::Room(name, RoomAct::CreateSite(x, y, kind)) => {
             let verb = format!("site:{}", kind.name());
             match world::room_by_name(*name) {
                 None => (verb, NOT_FOUND),
@@ -157,8 +157,8 @@ fn act(intent: &Intent) -> (String, i32) {
                 }
             }
         }
-        Intent::Room(_, RoomAct::Destroy(id)) => on("destroy", id, |s| actor(s).destroy()),
-        Intent::Tower(id, act) => match world::object_by_id(id) {
+        Action::Room(_, RoomAct::Destroy(id)) => on("destroy", id, |s| actor(s).destroy()),
+        Action::Tower(id, act) => match world::object_by_id(id) {
             None => ("tower".to_string(), NOT_FOUND),
             Some(tower) => {
                 let tower = actor(&tower);
@@ -169,17 +169,17 @@ fn act(intent: &Intent) -> (String, i32) {
                 }
             }
         },
-        Intent::Controller(id, ControllerAct::ActivateSafeMode) => {
+        Action::Controller(id, ControllerAct::ActivateSafeMode) => {
             on("safeMode", id, |c| actor(c).activate_safe_mode())
         }
-        Intent::Controller(id, ControllerAct::Unclaim) => on("unclaim", id, |c| actor(c).unclaim()),
-        Intent::Link(id, LinkAct::TransferEnergy(target, amount)) => {
+        Action::Controller(id, ControllerAct::Unclaim) => on("unclaim", id, |c| actor(c).unclaim()),
+        Action::Link(id, LinkAct::TransferEnergy(target, amount)) => {
             match world::object_by_id(id) {
                 None => ("link".to_string(), NOT_FOUND),
                 Some(link) => on("link", target, |t| actor(&link).transfer_energy(t, *amount)),
             }
         }
-        Intent::Lab(id, LabAct::RunReaction(a, b)) => match (
+        Action::Lab(id, LabAct::RunReaction(a, b)) => match (
             world::object_by_id(id),
             world::object_by_id(a),
             world::object_by_id(b),
@@ -189,31 +189,20 @@ fn act(intent: &Intent) -> (String, i32) {
             }
             _ => ("runReaction".to_string(), NOT_FOUND),
         },
-        Intent::Lab(id, LabAct::BoostCreep(creep)) => {
+        Action::Lab(id, LabAct::BoostCreep(creep)) => {
             match (world::object_by_id(id), world::object_by_id(creep)) {
                 (Some(lab), Some(creep)) => outcome("boostCreep", actor(&lab).boost_creep(&creep)),
                 _ => ("boostCreep".to_string(), NOT_FOUND),
             }
         }
-        Intent::Terminal(id, TerminalAct::Send(resource, amount, room)) => on("send", id, |t| {
+        Action::Terminal(id, TerminalAct::Send(resource, amount, room)) => on("send", id, |t| {
             let name = vocabulary::resource_name(resource);
             actor(t).send(&name, *amount, &room.to_string())
         }),
-        Intent::Observe(id, room) => on("observeRoom", id, |o| {
+        Action::Observe(id, room) => on("observeRoom", id, |o| {
             actor(o).observe_room(&room.to_string())
         }),
-        Intent::Queue(_, _) | Intent::Wish(_, _) => ("unsettled".to_string(), NOT_FOUND),
-        Intent::Trace(creep, scored) => {
-            let tiles: Vec<String> = scored
-                .iter()
-                .map(|(p, score)| format!("[\"{}\",{},{},{score}]", p.room, p.x, p.y))
-                .collect();
-            let line = format!(r#"{{"creep":"{creep}","tiles":[{}]}}"#, tiles.join(","));
-            crate::app::wire::trace(&line);
-            ("trace".to_string(), 0)
-        }
-        Intent::Count(_, _) | Intent::Short(_, _, _) | Intent::Held(_) => ("count".to_string(), 0),
-        Intent::Spawn(id, SpawnAct::RecycleCreep(creep)) => {
+        Action::Spawn(id, SpawnAct::RecycleCreep(creep)) => {
             match (world::object_by_id(id), world::object_by_id(creep)) {
                 (Some(spawn), Some(creep)) => {
                     outcome("recycle", actor(&spawn).recycle_creep(&creep))
@@ -221,7 +210,7 @@ fn act(intent: &Intent) -> (String, i32) {
                 _ => ("recycle".to_string(), NOT_FOUND),
             }
         }
-        Intent::Spawn(id, SpawnAct::SpawnCreep(body, name, drawn)) => on("spawn", id, |spawn| {
+        Action::Spawn(id, SpawnAct::SpawnCreep(body, name, drawn)) => on("spawn", id, |spawn| {
             let parts: Array = body.iter().map(|p| JsValue::from(*p)).collect();
             let options: SpawnOptions = Object::new().unchecked_into();
             if !drawn.is_empty() {
@@ -234,7 +223,7 @@ fn act(intent: &Intent) -> (String, i32) {
 }
 
 /// One bad intent costs itself, never the rest of the tick's.
-pub fn run(intents: &[Intent]) -> Vec<Refusal> {
+pub fn run(intents: &[Action]) -> Vec<Refusal> {
     (intents.iter())
         .filter_map(|intent| {
             let (act, code) = act(intent);

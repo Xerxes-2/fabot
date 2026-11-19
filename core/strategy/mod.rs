@@ -2,7 +2,7 @@ pub mod expand;
 pub mod intel;
 pub mod outposts;
 
-use super::intents::Intent;
+use super::intents::ModuleOutput;
 use super::state::State;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -17,7 +17,7 @@ use expand::Expansions;
 use intel::Intel;
 use screeps::LocalRoomTerrain;
 
-pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, String> {
+pub fn decide(context: &mut Context, state: &mut State) -> Result<ModuleOutput, String> {
     let mut preyed = intel::preyed(context.intel, context.declarations, context.world.time);
     preyed.retain(|room| context.atlas.has_terrain(*room));
     // A scout only dies where armed bodies stand, and draws them off; a
@@ -35,7 +35,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
     scouts.retain(|s| context.declarations.sieges.contains(&s.room) || unarmed(s.room));
     state.scouts = scouts;
     state.preyed = preyed;
-    Ok(observed)
+    Ok(observed.into())
 }
 
 /// A rival's room this near raids within a creep life.

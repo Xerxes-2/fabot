@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::atlas::tiles::Tile;
 use crate::atlas::{Atlas, Post};
 use crate::engine;
-use crate::intents::Intent;
+use crate::intents::Action;
 use crate::tick::{self, Declarations, Declared, Outpost};
 use crate::tiles;
 use crate::vocabulary::{Part, Resource, resource_name, resource_of_name};
@@ -221,7 +221,7 @@ pub fn sight(
     declarations: &Declarations,
     intel: &Intel,
     (preyed, radius): (&[RoomName], &BTreeMap<RoomName, i32>),
-) -> (Vec<Intent>, Vec<Scout>) {
+) -> (Vec<Action>, Vec<Scout>) {
     let mut free: Vec<_> = world
         .rooms
         .iter()
@@ -235,7 +235,7 @@ pub fn sight(
         .collect();
     stale.sort();
 
-    let mut observe = |room: &RoomName| -> Option<Intent> {
+    let mut observe = |room: &RoomName| -> Option<Action> {
         if !atlas.has_terrain(*room) {
             return None;
         }
@@ -246,7 +246,7 @@ pub fn sight(
             .min_by_key(|(_, o)| (tiles::rooms_apart(o.pos.room, *room), o.id))?;
         let id = observer.id;
         free.remove(at);
-        Some(Intent::Observe(id, *room))
+        Some(Action::Observe(id, *room))
     };
 
     // A sweep's choice needs a look while no fight body hunts a candidate,
@@ -254,14 +254,14 @@ pub fn sight(
     let looked = (preyed.iter()).any(|r| intel.get(r).is_some_and(|row| row.seen >= world.time));
     let hunting =
         (world.creeps.iter()).any(|c| tick::fights(&c.name) && preyed.contains(&c.pos.room));
-    let mut observed: Vec<Intent> = (declarations.sieges.iter())
+    let mut observed: Vec<Action> = (declarations.sieges.iter())
         .chain(preyed.first().filter(|_| !hunting && !looked))
         .filter_map(&mut observe)
         .collect();
-    let covered = |observed: &[Intent], room: &RoomName| {
+    let covered = |observed: &[Action], room: &RoomName| {
         observed
             .iter()
-            .any(|i| matches!(i, Intent::Observe(_, r) if r == room))
+            .any(|i| matches!(i, Action::Observe(_, r) if r == room))
     };
     for (_, room) in stale {
         if !covered(&observed, room)

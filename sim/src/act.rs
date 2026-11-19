@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use fabot_core::HashMap;
 use fabot_core::intents::{
-    ControllerAct, CreepAct, Intent, LabAct, LinkAct, Refusal, RoomAct, SpawnAct, TerminalAct,
+    Action, ControllerAct, CreepAct, LabAct, LinkAct, Refusal, RoomAct, SpawnAct, TerminalAct,
     TowerAct,
 };
 use fabot_core::vocabulary::{self, Part, Resource};
@@ -313,11 +313,11 @@ impl Run<'_> {
         Ok(())
     }
 
-    fn act(&mut self, intent: &Intent) -> (&'static str, Result<(), ErrorCode>) {
+    fn act(&mut self, intent: &Action) -> (&'static str, Result<(), ErrorCode>) {
         let resource = |r: &Resource| vocabulary::resource_name(r).to_string();
         match intent {
-            Intent::Creep(name, act) => (verb(act), self.creep(name, act)),
-            Intent::Room(room, RoomAct::CreateSite(x, y, kind)) => {
+            Action::Creep(name, act) => (verb(act), self.creep(name, act)),
+            Action::Room(room, RoomAct::CreateSite(x, y, kind)) => {
                 let Some(r) = self.v.index(&room.to_string()) else {
                     return ("site", Err(NotFound));
                 };
@@ -327,7 +327,7 @@ impl Run<'_> {
                 self.stored.push(r, "createConstructionSite", value);
                 ("site", Ok(()))
             }
-            Intent::Room(room, RoomAct::Destroy(id)) => match self.target(*id) {
+            Action::Room(room, RoomAct::Destroy(id)) => match self.target(*id) {
                 Ok((r, _)) => {
                     let value = json!({ "id": id, "roomName": room.to_string() });
                     self.stored.push(r, "destroyStructure", value);
@@ -335,7 +335,7 @@ impl Run<'_> {
                 }
                 Err(e) => ("destroy", Err(e)),
             },
-            Intent::Tower(id, act) => {
+            Action::Tower(id, act) => {
                 let (name, t) = match act {
                     TowerAct::Attack(t) => ("attack", t),
                     TowerAct::Heal(t) => ("heal", t),
@@ -343,43 +343,40 @@ impl Run<'_> {
                 };
                 (name, self.on(*id, &[*t], name, json!({ "id": t })))
             }
-            Intent::Controller(id, ControllerAct::ActivateSafeMode) => {
+            Action::Controller(id, ControllerAct::ActivateSafeMode) => {
                 ("safeMode", self.on(*id, &[], "activateSafeMode", json!({})))
             }
-            Intent::Controller(id, ControllerAct::Unclaim) => {
+            Action::Controller(id, ControllerAct::Unclaim) => {
                 ("unclaim", self.on(*id, &[], "unclaim", json!({})))
             }
-            Intent::Link(id, LinkAct::TransferEnergy(t, amount)) => {
+            Action::Link(id, LinkAct::TransferEnergy(t, amount)) => {
                 let value = json!({ "id": t, "amount": amount, "resourceType": "energy" });
                 ("link", self.on(*id, &[*t], "transfer", value))
             }
-            Intent::Lab(id, LabAct::RunReaction(a, b)) => {
+            Action::Lab(id, LabAct::RunReaction(a, b)) => {
                 let value = json!({ "lab1": a, "lab2": b });
                 ("runReaction", self.on(*id, &[*a, *b], "runReaction", value))
             }
-            Intent::Lab(id, LabAct::BoostCreep(c)) => (
+            Action::Lab(id, LabAct::BoostCreep(c)) => (
                 "boostCreep",
                 self.on(*id, &[*c], "boostCreep", json!({ "id": c })),
             ),
-            Intent::Terminal(id, TerminalAct::Send(r, amount, room)) => {
+            Action::Terminal(id, TerminalAct::Send(r, amount, room)) => {
                 let value = json!({ "resourceType": resource(r), "amount": amount,
                     "targetRoomName": room.to_string(), "description": "" });
                 ("send", self.on(*id, &[], "send", value))
             }
-            Intent::Observe(id, room) => {
+            Action::Observe(id, room) => {
                 let value = json!({ "roomName": room.to_string() });
                 ("observeRoom", self.on(*id, &[], "observeRoom", value))
             }
-            Intent::Spawn(id, SpawnAct::RecycleCreep(c)) => (
+            Action::Spawn(id, SpawnAct::RecycleCreep(c)) => (
                 "recycle",
                 self.on(*id, &[*c], "recycleCreep", json!({ "id": c })),
             ),
-            Intent::Spawn(id, SpawnAct::SpawnCreep(body, name, drawn)) => {
+            Action::Spawn(id, SpawnAct::SpawnCreep(body, name, drawn)) => {
                 ("spawn", self.spawn(*id, (body, name, drawn)))
             }
-            Intent::Queue(_, _) | Intent::Wish(_, _) => ("unsettled", Err(NotFound)),
-            Intent::Trace(_, _) => ("trace", Ok(())),
-            Intent::Count(_, _) | Intent::Short(_, _, _) | Intent::Held(_) => ("count", Ok(())),
         }
     }
 }
@@ -434,7 +431,7 @@ fn verb(act: &CreepAct) -> &'static str {
 }
 
 /// One bad intent costs itself, never the rest of the tick's.
-pub fn run(v: &View, intents: &[Intent]) -> (Stored, Vec<Refusal>) {
+pub fn run(v: &View, intents: &[Action]) -> (Stored, Vec<Refusal>) {
     let mut run = Run {
         v,
         at: index(v),

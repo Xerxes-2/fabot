@@ -7,13 +7,14 @@ use screeps::LocalRoomTerrain;
 
 use crate::atlas::{Atlas, tiles};
 use crate::fight::shape::Phase;
-use crate::intents::{Intent, Refusal};
+use crate::intents::{Action, Refusal};
 use crate::layout::shape::Standing;
 use crate::memory::Memory;
 use crate::observe::metrics::{self, Metrics};
 use crate::strategy::intel::Intel;
 use crate::tactics::Offer;
 use crate::tick::{self, Declarations, Outcome};
+use crate::world::Pos;
 use crate::world::{RoomName, Sightings, World};
 
 /// `ARCHITECTURE.md` §4's heap rows `decide` reads and hands back; empty after a reset.
@@ -33,6 +34,7 @@ pub struct Ran<'t> {
     pub counts: Vec<(String, i32)>,
     pub off: Vec<String>,
     pub offers: Vec<(i32, Vec<Offer>)>,
+    pub traces: Vec<(String, Vec<(Pos, i64)>)>,
 }
 
 /// The terrain a driver has read: a room's, and every room's for the Atlas.
@@ -60,7 +62,7 @@ pub fn run<'t, P, R, E, W>(
 ) -> Ran<'t>
 where
     R: FnOnce(&Declarations, Option<RoomName>) -> (World<'t>, &'t dyn Terrains, P),
-    E: FnOnce(&[Intent]) -> Vec<Refusal>,
+    E: FnOnce(&[Action]) -> Vec<Refusal>,
     W: FnOnce(&World, &P, &Intel, Option<String>, &mut Vec<(String, f64)>),
 {
     let mut state = memory.state();
@@ -97,7 +99,7 @@ where
     }
 
     let start = clock();
-    let refusals = (seam.execute)(&decided.result.intents);
+    let refusals = (seam.execute)(&decided.result.settled.actions);
     phases.push(("execute".to_string(), clock() - start));
     (seam.write)(
         &world,
@@ -135,5 +137,6 @@ where
             .filter(|e| !e.plan.offers.is_empty())
             .map(|e| (e.id, e.plan.offers.clone()))
             .collect(),
+        traces: result.telemetry.traces,
     }
 }

@@ -8,7 +8,7 @@ use super::shape::{Cast, Engagement, Group, Objective, Phase};
 use super::{casting, tracker};
 use crate::atlas::{self, Atlas};
 use crate::engine;
-use crate::intents::{Ask, Intent, Rank};
+use crate::intents::{Ask, ModuleOutput, Rank};
 use crate::state::State;
 use crate::tactics::{self, Tactic};
 use crate::tick::{self, Context, Module};
@@ -66,7 +66,7 @@ fn changed(e: &Engagement, events: &[tracker::Event], by_id: &BTreeMap<i32, Grou
     })
 }
 
-pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, String> {
+pub fn decide(context: &mut Context, state: &mut State) -> Result<ModuleOutput, String> {
     let world = context.world;
     let declarations = context.declarations;
     let context_trace = context.trace;
@@ -544,10 +544,10 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
         .filter_map(|s| s.spawning.as_ref().map(|o| &o.name))
         .collect();
 
-    let mut out: Vec<Intent> = (casts.iter())
+    let asks = (casts.iter())
         .filter(|c| !ovens.contains(&c.name))
         .map(|c| {
-            Intent::Queue(
+            (
                 c.room,
                 Ask {
                     body: c.body.clone(),
@@ -558,7 +558,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
         })
         .collect();
 
-    out.extend(super::act::act(
+    let mut out = super::act::act(
         &scene,
         atlas,
         context_trace,
@@ -566,7 +566,8 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
         &gates,
         &given_up,
         &grounds,
-    ));
+    );
+    out.asks = asks;
 
     state.groups = groups;
     state.engagements = decided;

@@ -6,7 +6,6 @@ use wasm_bindgen::prelude::*;
 use crate::app::world;
 use crate::app::{executor, record, wire};
 use fabot_core::drive::{self, Terrains as _};
-use fabot_core::intents::Intent;
 use fabot_core::observe::metrics::{self, Metrics};
 use fabot_core::strategy::intel::{self, Intel};
 use fabot_core::tick::Declarations;
@@ -90,7 +89,7 @@ fn run_tick() {
             (world.rooms.iter_mut()).for_each(|r| r.terrain = maps.terrain(r.name));
             (world, maps as &dyn drive::Terrains, read)
         },
-        execute: |intents: &[Intent]| executor::run(intents),
+        execute: executor::run,
         write: |world: &World,
                 pass: &world::Pass,
                 rows: &Intel,
@@ -131,7 +130,18 @@ fn run_tick() {
         counts,
         off,
         offers,
+        traces,
     } = ran;
+    for (creep, scored) in traces {
+        let tiles: Vec<String> = scored
+            .iter()
+            .map(|(p, score)| format!("[\"{}\",{},{},{score}]", p.room, p.x, p.y))
+            .collect();
+        wire::trace(&format!(
+            r#"{{"creep":"{creep}","tiles":[{}]}}"#,
+            tiles.join(",")
+        ));
+    }
     for (module, message) in &faulted {
         record_fault(&mut faults, module, message);
     }

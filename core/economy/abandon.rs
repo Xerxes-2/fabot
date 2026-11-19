@@ -1,7 +1,7 @@
 /// A colony given up (§5, owner 2026-10-18) digs, builds and upgrades nothing
 /// more; its ring spawns the haulers and charges the towers that guard them.
 use crate::engine;
-use crate::intents::{ControllerAct, Intent, RoomAct};
+use crate::intents::{Action, ControllerAct, RoomAct};
 use crate::tiles;
 use crate::vocabulary::Resource;
 use crate::world::{Creep, Kind, Room, RoomName, Structure};
@@ -30,19 +30,19 @@ pub fn left(room: &Room) -> i32 {
 const LEFT: i32 = 200;
 
 /// `destroy()` needs our controller: the unclaim waits for the last structure.
-pub fn raze(room: &Room) -> Vec<Intent> {
+pub fn raze(room: &Room) -> Vec<Action> {
     let Some(c) = room.controller.as_ref().filter(|c| c.owner.is_ours()) else {
         return Vec::new();
     };
     if left(room) > LEFT {
         return Vec::new();
     }
-    let ours: Vec<Intent> = (room.structures.iter())
+    let ours: Vec<Action> = (room.structures.iter())
         .filter(|s| s.owner.is_ours() && s.kind.name() != "controller")
-        .map(|s| Intent::Room(room.name, RoomAct::Destroy(s.id)))
+        .map(|s| Action::Room(room.name, RoomAct::Destroy(s.id)))
         .collect();
     if ours.is_empty() {
-        vec![Intent::Controller(c.id, ControllerAct::Unclaim)]
+        vec![Action::Controller(c.id, ControllerAct::Unclaim)]
     } else {
         ours
     }

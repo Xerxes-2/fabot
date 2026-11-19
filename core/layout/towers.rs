@@ -1,7 +1,7 @@
 //! Repair is economy work, but for a rampart about to decay away: a colony
 //! may hold no worker for a life.
 use crate::engine;
-use crate::intents::{Intent, TowerAct};
+use crate::intents::{Action, TowerAct};
 use crate::vocabulary::{Part, Resource};
 use crate::world::{self, Creep, Pos, Structure};
 
@@ -73,7 +73,7 @@ pub fn fire(
     ours: &[Creep],
     struck: &[Pos],
     ramparts: &[Structure],
-) -> Vec<Intent> {
+) -> Vec<Action> {
     let mut targets: Vec<(&Creep, bool, i32, i32, i32)> = hostiles
         .iter()
         .map(|h| {
@@ -91,7 +91,7 @@ pub fn fire(
     targets.sort_by_key(|(h, urgent, _, dealt, need)| (!urgent, need - dealt, h.id));
 
     let mut free: Vec<&Structure> = towers.iter().collect();
-    let mut acts: Vec<Intent> = Vec::new();
+    let mut acts: Vec<Action> = Vec::new();
 
     for (target, urgent, heal, dealt, need) in targets {
         let at = |t: &Structure| t.pos.range(&target.pos).map_or(0, engine::tower_attack_at);
@@ -108,7 +108,7 @@ pub fn fire(
             }
             landed += at(tower);
             committed += 1;
-            acts.push(Intent::Tower(tower.id, TowerAct::Attack(target.id)));
+            acts.push(Action::Tower(tower.id, TowerAct::Attack(target.id)));
         }
         free.drain(..committed);
     }
@@ -120,7 +120,7 @@ pub fn fire(
     {
         acts.extend(
             free.iter()
-                .map(|t| Intent::Tower(t.id, TowerAct::Heal(wounded.id))),
+                .map(|t| Action::Tower(t.id, TowerAct::Heal(wounded.id))),
         );
     } else if let Some(dying) = (ramparts.iter())
         .filter(|r| r.hits <= 2 * engine::RAMPART_DECAY_AMOUNT)
@@ -128,7 +128,7 @@ pub fn fire(
         && let Some(tower) = (free.iter())
             .find(|t| t.store.amount_of(&Resource::Energy) >= engine::TOWER_CAPACITY / 2)
     {
-        acts.push(Intent::Tower(tower.id, TowerAct::Repair(dying.id)));
+        acts.push(Action::Tower(tower.id, TowerAct::Repair(dying.id)));
     }
 
     acts
@@ -137,7 +137,7 @@ pub fn fire(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::intents::Intent;
+    use crate::intents::Action;
     use crate::layout::derive;
     use crate::layout::fixtures as fx;
     use crate::layout::run;
@@ -198,7 +198,7 @@ mod tests {
             let (colonies, _) = derive::colonies(&world, &owned, &plans, BTreeMap::new());
             let acts = run::decide_over(&world.rules, &colonies, 0);
 
-            let ids: Vec<String> = acts.iter().map(crate::intents::Intent::actor).collect();
+            let ids: Vec<String> = acts.iter().map(crate::intents::Action::actor).collect();
             let mut distinct: Vec<String> = Vec::new();
             for id in &ids {
                 if !distinct.contains(id) {
@@ -210,11 +210,11 @@ mod tests {
 
             for act in &acts {
                 match act {
-                    Intent::Tower(id, TowerAct::Attack(target)) => {
+                    Action::Tower(id, TowerAct::Attack(target)) => {
                         assert_ne!(*id, Id::from("t1"));
                         assert!(enemies.iter().any(|h| &h.id == target));
                     }
-                    Intent::Tower(id, TowerAct::Heal(target)) => {
+                    Action::Tower(id, TowerAct::Heal(target)) => {
                         assert_ne!(*id, Id::from("t1"));
                         assert!(ours.iter().any(|c| &c.id == target));
                     }

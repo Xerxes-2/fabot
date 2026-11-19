@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use crate::atlas::{Atlas, Mover, Tree};
 use crate::grid::Footprint;
-use crate::intents::{Intent, RoomAct};
+use crate::intents::{Action, RoomAct};
 use crate::tick;
 use crate::tiles::{self, Tile, TileSet};
 use crate::world::{Kind, Owner, Pos, Room, RoomName, World, terrain};
@@ -35,7 +35,7 @@ fn ours(room: &Room) -> bool {
 fn opened(
     taken: &mut BTreeMap<RoomName, TileSet>,
     pending: &mut BTreeMap<RoomName, i32>,
-    planned: &[Intent],
+    planned: &[Action],
     room: &Room,
 ) {
     if taken.contains_key(&room.name) {
@@ -52,7 +52,7 @@ fn opened(
     let mut n = room.sites.iter().filter(|s| s.owner.is_ours()).count() as i32;
 
     for i in planned {
-        if let Intent::Room(r, RoomAct::CreateSite(x, y, _)) = i
+        if let Action::Room(r, RoomAct::CreateSite(x, y, _)) = i
             && r == &room.name
         {
             tiles_open.insert(tiles::index(*x, *y));
@@ -69,9 +69,9 @@ fn place(
     rooms: &BTreeMap<RoomName, &Room>,
     taken: &mut BTreeMap<RoomName, TileSet>,
     pending: &mut BTreeMap<RoomName, i32>,
-    planned: &[Intent],
+    planned: &[Action],
     budget: &mut i32,
-    intents: &mut Vec<Intent>,
+    intents: &mut Vec<Action>,
     pos: &Pos,
     kind: &Kind,
 ) {
@@ -90,7 +90,7 @@ fn place(
     if now < SITES_IN_FLIGHT && taken.get_mut(&room.name).unwrap().insert(tile) {
         pending.insert(room.name, now + 1);
         *budget -= 1;
-        intents.push(Intent::Room(
+        intents.push(Action::Room(
             room.name,
             RoomAct::CreateSite(pos.x, pos.y, kind.clone()),
         ));
@@ -128,12 +128,12 @@ pub fn sites(
     atlas: &mut Atlas,
     world: &World,
     derived: &tick::Derived,
-    (planned, piles): (&[Intent], &dyn Fn(RoomName) -> Option<Pos>),
+    (planned, piles): (&[Action], &dyn Fn(RoomName) -> Option<Pos>),
     plans: &[&Plan],
     mut budget: i32,
-) -> Vec<Intent> {
+) -> Vec<Action> {
     let (colonies, outposts) = (&derived.colonies, &derived.worked);
-    let mut intents: Vec<Intent> = Vec::new();
+    let mut intents: Vec<Action> = Vec::new();
     let mut taken: BTreeMap<RoomName, TileSet> = BTreeMap::new();
     let mut pending: BTreeMap<RoomName, i32> = BTreeMap::new();
     let mut rooms: BTreeMap<RoomName, &Room> = BTreeMap::new();
