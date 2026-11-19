@@ -7,11 +7,11 @@ use super::kinds::{raid, siege};
 use super::scene::{Hunting, Scene, middle, picket};
 use super::shape::{Engagement, Objective, Phase};
 use crate::atlas::Atlas;
+use crate::declarations;
 use crate::exchange;
 use crate::intents::{self, Action, ControllerAct, CreepAct, ModuleOutput};
 use crate::mv::Wish;
 use crate::tactics::{self, Tactic};
-use crate::tick;
 use crate::tiles::Tile;
 use crate::vocabulary::Part;
 use crate::world::{self, Creep, Id, Kind, Owner, Pos, RoomName, Structure};
@@ -70,7 +70,7 @@ pub(super) fn act(
     let fighters: Vec<&Creep> = world
         .creeps
         .iter()
-        .filter(|c| tick::fights(&c.name))
+        .filter(|c| declarations::fights(&c.name))
         .collect();
 
     let swings = |c: &Creep| c.body.iter().any(|p| p.kind == Part::Attack);

@@ -3,7 +3,7 @@
 //! the API does, and the rooms are those our objects give vision of.
 use std::collections::BTreeSet;
 
-use fabot_core::tick::Declarations;
+use fabot_core::declarations::Declarations;
 use fabot_core::vocabulary::{self, Part};
 use fabot_core::world::*;
 use krebs::atom;

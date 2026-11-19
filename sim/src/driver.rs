@@ -5,12 +5,12 @@ use std::io::Write;
 use std::time::Instant;
 
 use fabot_core::atlas::tiles;
+use fabot_core::declarations::Declarations;
 use fabot_core::drive::{self, Terrains};
 use fabot_core::intel::Intel;
 use fabot_core::intents::Action;
 use fabot_core::memory::Memory;
 use fabot_core::observe::metrics::{self, Metrics};
-use fabot_core::tick::Declarations;
 use fabot_core::world::{RoomName, World};
 use krebs::intents::RoomIntents;
 use screeps::LocalRoomTerrain;

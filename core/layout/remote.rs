@@ -2,10 +2,10 @@
 //! road are placed off the haul's own walk home.
 use std::collections::BTreeMap;
 
-use crate::atlas::{Atlas, Mover, Tree};
+use crate::atlas::{self, Atlas, Mover, Tree};
+use crate::declarations;
 use crate::grid::Footprint;
 use crate::intents::{Action, RoomAct};
-use crate::tick;
 use crate::tiles::{self, Tile, TileSet};
 use crate::world::{Kind, Owner, Pos, Room, RoomName, World, terrain};
 
@@ -21,7 +21,7 @@ const HAULER: Mover = Mover {
 };
 
 /// Bounds a walk that never arrives.
-const LONGEST: usize = ((tick::REACH_HOPS + 1) * 2 * tiles::SIDE) as usize;
+const LONGEST: usize = ((declarations::REACH_HOPS + 1) * 2 * tiles::SIDE) as usize;
 
 /// The engine refuses a site under anyone else's hold.
 fn ours(room: &Room) -> bool {
@@ -118,7 +118,7 @@ fn sink_for<'t>(
             .or_else(|| bank(home.name))
     };
 
-    let i = tick::nearest(atlas, trees, homes, |i| sink(i).is_some(), &from)?;
+    let i = atlas::nearest(atlas, trees, homes, |i| sink(i).is_some(), &from)?;
     sink(i)
 }
 
@@ -127,7 +127,7 @@ fn sink_for<'t>(
 pub fn sites(
     atlas: &mut Atlas,
     world: &World,
-    derived: &tick::Derived,
+    derived: &atlas::Derived,
     (planned, piles): (&[Action], &dyn Fn(RoomName) -> Option<Pos>),
     plans: &[&Plan],
     mut budget: i32,
@@ -179,7 +179,7 @@ pub fn sites(
             let sink = sink_for(atlas, &trees, (&homes, piles), &rooms, room);
 
             if let Some(sink) = sink {
-                let home = tick::target_at(&sink, 1);
+                let home = atlas::target_at(&sink, 1);
 
                 // A reserver acts from beside the controller: a post there
                 // takes a tile no other seat can give it.

@@ -5,15 +5,14 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write;
 
 use crate::HashMap;
-use crate::atlas::Atlas;
+use crate::atlas::{Atlas, Derived};
+use crate::declarations::{self, Declarations, Refused};
 use crate::economy::abandon;
 use crate::economy::bodies::{self, Pattern};
 use crate::economy::task::{Assignment, Task};
 use crate::engine;
 use crate::fight::shape::{Cast, Engagement, Phase};
 use crate::intents::{Action, CreepAct, Refusal, SpawnAct, TowerAct};
-use crate::tick;
-use crate::tick::{Declarations, Derived, Refused};
 use crate::vocabulary::{Part, Resource};
 use crate::world::{Creep, Id, Kind, Owner, Pos, Room, RoomName, World, hostiles};
 
@@ -651,7 +650,7 @@ fn steps(
             continue;
         };
         let steps = t.moved(c.pos, time, a.held, c.fatigue > 0);
-        if !tick::fights(&c.name) && bodies::pattern_of_name(&c.name).is_some() {
+        if !declarations::fights(&c.name) && bodies::pattern_of_name(&c.name).is_some() {
             for name in steps {
                 add(sums, None, name, 1.0);
             }
@@ -883,7 +882,11 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
         owed.insert(*room);
     }
 
-    for c in world.creeps.iter().filter(|c| !tick::fights(&c.name)) {
+    for c in world
+        .creeps
+        .iter()
+        .filter(|c| !declarations::fights(&c.name))
+    {
         let Some(p) = bodies::pattern_of_name(&c.name) else {
             continue;
         };
@@ -1177,7 +1180,8 @@ pub fn counts(
         ("flood".to_string(), atlas.relaxed()),
         ("recomputed".to_string(), atlas.recomputed()),
     ];
-    let abandoning = (declarations.colonies.iter()).filter(|p| p.stage == tick::Stage::Abandon);
+    let abandoning =
+        (declarations.colonies.iter()).filter(|p| p.stage == declarations::Stage::Abandon);
     for room in abandoning.filter_map(|p| world.room(p.room)) {
         counts.push((format!("abandon:{}", room.name), abandon::left(room)));
     }

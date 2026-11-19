@@ -1,10 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::atlas::Atlas;
+use crate::declarations::{self, Declarations, Declared};
 use crate::engine;
 use crate::intel::{Intel, Row, STALE, Scout};
 use crate::intents::Action;
-use crate::tick::{self, Declarations, Declared};
 use crate::tiles;
 use crate::vocabulary::Part;
 use crate::world::{Kind, Owner, RoomName, World};
@@ -159,8 +159,8 @@ pub fn sight(
     // A sweep's choice needs a look while no fight body hunts a candidate,
     // one a tick none was seen in, so one observer starves nothing.
     let looked = (preyed.iter()).any(|r| intel.get(r).is_some_and(|row| row.seen >= world.time));
-    let hunting =
-        (world.creeps.iter()).any(|c| tick::fights(&c.name) && preyed.contains(&c.pos.room));
+    let hunting = (world.creeps.iter())
+        .any(|c| declarations::fights(&c.name) && preyed.contains(&c.pos.room));
     let mut observed: Vec<Action> = (declarations.sieges.iter())
         .chain(preyed.first().filter(|_| !hunting && !looked))
         .filter_map(&mut observe)

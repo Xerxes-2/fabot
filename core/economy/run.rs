@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::atlas::{self, Atlas, Mover, Target};
+use crate::atlas::{self, Atlas, Context, Mover, Target};
+use crate::declarations;
 use crate::engine;
 use crate::grid::{self, Footprint};
 use crate::intel::Scout;
@@ -8,7 +9,6 @@ use crate::intents::{
     Action, Ask, CreepAct, LabAct, LinkAct, ModuleOutput, Rank, SpawnAct, Telemetry, TerminalAct,
 };
 use crate::mv::{Wish, plan};
-use crate::tick::{self, Context};
 use crate::tiles::{self, TileSet};
 use crate::vocabulary::{Part, Resource};
 use crate::world::{Creep, Id, Kind, Pos, RoomName};
@@ -47,7 +47,12 @@ fn scouting(
             // A radius room is three apart but its route may run past the
             // reach the trees hold.
             let far = |at: &Pos| {
-                let rooms = atlas.route(&BTreeSet::new(), tick::SIEGE_HOPS, b.pos.room, at.room)?;
+                let rooms = atlas.route(
+                    &BTreeSet::new(),
+                    declarations::SIEGE_HOPS,
+                    b.pos.room,
+                    at.room,
+                )?;
                 Some(Atlas::CROSSING_TICKS * (rooms.len() as i32 - 1))
             };
             atlas::onward(rooms.filter_map(|(at, age, _)| {
@@ -378,15 +383,15 @@ fn target_of(
                 tiles: tiles.iter().map(tiles::of_pos).collect(),
                 range: 0,
                 avoid: BTreeSet::new(),
-                max_hops: tick::REACH_HOPS,
+                max_hops: declarations::REACH_HOPS,
             }
         }
         // A scout walks as far as its choice reached (`scouting`).
         None if matches!(task, Task::Scout(_)) => Target {
-            max_hops: tick::SIEGE_HOPS,
-            ..tick::target_at(&at, task.range_of())
+            max_hops: declarations::SIEGE_HOPS,
+            ..atlas::target_at(&at, task.range_of())
         },
-        None => tick::target_at(&at, task.range_of()),
+        None => atlas::target_at(&at, task.range_of()),
     };
     (target, seats)
 }
@@ -499,7 +504,7 @@ pub fn decide(
     // `{ World with Creeps = filtered }`: a creep a fight holds is not in the
     // economy, and only the creep list differs.
     let seen: Vec<&Creep> = (context.world.creeps.iter())
-        .filter(|c| !tick::fights(&c.name))
+        .filter(|c| !declarations::fights(&c.name))
         .collect();
 
     let derived = derived::of_world(
@@ -655,7 +660,7 @@ pub fn decide(
                         context.atlas,
                         creep,
                         mover,
-                        &tick::target_at(&to, reach),
+                        &atlas::target_at(&to, reach),
                         reach,
                         danger,
                     );
@@ -672,7 +677,7 @@ pub fn decide(
                     let recycle = SpawnAct::RecycleCreep(creep.id);
                     acts.push(Action::Spawn(s.id, recycle));
                 }
-                let to = tick::target_at(&s.pos, 1);
+                let to = atlas::target_at(&s.pos, 1);
                 let wish = plan::toward_round(context.atlas, creep, mover, &to, 1, danger);
                 wish_in(&mut wishes, creep.pos.room, wish);
                 continue;
@@ -756,7 +761,7 @@ fn home(
     let home = (derived.colonies.iter().rev())
         .min_by_key(walk)
         .map_or(creep.pos, |c| c.spawns[0].pos);
-    plan::toward_round(atlas, creep, mover, &tick::target_at(&home, 1), 1, danger)
+    plan::toward_round(atlas, creep, mover, &atlas::target_at(&home, 1), 1, danger)
 }
 
 /// A harvester full on its post raises or keeps the container under it, so
@@ -799,11 +804,11 @@ mod tests {
             let g = dice::world(&mut dice);
             let mut atlas = Atlas::of_world(&g.world);
             let sightings = BTreeMap::new();
-            let mut declarations = tick::undeclared();
+            let mut declarations = declarations::undeclared();
             declarations.outposts = g.worked.clone();
             declarations.claims = g.claims.clone();
-            let mut derived = tick::derive(&g.world, &mut atlas);
-            derived.worked = tick::worked(&g.world, &sightings, &declarations, &derived);
+            let mut derived = atlas::derive(&g.world, &mut atlas);
+            derived.worked = atlas::worked(&g.world, &sightings, &declarations, &derived);
 
             let mut context = Context {
                 world: &g.world,
@@ -831,7 +836,7 @@ mod tests {
                 (out.wishes.iter()).map(|(_, w)| w.creep.as_str()).collect();
 
             let fought = (g.world.creeps.iter())
-                .filter(|c| tick::fights(&c.name))
+                .filter(|c| declarations::fights(&c.name))
                 .count();
 
             assert_eq!(

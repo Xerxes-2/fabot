@@ -1,10 +1,11 @@
 use std::collections::BTreeSet;
 
+use crate::atlas::Derived;
+use crate::declarations::{ColonyPlan, Declarations, Outpost, REACH_HOPS, Stage, undeclared};
 use crate::engine;
 use crate::intel::{self, Intel, Row};
 use crate::layout::{ground, plan};
 use crate::season;
-use crate::tick::{ColonyPlan, Declarations, Derived, Outpost, REACH_HOPS, Stage, undeclared};
 use crate::tiles;
 use crate::vocabulary::Resource;
 use crate::world::{Kind, Room, RoomName, World};

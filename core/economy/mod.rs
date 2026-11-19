@@ -11,8 +11,8 @@ pub use run::{EconomyState, decide};
 
 #[cfg(test)]
 pub(crate) mod dice {
+    use crate::declarations::{Declared, Outpost};
     use crate::engine;
-    use crate::tick::{Declared, Outpost};
     use crate::vocabulary::{Compound, Ore, Part, Resource, part_count_in};
     use crate::world::{
         BodyPart, Controller, Creep, Id, Kind, Mineral, Owner, Pile, Pos, Remains, Room, RoomName,

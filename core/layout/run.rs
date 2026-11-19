@@ -1,6 +1,6 @@
+use crate::atlas::Context;
 use crate::engine;
 use crate::intents::{Action, ModuleOutput, RoomAct};
-use crate::tick::Context;
 use crate::world::Rules;
 
 use super::derive;

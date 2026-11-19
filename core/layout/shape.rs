@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use crate::tick::MUSTER_RANGE;
+use crate::declarations::MUSTER_RANGE;
 /// Ahead of `State` so `State` can hold the standing plan.
 use crate::tiles::{self, Tile};
 use crate::world::{Kind, Pos, RoomName};

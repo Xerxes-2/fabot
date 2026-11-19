@@ -4,8 +4,8 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::engine;
-use super::tick::Declarations;
 use super::vocabulary::{Part, Resource, ResourceType};
+use crate::declarations::Declarations;
 
 /// An object id in `screeps::RawObjectId`'s 128 bits, its digits left-aligned
 /// so it orders as its text: Memory's id sets and every tie-break on ids were
@@ -765,8 +765,8 @@ pub mod read {
     use crate::atlas::tiles::{self, BOTTOM, LEFT, RIGHT, TOP};
 
     use super::*;
+    use crate::declarations::Declarations;
     use crate::engine;
-    use crate::tick::Declarations;
     use crate::vocabulary::{self, Part};
 
     struct Reader<'a> {

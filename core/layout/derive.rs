@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::declarations::{ColonyPlan, Stage};
 use crate::engine;
-use crate::tick::{ColonyPlan, Stage};
 use crate::tiles::{self, Tile, TileSet};
 use crate::vocabulary::Resource;
 use crate::world::{Creep, Id, Kind, Pos, RoomName, Structure, World};

@@ -5,10 +5,11 @@ use std::cell::Cell;
 use std::collections::BTreeMap;
 
 use super::Dice;
-use crate::atlas::Atlas;
+use crate::atlas::{self, Atlas, Context};
+use crate::declarations;
 use crate::intents::{Action, CreepAct, ModuleOutput};
 use crate::state::State;
-use crate::tick::{self, Context, Module, Outcome, TickResult};
+use crate::tick::{self, Module, Outcome, TickResult};
 use crate::world::World;
 
 const NAMES: [&str; 8] = ["m0", "m1", "m2", "m3", "m4", "m5", "m6", "m7"];
@@ -62,9 +63,9 @@ fn run(throws: &[bool], state: State) -> TickResult {
         rules: crate::world::Rules::vanilla(),
     };
     let mut atlas = Atlas::of_world(&world);
-    let declarations = tick::undeclared();
+    let declarations = declarations::undeclared();
     let sightings = BTreeMap::new();
-    let derived = tick::derive(&world, &mut atlas);
+    let derived = atlas::derive(&world, &mut atlas);
     let mut context = Context {
         world: &world,
         atlas: &mut atlas,

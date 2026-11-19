@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use screeps::LocalRoomTerrain;
 
 use crate::atlas::{Atlas, tiles};
+use crate::declarations::Declarations;
 use crate::fight::shape::Phase;
 use crate::intel::Intel;
 use crate::intents::{Action, Refusal};
@@ -13,7 +14,7 @@ use crate::layout::shape::Standing;
 use crate::memory::Memory;
 use crate::observe::metrics::{self, Metrics};
 use crate::tactics::Offer;
-use crate::tick::{self, Declarations, Outcome};
+use crate::tick::{self, Outcome};
 use crate::world::Pos;
 use crate::world::{RoomName, Sightings, World};
 
@@ -54,6 +55,15 @@ pub struct Seam<R, E, W> {
     pub write: W,
 }
 
+/// A declared siege's owner, as intel last saw it, is an enemy (owner's call).
+fn besieging(mut declarations: Declarations, intel: &Intel) -> Declarations {
+    let owners: Vec<String> = (declarations.sieges.iter())
+        .filter_map(|room| intel.get(room)?.owner.clone())
+        .collect();
+    declarations.enemies.extend(owners);
+    declarations
+}
+
 pub fn run<'t, P, R, E, W>(
     heap: &mut Heap,
     (memory, intel, metrics): (&mut Memory, &mut Intel, Option<&mut Metrics>),
@@ -69,7 +79,7 @@ where
     state.layout = std::mem::take(&mut heap.standing);
     state.economy.spare = std::mem::take(&mut heap.spare);
 
-    let declarations: Declarations = memory.declarations().besieging(intel);
+    let declarations: Declarations = besieging(memory.declarations(), intel);
     let start = clock();
     let drain = (state.fight.engagements.iter())
         .find(|e| e.phase == Phase::Draining)

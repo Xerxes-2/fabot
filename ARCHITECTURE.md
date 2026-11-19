@@ -81,8 +81,10 @@ degrades.
 World ──▶ Derived ──▶ decisions (read Derived & Atlas, never World) ──▶ ModuleOutput
 ```
 
-- `Derived` (`core/tick.rs`) is built once per tick below `Fight` and `Economy`
-  so modules share facts without importing each other.
+- `Derived` and `Context` (`core/atlas/derived.rs`) are built once per tick
+  below `Fight` and `Economy` so modules share facts without importing each
+  other; `Declarations` (`core/declarations.rs`) sit below every module, and
+  only the tick loop and its driver import `tick`.
 - Room tile sets use bitmaps (`TileSet`) and per-tile arrays use `Table<T>`
   (`y * 50 + x`), never `BTreeSet<Tile>` / `BTreeMap<Tile, _>`.
 - **One demand-driven cache (`Atlas`):** goal-seeded reverse floods per room

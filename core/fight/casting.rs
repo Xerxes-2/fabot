@@ -3,9 +3,9 @@
 /// to the home's.
 use std::collections::BTreeMap;
 
+use crate::declarations::Declarations;
 use crate::engine;
 use crate::exchange::{self, Fighter, fighter};
-use crate::tick::Declarations;
 use crate::vocabulary::{Compound, Part, Resource, ResourceType};
 use crate::world::{
     Creep, Id, Kind, Owner, Pos, Room, RoomName, Spawn, Store, Structure, World, terrain,

@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
+use crate::declarations::{Declarations, Declared, Outpost};
 use crate::engine;
-use crate::tick::{Declarations, Declared, Outpost};
 use crate::tiles::{self, Post, Tile};
 use crate::vocabulary::{Resource, resource_name, resource_of_name};
 use crate::world::{Controller, Id, Owner, Pos, Room, RoomName, Source, World, push_int};

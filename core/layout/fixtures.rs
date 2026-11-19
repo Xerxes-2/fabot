@@ -3,10 +3,10 @@
 //! mineral, a controller and none, one or two spawns of ours.
 use std::collections::BTreeSet;
 
+use crate::declarations::{ColonyPlan, Stage};
 use crate::layout::ground::{self, Ground};
 use crate::layout::plan;
 use crate::layout::shape::Plan;
-use crate::tick::{ColonyPlan, Stage};
 use crate::tiles::{self, Tile};
 use crate::vocabulary::Resource;
 use crate::world::{

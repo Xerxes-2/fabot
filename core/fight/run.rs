@@ -6,11 +6,11 @@ use super::kinds::{defend, raid, siege, sweep};
 use super::scene::{Asked, Hunting, Scene, fresh};
 use super::shape::{Cast, Engagement, FightState, Group, Objective, Phase};
 use super::{casting, tracker};
-use crate::atlas::{self, Atlas};
+use crate::atlas::{self, Atlas, Context};
+use crate::declarations;
 use crate::engine;
 use crate::intents::{Ask, ModuleOutput, Rank};
 use crate::tactics::{self, Tactic};
-use crate::tick::{self, Context};
 use crate::world::{Creep, Id, Kind, Pos, RoomName, hostiles};
 
 /// A merge keeps the older group's id; two engagements on one group are one,
@@ -472,7 +472,8 @@ pub fn decide(
         .creeps
         .iter()
         .filter(|c| {
-            tick::fights(&c.name) && !(committed.contains(&c.name) || aging_out.contains(&c.name))
+            declarations::fights(&c.name)
+                && !(committed.contains(&c.name) || aging_out.contains(&c.name))
         })
         .map(|c| c.name.clone())
         .collect();

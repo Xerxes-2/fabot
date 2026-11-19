@@ -3,10 +3,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 
-use crate::atlas::{Atlas, Mover, Target};
+use crate::atlas::{self, Atlas, Mover, Target};
+use crate::declarations;
 use crate::engine;
 use crate::grid::{self, Footprint};
-use crate::tick;
 use crate::vocabulary::{Part, part_count_in};
 use crate::world::{Controller, Id, Pos, RoomName, Spawn};
 
@@ -109,7 +109,7 @@ pub fn distance(atlas: &Atlas, derived: &Derived, a: &Pos, b: &Pos) -> Option<i3
     let tree = (derived.route(b.room)).or_else(|| derived.route(a.room));
     let crossed = match tree {
         Some(tree) => tree.crossings(a.room, b.room),
-        None => (atlas.route(&BTreeSet::new(), tick::REACH_HOPS, a.room, b.room))
+        None => (atlas.route(&BTreeSet::new(), declarations::REACH_HOPS, a.room, b.room))
             .map(|r| r.len() as i32 - 1),
     };
     crossed.map(|n| Atlas::CROSSING_TICKS * n)
@@ -126,7 +126,7 @@ pub fn ticks_to(
         Some(tree)
             if from.room != target.room
                 && target.avoid.is_empty()
-                && target.max_hops == tick::REACH_HOPS =>
+                && target.max_hops == declarations::REACH_HOPS =>
         {
             atlas.ticks_on(tree, mover, target, from)
         }
@@ -139,7 +139,7 @@ fn walk(atlas: &Atlas, derived: &Derived, parts: &[Part], from: &Pos, to: &Pos) 
         footprint: Footprint::One,
         factor: grid::loaded_factor(parts),
     };
-    ticks_to(atlas, derived, mover, &tick::target_at(to, 1), from)
+    ticks_to(atlas, derived, mover, &atlas::target_at(to, 1), from)
 }
 
 /// A room out of sight floods nothing: its walk is its crossings, unroaded.
@@ -203,7 +203,7 @@ fn sponsors(atlas: &mut Atlas, derived: &Derived) -> Vec<Option<usize>> {
             let young = c.controller.level <= STORAGE_LEVEL && !g.has_storage() && !g.abandoned;
             let can = |ci: usize| ci != cj && banks(ci);
             let at = c.controller.pos;
-            young.then(|| tick::nearest(atlas, &|r| derived.route(r), &homes, can, &at))?
+            young.then(|| atlas::nearest(atlas, &|r| derived.route(r), &homes, can, &at))?
         })
         .collect()
 }
@@ -224,7 +224,7 @@ pub fn owners(atlas: &mut Atlas, derived: &Derived) -> Vec<Option<usize>> {
             let at = (ground.controller.as_ref().map(|c| c.pos))
                 .or_else(|| ground.sources.first().map(|s| s.pos))?;
             let route = |room| derived.route(room);
-            tick::nearest(atlas, &route, &homes, |ci| banks(derived, ci), &at)
+            atlas::nearest(atlas, &route, &homes, |ci| banks(derived, ci), &at)
         })
         .collect()
 }
@@ -843,7 +843,7 @@ fn errand(atlas: &mut Atlas, derived: &Derived, job: Job, seat: Pos, key: &str) 
         !derived.grounds[ci].abandoned
             && derived.colonies[ci].bank_capacity >= engine::body_cost(bodies::block_of(pattern))
     };
-    let ci = tick::nearest(atlas, &|room| derived.route(room), &homes, can, &seat)?;
+    let ci = atlas::nearest(atlas, &|room| derived.route(room), &homes, can, &seat)?;
     let body = bodies::sized(pattern, 1, derived.colonies[ci].bank_capacity)?;
     Some(Slot::new(ci, false, job, seat, key, 0, body))
 }
@@ -870,7 +870,7 @@ pub fn plan(
     let homes: Vec<Pos> = derived.colonies.iter().map(|c| c.spawns[0].pos).collect();
     for o in &derived.closed {
         let at = o.controller.pos;
-        let Some(ci) = tick::nearest(
+        let Some(ci) = atlas::nearest(
             atlas,
             &|r| derived.route(r),
             &homes,

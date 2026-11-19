@@ -6,10 +6,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use crate::atlas::{Atlas, Mover, Target};
+use crate::declarations::{self, TacticRule};
 use crate::grid::{self, Footprint};
 use crate::intents::CreepAct;
 use crate::mv::{Wish, blob, plan};
-use crate::tick::{self, TacticRule};
 use crate::tiles::Tile;
 use crate::vocabulary::Part;
 use crate::world::{Creep, Id, Pos, RoomName};
@@ -227,7 +227,7 @@ fn target_at(sight: &Sight, at: &Pos, range: i32) -> Target {
         tiles: vec![tiles::of_pos(at)],
         range,
         avoid: sight.avoid.clone(),
-        max_hops: tick::SIEGE_HOPS,
+        max_hops: declarations::SIEGE_HOPS,
     }
 }
 
@@ -775,7 +775,7 @@ pub fn retreat(sight: &mut Sight, creep: &Creep) -> Wish {
     let here = (sight.musters.iter()).filter(|p| p.room == room);
     let home = here.min_by_key(|p| (p.x, p.y)).copied().or_else(|| {
         let onto: Vec<RoomName> = sight.musters.iter().map(|p| p.room).collect();
-        let tree = (sight.atlas).tree_to(&BTreeSet::new(), tick::SIEGE_HOPS, room, &onto);
+        let tree = (sight.atlas).tree_to(&BTreeSet::new(), declarations::SIEGE_HOPS, room, &onto);
         (sight.musters.iter())
             .filter_map(|p| tree.crossings(room, p.room).map(|n| (n, *p)))
             .min_by_key(|(hops, p)| (*hops, p.room, p.x, p.y))
@@ -785,8 +785,8 @@ pub fn retreat(sight: &mut Sight, creep: &Creep) -> Wish {
         return hold(sight, creep);
     };
     // Waits as a body with no work, so any walker shoves it.
-    if !creep.pos.within(tick::MUSTER_RANGE, &home) {
-        return toward(sight, creep, &home, tick::MUSTER_RANGE);
+    if !creep.pos.within(declarations::MUSTER_RANGE, &home) {
+        return toward(sight, creep, &home, declarations::MUSTER_RANGE);
     }
     hold(sight, creep)
 }

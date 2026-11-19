@@ -6,10 +6,10 @@ use super::kinds::{defend, raid, siege, sweep};
 use super::scene::{Asked, Hunting, Scene, fresh, middle, picket};
 use super::shape::{Engagement, Group, Objective, Phase, Plan};
 use crate::atlas::{self, Atlas, Mover, Target};
+use crate::declarations::{self, Declarations};
 use crate::exchange::{self, Fighter, Ground, Losses, Outcome, Side, Stance, fighter};
 use crate::grid::{self, Footprint};
 use crate::tactics::{self, Offer, Tactic};
-use crate::tick::{self, Declarations};
 use crate::tiles::Tile;
 use crate::world::{self, Creep, Id, Kind, Pos, Room, RoomName, Structure};
 use crate::{engine, tiles};
@@ -905,7 +905,7 @@ pub(super) fn entries(
                 tiles: stretch.to_vec(),
                 range: engine::MELEE_RANGE,
                 avoid: BTreeSet::new(),
-                max_hops: tick::SIEGE_HOPS,
+                max_hops: declarations::SIEGE_HOPS,
             };
             let walk = atlas.ticks_to(mover, &onto, from)?;
             Some((stretch.iter()).map(move |t| (*t, walk, stretch.len() as i32)))

@@ -3,11 +3,11 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::HashMap;
-use crate::atlas::{Atlas, Tree};
+use crate::atlas::{self, Atlas, Tree};
+use crate::declarations::{self, Declarations, Outpost};
 use crate::engine;
 use crate::grid::Footprint;
 use crate::intel::{self, Intel, Scout};
-use crate::tick::{self, Declarations, Outpost};
 use crate::tiles::{self, Tile};
 use crate::vocabulary::{Part, Resource, part_count_in};
 use crate::world::{
@@ -830,9 +830,9 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
 }
 
 fn tree_of(routes: &mut BTreeMap<RoomName, Cow<'_, Tree>>, atlas: &Atlas, room: RoomName) {
-    routes
-        .entry(room)
-        .or_insert_with(|| Cow::Owned(atlas.tree(&BTreeSet::new(), tick::REACH_HOPS, room)));
+    routes.entry(room).or_insert_with(|| {
+        Cow::Owned(atlas.tree(&BTreeSet::new(), declarations::REACH_HOPS, room))
+    });
 }
 
 fn free_at(grounds: &[Ground], room: RoomName) -> i32 {
@@ -1077,7 +1077,7 @@ fn ovens_of(world: &World) -> Vec<Body> {
         .filter_map(|s| {
             s.spawning
                 .as_ref()
-                .filter(|oven| !tick::fights(&oven.name))
+                .filter(|oven| !declarations::fights(&oven.name))
                 .map(|oven| {
                     body_of(
                         (None, &oven.name),
@@ -1096,7 +1096,7 @@ pub fn of_world<'t>(
     creeps: &[&Creep],
     atlas: &Atlas,
     declarations: &Declarations,
-    ours: &'t tick::Derived,
+    ours: &'t atlas::Derived,
     intel: &Intel,
     scouts: &[Scout],
 ) -> Derived<'t> {

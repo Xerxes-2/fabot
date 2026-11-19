@@ -7,10 +7,12 @@ use std::collections::BTreeSet;
 use crate::HashMap;
 use std::rc::Rc;
 
+mod derived;
 mod graph;
 pub mod grid;
 pub mod tiles;
 
+pub use self::derived::{Context, Derived, derive, nearest, target_at, worked};
 pub use self::graph::Tree;
 use self::graph::Way;
 

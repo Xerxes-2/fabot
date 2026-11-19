@@ -1,5 +1,6 @@
 pub mod atlas;
 pub mod boost;
+pub mod declarations;
 pub mod drive;
 pub mod economy;
 pub mod engine;

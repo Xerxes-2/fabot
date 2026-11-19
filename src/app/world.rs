@@ -16,7 +16,7 @@ use wasm_bindgen::prelude::wasm_bindgen;
 use wasm_bindgen::{JsCast, JsValue};
 
 use fabot_core::atlas::tiles;
-use fabot_core::tick::Declarations;
+use fabot_core::declarations::Declarations;
 use fabot_core::world::RoomName;
 use fabot_core::world::*;
 
@@ -68,7 +68,7 @@ impl fabot_core::drive::Terrains for Maps {
 impl Maps {
     /// Kept when empty too, so a room the map lacks is asked once.
     fn read_around(&mut self, homes: impl Iterator<Item = (i32, i32)>) {
-        let reach = fabot_core::tick::SIEGE_HOPS;
+        let reach = fabot_core::declarations::SIEGE_HOPS;
         let mut unread: Vec<(i32, RoomName)> = Vec::new();
         for (x, y) in homes {
             for dx in -reach..=reach {

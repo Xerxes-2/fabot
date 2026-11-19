@@ -7,10 +7,10 @@ use super::kinds::siege::{self, Facts as SiegeFacts};
 use super::kinds::{raid, sweep};
 use super::shape::{Cast, Engagement, Group, Objective, Phase, Plan};
 use crate::atlas::{Atlas, Mover, Target, Tree};
+use crate::declarations::{self, TacticRule};
 use crate::exchange::{self, Fighter, fighter};
 use crate::grid::{self, Footprint};
 use crate::tactics::{self, Tactic};
-use crate::tick::{self, TacticRule};
 use crate::tiles::Tile;
 use crate::vocabulary::{Part, ResourceType};
 use crate::world::{
@@ -276,8 +276,8 @@ impl<'a> Scene<'a> {
 
     pub(super) fn hops(e: &Engagement) -> i32 {
         match e.objective {
-            Objective::Siege(_) | Objective::Sweep => tick::SIEGE_HOPS,
-            Objective::Defend => tick::REACH_HOPS,
+            Objective::Siege(_) | Objective::Sweep => declarations::SIEGE_HOPS,
+            Objective::Defend => declarations::REACH_HOPS,
         }
     }
 
@@ -404,7 +404,7 @@ impl<'a> Scene<'a> {
                     name: match compound {
                         Some(compound) => format!(
                             "{}{}-{}-{}-{}",
-                            tick::FIGHT_PREFIX,
+                            declarations::FIGHT_PREFIX,
                             self.world.time,
                             e.id,
                             slot,
@@ -412,7 +412,7 @@ impl<'a> Scene<'a> {
                         ),
                         None => format!(
                             "{}{}-{}-{}",
-                            tick::FIGHT_PREFIX,
+                            declarations::FIGHT_PREFIX,
                             self.world.time,
                             e.id,
                             slot
@@ -662,7 +662,7 @@ impl<'a> Scene<'a> {
                             tiles: vec![tiles::of_pos(&b.pos)],
                             range: engine::MELEE_RANGE,
                             avoid: BTreeSet::new(),
-                            max_hops: tick::SIEGE_HOPS,
+                            max_hops: declarations::SIEGE_HOPS,
                         },
                         &m.pos,
                     )
