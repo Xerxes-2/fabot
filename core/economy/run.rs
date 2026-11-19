@@ -549,7 +549,10 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
         })
         .collect();
     let telemetry = Telemetry {
-        counts: vec![("parkedCarriers", slots::parked(&slots, &holders))],
+        counts: vec![
+            ("parkedCarriers", slots::parked(&slots, &holders)),
+            ("slotIdsShared", slots::shared_ids(&slots)),
+        ],
         short: (short.into_iter())
             .map(|(room, p, n)| (room, bodies::name_of(p), n))
             .collect(),

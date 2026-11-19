@@ -518,7 +518,7 @@ impl Plan<'_> {
                 }
             }
             match &g.controller {
-                Some(c) if !own && g.reservable => {
+                Some(c) if !own && g.reservable && !claimed(derived, c.id) => {
                     let parts = claim_parts_for(g.our_reservation);
                     if let Some(body) =
                         bodies::sized(Pattern::Claimer, parts, capacity).filter(|_| {
@@ -851,6 +851,11 @@ impl Plan<'_> {
     }
 }
 
+/// A claim's controller is its claimer's, never a reserver's as well.
+fn claimed(derived: &Derived, controller: Id) -> bool {
+    derived.claims.iter().any(|c| c.id == controller)
+}
+
 fn errand(atlas: &mut Atlas, derived: &Derived, job: Job, seat: Pos, key: &str) -> Option<Slot> {
     let pattern = job.pattern();
     let homes: Vec<Pos> = derived.colonies.iter().map(|c| c.spawns[0].pos).collect();
@@ -896,7 +901,7 @@ pub fn plan(
         };
         let jobs = (o.sources.iter())
             .map(|s| (Job::Dig(s.id), s.pos, s.id))
-            .chain(std::iter::once((
+            .chain((!claimed(derived, o.controller.id)).then_some((
                 Job::Reserve(o.controller.id),
                 at,
                 o.controller.id,
@@ -949,11 +954,7 @@ pub fn plan(
     for s in &mut out {
         s.home_walk = walk_to(atlas, derived, s.colony, &s.body, &s.seat).unwrap_or(0);
     }
-    debug_assert_eq!(
-        (out.iter().map(|s| &s.id)).collect::<BTreeSet<_>>().len(),
-        out.len(),
-        "a slot id is its holders' key"
-    );
+    debug_assert_eq!(shared_ids(&out), 0);
     out
 }
 
@@ -1031,6 +1032,11 @@ pub fn far(slot: &Slot) -> bool {
 /// slot into a home one under its body.
 fn far_id(home: RoomName) -> String {
     format!("{}:{home}:far:", bodies::name_of(Pattern::Hauler))
+}
+
+/// An id is its holders' key.
+pub fn shared_ids(slots: &[Slot]) -> i32 {
+    (slots.len() - slots.iter().map(|s| &s.id).collect::<BTreeSet<_>>().len()) as i32
 }
 
 /// A carrier parked at home serves no flow while an outpost slot waits for one.

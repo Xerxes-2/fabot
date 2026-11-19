@@ -154,6 +154,7 @@ pub fn worked(
     let raised =
         (declarations.claims.iter()).filter(|c| owned.contains(&c.room) && !spawned(c.room));
     (declarations.outposts.iter())
+        .filter(|o| !owned.contains(&o.room))
         .chain(raised)
         .filter(|o| {
             open(world, sightings, owned, o.room)

@@ -1,0 +1,27 @@
+{
+  "why": "a declared claim on a worked outpost is one claimer slot, and once owned the room is worked once, as a raised claim: no two slots share an id (an id is its holders' key); main planned a Reserve and a Claim slot under one id, then worked the raised room both as an outpost and as a claim, 4 ids shared from tick 2 to 1291",
+  "modules": ["atlas", "economy"],
+  "start": {
+    "world": "scripts/xxscreeps/worlds/young-among-outposts.json",
+    "seed": 1,
+    "declarations": {
+      "outposts": [
+        {"room":"W2S7","controller":{"id":"d00290","x":37,"y":43},"sources":[{"id":"d00291","x":16,"y":45}]},
+        {"room":"W1S8","controller":{"id":"d00507","x":8,"y":16},"sources":[{"id":"d00506","x":33,"y":15}]},
+        {"room":"W3S9","controller":{"id":"d00533","x":15,"y":41},"sources":[{"id":"d00531","x":29,"y":6},{"id":"d00532","x":14,"y":29}]},
+        {"room":"W3S6","controller":{"id":"d001d6","x":33,"y":23},"sources":[{"id":"d001d7","x":35,"y":23}]},
+        {"room":"W1S7","controller":{"id":"d0029f","x":14,"y":29},"sources":[{"id":"d0029e","x":13,"y":28},{"id":"d002a0","x":46,"y":33}]},
+        {"room":"W1S9","controller":{"id":"d0057c","x":30,"y":29},"sources":[{"id":"d0057d","x":7,"y":33}]},
+        {"room":"W3S7","controller":{"id":"d0027e","x":26,"y":15},"sources":[{"id":"d0027f","x":25,"y":20}]},
+        {"room":"W2S9","controller":{"id":"d0056f","x":15,"y":36},"sources":[{"id":"d00570","x":40,"y":43}]},
+        {"room":"W2S6","controller":{"id":"d001ea","x":8,"y":32},"sources":[{"id":"d001eb","x":41,"y":40}]}
+      ],
+      "claims": [{"room":"W1S7","controller":{"id":"d0029f","x":14,"y":29},"sources":[{"id":"d0029e","x":13,"y":28},{"id":"d002a0","x":46,"y":33}]}]
+    }
+  },
+  "ticks": 3000,
+  "assert": [
+    {"measure": "slotIdsShared", "max": 0},
+    {"measure": "claimSpawned", "max": 3000}
+  ]
+}

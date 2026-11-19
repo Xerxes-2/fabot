@@ -1263,7 +1263,7 @@ pub fn of_world<'t>(
         bodies,
         closed: (declarations.outposts.iter())
             .filter(|o| !ours.worked.iter().any(|w| w.room == o.room))
-            .filter(|o| !ours.colonies.contains(&o.room))
+            .filter(|o| !ours.owned.contains(&o.room))
             .cloned()
             .collect(),
     }
