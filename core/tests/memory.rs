@@ -6,7 +6,7 @@ const OURS: &str = concat!(
     r#"{"other":{"b":1,"a":[1.5,"x",null]},"v2":{"declarations":{"reserve":1.5,"#,
     r#""outposts":[{"room":"W2N1","controller":{"id":"c1","x":3,"y":4},"sources":[{"id":"a1","x":5,"y":6}]}],"#,
     r#""allies":["A"],"tactics":[{"rival":"R","forbid":["kite"]}],"labs":{"home":"W1N1","targets":{"UH":3000,"XGHO2":1}}},"#,
-    r#""switches":{"economy":false,"recorder":true},"assignments":{"a":"h:x","b":"u:y"},"#,
+    r#""switches":{"economy":false,"recorder":true},"assignments":{"a":"d1|w:a1:energy","b":"u1|"},"#,
     r#""fight":{"groups":[{"room":"W1N1","x":10,"y":11,"id":3,"seen":99,"members":["b1","b2"]}],"#,
     r#""engagements":[{"kind":"siege","target":"d1","id":1,"group":0,"room":"W2N1","ours":["a"],"#,
     r#""tactic":"blob","order":["e1"],"phase":"forming","opened":100,"since":100,"lost":0,"budget":2,"#,

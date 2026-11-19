@@ -17,27 +17,25 @@ use super::bodies::{self, Pattern};
 use super::derived::{self, Body, Derived, Ground, LinkFact, RefillFact};
 use super::jobs::Jobs;
 use super::slots::{self, Job, Slot, distance};
-use super::task::{self, Task};
-
-/// Creep name → `slot|task`.
-type Assignments = BTreeMap<String, String>;
+use super::task::{self, Assignment, Task};
 
 /// Re-chosen only on arrival off the exit band, so a walk is never turned
 /// mid-way nor on a border; a scout whose open rooms lie past `REACH_HOPS`
 /// shares a held one rather than idle.
-fn scouting(atlas: &Atlas, derived: &Derived, held: &Assignments) -> Assignments {
+fn scouting(
+    atlas: &Atlas,
+    derived: &Derived,
+    held: &BTreeMap<String, Assignment>,
+) -> BTreeMap<String, RoomName> {
     let mut scouts: Vec<&Body> = (derived.bodies.iter())
         .filter(|b| b.pattern == Pattern::Scout)
         .collect();
     scouts.sort_by(|a, b| a.name.cmp(&b.name));
-    let kept = |b: &Body| match (held.get(&b.name))
-        .and_then(|v| slots::task_of(v))
-        .and_then(task::of_task_id)
-    {
+    let kept = |b: &Body| match held.get(&b.name).and_then(|a| a.task.as_ref()) {
         Some(Task::Scout(room)) => (derived.scouts.iter())
-            .find(|(at, _, _)| at.room == room)
-            .filter(|(at, _, _)| !b.pos.within(Task::Scout(room).range_of(), at))
-            .map(|_| room),
+            .find(|(at, _, _)| at.room == *room)
+            .filter(|(at, _, _)| !b.pos.within(Task::Scout(*room).range_of(), at))
+            .map(|_| *room),
         _ => None,
     };
     let mut out: BTreeMap<String, RoomName> = (scouts.iter())
@@ -64,9 +62,7 @@ fn scouting(atlas: &Atlas, derived: &Derived, held: &Assignments) -> Assignments
             out.insert(b.name.clone(), room);
         }
     }
-    out.into_iter()
-        .map(|(name, room)| (name, task::task_id(&Task::Scout(room))))
-        .collect()
+    out
 }
 
 fn ring_members<'a>(derived: &'a Derived, task: &Task, at: &Pos) -> Vec<&'a RefillFact> {
@@ -560,11 +556,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<ModuleOutput, 
         .collect();
 
     // A body holding a task books its load before another picks.
-    let kept = |name: &str| {
-        (state.assignments.get(name))
-            .and_then(|v| slots::task_of(v))
-            .and_then(task::of_task_id)
-    };
+    let kept = |name: &str| state.assignments.get(name).and_then(|a| a.task.clone());
     let held: Vec<(usize, &Body, Option<Task>)> = (assigned.iter())
         .filter_map(|(name, si)| Some((*si, *bodies.get(name.as_str())?, kept(name))))
         .collect();
@@ -578,9 +570,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<ModuleOutput, 
     let strays: BTreeMap<&str, Slot> = (derived.bodies.iter())
         .filter(|b| b.pattern == Pattern::Scout && !assigned.contains_key(&b.name))
         .filter_map(|b| {
-            let Task::Scout(room) = task::of_task_id(scouted.get(&b.name)?)? else {
-                return None;
-            };
+            let room = *scouted.get(&b.name)?;
             let slot = Slot {
                 id: String::new(),
                 rank: 0,
@@ -606,7 +596,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<ModuleOutput, 
                 .zip(bodies.get(creep.name.as_str()).copied());
             let at = at.map(|(slot, body)| {
                 let task = match &slot.job {
-                    Job::Scout(_) => scouted.get(&creep.name).and_then(|id| task::of_task_id(id)),
+                    Job::Scout(_) => scouted.get(&creep.name).map(|room| Task::Scout(*room)),
                     _ => jobs.task(slot, body, kept(&creep.name).as_ref()),
                 };
                 (slot, body, task)
@@ -615,7 +605,11 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<ModuleOutput, 
         })
         .collect();
 
-    let mut next = Assignments::new();
+    let mut next = BTreeMap::new();
+    let mut assign = |name: &str, slot: &str, task: Option<Task>| {
+        let slot = slot.to_string();
+        next.insert(name.to_string(), Assignment { slot, task });
+    };
     let mut acts: Vec<Action> = Vec::new();
     let mut wishes: Vec<(RoomName, Vec<Wish>)> = Vec::new();
     for (creep, at) in tasks {
@@ -678,13 +672,12 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<ModuleOutput, 
             continue;
         };
         if slot.closed {
-            next.insert(creep.name.clone(), slot.id.clone() + "|");
+            assign(&creep.name, &slot.id, None);
             let wish = home(context.atlas, &derived, creep, mover, danger);
             wish_in(&mut wishes, creep.pos.room, wish);
             continue;
         }
-        let held = task.as_ref().map_or(String::new(), task::task_id);
-        next.insert(creep.name.clone(), [slot.id.as_str(), "|", &held].concat());
+        assign(&creep.name, &slot.id, task.clone());
 
         let wish = match &task {
             Some(task) => work(
@@ -702,11 +695,11 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<ModuleOutput, 
     }
     for b in &derived.ovens {
         if let Some(si) = assigned.get(&b.name) {
-            next.insert(b.name.clone(), slots[*si].id.clone() + "|");
+            assign(&b.name, &slots[*si].id, None);
         }
     }
     for c in &casts {
-        next.insert(c.name.clone(), c.slot.clone() + "|");
+        assign(&c.name, &c.slot, None);
     }
 
     let taken: BTreeSet<String> = (acts.iter())
@@ -818,11 +811,7 @@ mod tests {
             let out = decide(&mut context, &mut state).expect("a world decides again");
 
             for (name, held) in &state.assignments {
-                assert!(!slots::slot_of(held).is_empty(), "{name} {held}");
-                assert!(
-                    slots::task_of(held).is_none_or(|t| task::of_task_id(t).is_some()),
-                    "{name} {held}"
-                );
+                assert!(!held.slot.is_empty(), "{name} {held:?}");
             }
 
             for (_, ask) in &out.asks {

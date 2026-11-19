@@ -1,5 +1,4 @@
-/// What a body is hired to do; compared only through `task_id`, which
-/// `assignments` keys on.
+/// What a body is hired to do; Memory holds it as its `task_id`.
 use std::fmt::Write;
 
 use crate::vocabulary::{Resource, resource_name, resource_of_name};
@@ -45,6 +44,13 @@ impl Target {
             .or_else(|| room(PILE).map(Target::Pile))
             .or_else(|| Id::parse(text).map(Target::Object))
     }
+}
+
+/// A body's sticky slot and the task it did last tick.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Assignment {
+    pub slot: String,
+    pub task: Option<Task>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

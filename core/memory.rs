@@ -1,11 +1,12 @@
 //! `Memory`'s text and what it holds: `v2` is ours, keys of others are carried
 //! through in place, and v1's and the engine's `creeps` are dropped.
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Map, Value, json};
 
+use super::economy::task::{Assignment, of_task_id, task_id};
 use super::exchange::{Losses, Outcome};
 use super::fight::shape::{Group, Objective};
 use super::state::State;
@@ -13,6 +14,14 @@ use super::tactics::{Tactic, by_name, name};
 use super::tick::{ColonyPlan, Declarations, Declared, Flow, Node, Outpost, Stage, undeclared};
 use super::vocabulary::{self, Resource};
 use super::world::{Id, Pos, RoomName};
+
+fn assignment(held: &str) -> Assignment {
+    let (slot, task) = held.split_once('|').unwrap_or((held, ""));
+    Assignment {
+        slot: slot.to_string(),
+        task: of_task_id(task),
+    }
+}
 
 pub struct Memory {
     /// As the tick found it, for the recorder.
@@ -55,7 +64,7 @@ impl Memory {
                 .map(|(name, _)| name.clone())
                 .collect(),
             assignments: (entries("assignments"))
-                .filter_map(|(name, id)| Some((name.clone(), id.as_str()?.to_string())))
+                .filter_map(|(name, held)| Some((name.clone(), assignment(held.as_str()?))))
                 .collect(),
             groups: list(fight, "groups"),
             engagements: list(fight, "engagements"),
@@ -72,7 +81,12 @@ impl Memory {
             return None;
         }
         let v2 = &mut self.root["v2"];
-        v2["assignments"] = json!(state.assignments);
+        let held = |a: &Assignment| a.slot.clone() + "|" + &a.task.as_ref().map_or_default(task_id);
+        v2["assignments"] = json!(
+            (state.assignments.iter())
+                .map(|(name, a)| (name, held(a)))
+                .collect::<BTreeMap<_, _>>()
+        );
         v2["fight"] = json!({
             "groups": state.groups,
             "engagements": state.engagements,

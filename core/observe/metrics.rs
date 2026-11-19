@@ -7,7 +7,7 @@ use std::fmt::Write;
 use crate::HashMap;
 use crate::economy::abandon;
 use crate::economy::bodies::{self, Pattern};
-use crate::economy::slots;
+use crate::economy::task::{Assignment, Task};
 use crate::engine;
 use crate::fight::kinds::defend;
 use crate::fight::shape::{Cast, Engagement, Phase};
@@ -291,7 +291,7 @@ struct Pace {
 
 #[derive(Clone, Debug)]
 struct Held {
-    task: String,
+    task: Task,
     load: i32,
 }
 
@@ -370,7 +370,7 @@ pub struct Metrics {
 
 pub struct Seen<'a> {
     pub world: &'a World<'a>,
-    pub assignments: &'a BTreeMap<String, String>,
+    pub assignments: &'a BTreeMap<String, Assignment>,
     pub engagements: &'a [Engagement],
     pub casts: &'a [Cast],
     pub intents: &'a [Action],
@@ -553,8 +553,8 @@ fn returned(
     drawn.retain(|name, _| creeps.contains_key(name.as_str()));
 }
 
-fn task_of<'a>(assignments: &'a BTreeMap<String, String>, name: &str) -> Option<&'a str> {
-    assignments.get(name).and_then(|held| slots::task_of(held))
+fn task_of<'a>(assignments: &'a BTreeMap<String, Assignment>, name: &str) -> Option<&'a Task> {
+    assignments.get(name).and_then(|a| a.task.as_ref())
 }
 
 /// Fewer ticks to live than this at its last sight, a body died of age.
@@ -896,7 +896,7 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
         let load = c.store.used();
         match (task, m.tasks.get_mut(&c.name)) {
             (Some(now), Some(held)) => {
-                if now != held.task {
+                if *now != held.task {
                     if held.load == load {
                         add(sums, None, CHURN, 1.0);
                     }
@@ -906,7 +906,7 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
             }
             (Some(now), None) => {
                 let held = Held {
-                    task: now.to_string(),
+                    task: now.clone(),
                     load,
                 };
                 m.tasks.insert(c.name.clone(), held);

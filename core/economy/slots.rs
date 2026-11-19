@@ -12,6 +12,7 @@ use crate::world::{Controller, Id, Pos, RoomName, Spawn};
 
 use super::bodies::{self, Leg, Pattern};
 use super::derived::{Body, Derived, Ground, SiteFact, dig_work, drawn_for};
+use super::task::Assignment;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Job {
@@ -316,7 +317,7 @@ fn worker_pace(atlas: &Atlas, derived: &Derived, ci: usize, body: &[Part], power
 struct Plan<'a> {
     atlas: &'a Atlas,
     derived: &'a Derived<'a>,
-    held: &'a BTreeMap<String, String>,
+    held: &'a BTreeMap<String, Assignment>,
     out: Vec<Slot>,
 }
 
@@ -607,7 +608,7 @@ impl Plan<'_> {
         let trip = round_trip(atlas, derived, ci, &shape, far_digs);
         // An oven carries nothing yet.
         let standing: i32 = (derived.bodies.iter())
-            .filter(|b| (self.held.get(&b.name)).is_some_and(|v| slot_of(v).starts_with(&outposts)))
+            .filter(|b| (self.held.get(&b.name)).is_some_and(|a| a.slot.starts_with(&outposts)))
             .filter(|b| serves_far(b, trip))
             .map(|b| b.carry)
             .sum();
@@ -851,7 +852,7 @@ pub fn plan(
     atlas: &mut Atlas,
     derived: &Derived,
     owners: &[Option<usize>],
-    held: &BTreeMap<String, String>,
+    held: &BTreeMap<String, Assignment>,
 ) -> Vec<Slot> {
     let sponsors = sponsors(atlas, derived);
     let mut plan = Plan {
@@ -1093,7 +1094,7 @@ pub fn assign<'a>(
     atlas: &Atlas,
     derived: &'a Derived,
     slots: &'a [Slot],
-    held: &BTreeMap<String, String>,
+    held: &BTreeMap<String, Assignment>,
 ) -> (BTreeMap<String, usize>, Holders<'a>, BTreeSet<String>) {
     let by_id: BTreeMap<&str, usize> = slots
         .iter()
@@ -1109,7 +1110,7 @@ pub fn assign<'a>(
     let mut loose: Vec<&Body> = Vec::new();
     for b in &all {
         let kept = (held.get(&b.name))
-            .and_then(|v| by_id.get(slot_of(v)))
+            .and_then(|a| by_id.get(a.slot.as_str()))
             .filter(|i| slots[**i].job.pattern() == b.pattern)
             .filter(|i| {
                 let s = &slots[**i];
@@ -1198,17 +1199,6 @@ pub fn assign<'a>(
         .map(|b| b.name.clone())
         .collect();
     (out, holders, retired)
-}
-
-/// An assignment is `slot|task`; the task is what the body did last tick.
-pub fn slot_of(held: &str) -> &str {
-    held.split_once('|').map_or(held, |(s, _)| s)
-}
-
-pub fn task_of(held: &str) -> Option<&str> {
-    held.split_once('|')
-        .map(|(_, t)| t)
-        .filter(|t| !t.is_empty())
 }
 
 #[derive(Clone, Debug)]

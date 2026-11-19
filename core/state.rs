@@ -1,6 +1,7 @@
 /// What crosses a tick (`ARCHITECTURE.md` §4); each field has one owner.
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::economy::task::Assignment;
 use super::fight::shape::{Cast, Engagement, Group};
 use super::layout::shape::Standing;
 use super::strategy::expand::Expansions;
@@ -11,7 +12,7 @@ use super::world::RoomName;
 pub struct State {
     /// A module named here is skipped and its last output not replayed.
     pub off: BTreeSet<String>,
-    pub assignments: BTreeMap<String, String>,
+    pub assignments: BTreeMap<String, Assignment>,
     /// Heap only, never in Memory: empty after a reset, so the first tick redraws.
     pub layout: BTreeMap<RoomName, Standing>,
     pub groups: Vec<Group>,

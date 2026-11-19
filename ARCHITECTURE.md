@@ -156,7 +156,7 @@ architecture change, not a fix.
 
 | Store | Shape | Owner | Lives in | Why |
 |---|---|---|---|---|
-| `assignments` | creep → `slot\|task` | Economy | Memory | sticky slot + task across ticks |
+| `assignments` | creep → `Assignment` (slot, task; `slot\|task` text only in `memory.rs`) | Economy | Memory | sticky slot + task across ticks |
 | `fight.engagements` | list of `Engagement` (§6.2), with open tick (never moved) | Fight | Memory | active combat commitments (without heap-only `offers`); a home's deaths since open are its raid's |
 | `fight.groups` | list of `Group` (§6.1) | Fight | Memory | hostile cluster identity across ticks |
 | `fight.casts` | pending casts by engagement | Fight | Memory | prevent double-casting while spawning |
