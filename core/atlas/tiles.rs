@@ -58,6 +58,9 @@ impl<T> IndexMut<Tile> for Vec<T> {
 /// One value a tile, in tile order.
 pub type Table<T> = Box<[T; COUNT]>;
 
+/// A keeper's lair and the resource it guards.
+pub type Post = (Tile, Tile);
+
 /// Built on the heap: a `Box::new` of the array builds it on the stack first.
 pub fn table<T: Clone>(value: T) -> Table<T> {
     vec![value; COUNT]

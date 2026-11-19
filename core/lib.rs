@@ -5,6 +5,7 @@ pub mod economy;
 pub mod engine;
 pub mod exchange;
 pub mod fight;
+pub mod intel;
 pub mod intents;
 pub mod layout;
 pub mod memory;

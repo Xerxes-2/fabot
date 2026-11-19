@@ -13,8 +13,8 @@ use super::tick::{ColonyPlan, Context, Declarations, Derived, Outpost, Stage};
 use super::tiles;
 use super::vocabulary::{Part, ResourceType, multiple};
 use super::world::{Kind, RoomName, Rules, World, sightings};
+use crate::intel::Intel;
 use expand::Expansions;
-use intel::Intel;
 use screeps::LocalRoomTerrain;
 
 pub fn decide(context: &mut Context, state: &mut State) -> Result<ModuleOutput, String> {

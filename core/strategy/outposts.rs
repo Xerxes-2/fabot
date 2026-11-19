@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::intel::Intel;
 use crate::engine;
 use crate::fight::shape::{Engagement, Objective};
+use crate::intel::Intel;
 use crate::tick::{ColonyPlan, Declarations, Derived, Outpost, REACH_HOPS};
 use crate::tiles;
 use crate::vocabulary::Part;

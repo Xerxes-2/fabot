@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
-use super::intel::{self, Intel, Row};
 use crate::engine;
+use crate::intel::{self, Intel, Row};
 use crate::layout::{ground, plan};
 use crate::season;
 use crate::tick::{ColonyPlan, Declarations, Derived, Outpost, REACH_HOPS, Stage, undeclared};

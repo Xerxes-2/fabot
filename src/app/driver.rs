@@ -6,8 +6,8 @@ use wasm_bindgen::prelude::*;
 use crate::app::world;
 use crate::app::{executor, record, wire};
 use fabot_core::drive::{self, Terrains as _};
+use fabot_core::intel::{self, Intel};
 use fabot_core::observe::metrics::{self, Metrics};
-use fabot_core::strategy::intel::{self, Intel};
 use fabot_core::tick::Declarations;
 use fabot_core::world::{World, read};
 

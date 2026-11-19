@@ -10,15 +10,13 @@ use super::atlas::{Atlas, Mover, Target, Tree};
 use super::boost;
 use super::engine;
 use super::grid::{self, Footprint};
+use super::intel::Intel;
 use super::intents::{
     Action, Ask, CreepAct, LabAct, ModuleOutput, Rank, Settled, SpawnAct, Telemetry,
 };
 use super::mv::{self, Wish};
 use super::state::State;
-use super::strategy::{
-    self,
-    intel::{self, Intel},
-};
+use super::strategy::{self, intel};
 use super::tactics;
 use super::tiles::{self, Tile, TileSet};
 use super::vocabulary::{Compound, Part, Resource};

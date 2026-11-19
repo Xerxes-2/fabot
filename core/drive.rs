@@ -7,11 +7,11 @@ use screeps::LocalRoomTerrain;
 
 use crate::atlas::{Atlas, tiles};
 use crate::fight::shape::Phase;
+use crate::intel::Intel;
 use crate::intents::{Action, Refusal};
 use crate::layout::shape::Standing;
 use crate::memory::Memory;
 use crate::observe::metrics::{self, Metrics};
-use crate::strategy::intel::Intel;
 use crate::tactics::Offer;
 use crate::tick::{self, Declarations, Outcome};
 use crate::world::Pos;

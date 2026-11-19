@@ -4,9 +4,9 @@ use serde::{Serialize, Serializer};
 use wasm_bindgen::prelude::wasm_bindgen;
 use wasm_bindgen::{JsCast, JsValue};
 
+use fabot_core::intel::{self, Intel};
 use fabot_core::memory::Memory;
 use fabot_core::observe::metrics::Metrics;
-use fabot_core::strategy::intel::{self, Intel};
 use fabot_core::tactics::{self, Offer};
 
 /// Read by `npm run observe` and `scripts/capture`.

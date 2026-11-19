@@ -17,13 +17,11 @@ use self::graph::Way;
 use self::grid::{
     FatigueFactor, Footprint, UNREACHED, Weight, flood, on_edge, step_table, step_ticks, weight_of,
 };
+use self::tiles::Post;
 use self::tiles::{Table, Tile, TileSet};
 use super::engine;
 use super::vocabulary::Part;
 use super::world::{Id, Kind, Owner, Pos, Room, RoomName, World};
-
-/// A keeper's lair and the resource it guards.
-pub type Post = (Tile, Tile);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Mover {

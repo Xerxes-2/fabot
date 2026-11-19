@@ -3,9 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::economy::task::Assignment;
 use super::fight::shape::{Cast, Engagement, Group};
+use super::intel::Scout;
 use super::layout::shape::Standing;
 use super::strategy::expand::Expansions;
-use super::strategy::intel::Scout;
 use super::world::RoomName;
 
 #[derive(Clone, Debug, Default, PartialEq)]

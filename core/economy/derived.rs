@@ -6,7 +6,7 @@ use crate::HashMap;
 use crate::atlas::{Atlas, Tree};
 use crate::engine;
 use crate::grid::Footprint;
-use crate::strategy::intel::{self, Intel, Scout};
+use crate::intel::{self, Intel, Scout};
 use crate::tick::{self, Declarations, Outpost};
 use crate::tiles::{self, Tile};
 use crate::vocabulary::{Part, Resource, part_count_in};
