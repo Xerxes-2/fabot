@@ -36,13 +36,7 @@ pub fn variations(ground: &Ground, walls: &[u8], exits: &[u8]) -> Vec<Variation>
         cy += tiles::y_of(t);
     }
     let mid = at(cx.div_euclid(count), cy.div_euclid(count));
-    let Some(weighted) = (cores.iter().copied()).reduce(|a, b| {
-        if tiles::range(b, mid) < tiles::range(a, mid) {
-            b
-        } else {
-            a
-        }
-    }) else {
+    let Some(weighted) = (cores.iter().copied()).min_by_key(|t| tiles::range(*t, mid)) else {
         return Vec::new();
     };
 
@@ -128,7 +122,7 @@ fn amount(rules: &Rules, plan: &Labels, label: &str) -> f64 {
     plan.count(label).min(cap.max(0) as usize) as f64
 }
 
-fn effect(a: Tile, b: Tile) -> f64 {
+pub(super) fn effect(a: Tile, b: Tile) -> f64 {
     let r = (tiles::range(a, b) + 2).clamp(5, 20);
     1.0 - f64::from(r - 5) / 15.0
 }

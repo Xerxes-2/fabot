@@ -126,14 +126,11 @@ pub fn chosen(
     }
     let mut cpu_left = world.cpu_limit / 2.0;
     let capacity = |home: RoomName| world.room(home).map_or(0, |r| r.energy_capacity);
-    let mut priced: Vec<(Candidate, Price)> = (candidates.into_iter())
-        .map(|c| {
-            let p = price(&c, capacity(c.home));
-            (c, p)
-        })
+    let mut priced: Vec<(Price, Candidate)> = (candidates.into_iter())
+        .map(|c| (price(&c, capacity(c.home)), c))
         .collect();
     let value = |p: &Price| p.net / p.spawn.max(1.0);
-    priced.sort_by(|(a, pa), (b, pb)| {
+    priced.sort_by(|(pa, a), (pb, b)| {
         (b.declared.cmp(&a.declared))
             .then(b.stands.cmp(&a.stands))
             .then(value(pb).total_cmp(&value(pa)))
@@ -141,7 +138,7 @@ pub fn chosen(
     });
     let mut out = Vec::new();
     let mut rising: BTreeSet<RoomName> = BTreeSet::new();
-    for (c, p) in priced {
+    for (p, c) in priced {
         let left = spawn_left.entry(c.home).or_default();
         let spawn = p.spawn + spend(c.home, p.net);
         let unpaid = p.net <= 0.0 || spawn > *left || p.cpu > cpu_left;
@@ -243,11 +240,11 @@ pub fn survey(
                     }
                     _ => continue,
                 };
-                match by_room.get(&name) {
-                    Some(held) if held.walk <= candidate.walk => (),
-                    _ => {
-                        by_room.insert(name, candidate);
-                    }
+                if by_room
+                    .get(&name)
+                    .is_none_or(|held| held.walk > candidate.walk)
+                {
+                    by_room.insert(name, candidate);
                 }
             }
         }

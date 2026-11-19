@@ -254,11 +254,7 @@ pub fn tiles_of(wall: &dyn Fn(i32, i32) -> bool, rects: &[Rect], safe: [bool; 4]
     let mut total = 0;
     while g.levels(source, sink) {
         let mut count = vec![0usize; n + 1];
-        loop {
-            let f = g.flow(source, INFINITY, sink, &mut count);
-            if f == 0 {
-                break;
-            }
+        while let f @ 1.. = g.flow(source, INFINITY, sink, &mut count) {
             total += f;
         }
     }

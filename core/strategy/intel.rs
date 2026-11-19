@@ -84,12 +84,7 @@ pub fn step(world: &World, intel: &mut Intel) {
             mineral: room.minerals.first().map(|m| m.resource.clone()),
             stronghold: (room.structures.iter()).any(|s| s.kind.is_invader_core() && s.level > 0),
         };
-        match intel.get_mut(&room.name) {
-            Some(held) => *held = row,
-            None => {
-                intel.insert(room.name, row);
-            }
-        }
+        intel.insert(room.name, row);
     }
 }
 

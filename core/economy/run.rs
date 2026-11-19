@@ -68,13 +68,10 @@ fn scouting(atlas: &Atlas, derived: &Derived, held: &Assignments) -> Assignments
 }
 
 fn ring_members<'a>(derived: &'a Derived, task: &Task, at: &Pos) -> Vec<&'a RefillFact> {
-    let Some(room) = (match task {
-        Task::Refill(task::Target::Ring(room), _) => Some(*room),
-        _ => None,
-    }) else {
+    let Task::Refill(task::Target::Ring(room), _) = task else {
         return Vec::new();
     };
-    let g = (derived.grounds.iter()).find(|g| g.room == room);
+    let g = (derived.grounds.iter()).find(|g| g.room == *room);
     let mut members: Vec<&RefillFact> = (g.iter().flat_map(|g| &g.refills))
         .filter(|f| !f.kind.is_tower() && f.free > 0)
         .collect();
@@ -283,9 +280,7 @@ fn sends(derived: &Derived) -> Vec<Intent> {
     let mut sends: Vec<Intent> = Vec::new();
     for g in &derived.grounds {
         sends.extend(link_send(g));
-        if let Some(send) = terminal_send(g) {
-            sends.push(send);
-        }
+        sends.extend(terminal_send(g));
         if let Some(plan) = &g.lab_plan {
             let lab = |id: Id| g.labs.iter().find(|l| l.id == id);
             let held = |id: Id| lab(id).and_then(|l| l.held.clone());

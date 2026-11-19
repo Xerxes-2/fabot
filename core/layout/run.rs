@@ -9,8 +9,7 @@ use super::remote;
 use super::sites;
 use super::towers;
 
-pub fn decide_over(rules: &Rules, colonies: &[derive::Colony], budget: i32) -> Vec<Intent> {
-    let mut budget = budget;
+pub fn decide_over(rules: &Rules, colonies: &[derive::Colony], mut budget: i32) -> Vec<Intent> {
     let mut intents: Vec<Intent> = Vec::new();
 
     for colony in colonies {
@@ -58,13 +57,9 @@ pub fn decide(ctx: &mut Context, state: &mut State) -> Result<Vec<Intent>, Strin
     let budget = engine::MAX_CONSTRUCTION_SITES - world.our_sites;
     let home = decide_over(&world.rules, &colonies, budget);
 
-    let placed: i32 = home
-        .iter()
-        .map(|i| match i {
-            Intent::Room(_, RoomAct::CreateSite(_, _, _)) => 1,
-            _ => 0,
-        })
-        .sum();
+    let placed = (home.iter())
+        .filter(|i| matches!(i, Intent::Room(_, RoomAct::CreateSite(..))))
+        .count() as i32;
 
     let piles = |room| {
         (ctx.declarations.colonies.iter())

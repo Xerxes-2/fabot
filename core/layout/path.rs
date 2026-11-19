@@ -34,7 +34,11 @@ struct P {
     y: i32,
 }
 
-const NULL: P = P { x: 0, y: 0 };
+const NULL: P = at(0, 0);
+
+const fn at(x: i32, y: i32) -> P {
+    P { x, y }
+}
 
 fn border(v: i32) -> bool {
     (v + 1) % 50 < 2
@@ -60,10 +64,7 @@ impl Run<'_> {
     }
 
     fn pos(index: usize) -> P {
-        P {
-            x: (index / 50) as i32 + BASE,
-            y: (index % 50) as i32 + BASE,
-        }
+        at((index / 50) as i32 + BASE, (index % 50) as i32 + BASE)
     }
 
     fn look(&self, p: P) -> u32 {
@@ -83,16 +84,13 @@ impl Run<'_> {
     }
 
     fn heuristic(&self, p: P) -> u32 {
-        let mut ret = u32::MAX;
-        for (g, range) in &self.goals {
-            let dist = (p.x - g.x).unsigned_abs().max((p.y - g.y).unsigned_abs());
-            if dist > *range {
-                ret = ret.min(dist - range);
-            } else {
-                ret = 0;
-            }
-        }
-        ret
+        (self.goals.iter())
+            .map(|(g, range)| {
+                let dist = (p.x - g.x).unsigned_abs().max((p.y - g.y).unsigned_abs());
+                dist.saturating_sub(*range)
+            })
+            .min()
+            .unwrap_or(u32::MAX)
     }
 
     fn weighted(&self, p: P) -> u32 {
@@ -115,10 +113,7 @@ impl Run<'_> {
 
     fn astar(&mut self, index: usize, p: P, g: u32) {
         for d in 1..=8 {
-            let n = P {
-                x: p.x + tiles::dx(d),
-                y: p.y + tiles::dy(d),
-            };
+            let n = at(p.x + tiles::dx(d), p.y + tiles::dy(d));
             let edge = |v: i32, nv: i32, same: bool| -> bool {
                 (v % 50 == 0 && (nv % 50 == 49 && !same || nv == v))
                     || (v % 50 == 49 && (nv % 50 == 0 && !same || nv == v))
@@ -138,20 +133,14 @@ impl Run<'_> {
     }
 
     fn jump_x(&self, cost: u32, mut p: P, dx: i32) -> P {
-        let mut up = self.look(P { x: p.x, y: p.y - 1 });
-        let mut down = self.look(P { x: p.x, y: p.y + 1 });
+        let mut up = self.look(at(p.x, p.y - 1));
+        let mut down = self.look(at(p.x, p.y + 1));
         loop {
             if self.heuristic(p) == 0 || near_border(p.x) {
                 break;
             }
-            let cu = self.look(P {
-                x: p.x + dx,
-                y: p.y - 1,
-            });
-            let cd = self.look(P {
-                x: p.x + dx,
-                y: p.y + 1,
-            });
+            let cu = self.look(at(p.x + dx, p.y - 1));
+            let cd = self.look(at(p.x + dx, p.y + 1));
             if (cu != OBSTACLE && up != cost) || (cd != OBSTACLE && down != cost) {
                 break;
             }
@@ -169,20 +158,14 @@ impl Run<'_> {
     }
 
     fn jump_y(&self, cost: u32, mut p: P, dy: i32) -> P {
-        let mut left = self.look(P { x: p.x - 1, y: p.y });
-        let mut right = self.look(P { x: p.x + 1, y: p.y });
+        let mut left = self.look(at(p.x - 1, p.y));
+        let mut right = self.look(at(p.x + 1, p.y));
         loop {
             if self.heuristic(p) == 0 || near_border(p.y) {
                 break;
             }
-            let cl = self.look(P {
-                x: p.x - 1,
-                y: p.y + dy,
-            });
-            let cr = self.look(P {
-                x: p.x + 1,
-                y: p.y + dy,
-            });
+            let cl = self.look(at(p.x - 1, p.y + dy));
+            let cr = self.look(at(p.x + 1, p.y + dy));
             if (cl != OBSTACLE && left != cost) || (cr != OBSTACLE && right != cost) {
                 break;
             }
@@ -200,57 +183,21 @@ impl Run<'_> {
     }
 
     fn jump_xy(&self, cost: u32, mut p: P, dx: i32, dy: i32) -> P {
-        let mut px = self.look(P {
-            x: p.x - dx,
-            y: p.y,
-        });
-        let mut py = self.look(P {
-            x: p.x,
-            y: p.y - dy,
-        });
+        let mut px = self.look(at(p.x - dx, p.y));
+        let mut py = self.look(at(p.x, p.y - dy));
         loop {
             if self.heuristic(p) == 0 || near_border(p.x) || near_border(p.y) {
                 break;
             }
-            if (self.look(P {
-                x: p.x - dx,
-                y: p.y + dy,
-            }) != OBSTACLE
-                && px != cost)
-                || (self.look(P {
-                    x: p.x + dx,
-                    y: p.y - dy,
-                }) != OBSTACLE
-                    && py != cost)
+            if (self.look(at(p.x - dx, p.y + dy)) != OBSTACLE && px != cost)
+                || (self.look(at(p.x + dx, p.y - dy)) != OBSTACLE && py != cost)
             {
                 break;
             }
-            px = self.look(P {
-                x: p.x,
-                y: p.y + dy,
-            });
-            py = self.look(P {
-                x: p.x + dx,
-                y: p.y,
-            });
-            if (py != OBSTACLE
-                && self.jump_x(
-                    cost,
-                    P {
-                        x: p.x + dx,
-                        y: p.y,
-                    },
-                    dx,
-                ) != NULL)
-                || (px != OBSTACLE
-                    && self.jump_y(
-                        cost,
-                        P {
-                            x: p.x,
-                            y: p.y + dy,
-                        },
-                        dy,
-                    ) != NULL)
+            px = self.look(at(p.x, p.y + dy));
+            py = self.look(at(p.x + dx, p.y));
+            if (py != OBSTACLE && self.jump_x(cost, at(p.x + dx, p.y), dx) != NULL)
+                || (px != OBSTACLE && self.jump_y(cost, at(p.x, p.y + dy), dy) != NULL)
             {
                 break;
             }
@@ -297,7 +244,6 @@ impl Run<'_> {
         let parent = Run::pos(self.parents[index]);
         let dx = (p.x - parent.x).signum();
         let dy = (p.y - parent.y).signum();
-        let at = |x: i32, y: i32| P { x, y };
 
         let special: Vec<P> = match (p.x % 50, p.y % 50) {
             (0, _) if dx == -1 => vec![at(p.x - 1, p.y)],
@@ -482,10 +428,7 @@ impl Heap {
 
 impl Search<'_> {
     pub fn run(&self, origin: Tile, goals: &[Goal]) -> Found {
-        let p = |t: Tile| P {
-            x: tiles::x_of(t) + BASE,
-            y: tiles::y_of(t) + BASE,
-        };
+        let p = |t: Tile| at(tiles::x_of(t) + BASE, tiles::y_of(t) + BASE);
         let weight = self.weight.clamp(1.0, 9.0);
         let mut run = Run {
             s: self,
@@ -534,20 +477,17 @@ impl Search<'_> {
         let mut path: Vec<Tile> = Vec::new();
         let tile = |q: P| tiles::index(q.x - BASE, q.y - BASE);
         let mut index = min_node;
-        let mut at = Run::pos(index);
-        while at != origin {
-            path.push(tile(at));
+        let mut here = Run::pos(index);
+        while here != origin {
+            path.push(tile(here));
             index = run.parents[index];
             let next = Run::pos(index);
-            let (sx, sy) = ((next.x - at.x).signum(), (next.y - at.y).signum());
-            while (next.x - at.x).abs().max((next.y - at.y).abs()) > 1 {
-                at = P {
-                    x: at.x + sx,
-                    y: at.y + sy,
-                };
-                path.push(tile(at));
+            let (sx, sy) = ((next.x - here.x).signum(), (next.y - here.y).signum());
+            while (next.x - here.x).abs().max((next.y - here.y).abs()) > 1 {
+                here = at(here.x + sx, here.y + sy);
+                path.push(tile(here));
             }
-            at = next;
+            here = next;
         }
         path.reverse();
         Found {

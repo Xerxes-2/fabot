@@ -6,6 +6,7 @@ use crate::world::Rules;
 use super::cut::{self, Rect};
 use super::ground::Ground;
 use super::place::{BLOCKED, Labels, Manager, ROAD, SWAMP, WALL, area, at, xy};
+use super::score::effect;
 
 const ENDANGERED: u8 = 0;
 const SAFE: u8 = 1;
@@ -130,7 +131,7 @@ impl Builder<'_> {
     }
 
     fn link_spot(&self, roads: &[Tile]) -> Option<Tile> {
-        for r in roads.iter().take(3) {
+        roads.iter().take(3).find_map(|r| {
             let (rx, ry) = xy(*r);
             let mut found = None;
             area(rx, ry, 1, |x, y| {
@@ -139,11 +140,8 @@ impl Builder<'_> {
                 }
                 found.is_none()
             });
-            if found.is_some() {
-                return found;
-            }
-        }
-        None
+            found
+        })
     }
 
     fn harvest_spot(&self, rock: Tile) -> Option<Tile> {
@@ -451,19 +449,12 @@ impl Builder<'_> {
             if self.m.exit_distance(x, y) < 8 || !self.m.buildable(x, y, false, false) {
                 continue;
             }
-            let count = [
-                (-1, 0),
-                (1, 0),
-                (0, -1),
-                (0, 1),
-                (-1, -1),
-                (1, -1),
-                (-1, 1),
-                (1, 1),
-            ]
-            .iter()
-            .filter(|(dx, dy)| self.m.buildable(x + dx, y + dy, false, false))
-            .count();
+            let count = (tiles::around(next).iter())
+                .filter(|n| {
+                    self.m
+                        .buildable(tiles::x_of(**n), tiles::y_of(**n), false, false)
+                })
+                .count();
             if count <= most {
                 continue;
             }
@@ -700,11 +691,6 @@ impl Builder<'_> {
         }
     }
 
-    fn effect(a: Tile, b: Tile) -> f64 {
-        let r = (tiles::range(a, b) + 2).clamp(5, 20);
-        1.0 - f64::from(r - 5) / 15.0
-    }
-
     fn towers(&mut self, safe: [bool; 4]) {
         let mut positions: Vec<(Tile, f64)> = Vec::new();
         if !safe.iter().all(|s| *s) {
@@ -773,11 +759,7 @@ impl Builder<'_> {
             .chain(self.m.plan.of("tower_placeholder"))
             .collect();
         for r in ramparts.iter_mut() {
-            let mut s = 1.0;
-            for t in &towers {
-                s *= 1.0 - 0.8 * Builder::effect(*t, r.0);
-            }
-            r.1 = s;
+            r.1 = (towers.iter()).fold(1.0, |s, t| s * (1.0 - 0.8 * effect(*t, r.0)));
         }
         for p in positions.iter_mut() {
             let (x, y) = xy(p.0);
@@ -787,11 +769,7 @@ impl Builder<'_> {
             if p.1 < 0.0 {
                 continue;
             }
-            let mut s = 0.0;
-            for r in ramparts.iter() {
-                s += r.1 * Builder::effect(r.0, p.0);
-            }
-            p.1 = s;
+            p.1 = (ramparts.iter()).fold(0.0, |s, r| s + r.1 * effect(r.0, p.0));
         }
     }
 

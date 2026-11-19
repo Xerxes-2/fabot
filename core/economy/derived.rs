@@ -105,9 +105,6 @@ impl StoreKind {
     pub fn is_buffer(self) -> bool {
         self == StoreKind::Buffer
     }
-    pub fn is_storage(self) -> bool {
-        self == StoreKind::Storage
-    }
     pub fn is_remains(self) -> bool {
         self == StoreKind::Remains
     }
@@ -123,7 +120,6 @@ pub struct StoreFact {
     pub kind: StoreKind,
     pub energy: i32,
     pub free: i32,
-    pub fill: f64,
     pub source_dug: i32,
     pub owned: bool,
 }
@@ -218,15 +214,10 @@ pub struct Ground {
     pub sites: Vec<SiteFact>,
     pub repairs: Vec<RepairFact>,
     pub piles: Vec<PileFact>,
-    pub income: i32,
-    /// The only income a body is hired against.
-    pub posted: i32,
     /// The engine accepts our reservation or claim on its controller, or a
     /// claimer attacks the Invader's hold off it.
     pub reservable: bool,
     pub our_reservation: i32,
-    /// Sources the Invader's hold refuses us a harvest from.
-    pub withheld: i32,
     pub upgrade_seats: Option<i32>,
     pub buffer: Option<StoreFact>,
     /// The buffer's tile, built (a link or container) or still a container
@@ -236,8 +227,6 @@ pub struct Ground {
     pub links: Vec<LinkFact>,
     pub receiver: Option<LinkFact>,
     pub buffer_seats: Vec<Pos>,
-    pub towers: i32,
-    pub fire: i32,
     pub labs: Vec<LabFact>,
     /// What our storage and terminal hold besides energy: (store, its tile,
     /// resource, amount).
@@ -430,21 +419,9 @@ fn takeable(c: &Controller) -> bool {
     reservable(c) || invader_held(c)
 }
 
-/// What a claimer wins a tick: a held room's yield over a neutral one's, and
-/// every source the Invader's hold refuses.
-pub fn reserve_gain(ground: &Ground) -> i32 {
-    ground.sources.len() as i32 * (engine::HELD_OUTPUT_PER_TICK - engine::NEUTRAL_OUTPUT_PER_TICK)
-        + ground.withheld * engine::HELD_OUTPUT_PER_TICK
-}
-
 /// `None` where the Atlas counts none: unknown, not zero.
 fn seats_at(atlas: &Atlas, range: i32, target: &Pos) -> Option<i32> {
-    let seats = atlas.seats(Footprint::One, range, target);
-    if seats.is_empty() {
-        None
-    } else {
-        Some(seats.len() as i32)
-    }
+    Some(atlas.seats(Footprint::One, range, target).len() as i32).filter(|n| *n > 0)
 }
 
 /// So the dig finishes the source inside its regeneration window despite the
@@ -464,14 +441,10 @@ pub fn dug_at(capacity: i32, home: bool, rate: i32, posted: bool, seats: Option<
         bodies::sized(Pattern::Harvester, dig_work(rate), capacity)
     };
 
-    match body {
-        Some(body) => {
-            // Not knowing a source's seats is no crew.
-            let diggers = if posted { 1 } else { seats.unwrap_or(0) };
-            rate.min(diggers * part_count_in(&body, Part::Work) * engine::HARVEST_PER_WORK)
-        }
-        None => 0,
-    }
+    let Some(body) = body else { return 0 };
+    // Not knowing a source's seats is no crew.
+    let diggers = if posted { 1 } else { seats.unwrap_or(0) };
+    rate.min(diggers * part_count_in(&body, Part::Work) * engine::HARVEST_PER_WORK)
 }
 
 /// Ten decay periods: the margin every bot keeps against losing a rampart.
@@ -624,11 +597,6 @@ fn stores_of(
                         kind,
                         energy,
                         free: s.store.free(),
-                        fill: if s.store.capacity > 0 {
-                            f64::from(s.store.used()) / f64::from(s.store.capacity)
-                        } else {
-                            0.0
-                        },
                         source_dug: dug,
                         owned,
                     })
@@ -648,7 +616,6 @@ fn stores_of(
                 kind: StoreKind::Remains,
                 energy,
                 free: 0,
-                fill: 1.0,
                 source_dug: 0,
                 owned: false,
             })
@@ -755,10 +722,8 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
 
     let minerals = minerals_of(room);
 
-    let income: i32 = sources.iter().map(|s| s.dug).sum();
     let dug_of =
         |by: &dyn Fn(&SourceFact) -> bool| sources.iter().filter(|s| by(s)).map(|s| s.dug).sum();
-    let posted: i32 = dug_of(&|s| s.container.is_some());
     let served_dug = |pos: &Pos| -> i32 { dug_of(&|s| s.pos.range(pos) == Some(1)) };
 
     let (bays, refills): (Vec<RefillFact>, Vec<RefillFact>) = (room.structures.iter())
@@ -782,7 +747,6 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
         kind,
         energy: l.energy,
         free: l.free,
-        fill: f64::from(l.energy) / f64::from((l.energy + l.free).max(1)),
         source_dug: dug,
         owned: false,
     };
@@ -838,18 +802,11 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
                 amount: p.amount,
             })
             .collect(),
-        income,
-        posted,
         reservable: room.controller.as_ref().is_some_and(takeable),
-        our_reservation: match room
-            .controller
-            .as_ref()
+        our_reservation: (room.controller.as_ref())
             .and_then(|c| c.reservation.as_ref())
-        {
-            Some((Owner::Ours, ticks)) => *ticks,
-            _ => 0,
-        },
-        withheld: 0,
+            .filter(|(owner, _)| *owner == Owner::Ours)
+            .map_or(0, |(_, ticks)| *ticks),
         upgrade_seats: match &room.controller {
             Some(c) => seats_at(atlas, engine::UPGRADE_RANGE, &c.pos),
             None => Some(0),
@@ -881,17 +838,6 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
         shipment: Vec::new(),
         ship_to: None,
         abandoned: false,
-        towers: room
-            .structures
-            .iter()
-            .filter(|s| s.kind.is_tower() && s.owner.is_ours())
-            .count() as i32,
-        fire: room
-            .structures
-            .iter()
-            .filter(|s| s.kind.is_tower() && s.owner.is_ours())
-            .map(|s| s.store.amount_of(&Resource::Energy))
-            .sum(),
         buffer_seats: buffer_seats_of(atlas, room, buffer.as_ref()),
     }
 }
@@ -1124,22 +1070,11 @@ fn remote_of(
         Cow::Borrowed,
     );
 
-    let withheld = |c: &Controller| {
-        if invader_held(c) {
-            room.sources.len() as i32
-        } else {
-            0
-        }
-    };
-
     match &room.controller {
         Some(c) if !c.owner.is_ours() && !reservable(c) => {
-            let sources = withheld(c);
             let mut bare = room.clone().into_owned();
             bare.sources = Vec::new();
-            let mut ground = ground_of(atlas, richest, 0, &bare, 0);
-            ground.withheld = sources;
-            ground
+            ground_of(atlas, richest, 0, &bare, 0)
         }
         _ if richest >= engine::body_cost(bodies::block_of(Pattern::Claimer)) => {
             ground_of(atlas, richest, engine::HELD_OUTPUT_PER_TICK, &room, 0)
@@ -1242,7 +1177,6 @@ pub fn of_world<'t>(
                 kind: StoreKind::Pile,
                 energy: energy.iter().map(|p| p.amount).sum(),
                 free: engine::STORAGE_CAPACITY,
-                fill: 0.0,
                 source_dug: 0,
                 owned: false,
             });

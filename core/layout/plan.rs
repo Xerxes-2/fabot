@@ -16,11 +16,9 @@ use super::shape::{self, Item, Plan};
 
 pub fn level_of(rules: &Rules, kind: &Kind, rank: i32) -> i32 {
     let name = kind.name();
-    let mut level = 0;
-    while level <= engine::CONTROLLER_MAX_LEVEL && rules.allowed(&name, level) <= rank {
-        level += 1;
-    }
-    level
+    (0..=engine::CONTROLLER_MAX_LEVEL)
+        .find(|level| rules.allowed(&name, *level) > rank)
+        .unwrap_or(engine::CONTROLLER_MAX_LEVEL + 1)
 }
 
 /// At the first level a room's energy goes to its controller alone.
@@ -249,24 +247,22 @@ fn to_plan(rules: &Rules, ground: &Ground, built: &Built) -> Plan {
     }
 
     let ramp = |t: &Tile| plan.has("rampart.ramp", *t);
-    let mut ring: Vec<Item> = Vec::new();
     let (main, ramps): (Vec<Tile>, Vec<Tile>) =
         plan.of("rampart").into_iter().partition(|t| !ramp(t));
-    for t in main.into_iter().chain(ramps) {
-        ring.push(Item {
-            kind: Kind::Rampart,
-            tile: t,
-            level: 3,
-        });
-    }
-    for (label, level) in [("wall.deco", 4), ("wall.quad", 6)] {
-        for t in plan.of(label) {
-            ring.push(Item {
-                kind: Kind::Wall,
-                tile: t,
-                level,
-            });
+    let item = |kind: Kind, level: i32| {
+        move |tile: Tile| Item {
+            kind: kind.clone(),
+            tile,
+            level,
         }
+    };
+    let mut ring: Vec<Item> = main
+        .into_iter()
+        .chain(ramps)
+        .map(item(Kind::Rampart, 3))
+        .collect();
+    for (label, level) in [("wall.deco", 4), ("wall.quad", 6)] {
+        ring.extend(plan.of(label).into_iter().map(item(Kind::Wall, level)));
     }
     ring.sort_by_key(|i| i.level);
 

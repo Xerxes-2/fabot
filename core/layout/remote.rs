@@ -75,9 +75,8 @@ fn place(
     pos: &Pos,
     kind: &Kind,
 ) {
-    let room = match rooms.get(&pos.room) {
-        Some(room) => *room,
-        None => return,
+    let Some(&room) = rooms.get(&pos.room) else {
+        return;
     };
 
     if *budget <= 0 {
@@ -131,11 +130,10 @@ pub fn sites(
     derived: &tick::Derived,
     (planned, piles): (&[Intent], &dyn Fn(RoomName) -> Option<Pos>),
     plans: &[&Plan],
-    budget: i32,
+    mut budget: i32,
 ) -> Vec<Intent> {
     let (colonies, outposts) = (&derived.colonies, &derived.worked);
     let mut intents: Vec<Intent> = Vec::new();
-    let mut budget = budget;
     let mut taken: BTreeMap<RoomName, TileSet> = BTreeMap::new();
     let mut pending: BTreeMap<RoomName, i32> = BTreeMap::new();
     let mut rooms: BTreeMap<RoomName, &Room> = BTreeMap::new();
@@ -169,9 +167,8 @@ pub fn sites(
         .collect();
 
     for o in outposts {
-        let room = match rooms.get(&o.room) {
-            Some(room) => *room,
-            None => continue,
+        let Some(&room) = rooms.get(&o.room) else {
+            continue;
         };
 
         // A room at its site limit places nothing: the walk is not drawn.

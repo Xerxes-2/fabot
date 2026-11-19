@@ -56,8 +56,6 @@ pub fn evacuate(g: &mut Ground, room: &Room, creeps: &[Creep], to: Option<(RoomN
     g.minerals.clear();
     g.sites.clear();
     g.repairs.clear();
-    g.income = 0;
-    g.posted = 0;
     g.lab_plan = None;
     g.buffer = None;
     g.feed = None;

@@ -173,13 +173,11 @@ pub fn plan_for(
         match held(lab) {
             Some((m, _)) if &m != reagent => plan.drains.push((lab, m)),
             Some((_, amount)) if amount >= half => (),
-            Some((_, amount)) => {
+            h => {
+                let amount = h.map_or(0, |(_, amount)| amount);
                 plan.fills
-                    .push((lab, reagent.clone(), engine::LAB_MINERAL_CAPACITY - amount))
+                    .push((lab, reagent.clone(), engine::LAB_MINERAL_CAPACITY - amount));
             }
-            None => plan
-                .fills
-                .push((lab, reagent.clone(), engine::LAB_MINERAL_CAPACITY)),
         }
     }
 

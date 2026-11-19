@@ -116,21 +116,11 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
     }
 
     let standing = |ordinal: i32| -> Vec<Pos> {
-        let mut found: Vec<Pos> = Vec::new();
-
-        for s in &room.structures {
-            if s.kind.ordinal() == ordinal {
-                found.push(s.pos);
-            }
-        }
-
-        for s in &room.sites {
-            if s.kind.ordinal() == ordinal {
-                found.push(s.pos);
-            }
-        }
-
-        found
+        (room.structures.iter().map(|s| (&s.kind, s.pos)))
+            .chain(room.sites.iter().map(|s| (&s.kind, s.pos)))
+            .filter(|(kind, _)| kind.ordinal() == ordinal)
+            .map(|(_, pos)| pos)
+            .collect()
     };
 
     let containers = standing(Kind::Container.ordinal());
@@ -172,10 +162,9 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
 
     let mut seat = [0u8; tiles::COUNT];
 
-    let buffer: Option<(Tile, &Structure)> = match (&room.controller, Atlas::buffer(room)) {
-        (Some(c), Some(b)) => Some((tiles::of_pos(&c.pos), b)),
-        _ => None,
-    };
+    let buffer: Option<(Tile, &Structure)> = (room.controller.as_ref())
+        .zip(Atlas::buffer(room))
+        .map(|(c, b)| (tiles::of_pos(&c.pos), b));
 
     if let Some((c, b)) = buffer {
         for t in Atlas::upgrader_seats(|t: Tile| walkable[t] > 0, c, tiles::of_pos(&b.pos)) {
@@ -329,11 +318,6 @@ pub fn place(
     // plan drew there lead to that unbuilt container, and the tile farthest
     // from the anchor lies behind the miner, off the way in. The last open
     // tile is the miner's way in.
-    let planned_post = |t: Tile| {
-        plan.items
-            .iter()
-            .any(|i| i.kind.is_container() && i.tile == t)
-    };
     // A claim's first spawn may stand in a harvest bay, where a pioneer digs:
     // its site waits under the creep and is built once it steps off.
     let founding = |kind: &Kind| kind.is_spawn() && held_of(census, &Kind::Spawn) == 0;
@@ -347,7 +331,7 @@ pub fn place(
             Some((_, None)) => None,
             None if item.kind.is_link()
                 && census.seat[item.tile] > 0
-                && census.buffer.is_some_and(|(_, b)| !planned_post(b)) =>
+                && census.buffer.is_some_and(|(_, b)| !posted(plan, b)) =>
             {
                 let (c, b) = census.buffer.unwrap();
                 let walkable = |t: Tile| census.walkable[t] > 0;
@@ -369,26 +353,20 @@ pub fn place(
             }
             Some((_, Some((post, beside))))
                 if closes(census, *post, item.tile)
-                    || (!planned_post(*post) && tiles::range(item.tile, *post) != 1) =>
+                    || (!posted(plan, *post) && tiles::range(item.tile, *post) != 1) =>
             {
-                let mut candidates: Vec<Tile> = beside
-                    .iter()
-                    .copied()
+                let head = (beside.iter().copied())
                     .filter(|t| {
                         plan.items.iter().all(|i| i.tile != *t || i.kind.is_road())
                             && !closes(census, *post, *t)
                     })
-                    .collect();
-
-                candidates.sort_by_key(|t| {
-                    (
-                        plan.items.iter().any(|i| i.tile == *t),
-                        -(tiles::range(*t, plan.anchor)),
-                        *t,
-                    )
-                });
-
-                let head = candidates.first().copied();
+                    .min_by_key(|t| {
+                        (
+                            plan.items.iter().any(|i| i.tile == *t),
+                            -(tiles::range(*t, plan.anchor)),
+                            *t,
+                        )
+                    });
                 if beside.len() > 1 { head } else { None }
             }
             _ => Some(item.tile),

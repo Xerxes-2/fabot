@@ -36,13 +36,6 @@ enum Of {
     Received,
 }
 
-/// The bodies handed a task this tick and the load they bring or take.
-#[derive(Clone, Copy, Debug, Default)]
-struct Bound {
-    bodies: i32,
-    load: i32,
-}
-
 #[derive(Clone, Debug)]
 struct Spot {
     task: Task,
@@ -56,7 +49,7 @@ pub struct Jobs<'a> {
     derived: &'a Derived<'a>,
     sinks: Vec<Vec<Spot>>,
     takes: Vec<Vec<Spot>>,
-    bound: HashMap<Task, Bound>,
+    booked_load: HashMap<Task, i32>,
     digging: HashMap<Id, i32>,
     /// Per colony: a carrier stands, so a worker refills the ring only
     /// without one.
@@ -230,11 +223,9 @@ fn sinks_of(derived: &Derived, ci: usize) -> Vec<Spot> {
 
 fn ores_aboard(derived: &Derived) -> Vec<Resource> {
     let mut out: Vec<Resource> = Vec::new();
-    for b in &derived.bodies {
-        for (r, _) in &b.store.held {
-            if !r.is_energy() && !out.contains(r) {
-                out.push(r.clone());
-            }
+    for (r, _) in derived.bodies.iter().flat_map(|b| &b.store.held) {
+        if !r.is_energy() && !out.contains(r) {
+            out.push(r.clone());
         }
     }
     out
@@ -428,7 +419,7 @@ impl<'a> Jobs<'a> {
             derived,
             sinks,
             takes,
-            bound: HashMap::default(),
+            booked_load: HashMap::default(),
             digging,
             carried,
             booked,
@@ -445,7 +436,7 @@ impl<'a> Jobs<'a> {
     /// Hivemind's (`dispatcher/resource-*`) priority and weight; `None` where
     /// its `isValid` fails, and a negative priority is never picked.
     fn rank(&self, ci: usize, s: &Spot, body: &Body, carrier: bool) -> Option<(i32, i32)> {
-        let Bound { load, .. } = self.bound.get(&s.task).copied().unwrap_or_default();
+        let load = self.booked_load.get(&s.task).copied().unwrap_or_default();
         // What the structure lacks, before the loads booked against it.
         let lacks = s.amount + load;
         let range = s.pos.range(&body.pos).unwrap_or(50);
@@ -513,7 +504,7 @@ impl<'a> Jobs<'a> {
     fn ring_open(&self, ci: usize) -> bool {
         (self.sinks[ci].iter()).any(|s| {
             matches!(s.of, Of::Ring { .. })
-                && self.bound.get(&s.task).map_or(0, |b| b.load) < s.amount
+                && self.booked_load.get(&s.task).copied().unwrap_or_default() < s.amount
         })
     }
 
@@ -538,19 +529,17 @@ impl<'a> Jobs<'a> {
         })
     }
 
-    fn count(bound: &mut HashMap<Task, Bound>, task: &Task, n: i32) {
-        let b = bound.entry(task.clone()).or_default();
-        b.bodies += 1;
-        b.load += n;
+    fn count(booked_load: &mut HashMap<Task, i32>, task: &Task, n: i32) {
+        *booked_load.entry(task.clone()).or_default() += n;
     }
 
     /// The ring is held by the loads bound for it, Hivemind's way; any other
     /// spot is booked down, main's.
-    fn book(bound: &mut HashMap<Task, Bound>, spot: &mut Spot, n: i32) {
+    fn book(booked_load: &mut HashMap<Task, i32>, spot: &mut Spot, n: i32) {
         if !matches!(spot.of, Of::Ring { .. }) {
             spot.amount -= n;
         }
-        Jobs::count(bound, &spot.task, n);
+        Jobs::count(booked_load, &spot.task, n);
     }
 
     fn deliver(
@@ -572,15 +561,13 @@ impl<'a> Jobs<'a> {
             matches!(&s.task, Task::Refill(_, r) if held.contains(r)
                 && (carrier || (!matches!(s.of, Of::Bank) || !r.is_energy()) && !matches!(s.of, Of::Worker { .. })))
         };
-        let i = match kept.and_then(|t| self.valid(ci, &self.sinks[ci], t, (body, carrier))) {
-            Some(i) => i,
-            None => self.pick(ci, &self.sinks[ci], (body, carrier), &fits)?,
-        };
+        let i = (kept.and_then(|t| self.valid(ci, &self.sinks[ci], t, (body, carrier))))
+            .or_else(|| self.pick(ci, &self.sinks[ci], (body, carrier), &fits))?;
         let spot = &mut self.sinks[ci][i];
         let Task::Refill(_, r) = &spot.task else {
             return None;
         };
-        Jobs::book(&mut self.bound, spot, body.store.amount_of(r));
+        Jobs::book(&mut self.booked_load, spot, body.store.amount_of(r));
         Some(spot.task.clone())
     }
 
@@ -635,7 +622,7 @@ impl<'a> Jobs<'a> {
             }
         }
         let spot = &mut takes[i?];
-        Jobs::book(&mut self.bound, spot, body.free);
+        Jobs::book(&mut self.booked_load, spot, body.free);
         Some(spot.task.clone())
     }
 
@@ -929,7 +916,7 @@ impl<'a> Jobs<'a> {
             {
                 *self.digging.entry(id).or_default() += 1;
             }
-            Jobs::count(&mut self.bound, t, body.free);
+            Jobs::count(&mut self.booked_load, t, body.free);
             return Some(t.clone());
         }
         let ci = slot.colony;
@@ -996,7 +983,7 @@ impl<'a> Jobs<'a> {
                 )
             });
         if let Some((t, _, _)) = load {
-            Jobs::count(&mut self.bound, t, body.free);
+            Jobs::count(&mut self.booked_load, t, body.free);
             return Some(t.clone());
         }
         // Beside a storage the dig is the carriers' to bank.
