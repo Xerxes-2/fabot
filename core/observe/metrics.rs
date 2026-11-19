@@ -5,15 +5,15 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write;
 
 use crate::HashMap;
+use crate::atlas::Atlas;
 use crate::economy::abandon;
 use crate::economy::bodies::{self, Pattern};
 use crate::economy::task::{Assignment, Task};
 use crate::engine;
-use crate::fight::kinds::defend;
 use crate::fight::shape::{Cast, Engagement, Phase};
 use crate::intents::{Action, CreepAct, Refusal, SpawnAct, TowerAct};
 use crate::tick;
-use crate::tick::{Declarations, Derived};
+use crate::tick::{Declarations, Derived, Refused};
 use crate::vocabulary::{Part, Resource};
 use crate::world::{Creep, Id, Kind, Owner, Pos, Room, RoomName, World, hostiles};
 
@@ -792,7 +792,7 @@ fn exposure(sums: &mut Sums, seen: &Seen) {
         let Some(c) = r.controller.as_ref() else {
             continue;
         };
-        let safe = c.safe_mode > 0 || defend::fireable(c);
+        let safe = c.safe_mode > 0 || c.safe_mode_fireable();
         if c.level >= 3 && towers(r) && safe {
             continue;
         }
@@ -1164,48 +1164,27 @@ fn to_text(ring: &VecDeque<Window>) -> String {
 }
 
 /// The per-tick counts the observe segment reports (`ARCHITECTURE.md` §9.3).
-pub fn counts(world: &World, decided: &tick::Decided) -> Vec<(String, i32)> {
-    let atlas = &decided.atlas;
+pub fn counts(
+    world: &World,
+    atlas: &Atlas,
+    declarations: &Declarations,
+    refused: &Refused,
+    telemetry: &[(&'static str, i32)],
+) -> Vec<(String, i32)> {
     let mut counts = vec![
         ("atlasHits".to_string(), atlas.hits()),
         ("atlasMisses".to_string(), atlas.misses()),
         ("flood".to_string(), atlas.relaxed()),
         ("recomputed".to_string(), atlas.recomputed()),
     ];
-    let abandoning =
-        (decided.declarations.colonies.iter()).filter(|p| p.stage == tick::Stage::Abandon);
+    let abandoning = (declarations.colonies.iter()).filter(|p| p.stage == tick::Stage::Abandon);
     for room in abandoning.filter_map(|p| world.room(p.room)) {
         counts.push((format!("abandon:{}", room.name), abandon::left(room)));
     }
-    counts.extend((decided.refused.rooms.iter()).map(|room| (format!("closed:{room}"), 1)));
-    counts.extend((decided.refused.rules.iter()).map(|rule| (format!("refused:{rule}"), 1)));
-    let telemetry = &decided.result.telemetry.counts;
+    counts.extend((refused.rooms.iter()).map(|room| (format!("closed:{room}"), 1)));
+    counts.extend((refused.rules.iter()).map(|rule| (format!("refused:{rule}"), 1)));
     counts.extend(telemetry.iter().map(|(name, n)| (name.to_string(), *n)));
     counts
-}
-
-pub fn measure(
-    m: Metrics,
-    world: &World,
-    decided: &tick::Decided,
-    refusals: &[Refusal],
-    phases: &[(String, f64)],
-) -> Metrics {
-    let state = &decided.result.state;
-    let seen = Seen {
-        world,
-        assignments: &state.assignments,
-        engagements: &state.engagements,
-        casts: &state.casts,
-        intents: &decided.result.settled.actions,
-        held: &decided.result.settled.held,
-        short: &decided.result.telemetry.short,
-        refusals,
-        phases,
-        declarations: &decided.declarations,
-        derived: &decided.derived,
-    };
-    step(m, &seen)
 }
 
 #[cfg(test)]

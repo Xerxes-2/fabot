@@ -266,13 +266,6 @@ fn last_resort(home: &Home) -> bool {
             || razed(home))
 }
 
-pub fn fireable(c: &Controller) -> bool {
-    c.safe_mode_available > 0
-        && c.safe_mode_cooldown == 0
-        && c.upgrade_blocked == 0
-        && c.ticks_to_downgrade >= engine::safe_mode_downgrade_line(c.level)
-}
-
 pub fn safe_mode(running: bool, homes: &[Home]) -> Option<Id> {
     let claimer =
         |c: &Controller, h: &Creep| h.live(Part::Claim) > 0 && h.pos.within(CLAIMER_REACH, &c.pos);
@@ -283,7 +276,7 @@ pub fn safe_mode(running: bool, homes: &[Home]) -> Option<Id> {
         homes
             .iter()
             .find(|h| {
-                fireable(&h.controller)
+                h.controller.safe_mode_fireable()
                     && (h.hostiles.iter().any(|c| claimer(&h.controller, c)) || last_resort(h))
             })
             .map(|h| h.controller.id)

@@ -109,10 +109,30 @@ where
         phases,
     );
 
-    let counts = metrics::counts(&world, &decided);
+    let counts = metrics::counts(
+        &world,
+        &decided.atlas,
+        &decided.declarations,
+        &decided.refused,
+        &decided.result.telemetry.counts,
+    );
     if let Some(m) = metrics {
         let start = clock();
-        *m = metrics::measure(std::mem::take(m), &world, &decided, &refusals, phases);
+        let state = &decided.result.state;
+        let seen = metrics::Seen {
+            world: &world,
+            assignments: &state.assignments,
+            engagements: &state.engagements,
+            casts: &state.casts,
+            intents: &decided.result.settled.actions,
+            held: &decided.result.settled.held,
+            short: &decided.result.telemetry.short,
+            refusals: &refusals,
+            phases,
+            declarations: &decided.declarations,
+            derived: &decided.derived,
+        };
+        *m = metrics::step(std::mem::take(m), &seen);
         phases.push(("metrics".to_string(), clock() - start));
     }
 

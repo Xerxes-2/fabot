@@ -612,6 +612,15 @@ pub struct Controller {
     pub upgrade_blocked: i32,
 }
 
+impl Controller {
+    pub fn safe_mode_fireable(&self) -> bool {
+        self.safe_mode_available > 0
+            && self.safe_mode_cooldown == 0
+            && self.upgrade_blocked == 0
+            && self.ticks_to_downgrade >= engine::safe_mode_downgrade_line(self.level)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BodyPart {
     pub kind: Part,
