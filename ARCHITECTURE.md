@@ -128,7 +128,7 @@ segments over multiple ticks (economy first); a cold tick never spends more than
 | `Layout` | Colony placement plan (Hivemind planner + xxscreeps JPS), rampart ring, construction sites, buried-road destroy, tower firing | `Derived`, `Atlas`, `declarations` | sites, destroys, tower actions, `standing.layout` |
 | `Exchange` | Pure combat arithmetic (`outcome`, `cheapest_win`, breach planning) | fighters, terrain | — |
 | `Fight` | Hostile `Tracker`, engagements (`kinds/`: defend, siege, sweep, raid), casting | `Derived`, `Atlas`, `Exchange`, `declarations`, `intel`, `State` | fight actions, asks, wishes, casts, `State` fight rows |
-| `Tactics` | Per-creep combat actions & stepping (no `Fight` import) | `Atlas`, `Move`, `Sight` + plan | creep actions, wishes |
+| `Tactics` | Per-creep combat actions, stepping, and the operator's tactic rules (`ruling`, `checked`) (no `Fight` import) | `Atlas`, `Move`, `Sight` + plan | creep actions, wishes |
 | `Strategy` | Intel, observers/scouts, `ColonyPlan` & outpost selection, expansion/abandon, operation opening & global force priority | `World`, `Derived`, `Exchange`, `intel`, `Season`, `standing.layout`, `spare`, fight state | `declarations` (`ColonyPlan`, outposts, claims), `intel`, `expansion` |
 | `Season` | Disposable seasonal rules (`worth`, `spent`, season structures/scoring) | `World` | declarations to `Strategy`, season actions |
 | `Move` | Room-level movement arbitration (augmenting-path matching) and stepping (`plan`, `blob`) | wishes, `Atlas` | moves & held bodies (`Settled`) |

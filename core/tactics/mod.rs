@@ -9,7 +9,7 @@ use crate::atlas::{Atlas, Mover, Target};
 use crate::grid::{self, Footprint};
 use crate::intents::CreepAct;
 use crate::mv::{Wish, blob, plan};
-use crate::tick;
+use crate::tick::{self, TacticRule};
 use crate::tiles::Tile;
 use crate::vocabulary::Part;
 use crate::world::{Creep, Id, Pos, RoomName};
@@ -45,6 +45,67 @@ pub fn by_name(name: &str) -> Option<Tactic> {
     [Kite, Close, Hold, BlobKite, BlobClose]
         .into_iter()
         .find(|t| self::name(*t) == name)
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Ruling {
+    pub forbid: BTreeSet<Tactic>,
+    pub pin: Option<Tactic>,
+}
+
+pub fn ruling(rules: &[TacticRule], room: RoomName, rivals: &BTreeSet<&str>) -> Ruling {
+    let applies = |r: &TacticRule| {
+        r.room.is_none_or(|x| x == room) && r.rival.as_deref().is_none_or(|x| rivals.contains(&x))
+    };
+
+    let mut out = Ruling::default();
+
+    for rule in rules.iter().filter(|r| applies(r)) {
+        out.forbid
+            .extend(rule.forbid.iter().filter_map(|n| by_name(n)));
+
+        out.pin = rule.pin.as_deref().and_then(by_name).or(out.pin);
+    }
+
+    out
+}
+
+pub fn checked(rules: Vec<TacticRule>) -> (Vec<TacticRule>, Vec<String>) {
+    let joins = |a: &TacticRule, b: &TacticRule| {
+        fn same<T: PartialEq>(x: Option<T>, y: Option<T>) -> bool {
+            x.zip(y).is_none_or(|(x, y)| x == y)
+        }
+        same(a.rival.as_ref(), b.rival.as_ref()) && same(a.room, b.room)
+    };
+
+    let mut kept = Vec::new();
+    let mut refused = Vec::new();
+
+    for rule in &rules {
+        let unknown = rule
+            .pin
+            .iter()
+            .chain(&rule.forbid)
+            .find(|name| by_name(name).is_none());
+
+        let pin = rule.pin.as_deref().and_then(by_name);
+
+        let contradicts = rules
+            .iter()
+            .filter(|other| joins(rule, other))
+            .flat_map(|other| other.forbid.iter().filter_map(|n| by_name(n)))
+            .any(|forbidden| Some(forbidden) == pin);
+
+        match (unknown, pin) {
+            (Some(name), _) => refused.push(format!("tactics {name}")),
+            (None, Some(pin)) if contradicts => {
+                refused.push(format!("tactics pin {}", name(pin)));
+            }
+            _ => kept.push(rule.clone()),
+        }
+    }
+
+    (kept, refused)
 }
 
 /// One candidate as its kind's price finds it (§6.3): the bodies it fields and
@@ -1012,6 +1073,62 @@ pub fn hunt(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn rule(
+        room: Option<&str>,
+        rival: Option<&str>,
+        pin: Option<&str>,
+        forbid: &[&str],
+    ) -> TacticRule {
+        TacticRule {
+            rival: rival.map(str::to_string),
+            room: room.map(RoomName::named),
+            pin: pin.map(str::to_string),
+            forbid: forbid.iter().map(ToString::to_string).collect(),
+        }
+    }
+
+    #[test]
+    fn a_rule_matches_every_field_it_sets_and_the_last_pin_wins() {
+        let rules = [
+            rule(None, Some("rival"), Some("kite"), &[]),
+            rule(Some("W1N1"), None, None, &["blob"]),
+            rule(Some("W1N1"), Some("rival"), Some("hold"), &[]),
+        ];
+        let rivals: BTreeSet<&str> = ["rival"].into_iter().collect();
+
+        let here = ruling(&rules, RoomName::named("W1N1"), &rivals);
+        assert_eq!(here.pin, Some(Tactic::Hold));
+        assert!(here.forbid.contains(&Tactic::BlobClose));
+
+        let elsewhere = ruling(&rules, RoomName::named("W2N2"), &rivals);
+        assert_eq!(elsewhere.pin, Some(Tactic::Kite));
+        assert!(elsewhere.forbid.is_empty());
+
+        let stranger: BTreeSet<&str> = ["other"].into_iter().collect();
+        assert_eq!(ruling(&rules, RoomName::named("W1N1"), &stranger).pin, None);
+    }
+
+    #[test]
+    fn a_rule_a_name_no_tactic_has_or_a_pin_a_rule_that_joins_it_forbids_never_applies() {
+        let (kept, refused) = checked(vec![
+            rule(None, None, None, &["bounce"]),
+            rule(Some("W1N1"), None, Some("kite"), &["kite"]),
+            rule(Some("W2N2"), None, Some("close"), &[]),
+        ]);
+
+        assert_eq!(kept.len(), 1);
+        assert_eq!(refused.len(), 2);
+
+        // A room-wide rule forbids what a rival's rule pins: neither names the other.
+        let (kept, refused) = checked(vec![
+            rule(Some("W1N1"), Some("rival"), Some("kite"), &[]),
+            rule(Some("W1N1"), None, None, &["kite"]),
+        ]);
+
+        assert_eq!(kept.len(), 1);
+        assert_eq!(refused.len(), 1);
+    }
 
     fn offer(tactic: Tactic, bodies: i32, value: i32, cost: i32) -> Offer {
         Offer {

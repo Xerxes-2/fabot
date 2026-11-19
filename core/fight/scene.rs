@@ -115,7 +115,7 @@ impl<'a> Scene<'a> {
         e: &Engagement,
         candidates: &[Tactic],
     ) -> (Vec<Tactic>, Option<Tactic>) {
-        let ruling = tick::ruling(self.rules, e.room, &self.rivals_of(e.room));
+        let ruling = tactics::ruling(self.rules, e.room, &self.rivals_of(e.room));
 
         let left = candidates
             .iter()
