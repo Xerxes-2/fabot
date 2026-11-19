@@ -33,6 +33,7 @@ impl Wish {
 
     /// A body is pushed off its work only by a chain at least two weights
     /// heavier: one weight heavier scores nothing.
+    #[inline]
     pub fn value(&self, tile: Tile) -> i32 {
         let weight = self.weight.max(1);
         let asked = if self.stays() {

@@ -593,7 +593,9 @@ Pure at module boundaries, systems Rust inside (measurements override defaults):
 - **`#[inline]` across crates:** rustc inlines a function into another
   crate only when it is `#[inline]` or tiny, and neither the incremental test
   profile nor release LTO makes up for it, so a hot helper another crate calls
-  takes `#[inline]`; without it on `tiles` the core suite ran 2.2 → 3.0 s.
+  takes `#[inline]` when a profile shows the split took it out of line (each new
+  crate boundary repeats that pass); without them the base split cost economy
+  +3%, atlas +6%, settle +8% warm and the core suite 2.2 → 3.0 s.
 
 ### 9.3 Counts are a gate
 

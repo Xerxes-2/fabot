@@ -116,6 +116,7 @@ impl Declarations {
         self
     }
 
+    #[inline]
     pub fn abandoning(&self, room: RoomName) -> bool {
         (self.colonies.iter()).any(|p| p.room == room && p.stage == Stage::Abandon)
     }

@@ -272,10 +272,12 @@ impl Pos {
         self.y * 50 + self.x
     }
 
+    #[inline]
     pub fn range(&self, b: &Pos) -> Option<i32> {
         (self.room == b.room).then(|| (self.x - b.x).abs().max((self.y - b.y).abs()))
     }
 
+    #[inline]
     pub fn within(&self, range: i32, b: &Pos) -> bool {
         self.range(b).map(|r| r <= range).unwrap_or_default()
     }
@@ -320,6 +322,7 @@ impl Owner {
         }
     }
 
+    #[inline]
     pub fn is_ours(&self) -> bool {
         *self == Owner::Ours
     }
@@ -361,6 +364,7 @@ impl Store {
         }
     }
 
+    #[inline]
     pub fn amount_of(&self, resource: &Resource) -> i32 {
         self.held
             .iter()
@@ -372,6 +376,7 @@ impl Store {
         self.held.iter().map(|(_, amount)| amount).sum()
     }
 
+    #[inline]
     pub fn free(&self) -> i32 {
         (self.capacity - self.used()).max(0)
     }
@@ -734,6 +739,7 @@ pub struct Rules {
 
 impl Rules {
     /// `CONTROLLER_STRUCTURES`; sites count with standing structures.
+    #[inline]
     pub fn allowed(&self, kind: &str, level: i32) -> i32 {
         let row = self.structures.get(kind).map_or(&[][..], Vec::as_slice);
         let at = usize::try_from(level).map_or(None, |l| row.get(l).or(row.last()));
@@ -1329,22 +1335,26 @@ impl Creep {
         self.owner.is_ours()
     }
 
+    #[inline]
     pub fn live(&self, kind: Part) -> i32 {
         live(&self.body, kind)
     }
 }
 
+#[inline]
 pub fn live(body: &[BodyPart], kind: Part) -> i32 {
     (body.iter())
         .filter(|p| p.hits > 0 && p.kind == kind)
         .count() as i32
 }
 
+#[inline]
 pub fn cast(body: &[BodyPart], kind: Part) -> i32 {
     (body.iter()).filter(|p| p.kind == kind).count() as i32
 }
 
 impl World<'_> {
+    #[inline]
     pub fn room(&self, name: RoomName) -> Option<&Room<'_>> {
         self.rooms.iter().find(|r| r.name == name)
     }

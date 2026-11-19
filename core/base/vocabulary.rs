@@ -53,6 +53,7 @@ pub fn takes(part: Part, compound: ResourceType) -> bool {
     multiple(part, Some(compound)) > 1 || damage_ratio(part, Some(compound)) < 1.0
 }
 
+#[inline]
 pub fn part_count_in(body: &[Part], part: Part) -> i32 {
     body.iter().filter(|each| **each == part).count() as i32
 }
@@ -109,6 +110,7 @@ impl Resource {
         }
     }
 
+    #[inline]
     pub fn is_energy(&self) -> bool {
         self == &Resource::Energy
     }

@@ -126,6 +126,7 @@ pub fn lifetime(mut body: impl Iterator<Item = Part>) -> i32 {
     }
 }
 
+#[inline]
 pub fn body_cost(body: &[Part]) -> i32 {
     body.iter().map(|part| part_cost(*part)).sum()
 }

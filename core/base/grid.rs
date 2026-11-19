@@ -62,6 +62,7 @@ pub fn empty_factor(body: &[Part]) -> FatigueFactor {
     FatigueFactor { weight, moves }
 }
 
+#[inline]
 pub fn loaded_factor(body: &[Part]) -> FatigueFactor {
     let moves = body.iter().filter(|p| **p == Part::Move).count() as i32;
     FatigueFactor {
@@ -83,6 +84,7 @@ pub const SEAT_WEIGHT: i32 = SEAT_SWAMPS * engine::SWAMP_WEIGHT;
 /// Exact per step: a body cannot step again until its fatigue is zero, so a
 /// path's ticks are the sum of its steps'. A seat's price follows from swamp's,
 /// so the pace class keys a flood.
+#[inline]
 pub fn step_ticks(factor: FatigueFactor, weight: i32) -> Option<i32> {
     let seat = weight == SEAT_WEIGHT;
     let ticks = (step_units(factor, if seat { engine::SWAMP_WEIGHT } else { weight })? + 1) / 2;

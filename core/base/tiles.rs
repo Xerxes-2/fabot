@@ -330,6 +330,7 @@ fn in_sector((x, y): (i32, i32)) -> (i32, i32) {
     (local(x), local(y))
 }
 
+#[inline]
 pub fn is_keeper_room(c: (i32, i32)) -> bool {
     let (x, y) = in_sector(c);
     (4..=6).contains(&x) && (4..=6).contains(&y) && (x, y) != (5, 5)
@@ -341,6 +342,7 @@ pub fn has_controller(c: (i32, i32)) -> bool {
 }
 
 /// Across rooms, where adjacent rooms' edge tiles are one tile.
+#[inline]
 pub fn seam_range(a: &Pos, b: &Pos) -> Option<i32> {
     if a.room == b.room {
         a.range(b)
