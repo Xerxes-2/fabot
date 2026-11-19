@@ -1,0 +1,10 @@
+{
+  "why": "a level-0 core glimpsed once by a body passing its outpost stays in sightings until it collapses, so its engagement outlives lost sight and razes it rather than closing beside it",
+  "modules": ["atlas", "economy", "exchange", "fight", "mv", "strategy", "tactics"],
+  "start": { "room": "W8N3", "seed": 1, "node": "E1", "core": "W7N3:100" },
+  "ticks": 1200,
+  "assert": [
+    { "measure": "closedOnCore", "max": 0 },
+    { "measure": "coresAtEnd", "to": 1000, "max": 0 }
+  ]
+}

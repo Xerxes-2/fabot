@@ -161,7 +161,12 @@ impl Reader<'_> {
                 Store::empty()
             },
             cooldown: if kind.has_cooldown() { cooldown } else { 0 },
-            collapse: 0,
+            // The sim's cores carry no collapse effect or deploy timer; `read.js` reads that as the longest collapse.
+            collapse: if kind == Kind::InvaderCore {
+                fabot_base::engine::STRONGHOLD_LONGEST_COLLAPSE
+            } else {
+                0
+            },
             level: 0,
             spawn: (kind == Kind::KeeperLair)
                 .then(|| num(o, atom!("nextSpawnTime")) as i32 - self.time)
