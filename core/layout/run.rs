@@ -1,11 +1,11 @@
 use crate::engine;
 use crate::intents::{Action, ModuleOutput, RoomAct};
-use crate::state::State;
-use crate::tick::{Context, Module};
+use crate::tick::Context;
 use crate::world::Rules;
 
 use super::derive;
 use super::remote;
+use super::shape::LayoutState;
 use super::sites;
 use super::towers;
 
@@ -45,13 +45,13 @@ pub fn decide_over(rules: &Rules, colonies: &[derive::Colony], mut budget: i32) 
     intents
 }
 
-pub fn decide(ctx: &mut Context, state: &mut State) -> Result<ModuleOutput, String> {
+pub fn decide(ctx: &mut Context, standing: &mut LayoutState) -> Result<ModuleOutput, String> {
     let world = ctx.world;
-    let (colonies, standing) = derive::colonies(
+    let (colonies, kept) = derive::colonies(
         world,
         &ctx.derived.owned,
         &ctx.declarations.colonies,
-        std::mem::take(&mut state.layout),
+        std::mem::take(standing),
     );
 
     let budget = engine::MAX_CONSTRUCTION_SITES - world.our_sites;
@@ -81,13 +81,6 @@ pub fn decide(ctx: &mut Context, state: &mut State) -> Result<ModuleOutput, Stri
     let mut intents = home;
     intents.extend(sites);
 
-    state.layout = standing;
+    *standing = kept;
     Ok(intents.into())
-}
-
-pub fn layout() -> Module {
-    Module {
-        name: "layout",
-        run: decide,
-    }
 }

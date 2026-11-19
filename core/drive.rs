@@ -67,11 +67,11 @@ where
 {
     let mut state = memory.state();
     state.layout = std::mem::take(&mut heap.standing);
-    state.spare = std::mem::take(&mut heap.spare);
+    state.economy.spare = std::mem::take(&mut heap.spare);
 
     let declarations: Declarations = memory.declarations().besieging(intel);
     let start = clock();
-    let drain = (state.engagements.iter())
+    let drain = (state.fight.engagements.iter())
         .find(|e| e.phase == Phase::Draining)
         .map(|e| e.room);
     let (mut world, maps, pass) = (seam.read)(&declarations, drain);
@@ -121,9 +121,9 @@ where
         let state = &decided.result.state;
         let seen = metrics::Seen {
             world: &world,
-            assignments: &state.assignments,
-            engagements: &state.engagements,
-            casts: &state.casts,
+            assignments: &state.economy.assignments,
+            engagements: &state.fight.engagements,
+            casts: &state.fight.casts,
             intents: &decided.result.settled.actions,
             held: &decided.result.settled.held,
             short: &decided.result.telemetry.short,
@@ -143,10 +143,10 @@ where
         ..
     } = decided;
     heap.standing = std::mem::take(&mut result.state.layout);
-    heap.spare = std::mem::take(&mut result.state.spare);
+    heap.spare = std::mem::take(&mut result.state.economy.spare);
     heap.sightings = sightings;
     heap.atlas = atlas;
-    let engagements = result.state.engagements.iter();
+    let engagements = result.state.fight.engagements.iter();
     Ran {
         world,
         refusals,

@@ -4,14 +4,13 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::kinds::{defend, raid, siege, sweep};
 use super::scene::{Asked, Hunting, Scene, fresh};
-use super::shape::{Cast, Engagement, Group, Objective, Phase};
+use super::shape::{Cast, Engagement, FightState, Group, Objective, Phase};
 use super::{casting, tracker};
 use crate::atlas::{self, Atlas};
 use crate::engine;
 use crate::intents::{Ask, ModuleOutput, Rank};
-use crate::state::State;
 use crate::tactics::{self, Tactic};
-use crate::tick::{self, Context, Module};
+use crate::tick::{self, Context};
 use crate::world::{Creep, Id, Kind, Pos, RoomName, hostiles};
 
 /// A merge keeps the older group's id; two engagements on one group are one,
@@ -66,7 +65,11 @@ fn changed(e: &Engagement, events: &[tracker::Event], by_id: &BTreeMap<i32, Grou
     })
 }
 
-pub fn decide(context: &mut Context, state: &mut State) -> Result<ModuleOutput, String> {
+pub fn decide(
+    context: &mut Context,
+    state: &mut FightState,
+    preyed: &[RoomName],
+) -> Result<ModuleOutput, String> {
     let world = context.world;
     let declarations = context.declarations;
     let context_trace = context.trace;
@@ -277,7 +280,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<ModuleOutput, 
             .iter()
             .filter(|e| e.objective == Objective::Sweep)
     };
-    let grounds: BTreeMap<RoomName, Hunting> = (state.preyed.iter())
+    let grounds: BTreeMap<RoomName, Hunting> = (preyed.iter())
         .filter(|room| stirred.contains(*room))
         .chain(sweeps().map(|e| &e.room))
         .filter_map(|room| {
@@ -353,7 +356,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<ModuleOutput, 
                         elsewhere: scene.elsewhere(atlas, e, &candidates, &grounds),
                         patrol: (grounds.get(&e.room))
                             .filter(|g| g.worth == 0 && g.escort.is_empty())
-                            .and_then(|_| scene.patrol(atlas, e, &state.preyed, age)),
+                            .and_then(|_| scene.patrol(atlas, e, preyed, age)),
                     },
                     e,
                 ),
@@ -515,7 +518,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<ModuleOutput, 
             {
                 let onward = || {
                     (scene.elsewhere(atlas, &e, &candidates, &grounds))
-                        .or_else(|| scene.patrol(atlas, &e, &state.preyed, age))
+                        .or_else(|| scene.patrol(atlas, &e, preyed, age))
                 };
                 decided.extend(scene.swept(atlas, &mut asked, (&e, onward), (&mut free, &grounds)));
             }
@@ -576,8 +579,3 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<ModuleOutput, 
     state.due = asked.due;
     Ok(out)
 }
-
-pub static FIGHT: Module = Module {
-    name: "fight",
-    run: decide,
-};

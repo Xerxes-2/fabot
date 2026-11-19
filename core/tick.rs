@@ -722,9 +722,13 @@ pub fn decide<'t>(
         &derived,
         &declarations,
         intel,
-        (&state.engagements, &state.casts, &state.due),
-        (&state.layout, &state.spare),
-        (terrain, &mut state.expansion),
+        (
+            &state.fight.engagements,
+            &state.fight.casts,
+            &state.fight.due,
+        ),
+        (&state.layout, &state.economy.spare),
+        (terrain, &mut state.strategy.expansion),
     );
     let declarations = declarations.planned(plans);
     derived.worked = worked(world, &sightings, &declarations, &derived);
@@ -756,18 +760,18 @@ pub fn decide<'t>(
 pub const MODULES: [Module; 4] = [
     Module {
         name: "strategy",
-        run: super::strategy::decide,
+        run: |c, s| super::strategy::decide(c, &mut s.strategy),
     },
     Module {
         name: "fight",
-        run: super::fight::decide,
+        run: |c, s| super::fight::decide(c, &mut s.fight, &s.strategy.preyed),
     },
     Module {
         name: "economy",
-        run: super::economy::decide,
+        run: |c, s| super::economy::decide(c, &mut s.economy, &s.strategy.scouts),
     },
     Module {
         name: "layout",
-        run: super::layout::decide,
+        run: |c, s| super::layout::decide(c, &mut s.layout),
     },
 ];

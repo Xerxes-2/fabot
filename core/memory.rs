@@ -6,8 +6,11 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
 
+use super::economy::EconomyState;
 use super::economy::task::{Assignment, of_task_id, task_id};
+use super::fight::shape::FightState;
 use super::state::State;
+use super::strategy::StrategyState;
 use super::tick::{ColonyPlan, Declarations, Declared, Flow, Node, Outpost, Stage, undeclared};
 use super::vocabulary::{self, Resource};
 use super::world::{Id, Pos, RoomName};
@@ -60,14 +63,22 @@ impl Memory {
                 .filter(|(_, on)| on.as_bool() == Some(false))
                 .map(|(name, _)| name.clone())
                 .collect(),
-            assignments: (entries("assignments"))
-                .filter_map(|(name, held)| Some((name.clone(), assignment(held.as_str()?))))
-                .collect(),
-            groups: list(fight, "groups"),
-            engagements: list(fight, "engagements"),
-            casts: list(fight, "casts"),
-            due: list(fight, "due"),
-            expansion: Deserialize::deserialize(&v2["expansion"]).unwrap_or_default(),
+            economy: EconomyState {
+                assignments: (entries("assignments"))
+                    .filter_map(|(name, held)| Some((name.clone(), assignment(held.as_str()?))))
+                    .collect(),
+                ..EconomyState::default()
+            },
+            fight: FightState {
+                groups: list(fight, "groups"),
+                engagements: list(fight, "engagements"),
+                casts: list(fight, "casts"),
+                due: list(fight, "due"),
+            },
+            strategy: StrategyState {
+                expansion: Deserialize::deserialize(&v2["expansion"]).unwrap_or_default(),
+                ..StrategyState::default()
+            },
             ..State::default()
         }
     }
@@ -80,17 +91,17 @@ impl Memory {
         let v2 = &mut self.root["v2"];
         let held = |a: &Assignment| a.slot.clone() + "|" + &a.task.as_ref().map_or_default(task_id);
         v2["assignments"] = json!(
-            (state.assignments.iter())
+            (state.economy.assignments.iter())
                 .map(|(name, a)| (name, held(a)))
                 .collect::<BTreeMap<_, _>>()
         );
         v2["fight"] = json!({
-            "groups": state.groups,
-            "engagements": state.engagements,
-            "casts": state.casts,
-            "due": state.due,
+            "groups": state.fight.groups,
+            "engagements": state.fight.engagements,
+            "casts": state.fight.casts,
+            "due": state.fight.due,
         });
-        v2["expansion"] = json!(state.expansion);
+        v2["expansion"] = json!(state.strategy.expansion);
         serde_json::to_string(&self.root).ok()
     }
 

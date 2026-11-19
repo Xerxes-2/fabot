@@ -38,6 +38,8 @@ impl Plan {
     }
 }
 
+pub type LayoutState = std::collections::BTreeMap<RoomName, Standing>;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Standing {
     pub key: Vec<Tile>,

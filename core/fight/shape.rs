@@ -6,6 +6,15 @@ use crate::tactics::{Offer, Tactic};
 use crate::vocabulary::Part;
 use crate::world::{Id, Pos, RoomName};
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FightState {
+    pub groups: Vec<Group>,
+    pub engagements: Vec<Engagement>,
+    pub casts: Vec<Cast>,
+    /// The colonies a siege successor falls due at within a body's spawn time.
+    pub due: BTreeSet<RoomName>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "Seen", into = "Seen")]
 pub struct Group {

@@ -31,7 +31,10 @@ fn state_written_back_is_the_text_read() {
     );
     let mut memory = Memory::of_text(theirs);
     let state = memory.state();
-    assert_eq!((state.groups.len(), state.engagements.len()), (1, 3));
+    assert_eq!(
+        (state.fight.groups.len(), state.fight.engagements.len()),
+        (1, 3)
+    );
     assert_eq!(memory.written(&state).as_deref(), Some(OURS));
 }
 
@@ -47,7 +50,7 @@ fn garbled_reads_as_none() {
     ] {
         let mut memory = Memory::of_text(text.to_string());
         let state = memory.state();
-        assert!(state.groups.is_empty() && state.assignments.is_empty());
+        assert!(state.fight.groups.is_empty() && state.economy.assignments.is_empty());
         let declared = memory.declarations();
         assert!(declared.outposts.is_empty());
         let kept = text.is_empty() || text.ends_with('}');

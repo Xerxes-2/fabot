@@ -124,10 +124,10 @@ segments over multiple ticks (economy first); a cold tick never spends more than
 | `Engine` | Game formulas & non-global server constants (vanilla tables from `screeps-game-api`) | — | — |
 | `World` | Single-pass tick snapshot, event-log strikes/destroys, per-tick `rules` (`CONTROLLER_STRUCTURES`) | `Game` | — |
 | `Atlas` | Room graph (region nodes, border-stretch crossings, keeper-strike avoidance, blind keeper & stronghold penalty) and per-room tile grid (weights, reverse floods, seats, footprint queries); out-of-sight grids hold what stood when last seen (else terrain) and stay kept with their floods under the same bound as part of the flood table, not a second cache | `World`, `terrain`, `intel.rooms` | flood table, `atlas.carried` |
-| `Economy` | Slots, casts, sticky tasks, logistics dispatcher, links, labs, terminals, abandon | `Derived`, `Atlas`, `declarations`, `State` | tasks, casts, `assignments`, `spare` |
+| `Economy` | Slots, casts, sticky tasks, logistics dispatcher, links, labs, terminals, abandon | `Derived`, `Atlas`, `declarations`, `EconomyState`, Strategy's `scouts` | tasks, casts, `assignments`, `spare` |
 | `Layout` | Colony placement plan (Hivemind planner + xxscreeps JPS), rampart ring, construction sites, buried-road destroy, tower firing | `Derived`, `Atlas`, `declarations` | sites, destroys, tower actions, `standing.layout` |
 | `Exchange` | Pure combat arithmetic (`outcome`, `cheapest_win`, breach planning) | fighters, terrain | — |
-| `Fight` | Hostile `Tracker`, engagements (`kinds/`: defend, siege, sweep, raid), casting | `Derived`, `Atlas`, `Exchange`, `declarations`, `intel`, `State` | fight actions, asks, wishes, casts, `State` fight rows |
+| `Fight` | Hostile `Tracker`, engagements (`kinds/`: defend, siege, sweep, raid), casting | `Derived`, `Atlas`, `Exchange`, `declarations`, `intel`, `FightState`, Strategy's `preyed` | fight actions, asks, wishes, casts, `FightState` |
 | `Tactics` | Per-creep combat actions, stepping, and the operator's tactic rules (`ruling`, `checked`) (no `Fight` import) | `Atlas`, `Move`, `Sight` + plan | creep actions, wishes |
 | `Strategy` | Intel, observers/scouts, `ColonyPlan` & outpost selection, expansion/abandon, operation opening & global force priority | `World`, `Derived`, `Exchange`, `intel`, `Season`, `standing.layout`, `spare`, fight state | `declarations` (`ColonyPlan`, outposts, claims), `intel`, `expansion` |
 | `Season` | Disposable seasonal rules (`worth`, `spent`, season structures/scoring) | `World` | declarations to `Strategy`, season actions |
@@ -143,8 +143,10 @@ by `npm run ceiling` and `npm run scenario`).
 
 ## 4. State
 
-Every cross-tick value lives in this table with one owner. Adding a row is an
-architecture change, not a fix.
+Every cross-tick value lives in this table with one owner. `State` composes
+one slice per owner (`EconomyState`, `LayoutState`, `FightState`,
+`StrategyState`) and each module's `decide` takes `&mut` only to its own, so
+the compiler holds ownership. Adding a row is an architecture change, not a fix.
 
 **Storage tiers:**
 - **Memory (`RawMemory`):** parsed once per tick in `core/memory.rs` under

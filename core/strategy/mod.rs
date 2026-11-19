@@ -3,7 +3,7 @@ pub mod intel;
 pub mod outposts;
 
 use super::intents::ModuleOutput;
-use super::state::State;
+use crate::intel::Scout;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::engine;
@@ -17,7 +17,16 @@ use crate::intel::Intel;
 use expand::Expansions;
 use screeps::LocalRoomTerrain;
 
-pub fn decide(context: &mut Context, state: &mut State) -> Result<ModuleOutput, String> {
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct StrategyState {
+    /// `Scout room` declarations, rebuilt each tick before Economy reads them.
+    pub scouts: Vec<Scout>,
+    /// Sweep candidates this tick, the stalest seen first.
+    pub preyed: Vec<RoomName>,
+    pub expansion: Expansions,
+}
+
+pub fn decide(context: &mut Context, state: &mut StrategyState) -> Result<ModuleOutput, String> {
     let mut preyed = intel::preyed(context.intel, context.declarations, context.world.time);
     preyed.retain(|room| context.atlas.has_terrain(*room));
     // A scout only dies where armed bodies stand, and draws them off; a

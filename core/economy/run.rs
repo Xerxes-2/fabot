@@ -3,11 +3,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::atlas::{self, Atlas, Mover, Target};
 use crate::engine;
 use crate::grid::{self, Footprint};
+use crate::intel::Scout;
 use crate::intents::{
     Action, Ask, CreepAct, LabAct, LinkAct, ModuleOutput, Rank, SpawnAct, Telemetry, TerminalAct,
 };
 use crate::mv::{Wish, plan};
-use crate::state::State;
 use crate::tick::{self, Context};
 use crate::tiles::{self, TileSet};
 use crate::vocabulary::{Part, Resource};
@@ -485,7 +485,17 @@ fn work(
     plan::toward_round(atlas, creep, mover, &target, weight_of(&slot.job), danger)
 }
 
-pub fn decide(context: &mut Context, state: &mut State) -> Result<ModuleOutput, String> {
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct EconomyState {
+    pub assignments: BTreeMap<String, Assignment>,
+    pub spare: BTreeMap<RoomName, f64>,
+}
+
+pub fn decide(
+    context: &mut Context,
+    state: &mut EconomyState,
+    scouts: &[Scout],
+) -> Result<ModuleOutput, String> {
     // `{ World with Creeps = filtered }`: a creep a fight holds is not in the
     // economy, and only the creep list differs.
     let seen: Vec<&Creep> = (context.world.creeps.iter())
@@ -499,7 +509,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<ModuleOutput, 
         context.declarations,
         context.derived,
         context.intel,
-        &state.scouts,
+        scouts,
     );
 
     let movers: BTreeMap<&str, Mover> = (seen.iter())
@@ -780,7 +790,6 @@ mod tests {
 
     use super::*;
     use crate::economy::dice::{self, Dice};
-    use crate::state::State;
 
     #[test]
     fn decide_never_faults_and_holds_a_slot_and_a_task_it_can_read() {
@@ -806,9 +815,9 @@ mod tests {
                 trace: false,
             };
 
-            let mut state = State::default();
-            decide(&mut context, &mut state).expect("a world decides");
-            let out = decide(&mut context, &mut state).expect("a world decides again");
+            let mut state = EconomyState::default();
+            decide(&mut context, &mut state, &[]).expect("a world decides");
+            let out = decide(&mut context, &mut state, &[]).expect("a world decides again");
 
             for (name, held) in &state.assignments {
                 assert!(!held.slot.is_empty(), "{name} {held:?}");

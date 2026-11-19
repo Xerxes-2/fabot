@@ -7,7 +7,7 @@ pub mod run;
 pub mod slots;
 pub mod task;
 
-pub use run::decide;
+pub use run::{EconomyState, decide};
 
 #[cfg(test)]
 pub(crate) mod dice {
