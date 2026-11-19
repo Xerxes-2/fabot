@@ -4,10 +4,6 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write;
 
-use crate::economy::abandon;
-use crate::economy::bodies::{self, Pattern};
-use crate::economy::task::{Assignment, Task};
-use crate::fight::shape::{Cast, Engagement, Phase};
 use fabot_atlas::{Atlas, Derived};
 use fabot_base::HashMap;
 use fabot_base::declarations::{self, Declarations, Refused};
@@ -15,6 +11,10 @@ use fabot_base::engine;
 use fabot_base::intents::{Action, CreepAct, Refusal, SpawnAct, TowerAct};
 use fabot_base::vocabulary::{Part, Resource};
 use fabot_base::world::{Creep, Id, Kind, Owner, Pos, Room, RoomName, World, hostiles};
+use fabot_economy::abandon;
+use fabot_economy::bodies::{self, Pattern};
+use fabot_economy::task::{Assignment, Task};
+use fabot_fight::shape::{Cast, Engagement, Phase};
 
 pub const WINDOW: i32 = 100;
 const RING: usize = 150;

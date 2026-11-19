@@ -5,7 +5,6 @@ use std::collections::BTreeMap;
 
 use screeps::LocalRoomTerrain;
 
-use crate::fight::shape::Phase;
 use crate::memory::Memory;
 use crate::observe::metrics::{self, Metrics};
 use crate::tick;
@@ -16,6 +15,7 @@ use fabot_base::intents::{Action, Refusal};
 use fabot_base::tiles;
 use fabot_base::world::Pos;
 use fabot_base::world::{RoomName, Sightings, World};
+use fabot_fight::shape::Phase;
 use fabot_layout::shape::Standing;
 use fabot_tactics::Offer;
 

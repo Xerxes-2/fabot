@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::fight::shape::{Engagement, Objective};
 use fabot_atlas::Derived;
 use fabot_base::declarations::{ColonyPlan, Declarations, Outpost, REACH_HOPS};
 use fabot_base::engine;
@@ -8,6 +7,7 @@ use fabot_base::intel::Intel;
 use fabot_base::tiles;
 use fabot_base::vocabulary::Part;
 use fabot_base::world::{Kind, RoomName, World};
+use fabot_fight::shape::{Engagement, Objective};
 
 /// What one intent costs the engine; a body acts about once a tick.
 const INTENT_CPU: f64 = 0.2;

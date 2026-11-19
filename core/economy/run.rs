@@ -794,7 +794,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::economy::dice::{self, Dice};
+    use crate::dice::{self, Dice};
 
     #[test]
     fn decide_never_faults_and_holds_a_slot_and_a_task_it_can_read() {

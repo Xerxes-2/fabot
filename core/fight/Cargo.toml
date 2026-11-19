@@ -1,0 +1,22 @@
+[package]
+name = "fabot-fight"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "mod.rs"
+doctest = false
+
+[dependencies]
+fabot-base = { path = "../base" }
+fabot-atlas = { path = "../atlas" }
+fabot-exchange = { path = "../exchange" }
+fabot-tactics = { path = "../tactics" }
+serde.workspace = true
+
+[dev-dependencies]
+fabot-base = { path = "../base", features = ["test-support"] }
+
+[lints]
+workspace = true

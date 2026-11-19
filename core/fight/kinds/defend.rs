@@ -342,7 +342,7 @@ pub fn opens(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fight::shape::Objective;
+    use crate::shape::Objective;
     use fabot_base::world::{BodyPart, Store};
 
     fn at(x: i32, y: i32) -> Pos {
@@ -697,7 +697,7 @@ mod tests {
                 lost: rng.between(OUTPOST_LOSSES, OUTPOST_LOSSES + 2),
                 budget: rng.between(0, 3),
                 unanswered: false,
-                ..crate::fight::scene::fresh(
+                ..crate::scene::fresh(
                     1,
                     Objective::Defend,
                     RoomName::named("W1N1"),

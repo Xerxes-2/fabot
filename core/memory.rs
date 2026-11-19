@@ -6,9 +6,6 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
 
-use super::economy::EconomyState;
-use super::economy::task::{Assignment, of_task_id, task_id};
-use super::fight::shape::FightState;
 use super::state::State;
 use super::strategy::StrategyState;
 use fabot_base::declarations::{
@@ -16,6 +13,9 @@ use fabot_base::declarations::{
 };
 use fabot_base::vocabulary::{self, Resource};
 use fabot_base::world::{Id, Pos, RoomName};
+use fabot_economy::EconomyState;
+use fabot_economy::task::{Assignment, of_task_id, task_id};
+use fabot_fight::shape::FightState;
 
 fn assignment(held: &str) -> Assignment {
     let (slot, task) = held.split_once('|').unwrap_or((held, ""));

@@ -1,5 +1,5 @@
 [workspace]
-members = ["core/base", "core/atlas", "core/exchange", "core/mv", "core/layout", "core/tactics", "core", "sim"]
+members = ["core/base", "core/atlas", "core/exchange", "core/mv", "core/layout", "core/tactics", "core/economy", "core/fight", "core", "sim"]
 # Old commits' trees build under .scratch/, an agent's workspace under .claude/: cargo must not claim them.
 exclude = [".scratch", ".claude"]
 

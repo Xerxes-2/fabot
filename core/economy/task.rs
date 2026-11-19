@@ -174,7 +174,7 @@ impl Task {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::economy::dice::{self, Dice};
+    use crate::dice::{self, Dice};
 
     #[test]
     fn a_task_id_reads_back_as_the_same_task() {

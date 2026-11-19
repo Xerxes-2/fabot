@@ -135,7 +135,8 @@ version = "0.1.0"
 dependencies = [
  "fabot-atlas",
  "fabot-base",
- "fabot-exchange",
+ "fabot-economy",
+ "fabot-fight",
  "fabot-layout",
  "fabot-mv",
  "fabot-tactics",
@@ -145,10 +146,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "fabot-economy"
+version = "0.1.0"
+dependencies = [
+ "fabot-atlas",
+ "fabot-base",
+ "fabot-mv",
+]
+
+[[package]]
 name = "fabot-exchange"
 version = "0.1.0"
 dependencies = [
  "fabot-base",
+ "serde",
+]
+
+[[package]]
+name = "fabot-fight"
+version = "0.1.0"
+dependencies = [
+ "fabot-atlas",
+ "fabot-base",
+ "fabot-exchange",
+ "fabot-tactics",
  "serde",
 ]
 

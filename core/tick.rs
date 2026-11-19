@@ -366,11 +366,11 @@ pub const MODULES: [Module; 4] = [
     },
     Module {
         name: "fight",
-        run: |c, s| super::fight::decide(c, &mut s.fight, &s.strategy.preyed),
+        run: |c, s| fabot_fight::decide(c, &mut s.fight, &s.strategy.preyed),
     },
     Module {
         name: "economy",
-        run: |c, s| super::economy::decide(c, &mut s.economy, &s.strategy.scouts),
+        run: |c, s| fabot_economy::decide(c, &mut s.economy, &s.strategy.scouts),
     },
     Module {
         name: "layout",

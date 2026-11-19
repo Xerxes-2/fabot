@@ -6,7 +6,6 @@ use fabot_base::intel::Scout;
 use fabot_base::intents::ModuleOutput;
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::fight::shape::{Cast, Engagement};
 use expand::Expansions;
 use fabot_atlas::{Context, Derived};
 use fabot_base::declarations::{ColonyPlan, Declarations, Outpost, Stage};
@@ -15,6 +14,7 @@ use fabot_base::intel::Intel;
 use fabot_base::tiles;
 use fabot_base::vocabulary::{Part, ResourceType, multiple};
 use fabot_base::world::{Kind, RoomName, Rules, World, sightings};
+use fabot_fight::shape::{Cast, Engagement};
 use fabot_layout::{RING_LEVEL, Standing};
 use screeps::LocalRoomTerrain;
 
