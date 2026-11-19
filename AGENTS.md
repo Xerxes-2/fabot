@@ -1,97 +1,82 @@
 # fabot
 
 `ARCHITECTURE.md` is the only design document. The code decides anything it does
-not; no other file is a source of truth. v1 (the `v1` bookmark) is source to
-port from, never a fact about v2.
+not; no other file is a source of truth. `v1` (the `v1` bookmark, `9677b5e8`) is
+source to port from and rollback only, never a fact about v2.
 
-Reading costs more than writing: every line is written once and read by
-every agent and every review after. Prefer deleting to adding, a type or a
-name to a sentence, one place for a fact to two, and short reports to long
-ones.
+Reading costs more than writing: every line is written once and read by every
+agent and review after. Prefer deleting to adding, a type or name to a sentence,
+one place for a fact to two, and short reports to long ones.
 
 ## Rewrite period (active)
 
-The season is over. Until the owner deletes this section, the rules below are
-suspended, and this section wins over any rule under it that says otherwise.
+The season is over. Until the owner deletes this section, conflicting rules
+below are suspended and this section wins:
 
-- **"Refactor" means rewrite.** Behaviour may change. An identical replay is
-  not required; the first differing tick is reported, not fixed.
-- **Architecture changes are in scope.** A store, a memo, a `static`, a
-  `Tuning` field, a new module, a merged or deleted module, a changed row in
-  `ARCHITECTURE.md` §4: decide it, do not stop and ask. The agent is the owner
-  for these decisions; each one lands in `ARCHITECTURE.md` with its why in a
-  sentence, and the rest in the commit.
+- **"Refactor" means rewrite.** Behaviour may change. Identical replay is not
+  required; report the first differing tick, do not fix it.
+- **Architecture changes are in scope.** A store, memo, `static`, `Tuning`
+  field, new/merged/deleted module, or `ARCHITECTURE.md` §4 row: decide it, do
+  not stop and ask. The agent is the owner for these decisions; record each in
+  `ARCHITECTURE.md` with its why in one sentence and the rest in the commit.
 - **Ceilings may be raised** (`scripts/ceilings.json`) while a rewrite is in
-  flight, in the same commit as the rewrite. The commit says the new number
-  and when it comes back down. Net lines added may be positive.
-- **The ask is the target, not the permission.** A rewrite is given a
-  destination (the modules after, the structure, a measure) and is done to
-  that destination. Several options are listed with the most radical first,
-  and the most radical that reaches the destination is taken; the safest is
-  taken only when the others are shown not to work.
-- **Verification is the scenario library and the soak**, not the replay:
-  `npm run scenario` passes and `npm run soak:many` does not regress beyond
-  noise (§Verification). A rewrite with no scenario covering it adds one.
+  flight, in the same commit, stating the new number and when it comes back
+  down. Net lines added may be positive.
+- **The ask is the target, not the permission.** Work to the destination (the
+  modules after, the structure, a measure). List options most radical first and
+  take the most radical that reaches it; take the safest only when the others
+  are shown not to work.
+- **Verification is scenarios and soak**, not replay: `npm run scenario` passes
+  and `npm run soak:many` does not regress beyond noise (§Verification). Add a
+  scenario when none covers the rewrite.
 
-What stays: `decide` is deterministic; no names or ids in source; `Fight` and
+What stays: deterministic `decide`; no names or ids in source; `Fight` and
 `Economy` do not import each other; the comment-share ceiling; the paraphrase
 test; `jj ship` and its gates.
 
 ## Boundaries
 
-- A module's state is the row it owns in `ARCHITECTURE.md` §4. Adding a store,
-  a memo, a `thread_local!` or `static`, a Memory or segment read outside
-  the driver (`app/driver.rs`), a `Tuning` field, or any cooldown / latch / grace / hold-while /
-  hysteresis: **stop and ask the owner.** These are architecture changes and
-  never fixes. Owner away: label the issue `needs-owner`, park it, take other
-  work. Never work around it.
-- `Fight` and `Economy` do not import each other; only `Strategy` imports
-  `Season`. Declarations flow down §3's table, never up.
-- No room name, player name or object id in source. They are `declarations`.
-- Line and comment-share ceilings (`scripts/ceilings.json`, `npm run ceiling`)
-  are never raised. A change over either pays for itself by deleting first.
-- `decide` is deterministic: no clock, no unseeded random.
-- Derived facts are computed once into `Derived` and passed down. A decision
-  function takes `Derived`, never `World`. A value kept across ticks is
-  keyed by a fingerprint of everything it reads, recomputed when the key
-  changes and never invalidated by hand, and `replay --check` and
-  `sim --check` compute it afresh beside the kept one; one that reads
-  dynamic state (energy, positions, bookings) is not kept. Each has a §4
-  row; any other memo, `HashMap` cache or lazy cell outside `Derived` is an
-  architecture change (stop and ask).
-- Count ceilings (`scripts/ceilings.json`, read by `npm run scenario`) are a
-  gate like line ceilings: never raised.
+- **Stop and ask the owner** before adding a §4 state row, a memo/cache outside
+  `Derived`/`Atlas`, a `thread_local!`/`static`, a Memory or segment read
+  outside `src/app/driver.rs`, a `Tuning` field, or any cooldown / latch /
+  grace / hold-while / hysteresis. These are architecture changes and never
+  fixes. Owner away: label `needs-owner`, park it, take other work. Never work
+  around it.
+- **Dependency direction (`ARCHITECTURE.md` §3):** `Fight` and `Economy` never
+  import each other; only `Strategy` imports `Season`; declarations flow down.
+- **No room name, player name, or object id in source:** they are `declarations`.
+- **Ceilings (`scripts/ceilings.json`) never rise:** line and comment-share
+  ceilings (`npm run ceiling`) and per-tick count ceilings (`npm run scenario`,
+  §9.3). Pay for every addition by deleting first.
+- **Deterministic `decide`:** no clock, no unseeded random.
+- **Derive once (`ARCHITECTURE.md` §1):** decision functions read `Derived` and
+  `Atlas`, never `World`. A value kept across ticks is keyed by a fingerprint of
+  everything it reads, recomputed when the key changes, never invalidated by
+  hand, and verified afresh beside the kept one by `replay --check` and
+  `sim --check`; **a value reading dynamic state (energy, positions, bookings)
+  is not kept**; each has a §4 row.
 
 ## Fixing behaviour
 
-- v1 (`v1`) ran live and solved much of the economy already. Before
-  designing a fix, find how v1 solved the problem (its code and
-  `docs/adr/`, read with `git show v1:<path>`) and port that mechanism
-  with its invariant; drop or replace it only when it was a one-incident
-  patch or no longer applies, and say which in the commit. A v1 cap, floor
-  or extra body bolted onto a formula marks where the formula was wrong:
-  fix the formula, never drop the patch silently.
-- Port a mechanism with the links it depends on. The economy is one chain
-  per level (dig, carry, sinks, what spends the surplus); before a soak,
-  trace it through v2 and land the missing links together. A soak of one
-  link without the rest measures the missing link.
-
-- Name the invariant the bug breaks in the commit, in one sentence that covers
-  every body, room or colony. A new rule that mops up after an old one is not a fix.
-- A fight fix changes a phase rule, a tactic or `Exchange`. It never adds a
-  per-tick check. If the bug is "we changed our mind mid-fight", the fix is in
-  the event that re-evaluated, not a latch.
-- Net lines added by a fix should be ≤ 0. A positive diff says why in the
-  commit.
-- Simple and working beats clever, even if slower. Start with the simple
-  rule (a fixed order, the engine's allowance, a plain threshold); replace it
-  with a priced decision only when a soak shows the simple rule losing, and
-  say by how much in the commit. A simple rule lives in one function shaped
-  as its priced replacement would be (the facts it would read in, a rank or
-  a choice out), so the swap changes that function and nothing else; never
-  scatter a rule across its callers.
-- Where a decision is priced, it is priced when a commitment is made
-  (`Exchange.cheapestWin`, `Strategy`), not re-read per tick.
+- **Check `v1` first** (`git show v1:<path>`, including `docs/adr/`): port its
+  mechanism with its invariant; drop or replace only one-incident patches or
+  obsolete rules, and say which in the commit. A v1 cap, floor, or extra body
+  bolted onto a formula marks where the formula was wrong: fix the formula,
+  never drop the patch silently.
+- **Port linked chains together:** the economy is one chain per level (dig,
+  carry, sinks, surplus spend); trace it through v2 before a soak — a soak of
+  one link without the rest measures the missing link.
+- **Fix the invariant, not the symptom:** name the broken invariant in one
+  sentence in the commit (covering every body, room, or colony). A new rule that
+  mops up after an old one is not a fix. Fight fixes change a phase rule,
+  tactic, or `Exchange` — never a per-tick check; if the bug is "we changed our
+  mind mid-fight", the fix is in the event that re-evaluated, not a latch.
+- **Net lines ≤ 0** for fixes; justify any positive diff in the commit.
+- **Simple first, priced later:** start with a simple rule in one function
+  shaped as its priced replacement would be (facts in, rank/choice out) — never
+  scatter a rule across its callers. Switch to a priced decision only when a
+  soak shows the simple rule losing, quoting how much in the commit. Price at
+  commitment (`Exchange::cheapest_win`, `Strategy`), never per tick.
 
 ## Writing prose
 
@@ -99,139 +84,132 @@ Docs and comments are written when asked, or when the fact passes the tests
 below.
 
 Comments:
-- Code says *what*; a comment says only *why*. The default is no comment.
-  Reach first for a name, a type or a test; comment only what none of them
-  can hold: a reason, an engine constraint, the owner's decision, a rejected
-  alternative. One or two lines.
-- Paraphrase test: hide the code and read the comment. If it tells you what
-  the code does, it is a paraphrase; delete it. The surrounding code's
-  comment density is no precedent: match its naming, never its prose.
-- The invariant a fix restores, the incident and the change's story go in
-  the commit. An open item is an issue, or a ❓ in `ARCHITECTURE.md`.
-  `npm run ceiling` fails on an issue or ADR citation in code.
+- Code says *what*; comments say only *why* (reason, engine constraint, owner
+  decision, rejected alternative), 1–2 lines. Default: no comment. Reach first
+  for a name, a type, or a test.
+- **Paraphrase test:** hide the code and read the comment; if it restates the
+  code, delete it. Never match surrounding comment density.
+- Incident stories and restored invariants go in commits; open items are issues
+  or `❓` in `ARCHITECTURE.md`. Never cite issue or ADR numbers in code
+  (`npm run ceiling` fails).
 
 Docs:
-- Docs live in `ARCHITECTURE.md` (the design), `AGENTS.md` (these rules) and
-  `README.md` (setup). A `GLOSSARY.md` only once a term needs one. Do not
-  create other markdown files unless asked.
-- Before writing a fact, search for it. If it exists, link to it.
-- To add a section, look for one to delete first.
-- Plans, session notes and completion reports go in chat or the commit, not
-  in files.
-- No ADRs. A decision that is hard to reverse, surprising without context
-  and a real trade-off changes `ARCHITECTURE.md`, with its why in one or two
-  sentences there and the rest in the commit. Agreeing on a term with the
-  owner is not a trade-off: that goes in `GLOSSARY.md` or nowhere.
+- Only `ARCHITECTURE.md` (design), `AGENTS.md` (working rules), `README.md`
+  (setup), and `GLOSSARY.md` only once a term needs one. No other markdown files
+  unless asked.
+- No ADRs: a decision that is hard to reverse, surprising without context, and a
+  real trade-off changes `ARCHITECTURE.md` (why in 1–2 sentences + commit).
+  Agreeing on a term with the owner is not a trade-off: that goes in
+  `GLOSSARY.md` or nowhere.
+- Before writing a fact, search for it and link instead of duplicating; look for
+  a section to delete before adding one. Plans, session notes, and reports
+  belong in chat or commits.
 
 ## Verification
 
-- A refactor (no behaviour meant to change) is verified by an identical
-  replay of the library's captures against its base (`npm run replay`,
-  `ARCHITECTURE.md` §10.4). A change of behaviour reads its first differing
-  tick there before the scenarios run.
-- A behaviour fix is verified by a scenario (`scenario.mjs --list` names
-  its engine) that reproduces the
-  incident passing, and the scenario library not regressing
-  (`ARCHITECTURE.md` §10.2). Add the scenario to the library.
-- An offence scenario (siege, sweep, drain: anything that attacks a rival)
-  seats a real bot as the rival, Hivemind or TooAngel (`start.opponents`):
-  what an offence pays is proven against a bot that spawns, works and fights
-  back. A scripted rival (`engine/rival`'s roles)
-  checks only that the plan runs as planned (raze order, positioning, gate
-  tile), and its `why` says why a real bot does not fit. While fight is
-  paused, offence scenarios live on the `fight-scenarios` bookmark and come
-  back with it.
-- An `Exchange` change is verified by the prediction error on the generated
-  set not rising (§10.1).
-- An economy change is read off the soak's curves over the long horizon
-  (`npm run soak -- --ticks 30000`, `ARCHITECTURE.md` §5, §10.2): long-run
-  growth is the objective, and an early regression is accepted when the end
-  of the run improves. Before shipping, `npm run soak:many` (the
-  seat extremes, on `sim`) over its default starts (two seeds and a late
-  start): no room regresses, where a loss smaller than that room's spread
-  across sim's starts on the base is noise; the contested room as
-  `ARCHITECTURE.md` §10.2 says.
-- Unit tests only for invariants and pure arithmetic. A test that asserts one
-  creep's action in one scenario is rejected in review.
-- `npm test` (unit) stays under a minute. Scenarios and soak run on `jj ship`
-  for the modules a change touches, and nightly in full.
-- After a large fight change the owner watches its siege, sweep and defend
-  scenarios in their client, lazycreep (`npm run scenario -- <name> --watch`).
-  A result is reported as the scenario's name, its measured numbers and that
-  command, never as a bare pass. A fault the owner sees there becomes a
-  measure and a scenario that fails on the old code.
+Full engine and metric details live in `ARCHITECTURE.md` §10.
+
+- **Refactor** (no intended behaviour change): identical `npm run replay`
+  against base (§10.4). Behaviour changes read their first differing tick there
+  before running scenarios.
+- **Behaviour fix:** add a scenario reproducing the incident (`scenario.mjs --list`
+  shows its engine) and pass `npm run scenario` without regression.
+- **Offence scenarios** (siege, sweep, drain): seat a real rival bot (Hivemind
+  or TooAngel, `start.opponents`) — what an offence pays is proven against a bot
+  that spawns, works, and fights back. Scripted rivals (`engine/rival/`) only
+  verify plan mechanics and must explain `why`. While fight is paused, offence
+  scenarios live on the `fight-scenarios` bookmark.
+- **`Exchange` changes:** prediction error on `npm run exchange` must not rise
+  (§10.1).
+- **Economy changes:** long-run growth is the objective (`npm run soak -- --ticks 30000`,
+  §5, §10.2); an early regression is accepted when the end of the run improves.
+  Before shipping, `npm run soak:many` over its default starts (two seeds and a
+  late start) shows no room regressing beyond base start-spread noise, with the
+  contested room read as `ARCHITECTURE.md` §10.2 says.
+- **Unit tests:** invariants and pure arithmetic only (`npm test` < 1 min);
+  scenarios and soak run on `jj ship` for the modules a change touches. Reject
+  any test asserting one creep's action in one scenario.
+- **Large fight changes:** the owner watches siege/sweep/defend scenarios in
+  lazycreep (`npm run scenario -- <name> --watch`). Report scenario name,
+  measured numbers, and that command — never a bare pass. A fault the owner sees
+  there becomes a measure and a scenario that fails on the old code.
 
 ## Performance
 
-- No performance change without the representative benchmark
-  (`ARCHITECTURE.md` §9.1: live capture, engine cost model, calibrated against
-  `observe cpu`). If the benchmark is not representative, fix the benchmark.
-- The dialect in §9.2 is a default, not a rule: a measurement overrides it
-  either way, and the commit quotes the measurement.
-- A speed claim is an interleaved A/B on that benchmark with identical Memory
-  fingerprints, or a count. A wall-clock number alone is not a claim.
-- Worth doing is not profile share alone: a change that is net-negative in
-  lines, or unlocks a further optimisation (name it), is taken when replay is
-  identical and the A/B above shows no slowdown.
+Full benchmark and dialect details live in `ARCHITECTURE.md` §9.
+
+- No performance change without the representative benchmark (§9.1); fix the
+  benchmark first if it is not representative.
+- §9.2's Rust dialect is a default; benchmark measurements override it (quote
+  the measurement in the commit).
+- Speed claims require an interleaved A/B with identical Memory fingerprints, or
+  a deterministic count — never bare wall-clock.
+- Take net-negative-line or enabling refactors (name what they unlock) when
+  replay is identical and A/B shows no slowdown.
 
 ## Version control
 
-**jj** (colocated with git): every mutation goes through `jj`; git is read-only. Solo repo: no PRs, no feature branches, work on `main`.
+**jj** (colocated with git): all mutations go through `jj`; git is read-only.
+Solo repo: no PRs, no feature branches, work on `main`.
 
 ### Shipping an issue
 
-1. `/code-review` has run on the diff and its findings are resolved. Every
-   added comment line passes the paraphrase test, or a finding deletes it.
-2. `jj describe` with a conventional-commit subject, one `Fixes #<n>` trailer line per issue and `Reviewed: code-review` (ship.sh refuses a change without it).
-3. `jj ship [-r REV]` (`scripts/ship.sh`): the gates (`npm test`: `cargo fmt --check`, line ceilings, clippy, `cargo test`; then the build, `npm run smoke` and `npm run scenario` over the scenarios whose `modules` the change touches, every one when it touches code outside `core/<module>/`), then the `claude.session-branch` bookmark (`main` locally, set once with `jj config set --repo claude.session-branch main`) moved to REV and pushed. Its gates are the pre-push run; don't run `npm test` again before it. A pushed change is immutable.
-   Before it, `jj log -r 'main..REV'`: every change listed ships.
-4. `npm run deploy` builds, smokes and uploads the bundle to the live server; the first tick after it is a cold reset.
+1. Run `/code-review` on the diff and resolve all findings (every added comment
+   passes the paraphrase test).
+2. `jj describe` with a conventional-commit subject, one `Fixes #<n>` trailer
+   per issue, and `Reviewed: code-review` (`scripts/ship.sh` requires it).
+3. Check `jj log -r 'main..REV'` — every change listed ships. Then run
+   `jj ship [-r REV]`: runs `npm test`, build, `npm run smoke`, and scenarios
+   whose `modules` the change touches (every one when it touches code outside
+   `core/<module>/`), then moves `claude.session-branch` (`main` locally, set
+   once via `jj config set --repo claude.session-branch main`) to `REV` and
+   pushes. Do not re-run `npm test` before it. Pushed changes are immutable.
+4. `npm run deploy` only when asked (cold reset on the next tick).
 
-Squash TDD slices into one change per issue; push per issue.
-
-A live firefight the user flags may be fixed in the current session without the subagent loop; steps 1–3 still apply.
+Squash TDD slices into one change per issue; push per issue. A user-flagged live
+firefight may skip the subagent loop; steps 1–3 still apply.
 
 ### Working alongside
 
-- A background task or subagent notifies when it finishes: end the turn. Wait on the game with `npm run observe -- wait --ticks N`.
-- Stop a background job with TaskStop. A long job runs with
-  `run_in_background` and the turn ends: its exit notifies you (a
-  subagent too). Inside one command, wait by pid (`wait`, `kill -0`), never
-  a loop on `pgrep -f`/`pkill -f`, which matches its own shell; a
-  PreToolUse hook (`no-self-pgrep.sh`) refuses one. A wait on a condition
-  (a file, a count of lines) uses Monitor, or a loop under `timeout`: a bare
-  `until` loop never ends if the condition never comes.
-- A subagent that edits runs isolated — Claude Code passes `isolation: "worktree"`, pi passes
-  `cwd: "auto"` to `subagent`, and `.pi/extensions/worktree.ts` runs the hooks Claude Code ran
-  itself (pi-subagents' own `worktree: true` is a git worktree, so it is refused). The repo's WorktreeCreate hook (`.claude/hooks/worktree-create.sh`, registered in `.claude/settings.json`) gives it its own jj workspace at `.claude/worktrees/<name>` (ignored), based on `main` (`trunk()`, or `claude.worktree-base` when set), with `node_modules` linked and `.env` copied; anything machine-local goes in an untracked `.claude/worktree-setup.local.sh`. The subagent describes the workspace's own `@` (no `jj new` before its first edit, which leaves an empty change under its work) and never moves a bookmark or pushes.
-- Ship a subagent's change from the default workspace: `jj new <change>` (rebase it onto `main` first if `main` moved), then steps 3–4 with `-r <change>`. A subagent's workspace is removed when it stops with no work in it and no background task running (`subagent-stop.sh`); one holding work stays, so the agent can be resumed to amend it, until session end (`worktree-sweep.sh`); by hand, `.claude/hooks/worktree-sweep.sh --stale` forgets workspaces whose directory is gone and removes directories no workspace owns. Each removal first kills what still runs in the workspace (`kill-cwd.sh`).
+- Background tasks (`run_in_background`) and subagents notify on exit — end the
+  turn instead of polling; stop a background job with `TaskStop`. Wait on the
+  live game with `npm run observe -- wait --ticks N`.
+- Inside a shell command, wait by pid (`wait`, `kill -0`) or `Monitor` /
+  `timeout`, never a `pgrep -f`/`pkill -f` loop (blocked by `no-self-pgrep.sh`).
+- **Editing subagents run in isolated jj workspaces** (Claude: `isolation: "worktree"`,
+  pi: `cwd: "auto"` via `.pi/extensions/worktree.ts`; pi-subagents'
+  `worktree: true` is a git worktree and is refused). `.claude/hooks/worktree-create.sh`
+  creates `.claude/worktrees/<name>` from `main` / `claude.worktree-base` with
+  `node_modules` linked and `.env` copied. Describe `@` directly (no extra
+  `jj new`), and never move bookmarks or push from a subagent. Ship from the
+  default workspace via `jj new <change>` (rebase onto `main` if it moved), then
+  steps 3–4 with `-r <change>`. `subagent-stop.sh` removes empty workspaces; one
+  holding work stays so the agent can be resumed to amend it, until session end
+  (`worktree-sweep.sh`, or `--stale` manually), and `kill-cwd.sh` stops
+  remaining processes first.
 - Another live session works in its own workspace too, or stays read-only.
-- One agent at a time changes the economy's spend formula (what the surplus,
-  spawn time and workers go to); a second parks its change and takes another
-  lane: performance and bench, research, the client, tooling, or scenarios
-  that touch no spend code. Two in flight re-measure each other.
-- `/tmp` is a RAM tmpfs here, shared by every agent: a build target, bundle, extracted tree or log that outlives one command goes under the workspace's `.scratch/` (ignored, on disk), and evidence a report cites under the default checkout's. Each agent deletes what it wrote there once nothing cites it.
+- **One agent at a time** changes the economy spend formula (surplus, spawn
+  time, workers); a second parks its change and takes another lane (bench,
+  tooling, research, client, non-spend scenarios).
+- `/tmp` is shared RAM tmpfs: persistent build targets, bundles, logs, and
+  scratch files go under the workspace's `.scratch/` (on disk, gitignored), and
+  evidence a report cites goes under the default checkout's `.scratch/`. Delete
+  once uncited.
 
 ### Cloud sessions
 
-A cloud session (claude.ai/code) may push only the branch it was cloned on, so that branch stands in for `main` everywhere above; `main` gets the work by PR, merged by the user.
+A cloud session pushes only its clone branch (`claude.session-branch`, set by
+`.claude/hooks/session-start.sh`), which stands in for `main` everywhere above;
+the user merges it to `main` via PR.
 
-- `session-start.sh` records the branch as `claude.session-branch`, gives jj git's identity, makes what origin holds immutable, and defines `jj ship [-r REV]` (`scripts/ship.sh`: the gates, then the branch set to REV and pushed; jj starts a new `@` when REV was it). The local `main` bookmark is never moved.
-- Step 3 is `jj ship`; subagent workspaces are based on the session branch, and a subagent's change is rebased onto it, not onto `main`.
-- The container is reclaimed when the session idles: work not pushed is lost, so ship each issue as it lands.
-- `npm run deploy` from a cloud session runs the session branch live, ahead of `main`.
+- Never move local `main`; rebase subagent work onto the session branch.
+- Ship each issue via `jj ship` as it lands (idle containers lose unpushed work).
+- `npm run deploy` deploys the session branch ahead of `main`.
 
 ## Live game
 
-**The live server runs v2** (since 2026-10-17): `npm run deploy` builds,
-smokes and uploads `dist/main.js` and `dist/main.wasm`. Never deploy unasked. Live declarations (outposts,
-allies, reserve) are set with `observe declare`.
-
-`npm run observe -- health` first after a deploy; `npm run observe` with no
-args lists the rest (engagements, rooms, creeps, regions, replay, kill
-switches). `observe exchange` lands with its module.
-
-v1 lives on the `v1` bookmark (`9677b5e8`, the code that ran live before v2),
-a rollback only: deployed from a workspace on the bookmark, never changed
-again. Nothing ports from v2 to v1. For v2 it is source to port from
-(`git show v1:<path>`), never a fact about v2.
+Live runs v2 (`npm run deploy` — never deploy unasked). Run
+`npm run observe -- health` first after a deploy; set live declarations with
+`npm run observe -- declare` (`npm run observe` with no args lists all
+commands). `v1` (`9677b5e8`) is rollback only: deployed from a workspace on the
+bookmark, never changed again; nothing ports from v2 to v1.
