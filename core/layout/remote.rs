@@ -3,18 +3,18 @@
 use std::collections::BTreeMap;
 
 use crate::atlas::{self, Atlas, Mover, Tree};
-use crate::declarations;
-use crate::grid::Footprint;
-use crate::intents::{Action, RoomAct};
-use crate::tiles::{self, Tile, TileSet};
-use crate::world::{Kind, Owner, Pos, Room, RoomName, World, terrain};
+use fabot_base::declarations;
+use fabot_base::grid::Footprint;
+use fabot_base::intents::{Action, RoomAct};
+use fabot_base::tiles::{self, Tile, TileSet};
+use fabot_base::world::{Kind, Owner, Pos, Room, RoomName, World, terrain};
 
 use super::shape::Plan;
 use super::sites::SITES_IN_FLIGHT;
 
 const HAULER: Mover = Mover {
     footprint: Footprint::One,
-    factor: crate::grid::FatigueFactor {
+    factor: fabot_base::grid::FatigueFactor {
         weight: 2,
         moves: 1,
     },

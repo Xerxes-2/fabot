@@ -4,26 +4,24 @@
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 
-use crate::HashMap;
+use fabot_base::HashMap;
 use std::rc::Rc;
 
 mod derived;
 mod graph;
-pub mod grid;
-pub mod tiles;
 
 pub use self::derived::{Context, Derived, derive, nearest, target_at, worked};
 pub use self::graph::Tree;
 use self::graph::Way;
 
-use self::grid::{
-    FatigueFactor, Footprint, UNREACHED, Weight, flood, on_edge, step_table, step_ticks, weight_of,
+use fabot_base::engine;
+use fabot_base::grid::{
+    self, FatigueFactor, Footprint, UNREACHED, Weight, flood, on_edge, step_table, step_ticks,
+    weight_of,
 };
-use self::tiles::Post;
-use self::tiles::{Table, Tile, TileSet};
-use super::engine;
-use super::vocabulary::Part;
-use super::world::{Id, Kind, Owner, Pos, Room, RoomName, World};
+use fabot_base::tiles::{self, Post, Table, Tile, TileSet};
+use fabot_base::vocabulary::Part;
+use fabot_base::world::{Id, Kind, Owner, Pos, Room, RoomName, World};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Mover {
@@ -404,7 +402,7 @@ impl Atlas {
         room.sources.iter().any(|s| s.pos.within(2, pos))
     }
 
-    pub fn controller_link<'a>(room: &'a Room) -> Option<&'a super::world::Structure> {
+    pub fn controller_link<'a>(room: &'a Room) -> Option<&'a fabot_base::world::Structure> {
         let c = room.controller.as_ref()?;
         (room.structures.iter())
             .filter(|s| {
@@ -416,7 +414,7 @@ impl Atlas {
             .min_by_key(|s| (c.pos.range(&s.pos), tiles::of_pos(&s.pos)))
     }
 
-    pub fn buffer<'a>(room: &'a Room) -> Option<&'a super::world::Structure> {
+    pub fn buffer<'a>(room: &'a Room) -> Option<&'a fabot_base::world::Structure> {
         Atlas::controller_link(room).or_else(|| {
             room.structures
                 .iter()
@@ -517,7 +515,7 @@ impl Atlas {
         if resource == from {
             return vec![from];
         }
-        let open = |t: Tile| terrain[t.index()] & super::world::terrain::WALL == 0;
+        let open = |t: Tile| terrain[t.index()] & fabot_base::world::terrain::WALL == 0;
         let mut seen = TileSet::default();
         seen.insert(from);
         let mut met = vec![(from, 0)];
@@ -616,9 +614,9 @@ impl Atlas {
     fn ground(terrain: &[u8]) -> Table<Weight> {
         let mut weights: Table<Weight> = tiles::table(None);
         for (weight, t) in weights.iter_mut().zip(terrain) {
-            *weight = if t & super::world::terrain::WALL != 0 {
+            *weight = if t & fabot_base::world::terrain::WALL != 0 {
                 None
-            } else if t & super::world::terrain::SWAMP != 0 {
+            } else if t & fabot_base::world::terrain::SWAMP != 0 {
                 grid::weight(engine::SWAMP_WEIGHT)
             } else {
                 grid::weight(engine::PLAIN_WEIGHT)

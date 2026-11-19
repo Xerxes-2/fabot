@@ -1,7 +1,7 @@
 //! Hivemind's min cut (MIT, © David Franke, after Saruss and Chobobobo): Dinic
 //! on a graph of tile halves, built and searched in its order so the cut is
 //! the one its planner draws.
-use crate::tiles::{self, Tile};
+use fabot_base::tiles::{self, Tile};
 
 const UNWALKABLE: i8 = -1;
 const NORMAL: i8 = 0;

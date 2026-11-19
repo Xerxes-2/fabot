@@ -5,12 +5,12 @@ use super::super::casting;
 use super::super::shape::{self, Engagement, Phase};
 use super::sweep;
 use crate::atlas::Atlas;
-use crate::atlas::tiles::{self, Tile, TileSet};
-use crate::engine;
 use crate::exchange::{self, Outcome};
 use crate::tactics::{self, Offer, Tactic};
-use crate::vocabulary::Resource;
-use crate::world::{Controller, Id, Kind, Owner, Pos, Room, RoomName, Structure};
+use fabot_base::engine;
+use fabot_base::tiles::{self, Tile, TileSet};
+use fabot_base::vocabulary::Resource;
+use fabot_base::world::{Controller, Id, Kind, Owner, Pos, Room, RoomName, Structure};
 
 pub const CANDIDATES: &[Tactic] = &[Tactic::BlobClose];
 

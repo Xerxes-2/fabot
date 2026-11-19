@@ -1,4 +1,4 @@
-// The world in one pass (`core/world.rs` `read` decodes it): every number into
+// The world in one pass (`core/base/world.rs` `read` decodes it): every number into
 // one Int32Array, every string into one NUL-joined string, a word the pass
 // repeats (a kind, a part, a room) once at its end and by index, so a tick crosses
 // the wasm–JS seam a handful of times, not once a field. The write order is

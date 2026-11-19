@@ -1,4 +1,4 @@
-use super::world::RoomName;
+use fabot_base::world::RoomName;
 
 pub fn worth(_room: RoomName) -> f64 {
     0.0

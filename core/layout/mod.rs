@@ -23,19 +23,19 @@ pub use shape::{Item, Plan, Standing};
 /// the plan tool and `sim/` plan a fresh colony from.
 #[cfg(feature = "tools")]
 pub fn bare(
-    name: crate::world::RoomName,
+    name: fabot_base::world::RoomName,
     terrain: Vec<u8>,
     (controller, sources, minerals): (
-        crate::world::Pos,
-        &[crate::world::Pos],
-        &[crate::world::Pos],
+        fabot_base::world::Pos,
+        &[fabot_base::world::Pos],
+        &[fabot_base::world::Pos],
     ),
     level: i32,
-) -> crate::world::Room<'static> {
-    use crate::world::{Controller, Mineral, Owner, Room, Source};
+) -> fabot_base::world::Room<'static> {
+    use fabot_base::world::{Controller, Mineral, Owner, Room, Source};
     Room {
         name,
-        terrain: crate::world::terrain::leak(terrain),
+        terrain: fabot_base::world::terrain::leak(terrain),
         controller: Some(Controller {
             id: "controller".into(),
             pos: controller,
@@ -65,7 +65,7 @@ pub fn bare(
             .map(|(i, pos)| Mineral {
                 id: format!("mineral{i}").as_str().into(),
                 pos: *pos,
-                resource: crate::vocabulary::Resource::Energy,
+                resource: fabot_base::vocabulary::Resource::Energy,
                 amount: 0,
             })
             .collect(),
@@ -79,14 +79,14 @@ pub fn bare(
 
 /// A room's plan and the tile it puts the first spawn on.
 pub fn first_spawn(
-    rules: &crate::world::Rules,
-    room: &crate::world::Room,
-) -> Option<(Plan, crate::tiles::Tile)> {
+    rules: &fabot_base::world::Rules,
+    room: &fabot_base::world::Room,
+) -> Option<(Plan, fabot_base::tiles::Tile)> {
     let plan = plan::of_ground(rules, &ground::of_room(room)?)?;
     let tile = plan
         .items
         .iter()
-        .find(|i| i.kind == crate::world::Kind::Spawn)?
+        .find(|i| i.kind == fabot_base::world::Kind::Spawn)?
         .tile;
     Some((plan, tile))
 }

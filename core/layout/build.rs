@@ -1,7 +1,7 @@
 //! Hivemind's room variation builder and its tower step (MIT, © David
 //! Franke), step for step: one variation's plan, as labels.
-use crate::tiles::{self, Tile, index};
-use crate::world::Rules;
+use fabot_base::tiles::{self, Tile, index};
+use fabot_base::world::Rules;
 
 use super::cut::{self, Rect};
 use super::ground::Ground;

@@ -20,7 +20,7 @@ use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::time::Instant;
 
-use fabot_core::world::RoomName;
+use fabot_base::world::RoomName;
 use krebs::cron::{CronCtx, JOBS};
 use krebs::hooks::ProcessorHooks;
 use krebs::intents::RoomIntents;
@@ -200,7 +200,7 @@ fn main() {
     let mut k = map.stand(&args.room, args.seed, args.ended);
     let terrains = (map.rooms.iter())
         .filter_map(|(name, t)| {
-            let bits: Box<[u8; fabot_core::tiles::COUNT]> = t
+            let bits: Box<[u8; fabot_base::tiles::COUNT]> = t
                 .bytes()
                 .map(|b| b - b'0')
                 .collect::<Vec<_>>()

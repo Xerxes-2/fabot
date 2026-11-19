@@ -1,7 +1,7 @@
 //! xxscreeps' `PathFinder.search` (Marcel Laverdet's A* and jump point search
 //! over a Dial heap) inside one room, with no ops limit as there, so a ported
 //! planner draws the roads its original draws: ties fall as that heap lets them.
-use crate::tiles::{self, Tile};
+use fabot_base::tiles::{self, Tile};
 
 const OBSTACLE: u32 = u32::MAX;
 /// One room, at world coordinates 50..100 so a step off it lands in another,

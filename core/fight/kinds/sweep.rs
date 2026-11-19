@@ -2,10 +2,10 @@
 use std::collections::BTreeSet;
 
 use super::super::shape::{Engagement, Phase, enter};
-use crate::engine;
 use crate::tactics::Tactic;
-use crate::vocabulary::Part;
-use crate::world::{Creep, Owner, Pos, Room, RoomName, Source};
+use fabot_base::engine;
+use fabot_base::vocabulary::Part;
+use fabot_base::world::{Creep, Owner, Pos, Room, RoomName, Source};
 
 pub const CANDIDATES: &[Tactic] = &[Tactic::BlobKite, Tactic::Kite];
 
@@ -39,7 +39,7 @@ pub fn prey<'a>(room: &'a Room) -> Vec<&'a Creep> {
 }
 
 pub fn worth(c: &Creep) -> i32 {
-    let body = crate::world::body_kinds(c);
+    let body = fabot_base::world::body_kinds(c);
     let life = engine::lifetime(body.iter().copied());
     engine::body_cost(&body) * c.ticks_to_live.clamp(0, life) / life + c.store.used()
 }

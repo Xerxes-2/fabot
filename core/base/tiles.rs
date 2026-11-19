@@ -14,10 +14,12 @@ pub const COUNT: usize = screeps::ROOM_AREA;
 pub struct Tile(u16);
 
 impl Tile {
+    #[inline]
     pub fn of_index(i: usize) -> Tile {
         Tile(i as u16)
     }
 
+    #[inline]
     pub fn index(self) -> usize {
         self.0 as usize
     }
@@ -81,6 +83,7 @@ impl Default for TileSet {
 
 impl TileSet {
     /// Whether `tile` was not in the set.
+    #[inline]
     pub fn insert(&mut self, tile: Tile) -> bool {
         let (word, bit) = (tile.index() / 64, 1u64 << (tile.index() % 64));
         let new = self.0[word] & bit == 0;
@@ -88,6 +91,7 @@ impl TileSet {
         new
     }
 
+    #[inline]
     pub fn contains(&self, tile: Tile) -> bool {
         self.0[tile.index() / 64] & (1u64 << (tile.index() % 64)) != 0
     }
@@ -107,31 +111,38 @@ pub fn all() -> impl Iterator<Item = Tile> {
     (0..COUNT as u16).map(Tile)
 }
 
+#[inline]
 pub fn index(x: i32, y: i32) -> Tile {
     Tile((y * SIDE + x) as u16)
 }
 
+#[inline]
 pub fn x_of(tile: Tile) -> i32 {
     i32::from(tile.0) % SIDE
 }
 
+#[inline]
 pub fn y_of(tile: Tile) -> i32 {
     i32::from(tile.0) / SIDE
 }
 
+#[inline]
 pub fn in_room(x: i32, y: i32) -> bool {
     (0..SIDE).contains(&x) && (0..SIDE).contains(&y)
 }
 
+#[inline]
 pub fn of_pos(pos: &Pos) -> Tile {
     index(pos.x, pos.y)
 }
 
+#[inline]
 pub fn to_pos(room: RoomName, tile: Tile) -> Pos {
     Pos::new(room, x_of(tile), y_of(tile))
 }
 
 /// The engine's `getRangeTo`.
+#[inline]
 pub fn range(a: Tile, b: Tile) -> i32 {
     (x_of(a) - x_of(b)).abs().max((y_of(a) - y_of(b)).abs())
 }
@@ -146,6 +157,7 @@ pub const BOTTOM_LEFT: i32 = 6;
 pub const LEFT: i32 = 7;
 pub const TOP_LEFT: i32 = 8;
 
+#[inline]
 pub fn dx(direction: i32) -> i32 {
     match direction {
         2..=4 => 1,
@@ -155,6 +167,7 @@ pub fn dx(direction: i32) -> i32 {
 }
 
 /// Rows grow downward.
+#[inline]
 pub fn dy(direction: i32) -> i32 {
     match direction {
         8 | 1 | 2 => -1,
@@ -163,6 +176,7 @@ pub fn dy(direction: i32) -> i32 {
     }
 }
 
+#[inline]
 pub fn neighbour(tile: Tile, direction: i32) -> Option<Tile> {
     let x = x_of(tile) + dx(direction);
     let y = y_of(tile) + dy(direction);
@@ -179,6 +193,7 @@ fn around_table() -> &'static Vec<Vec<Tile>> {
 }
 
 /// The in-room neighbours, in direction order.
+#[inline]
 pub fn around(tile: Tile) -> &'static [Tile] {
     &around_table()[tile]
 }
@@ -193,6 +208,7 @@ pub fn least_around(tile: Tile, bound: i32, mut cost: impl FnMut(Tile) -> i32) -
         .map(|(_, n)| n)
 }
 
+#[inline]
 pub fn direction(from: Tile, onto: Tile) -> i32 {
     let ddx = x_of(onto) - x_of(from);
     let ddy = y_of(onto) - y_of(from);
@@ -224,6 +240,7 @@ pub fn within(radius: i32, tile: Tile) -> Vec<Tile> {
 
 const LAST: i32 = SIDE - 1;
 
+#[inline]
 pub fn on_edge(tile: Tile) -> bool {
     let x = x_of(tile);
     let y = y_of(tile);
@@ -232,6 +249,7 @@ pub fn on_edge(tile: Tile) -> bool {
 
 /// The engine's FIND_EXIT_* values; a corner lies on two borders and lands
 /// nowhere.
+#[inline]
 pub fn exit_of(tile: Tile) -> i32 {
     let x = x_of(tile);
     let y = y_of(tile);
@@ -266,10 +284,12 @@ fn exit_bands() -> &'static Vec<Vec<Tile>> {
 }
 
 /// Shared: never written.
+#[inline]
 pub fn exit_tiles(exit: i32) -> &'static [Tile] {
     exit_bands().get(exit as usize).map_or(&[], Vec::as_slice)
 }
 
+#[inline]
 pub fn landing(tile: Tile) -> Option<Tile> {
     let x = x_of(tile);
     let y = y_of(tile);

@@ -1,9 +1,9 @@
 //! The fight's cast invariants: what a body a set walks out with is made of.
-use crate::engine;
 use crate::fight::casting;
-use crate::vocabulary::Part;
+use fabot_base::engine;
+use fabot_base::vocabulary::Part;
 
-use super::Dice;
+use fabot_base::testing::Dice;
 
 /// Every body cast for a kind that walks out of our rooms carries a HEAL
 /// (owner): shot up it heals the damage off instead of losing its MOVE to it

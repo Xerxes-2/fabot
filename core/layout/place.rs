@@ -3,7 +3,7 @@
 //! as its plan's integer keys are.
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::tiles::{self, Tile, index};
+use fabot_base::tiles::{self, Tile, index};
 
 use super::path::{Goal, Search};
 

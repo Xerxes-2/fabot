@@ -39,10 +39,7 @@ pub fn booster<'a>(
         .or_else(|| (labs_in(world, room)).min_by_key(|l| (reagent(l), other(l), l.id)))
 }
 
-pub(crate) fn labs_in<'a>(
-    world: &'a World,
-    room: RoomName,
-) -> impl Iterator<Item = &'a world::Structure> {
+pub fn labs_in<'a>(world: &'a World, room: RoomName) -> impl Iterator<Item = &'a world::Structure> {
     (world.rooms.iter())
         .filter(move |r| r.name == room)
         .flat_map(|r| r.structures.iter())
@@ -82,7 +79,7 @@ fn holds_room_for(lab: &world::Structure, compound: Compound) -> bool {
     (lab.store.held.iter()).all(|(r, n)| *n <= 0 || r == &wanted || !vocabulary::is_mineral(r))
 }
 
-pub(crate) fn can_boost(lab: &world::Structure, compound: Compound) -> bool {
+pub fn can_boost(lab: &world::Structure, compound: Compound) -> bool {
     lab.store.amount_of(&Resource::Compound(compound)) >= engine::BOOST_MINERAL_PER_PART
         && lab.store.amount_of(&Resource::Energy) >= engine::BOOST_ENERGY_PER_PART
 }

@@ -10,13 +10,16 @@ autotests = false
 path = "lib.rs"
 
 [dependencies]
+fabot-base = { path = "base" }
 screeps-game-api.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-rustc-hash.workspace = true
 
 [features]
-tools = []
+tools = ["fabot-base/tools"]
+
+[dev-dependencies]
+fabot-base = { path = "base", features = ["test-support"] }
 
 [lints]
 workspace = true

@@ -1,7 +1,7 @@
 use crate::atlas::Context;
-use crate::engine;
-use crate::intents::{Action, ModuleOutput, RoomAct};
-use crate::world::Rules;
+use fabot_base::engine;
+use fabot_base::intents::{Action, ModuleOutput, RoomAct};
+use fabot_base::world::Rules;
 
 use super::derive;
 use super::remote;

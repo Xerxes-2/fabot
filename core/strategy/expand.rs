@@ -1,14 +1,14 @@
 use std::collections::BTreeSet;
 
 use crate::atlas::Derived;
-use crate::declarations::{ColonyPlan, Declarations, Outpost, REACH_HOPS, Stage, undeclared};
-use crate::engine;
-use crate::intel::{self, Intel, Row};
 use crate::layout::{ground, plan};
 use crate::season;
-use crate::tiles;
-use crate::vocabulary::Resource;
-use crate::world::{Kind, Room, RoomName, World};
+use fabot_base::declarations::{ColonyPlan, Declarations, Outpost, REACH_HOPS, Stage, undeclared};
+use fabot_base::engine;
+use fabot_base::intel::{self, Intel, Row};
+use fabot_base::tiles;
+use fabot_base::vocabulary::Resource;
+use fabot_base::world::{Kind, Room, RoomName, World};
 use screeps::LocalRoomTerrain;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -398,7 +398,7 @@ pub fn claim(intel: &Intel, derived: &Derived, held: Option<&Expansion>) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vocabulary::Ore;
+    use fabot_base::vocabulary::Ore;
 
     #[test]
     fn a_claim_fails_past_its_deadline_or_to_another_player() {

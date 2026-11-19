@@ -1,9 +1,9 @@
 //! `World.ofGame`: the one reader of the game's objects. `read.js` walks them
 //! in one pass and hands over its numbers and its strings whole, for
-//! `fabot_core::world::read` to decode; this fetches what only the engine
+//! `fabot_base::world::read` to decode; this fetches what only the engine
 //! answers. A call across the seam costs more than the field it reads, so the
 //! reader makes a handful a tick.
-use fabot_core::HashMap;
+use fabot_base::HashMap;
 use std::collections::BTreeSet;
 
 use js_sys::{Array, Int32Array};
@@ -15,10 +15,10 @@ use screeps::game::{
 use wasm_bindgen::prelude::wasm_bindgen;
 use wasm_bindgen::{JsCast, JsValue};
 
-use fabot_core::atlas::tiles;
-use fabot_core::declarations::Declarations;
-use fabot_core::world::RoomName;
-use fabot_core::world::*;
+use fabot_base::declarations::Declarations;
+use fabot_base::tiles;
+use fabot_base::world::RoomName;
+use fabot_base::world::*;
 
 #[wasm_bindgen]
 extern "C" {
@@ -68,7 +68,7 @@ impl fabot_core::drive::Terrains for Maps {
 impl Maps {
     /// Kept when empty too, so a room the map lacks is asked once.
     fn read_around(&mut self, homes: impl Iterator<Item = (i32, i32)>) {
-        let reach = fabot_core::declarations::SIEGE_HOPS;
+        let reach = fabot_base::declarations::SIEGE_HOPS;
         let mut unread: Vec<(i32, RoomName)> = Vec::new();
         for (x, y) in homes {
             for dx in -reach..=reach {

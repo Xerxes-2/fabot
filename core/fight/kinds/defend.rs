@@ -3,11 +3,13 @@
 use std::collections::BTreeSet;
 
 use super::super::shape::{Engagement, Group, Phase, enter};
-use crate::engine;
 use crate::tactics::Tactic;
-use crate::tiles::{self};
-use crate::vocabulary::Part;
-use crate::world::{self, Controller, Creep, Fallen, Id, Kind, Owner, Pos, RoomName, Structure};
+use fabot_base::engine;
+use fabot_base::tiles::{self};
+use fabot_base::vocabulary::Part;
+use fabot_base::world::{
+    self, Controller, Creep, Fallen, Id, Kind, Owner, Pos, RoomName, Structure,
+};
 
 /// What a `Defend` may fight as, in the order its ties fall to (§6.3).
 pub const CANDIDATES: &[Tactic] = &[
@@ -341,7 +343,7 @@ pub fn opens(
 mod tests {
     use super::*;
     use crate::fight::shape::Objective;
-    use crate::world::{BodyPart, Store};
+    use fabot_base::world::{BodyPart, Store};
 
     fn at(x: i32, y: i32) -> Pos {
         Pos::new(RoomName::named("W1N1"), x, y)

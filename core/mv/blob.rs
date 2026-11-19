@@ -4,11 +4,12 @@ use std::cmp::Reverse;
 use std::collections::BTreeSet;
 
 use crate::atlas::{Atlas, Field, Mover, Target};
-use crate::engine;
-use crate::grid::{self, FatigueFactor, Footprint, factor_of, step_ticks};
-use crate::mv::{Wish, plan};
-use crate::tiles::{self, Tile};
-use crate::world::{Creep, RoomName};
+use crate::mv::plan;
+use fabot_base::engine;
+use fabot_base::grid::{self, FatigueFactor, Footprint, factor_of, step_ticks};
+use fabot_base::tiles::{self, Tile};
+use fabot_base::wish::Wish;
+use fabot_base::world::{Creep, RoomName};
 
 /// ⌈(n−1)/2⌉: less, and a file of n deadlocks in a corridor.
 pub fn radius(n: usize) -> i32 {

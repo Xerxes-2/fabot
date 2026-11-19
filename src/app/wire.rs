@@ -4,7 +4,7 @@ use serde::{Serialize, Serializer};
 use wasm_bindgen::prelude::wasm_bindgen;
 use wasm_bindgen::{JsCast, JsValue};
 
-use fabot_core::intel::{self, Intel};
+use fabot_base::intel::{self, Intel};
 use fabot_core::memory::Memory;
 use fabot_core::observe::metrics::Metrics;
 use fabot_core::tactics::{self, Offer};
@@ -81,7 +81,7 @@ pub struct Observed {
     #[serde(serialize_with = "offer_rows")]
     pub offers: Vec<(i32, Vec<Offer>)>,
     pub faults: Vec<Fault>,
-    pub refusals: Vec<fabot_core::intents::Refusal>,
+    pub refusals: Vec<fabot_base::intents::Refusal>,
     pub alerts: Vec<String>,
 }
 

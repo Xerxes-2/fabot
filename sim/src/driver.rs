@@ -4,14 +4,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::time::Instant;
 
-use fabot_core::atlas::tiles;
-use fabot_core::declarations::Declarations;
+use fabot_base::declarations::Declarations;
+use fabot_base::intel::Intel;
+use fabot_base::intents::Action;
+use fabot_base::tiles;
+use fabot_base::world::{RoomName, World};
 use fabot_core::drive::{self, Terrains};
-use fabot_core::intel::Intel;
-use fabot_core::intents::Action;
 use fabot_core::memory::Memory;
 use fabot_core::observe::metrics::{self, Metrics};
-use fabot_core::world::{RoomName, World};
 use krebs::intents::RoomIntents;
 use screeps::LocalRoomTerrain;
 use serde_json::{Value, json};
@@ -161,8 +161,8 @@ fn rows(m: &Metrics, t: u64, after: &mut i32, ledger: &Value, out: &mut impl Wri
 mod tests {
     use std::collections::{BTreeMap, VecDeque};
 
+    use fabot_base::world::RoomName;
     use fabot_core::observe::metrics::{Metrics, Window};
-    use fabot_core::world::RoomName;
     use serde_json::{Value, json};
 
     #[test]

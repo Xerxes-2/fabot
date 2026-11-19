@@ -1,8 +1,8 @@
 //! The engine's arithmetic, against values read off the engine and against
 //! its own inverses.
-use super::{Dice, boosted};
-use crate::engine;
-use crate::vocabulary::{ALL_BODY_PARTS, Part, ResourceType, resource_name, resource_of_name};
+use fabot_base::engine;
+use fabot_base::testing::{Dice, boosted};
+use fabot_base::vocabulary::{ALL_BODY_PARTS, Part, ResourceType, resource_name, resource_of_name};
 
 const CASES: usize = 100;
 

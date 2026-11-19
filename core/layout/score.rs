@@ -1,7 +1,7 @@
 //! Hivemind's variation generator and plan scorer (MIT, © David Franke): the
 //! room centres and harvest-bay spawns it tries, and how it picks one.
-use crate::tiles::{self, Tile, index};
-use crate::world::Rules;
+use fabot_base::tiles::{self, Tile, index};
+use fabot_base::world::Rules;
 
 use super::build::{self, Built, Variation};
 use super::ground::Ground;

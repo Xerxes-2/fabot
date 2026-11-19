@@ -3,9 +3,9 @@
 //! the API does, and the rooms are those our objects give vision of.
 use std::collections::BTreeSet;
 
-use fabot_core::declarations::Declarations;
-use fabot_core::vocabulary::{self, Part};
-use fabot_core::world::*;
+use fabot_base::declarations::Declarations;
+use fabot_base::vocabulary::{self, Part};
+use fabot_base::world::*;
 use krebs::atom;
 use krebs::doc::{Atom, Obj, Val};
 use krebs::world::UserIdx;
@@ -19,8 +19,8 @@ use crate::world::{INVADER, KEEPER, US, USERNAME};
 pub fn username(user: &str) -> &str {
     match user {
         US => USERNAME,
-        INVADER => fabot_core::engine::INVADER_USER,
-        KEEPER => fabot_core::engine::KEEPER_USER,
+        INVADER => fabot_base::engine::INVADER_USER,
+        KEEPER => fabot_base::engine::KEEPER_USER,
         other => other,
     }
 }

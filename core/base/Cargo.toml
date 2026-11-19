@@ -1,0 +1,21 @@
+[package]
+name = "fabot-base"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "lib.rs"
+doctest = false
+
+[dependencies]
+screeps-game-api.workspace = true
+serde.workspace = true
+rustc-hash.workspace = true
+
+[features]
+tools = []
+test-support = []
+
+[lints]
+workspace = true

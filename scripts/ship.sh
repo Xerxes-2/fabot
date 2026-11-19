@@ -39,6 +39,7 @@ modules=() scenarios=() full=
 while read -r f; do
   case "$f" in
     *.md | core/tests/*) ;;
+    core/base/*) full=${full:-$f} ;;
     core/*/*) m=${f#core/}; m=${m%%/*}; [ ! -d "core/$m" ] || modules+=("$m") ;;
     scripts/xxscreeps/scenarios/*.json) [ ! -e "$f" ] || { s=${f##*/}; scenarios+=("${s%.json}"); } ;;
     *) full=${full:-$f} ;;

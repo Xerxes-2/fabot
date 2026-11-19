@@ -7,16 +7,16 @@ use super::kinds::siege::{self, Facts as SiegeFacts};
 use super::kinds::{raid, sweep};
 use super::shape::{Cast, Engagement, Group, Objective, Phase, Plan};
 use crate::atlas::{Atlas, Mover, Target, Tree};
-use crate::declarations::{self, TacticRule};
 use crate::exchange::{self, Fighter, fighter};
-use crate::grid::{self, Footprint};
 use crate::tactics::{self, Tactic};
-use crate::tiles::Tile;
-use crate::vocabulary::{Part, ResourceType};
-use crate::world::{
+use fabot_base::declarations::{self, TacticRule};
+use fabot_base::grid::{self, Footprint};
+use fabot_base::tiles::Tile;
+use fabot_base::vocabulary::{Part, ResourceType};
+use fabot_base::world::{
     Creep, Id, Kind, Owner, Pos, Room, RoomName, Sightings, Structure, World, hostiles, sightings,
 };
-use crate::{engine, tiles};
+use fabot_base::{engine, tiles};
 
 #[derive(Default)]
 pub(super) struct Asked {
@@ -366,7 +366,7 @@ impl<'a> Scene<'a> {
         let stand = self
             .members_of(e)
             .iter()
-            .filter(|c| of(&crate::world::body_kinds(c)))
+            .filter(|c| of(&fabot_base::world::body_kinds(c)))
             .count();
         stand
             + ovens
@@ -458,7 +458,7 @@ impl<'a> Scene<'a> {
         let due: BTreeMap<String, casting::Body> = members
             .iter()
             .filter(|c| !held.contains(&slot(&c.name)))
-            .map(|c| (slot(&c.name), crate::world::body_kinds(c)))
+            .map(|c| (slot(&c.name), fabot_base::world::body_kinds(c)))
             .collect();
 
         let lead = engine::SPAWN_TICKS_PER_PART * engine::MAX_BODY_PARTS as i32;
@@ -625,7 +625,7 @@ impl<'a> Scene<'a> {
             .ours
             .iter()
             .filter_map(|n| self.ours.get(n.as_str()))
-            .map(|c| (slot_of(&c.name), crate::world::body_kinds(c)))
+            .map(|c| (slot_of(&c.name), fabot_base::world::body_kinds(c)))
             .collect();
 
         bodies.extend(

@@ -1,26 +1,27 @@
 /// The clock is passed in to keep `decide` deterministic.
 use std::collections::BTreeSet;
 
-use crate::HashMap;
+use fabot_base::HashMap;
 
 use screeps::LocalRoomTerrain;
 
 use super::atlas::{Atlas, Context, Derived, Mover, derive, target_at, worked};
-use super::boost;
-use super::declarations::{Declarations, Refused};
-use super::engine;
-use super::grid::{self, Footprint};
-use super::intel::Intel;
-use super::intents::{
-    Action, Ask, CreepAct, LabAct, ModuleOutput, Rank, Settled, SpawnAct, Telemetry,
-};
-use super::mv::{self, Wish};
+use super::mv;
 use super::state::State;
 use super::strategy::{self, intel};
 use super::tactics;
-use super::tiles::{self, Tile};
-use super::vocabulary::Compound;
-use super::world::{self, Id, Kind, Pos, Room, RoomName, Sightings, Structure, World};
+use fabot_base::boost;
+use fabot_base::declarations::{Declarations, Refused};
+use fabot_base::engine;
+use fabot_base::grid::{self, Footprint};
+use fabot_base::intel::Intel;
+use fabot_base::intents::{
+    Action, Ask, CreepAct, LabAct, ModuleOutput, Rank, Settled, SpawnAct, Telemetry,
+};
+use fabot_base::tiles::{self, Tile};
+use fabot_base::vocabulary::Compound;
+use fabot_base::wish::Wish;
+use fabot_base::world::{self, Id, Kind, Pos, Room, RoomName, Sightings, Structure, World};
 
 pub type ModuleRun = fn(&mut Context, &mut State) -> ModuleOutput;
 
@@ -109,7 +110,7 @@ pub fn queue(world: &World, asks: &[(RoomName, Ask)]) -> Vec<Action> {
 
 /// One arbitration per room over every module's wishes (§3's `Move`); a creep
 /// of ours that wishes nothing holds its tile.
-pub fn arbitrate(context: &Context, wishes: &[(RoomName, mv::Wish)]) -> (Vec<Action>, Vec<String>) {
+pub fn arbitrate(context: &Context, wishes: &[(RoomName, Wish)]) -> (Vec<Action>, Vec<String>) {
     let groups = by_room(wishes);
     let wished: BTreeSet<&str> = (groups.iter())
         .flat_map(|(_, ws)| ws.iter().map(|w| w.creep.as_str()))
@@ -124,7 +125,7 @@ pub fn arbitrate(context: &Context, wishes: &[(RoomName, mv::Wish)]) -> (Vec<Act
         let theirs: BTreeSet<Tile> = (context.world.room(room).into_iter())
             .flat_map(|r| r.hostiles().map(|c| tiles::of_pos(&c.pos)))
             .collect();
-        let (glued, ws): (Vec<&mv::Wish>, Vec<&mv::Wish>) =
+        let (glued, ws): (Vec<&Wish>, Vec<&Wish>) =
             (ws.into_iter()).partition(|w| w.head != w.at && theirs.contains(&w.head));
         out.extend(glued.iter().map(|w| {
             Action::Creep(
@@ -304,7 +305,7 @@ pub fn decide<'t>(
 ) -> Decided {
     let mut state = state;
     let refused = refuse(&mut declarations, &world.closed);
-    let sightings = super::world::sightings::step(world, sightings);
+    let sightings = fabot_base::world::sightings::step(world, sightings);
     intel::step(world, intel);
     phases.push(("world".to_string(), clock() - began));
 

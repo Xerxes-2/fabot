@@ -6,13 +6,13 @@ use super::kinds::{defend, raid, siege, sweep};
 use super::scene::{Asked, Hunting, Scene, fresh, middle, picket};
 use super::shape::{Engagement, Group, Objective, Phase, Plan};
 use crate::atlas::{self, Atlas, Mover, Target};
-use crate::declarations::{self, Declarations};
 use crate::exchange::{self, Fighter, Ground, Losses, Outcome, Side, Stance, fighter};
-use crate::grid::{self, Footprint};
 use crate::tactics::{self, Offer, Tactic};
-use crate::tiles::Tile;
-use crate::world::{self, Creep, Id, Kind, Pos, Room, RoomName, Structure};
-use crate::{engine, tiles};
+use fabot_base::declarations::{self, Declarations};
+use fabot_base::grid::{self, Footprint};
+use fabot_base::tiles::Tile;
+use fabot_base::world::{self, Creep, Id, Kind, Pos, Room, RoomName, Structure};
+use fabot_base::{engine, tiles};
 
 /// `Casting.price`'s say in how many copies of a block to ask for.
 type CopiesOf<'a> = Box<dyn Fn(&casting::Body) -> i32 + 'a>;
@@ -738,11 +738,12 @@ impl<'a> Scene<'a> {
 
                     let razing = casting::razer(capacity, core_hits, &[]);
 
-                    let fielded_cost: i32 = (fielding.iter().map(|c| crate::world::body_kinds(c)))
-                        .chain(asked_bodies.iter().cloned())
-                        .filter(|b| !razing.contains(b))
-                        .map(|b| engine::body_cost(&b))
-                        .sum();
+                    let fielded_cost: i32 =
+                        (fielding.iter().map(|c| fabot_base::world::body_kinds(c)))
+                            .chain(asked_bodies.iter().cloned())
+                            .filter(|b| !razing.contains(b))
+                            .map(|b| engine::body_cost(&b))
+                            .sum();
 
                     let worth = tick_worth * ticks - fielded_cost;
 

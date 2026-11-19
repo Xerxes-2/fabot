@@ -1,10 +1,10 @@
 /// A colony given up (§5, owner 2026-10-18) digs, builds and upgrades nothing
 /// more; its ring spawns the haulers and charges the towers that guard them.
-use crate::engine;
-use crate::intents::{Action, ControllerAct, RoomAct};
-use crate::tiles;
-use crate::vocabulary::Resource;
-use crate::world::{Creep, Kind, Room, RoomName, Structure};
+use fabot_base::engine;
+use fabot_base::intents::{Action, ControllerAct, RoomAct};
+use fabot_base::tiles;
+use fabot_base::vocabulary::Resource;
+use fabot_base::world::{Creep, Kind, Room, RoomName, Structure};
 
 use super::derived::Ground;
 use super::task::Target;

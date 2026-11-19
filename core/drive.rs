@@ -5,18 +5,19 @@ use std::collections::BTreeMap;
 
 use screeps::LocalRoomTerrain;
 
-use crate::atlas::{Atlas, tiles};
-use crate::declarations::Declarations;
+use crate::atlas::Atlas;
 use crate::fight::shape::Phase;
-use crate::intel::Intel;
-use crate::intents::{Action, Refusal};
 use crate::layout::shape::Standing;
 use crate::memory::Memory;
 use crate::observe::metrics::{self, Metrics};
 use crate::tactics::Offer;
 use crate::tick;
-use crate::world::Pos;
-use crate::world::{RoomName, Sightings, World};
+use fabot_base::declarations::Declarations;
+use fabot_base::intel::Intel;
+use fabot_base::intents::{Action, Refusal};
+use fabot_base::tiles;
+use fabot_base::world::Pos;
+use fabot_base::world::{RoomName, Sightings, World};
 
 /// `ARCHITECTURE.md` §4's heap rows `decide` reads and hands back; empty after a reset.
 #[derive(Default)]

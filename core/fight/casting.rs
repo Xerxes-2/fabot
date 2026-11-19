@@ -3,11 +3,11 @@
 /// to the home's.
 use std::collections::BTreeMap;
 
-use crate::declarations::Declarations;
-use crate::engine;
 use crate::exchange::{self, Fighter, fighter};
-use crate::vocabulary::{Compound, Part, Resource, ResourceType};
-use crate::world::{
+use fabot_base::declarations::Declarations;
+use fabot_base::engine;
+use fabot_base::vocabulary::{Compound, Part, Resource, ResourceType};
+use fabot_base::world::{
     Creep, Id, Kind, Owner, Pos, Room, RoomName, Spawn, Store, Structure, World, terrain,
 };
 
@@ -87,7 +87,10 @@ fn with_heal(mut body: Body) -> Body {
 }
 
 pub fn fighter_of(c: &Creep) -> Fighter {
-    let (body, boosts) = (crate::world::body_kinds(c), crate::world::body_boosts(c));
+    let (body, boosts) = (
+        fabot_base::world::body_kinds(c),
+        fabot_base::world::body_boosts(c),
+    );
     let mut f = fighter::of_parts(&body, &boosts, c.hits, Some(c.pos));
     f.invader = c.owner == Owner::Invader;
     f
@@ -182,7 +185,7 @@ pub fn side_in(room: &Room, bodies: Vec<Fighter>) -> exchange::Side {
 /// cast unboosted rather than held.
 pub fn cluster_boost(world: &World, declarations: &Declarations) -> Option<(ResourceType, i32)> {
     let (home, _) = declarations.labs()?;
-    let (compound, energy) = crate::boost::home_holds(world, home, Compound::UtriumAcid);
+    let (compound, energy) = fabot_base::boost::home_holds(world, home, Compound::UtriumAcid);
     let parts =
         (compound / engine::BOOST_MINERAL_PER_PART).min(energy / engine::BOOST_ENERGY_PER_PART);
 
@@ -444,7 +447,7 @@ pub fn colony_for(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::atlas::grid;
+    use fabot_base::grid;
 
     /// A pair is 5,100 of the bank and three pairs are the most a drain casts,
     /// a pair's medic seating 156 of heal a tick.

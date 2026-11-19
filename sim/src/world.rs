@@ -2,8 +2,8 @@
 //! our first spawn on it as `soak.mjs`'s respawn stands it.
 use std::sync::Arc;
 
+use fabot_base::world::{Pos, RoomName, Rules};
 use fabot_core::layout;
-use fabot_core::world::{Pos, RoomName, Rules};
 use krebs::mapgen::{self, RoomKind};
 use krebs::room_name::RoomXY;
 use krebs::scenario::GlobalScenario;
@@ -98,7 +98,7 @@ impl Map {
             1,
         );
         let (_, tile) = layout::first_spawn(&Rules::vanilla(), &bare).expect("a plan");
-        let pos = fabot_core::tiles::to_pos(name, tile);
+        let pos = fabot_base::tiles::to_pos(name, tile);
         (i64::from(pos.x), i64::from(pos.y))
     }
 

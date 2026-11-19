@@ -4,10 +4,10 @@
 /// tick or a reset loses nothing.
 use std::collections::BTreeMap;
 
-use crate::boost::{Roles, roles_of};
-use crate::engine;
-use crate::vocabulary::{Compound, Resource};
-use crate::world::{Id, Pos};
+use fabot_base::boost::{Roles, roles_of};
+use fabot_base::engine;
+use fabot_base::vocabulary::{Compound, Resource};
+use fabot_base::world::{Id, Pos};
 
 /// Toward the first target (in compound order) its stock stands short of. A
 /// reagent compound short of the shortfall is made first; once none can be,
@@ -203,8 +203,8 @@ pub fn ready_runs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vocabulary::Ore;
-    use crate::world::RoomName;
+    use fabot_base::vocabulary::Ore;
+    use fabot_base::world::RoomName;
 
     fn stocked(pairs: &[(Resource, i32)]) -> impl Fn(&Resource) -> i32 + '_ {
         move |r| pairs.iter().find(|(p, _)| p == r).map_or(0, |(_, n)| *n)

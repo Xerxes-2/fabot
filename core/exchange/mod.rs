@@ -6,11 +6,11 @@ pub use fighter::Fighter;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::engine;
-use crate::grid::{self, FatigueFactor, Weight, step_ticks};
-use crate::tiles::{self, Table, Tile};
-use crate::vocabulary::{Part, ResourceType};
-use crate::world::{Pos, RoomName};
+use fabot_base::engine;
+use fabot_base::grid::{self, FatigueFactor, Weight, step_ticks};
+use fabot_base::tiles::{self, Table, Tile};
+use fabot_base::vocabulary::{Part, ResourceType};
+use fabot_base::world::{Pos, RoomName};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Tower {
@@ -1580,7 +1580,7 @@ mod tests {
             .collect();
         let tier = rng.element(&[0, 1, 2, 3]);
         let boosts: Vec<_> = (body.iter())
-            .map(|p| crate::tests::boosted(*p, tier))
+            .map(|p| fabot_base::testing::boosted(*p, tier))
             .collect();
         let x = rng.between(1, 48);
         let y = rng.between(1, 48);

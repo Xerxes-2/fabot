@@ -6,14 +6,14 @@ use super::super::shape::{Engagement, Objective};
 use super::super::{casting, price};
 use super::siege;
 use crate::atlas::Atlas;
-use crate::atlas::tiles::{self, Tile};
-use crate::engine;
 use crate::exchange::{self, Fighter, Ground, Losses, Outcome};
-use crate::intents::CreepAct;
-use crate::mv::Wish;
 use crate::tactics::{self, Sight, Tactic};
-use crate::vocabulary::{Part, Resource};
-use crate::world::{Creep, Id, Kind, Pos, Room, Structure};
+use fabot_base::engine;
+use fabot_base::intents::CreepAct;
+use fabot_base::tiles::{self, Tile};
+use fabot_base::vocabulary::{Part, Resource};
+use fabot_base::wish::Wish;
+use fabot_base::world::{Creep, Id, Kind, Pos, Room, Structure};
 
 /// A siege whose set shoots its way in: a ranged blob, no dismantler.
 pub fn raids(e: &Engagement) -> bool {

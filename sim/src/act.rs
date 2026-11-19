@@ -3,13 +3,13 @@
 //! order where they are cheap and decide the stored amount, refused with its code.
 use std::collections::BTreeMap;
 
-use fabot_core::HashMap;
-use fabot_core::intents::{
+use fabot_base::HashMap;
+use fabot_base::intents::{
     Action, ControllerAct, CreepAct, LabAct, LinkAct, Refusal, RoomAct, SpawnAct, TerminalAct,
     TowerAct,
 };
-use fabot_core::vocabulary::{self, Part, Resource};
-use fabot_core::world;
+use fabot_base::vocabulary::{self, Part, Resource};
+use fabot_base::world;
 use krebs::atom;
 use krebs::doc::{Atom, Id, Obj, Val};
 use krebs::intents::{RoomIntents, UserRoomIntents};

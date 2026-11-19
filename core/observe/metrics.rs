@@ -4,17 +4,17 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write;
 
-use crate::HashMap;
 use crate::atlas::{Atlas, Derived};
-use crate::declarations::{self, Declarations, Refused};
 use crate::economy::abandon;
 use crate::economy::bodies::{self, Pattern};
 use crate::economy::task::{Assignment, Task};
-use crate::engine;
 use crate::fight::shape::{Cast, Engagement, Phase};
-use crate::intents::{Action, CreepAct, Refusal, SpawnAct, TowerAct};
-use crate::vocabulary::{Part, Resource};
-use crate::world::{Creep, Id, Kind, Owner, Pos, Room, RoomName, World, hostiles};
+use fabot_base::HashMap;
+use fabot_base::declarations::{self, Declarations, Refused};
+use fabot_base::engine;
+use fabot_base::intents::{Action, CreepAct, Refusal, SpawnAct, TowerAct};
+use fabot_base::vocabulary::{Part, Resource};
+use fabot_base::world::{Creep, Id, Kind, Owner, Pos, Room, RoomName, World, hostiles};
 
 pub const WINDOW: i32 = 100;
 const RING: usize = 150;
@@ -1194,7 +1194,7 @@ pub fn counts(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::Dice;
+    use fabot_base::testing::Dice;
 
     #[test]
     fn a_ring_reads_back_as_written() {

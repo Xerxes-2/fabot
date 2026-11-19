@@ -1,5 +1,5 @@
-use super::mv::Wish;
 use super::vocabulary::{Part, Resource};
+use super::wish::Wish;
 use super::world::{Id, Kind, RoomName};
 
 #[derive(Clone, Debug, PartialEq, Eq)]

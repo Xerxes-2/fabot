@@ -6,11 +6,11 @@ use std::cmp::Reverse;
 use std::collections::{BTreeSet, BinaryHeap};
 use std::rc::Rc;
 
-use super::grid::{UNREACHED, weight_of};
-use super::tiles::{self, Table, Tile, TileSet};
 use super::{Atlas, Coords, Goal, Mover, RoomGrid, Target};
-use crate::HashMap;
-use crate::world::RoomName;
+use fabot_base::HashMap;
+use fabot_base::grid::{UNREACHED, weight_of};
+use fabot_base::tiles::{self, Table, Tile, TileSet};
+use fabot_base::world::RoomName;
 
 /// Each stretch's first and last tile on its band.
 pub type Exit = Rc<[(Tile, Tile)]>;

@@ -8,7 +8,7 @@ use std::fmt::Write;
 use screeps::raw_memory;
 
 use super::world::Pass;
-use fabot_core::world::push_int;
+use fabot_base::world::push_int;
 
 const RING: usize = 5;
 const FIRST: usize = 10;

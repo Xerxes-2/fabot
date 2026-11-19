@@ -41,7 +41,7 @@ Game ──World.ofGame──▶ World ──decide──▶ Actions ──Execu
          State (Memory + segments + heap, §4) ──── writes back ────┘
 ```
 
-- **Pure core (`fabot-core`, `core/`):** `World::of_game` reads the JS API once
+- **Pure core (`core/` workspace crates, orchestrated by `fabot-core`):** `World::of_game` reads the JS API once
   in `src/app/`; nothing in `core/` touches `Game`. `core/drive.rs` is the
   shared tick seam called by both the WASM driver (`src/app/driver.rs`) and the
   native simulator (`sim/`).
@@ -83,7 +83,7 @@ World ──▶ Derived ──▶ decisions (read Derived & Atlas, never World) 
 
 - `Derived` and `Context` (`core/atlas/derived.rs`) are built once per tick
   below `Fight` and `Economy` so modules share facts without importing each
-  other; `Declarations` (`core/declarations.rs`) sit below every module, and
+  other; `Declarations` (`core/base/declarations.rs`) sit below every module, and
   only the tick loop and its driver import `tick`.
 - Room tile sets use bitmaps (`TileSet`) and per-tile arrays use `Table<T>`
   (`y * 50 + x`), never `BTreeSet<Tile>` / `BTreeMap<Tile, _>`.
@@ -126,22 +126,26 @@ segments over multiple ticks (economy first); a cold tick never spends more than
 
 ## 3. Modules
 
-| Module | Owns | Reads | Writes |
-|---|---|---|---|
-| `Bindings` / `app` | Screeps JS API seam, packed `read.js`, `driver.rs` | `Game`, `RawMemory` | `Game`, `RawMemory`, segments |
-| `Engine` | Game formulas & non-global server constants (vanilla tables from `screeps-game-api`) | — | — |
-| `World` | Single-pass tick snapshot, event-log strikes/destroys, per-tick `rules` (`CONTROLLER_STRUCTURES`) | `Game` | — |
-| `Atlas` | Room graph (region nodes, border-stretch crossings, keeper-strike avoidance, blind keeper & stronghold penalty) and per-room tile grid (weights, reverse floods, seats, footprint queries); out-of-sight grids hold what stood when last seen (else terrain) and stay kept with their floods under the same bound as part of the flood table, not a second cache | `World`, `terrain`, `intel.rooms` | flood table, `atlas.carried` |
-| `Economy` | Slots, casts, sticky tasks, logistics dispatcher, links, labs, terminals, abandon | `Derived`, `Atlas`, `declarations`, `EconomyState`, Strategy's `scouts` | tasks, casts, `assignments`, `spare` |
-| `Layout` | Colony placement plan (Hivemind planner + xxscreeps JPS), rampart ring, construction sites, buried-road destroy, tower firing | `Derived`, `Atlas`, `declarations` | sites, destroys, tower actions, `standing.layout` |
-| `Exchange` | Pure combat arithmetic (`outcome`, `cheapest_win`, breach planning) | fighters, terrain | — |
-| `Fight` | Hostile `Tracker`, engagements (`kinds/`: defend, siege, sweep, raid), casting | `Derived`, `Atlas`, `Exchange`, `declarations`, `intel`, `FightState`, Strategy's `preyed` | fight actions, asks, wishes, casts, `FightState` |
-| `Tactics` | Per-creep combat actions, stepping, and the operator's tactic rules (`ruling`, `checked`) (no `Fight` import) | `Atlas`, `Move`, `Sight` + plan | creep actions, wishes |
-| `Strategy` | Intel, observers/scouts, `ColonyPlan` & outpost selection, expansion/abandon, operation opening & global force priority | `World`, `Derived`, `Exchange`, `intel`, `Season`, `standing.layout`, `spare`, fight state | `declarations` (`ColonyPlan`, outposts, claims), `intel`, `expansion` |
-| `Season` | Disposable seasonal rules (`worth`, `spent`, season structures/scoring) | `World` | declarations to `Strategy`, season actions |
-| `Move` | Room-level movement arbitration (augmenting-path matching) and stepping (`plan`, `blob`) | wishes, `Atlas` | moves & held bodies (`Settled`) |
-| `Executor` | Turning settled actions into API calls | `Settled.actions` | `Game`, refusals |
-| `Observe` | Operator views (`health`, faults, CPU, counts, tactic offers) & windowed metrics (§10.5) | world, actions, held, telemetry, refusals, state | observe & metrics segments |
+| Module | Crate | Owns | Reads | Writes |
+|---|---|---|---|---|
+| `Bindings` / `app` | `fabot` | Screeps JS API seam, packed `read.js`, `driver.rs` | `Game`, `RawMemory` | `Game`, `RawMemory`, segments |
+| `Engine` | `fabot-base` | Game formulas & non-global server constants (vanilla tables from `screeps-game-api`) | — | — |
+| `World` | `fabot-base` | Single-pass tick snapshot, event-log strikes/destroys, per-tick `rules` (`CONTROLLER_STRUCTURES`) | `Game` | — |
+| `Atlas` | `fabot-core` | Room graph (region nodes, border-stretch crossings, keeper-strike avoidance, blind keeper & stronghold penalty) and per-room tile grid (weights, reverse floods, seats, footprint queries); out-of-sight grids hold what stood when last seen (else terrain) and stay kept with their floods under the same bound as part of the flood table, not a second cache | `World`, `terrain`, `intel.rooms` | flood table, `atlas.carried` |
+| `Economy` | `fabot-core` | Slots, casts, sticky tasks, logistics dispatcher, links, labs, terminals, abandon | `Derived`, `Atlas`, `declarations`, `EconomyState`, Strategy's `scouts` | tasks, casts, `assignments`, `spare` |
+| `Layout` | `fabot-core` | Colony placement plan (Hivemind planner + xxscreeps JPS), rampart ring, construction sites, buried-road destroy, tower firing | `Derived`, `Atlas`, `declarations` | sites, destroys, tower actions, `standing.layout` |
+| `Exchange` | `fabot-core` | Pure combat arithmetic (`outcome`, `cheapest_win`, breach planning) | fighters, terrain | — |
+| `Fight` | `fabot-core` | Hostile `Tracker`, engagements (`kinds/`: defend, siege, sweep, raid), casting | `Derived`, `Atlas`, `Exchange`, `declarations`, `intel`, `FightState`, Strategy's `preyed` | fight actions, asks, wishes, casts, `FightState` |
+| `Tactics` | `fabot-core` | Per-creep combat actions, stepping, and the operator's tactic rules (`ruling`, `checked`) (no `Fight` import) | `Atlas`, `Move`, `Sight` + plan | creep actions, wishes |
+| `Strategy` | `fabot-core` | Intel, observers/scouts, `ColonyPlan` & outpost selection, expansion/abandon, operation opening & global force priority | `World`, `Derived`, `Exchange`, `intel`, `Season`, `standing.layout`, `spare`, fight state | `declarations` (`ColonyPlan`, outposts, claims), `intel`, `expansion` |
+| `Season` | `fabot-core` | Disposable seasonal rules (`worth`, `spent`, season structures/scoring) | `World` | declarations to `Strategy`, season actions |
+| `Move` | `fabot-core` | Room-level movement arbitration (augmenting-path matching) and stepping (`plan`, `blob`) | wishes, `Atlas` | moves & held bodies (`Settled`) |
+| `Executor` | `fabot` | Turning settled actions into API calls | `Settled.actions` | `Game`, refusals |
+| `Observe` | `fabot-core` | Operator views (`health`, faults, CPU, counts, tactic offers) & windowed metrics (§10.5) | world, actions, held, telemetry, refusals, state | observe & metrics segments |
+
+`fabot-base` (`core/base`) also holds what every module shares (`tiles`, `grid`,
+`wish`, `intents`, `declarations`, intel rows, boost queries, `HashMap`) and
+imports no module above it: a crate, so the compiler holds that floor.
 
 **Dependency direction:** top to bottom. `Fight` and `Economy` never import each
 other; only `Strategy` imports `Season`. Declarations flow down only.
@@ -472,7 +476,7 @@ conflicts never silently cancel an act.
   soonest (hops + spawn queue + energy refill time); home `Defend` casts at
   home. Bodies end with one `MOVE` (`with_move_last`) and carry `HEAL` when
   leaving owned rooms (except siege dismantlers covered by medics).
-- **Boosts (`core/boost.rs`):** if the declared lab cluster covers a compound,
+- **Boosts (`core/base/boost.rs`):** if the declared lab cluster covers a compound,
   the cast encodes it in the creep name (`fight-<tick>-<eng>-<slot>-<compound>`).
   `Tick` holds the creep at the boost lab while parts need it, stock covers it,
   and a carrier exists — a stateless tick fact, never a timer.
@@ -583,9 +587,13 @@ Pure at module boundaries, systems Rust inside (measurements override defaults):
 - **Single-pass JS→WASM seam:** ~90% of world-read cost was seam calls rather
   than work, so `src/app/read.js` packs the tick into one `Int32Array` +
   interned string buffer (interning cut `world` by −17%), decoded by
-  `core/world.rs`; never add per-field JS calls.
+  `core/base/world.rs`; never add per-field JS calls.
 - **Copy `world::Id`:** 96-bit left-aligned hex + length (`Copy`, lex-ordered as
   text), avoiding `String` allocations and pointer hashing.
+- **`#[inline]` across crates:** rustc inlines a function into another
+  crate only when it is `#[inline]` or tiny, and neither the incremental test
+  profile nor release LTO makes up for it, so a hot helper another crate calls
+  takes `#[inline]`; without it on `tiles` the core suite ran 2.2 → 3.0 s.
 
 ### 9.3 Counts are a gate
 

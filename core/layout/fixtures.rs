@@ -3,13 +3,13 @@
 //! mineral, a controller and none, one or two spawns of ours.
 use std::collections::BTreeSet;
 
-use crate::declarations::{ColonyPlan, Stage};
 use crate::layout::ground::{self, Ground};
 use crate::layout::plan;
 use crate::layout::shape::Plan;
-use crate::tiles::{self, Tile};
-use crate::vocabulary::Resource;
-use crate::world::{
+use fabot_base::declarations::{ColonyPlan, Stage};
+use fabot_base::tiles::{self, Tile};
+use fabot_base::vocabulary::Resource;
+use fabot_base::world::{
     Controller, Creep, Kind, Mineral, Owner, Pos, Room, RoomName, Rules, Site, Source, Spawn,
     Store, Structure, World, terrain,
 };
@@ -329,7 +329,7 @@ pub fn census_case(rng: &mut Rng) -> CensusCase {
         level,
         built: list(rng),
         pending: list(rng),
-        budget: rng.choose(0, crate::engine::MAX_CONSTRUCTION_SITES),
+        budget: rng.choose(0, fabot_base::engine::MAX_CONSTRUCTION_SITES),
     }
 }
 
@@ -384,8 +384,8 @@ pub fn creep(id: &str, owner: Owner, hits: i32, tile: Tile) -> Creep {
         name: id.to_string(),
         owner,
         pos: at(tile),
-        body: vec![crate::world::BodyPart {
-            kind: crate::vocabulary::Part::Attack,
+        body: vec![fabot_base::world::BodyPart {
+            kind: fabot_base::vocabulary::Part::Attack,
             hits: 100,
             boost: None,
         }],

@@ -1,13 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::atlas::Atlas;
-use crate::declarations::{self, Declarations, Declared};
-use crate::engine;
-use crate::intel::{Intel, Row, STALE, Scout};
-use crate::intents::Action;
-use crate::tiles;
-use crate::vocabulary::Part;
-use crate::world::{Kind, Owner, RoomName, World};
+use fabot_base::declarations::{self, Declarations, Declared};
+use fabot_base::engine;
+use fabot_base::intel::{Intel, Row, STALE, Scout};
+use fabot_base::intents::Action;
+use fabot_base::tiles;
+use fabot_base::vocabulary::Part;
+use fabot_base::world::{Kind, Owner, RoomName, World};
 
 /// `Owner::of_user`'s inverse: a row outlives the stance it was seen under.
 fn user(me: &str, owner: &Owner) -> Option<String> {

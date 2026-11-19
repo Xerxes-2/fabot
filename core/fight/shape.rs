@@ -3,8 +3,8 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 
 use crate::tactics::{Offer, Tactic};
-use crate::vocabulary::Part;
-use crate::world::{Id, Pos, RoomName};
+use fabot_base::vocabulary::Part;
+use fabot_base::world::{Id, Pos, RoomName};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FightState {
@@ -142,7 +142,7 @@ pub struct Engagement {
     pub lost: i32,
     /// The bodies it may lose before it disengages.
     pub budget: i32,
-    #[serde(serialize_with = "crate::wire::js_number")]
+    #[serde(serialize_with = "fabot_base::wire::js_number")]
     pub priority: f64,
     /// Starved: towers and ramparts answer it alone.
     pub unanswered: bool,
@@ -172,6 +172,6 @@ pub struct Cast {
     pub engagement: i32,
     pub name: String,
     pub room: RoomName,
-    #[serde(with = "crate::wire::letters")]
+    #[serde(with = "fabot_base::wire::letters")]
     pub body: Vec<Part>,
 }

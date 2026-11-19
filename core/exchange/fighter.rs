@@ -1,7 +1,7 @@
-use crate::engine;
-use crate::grid::{FatigueFactor, step_ticks};
-use crate::vocabulary::{Part, ResourceType, part_count_in, takes};
-use crate::world::Pos;
+use fabot_base::engine;
+use fabot_base::grid::{FatigueFactor, step_ticks};
+use fabot_base::vocabulary::{Part, ResourceType, part_count_in, takes};
+use fabot_base::world::Pos;
 
 /// A body as the exchange reads it, on either side.
 #[derive(Clone, Debug, PartialEq)]

@@ -1,10 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::declarations::{ColonyPlan, Stage};
-use crate::engine;
-use crate::tiles::{self, Tile, TileSet};
-use crate::vocabulary::Resource;
-use crate::world::{Creep, Id, Kind, Pos, RoomName, Structure, World};
+use fabot_base::declarations::{ColonyPlan, Stage};
+use fabot_base::engine;
+use fabot_base::tiles::{self, Tile, TileSet};
+use fabot_base::vocabulary::Resource;
+use fabot_base::world::{Creep, Id, Kind, Pos, RoomName, Structure, World};
 
 use super::ground;
 use super::plan;
@@ -151,8 +151,8 @@ mod tests {
     use super::*;
     use crate::layout::fixtures as fx;
     use crate::layout::shape::Plan;
-    use crate::tiles;
-    use crate::world::{Kind, Owner, hostiles};
+    use fabot_base::tiles;
+    use fabot_base::world::{Kind, Owner, hostiles};
 
     fn agree(a: &Option<Plan>, b: &Option<Plan>) -> bool {
         match (a, b) {

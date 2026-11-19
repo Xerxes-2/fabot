@@ -86,7 +86,7 @@ impl<'de> serde::Deserialize<'de> for Id {
 }
 
 /// A fixture's readable tag, hexed so tags keep their order.
-#[cfg(any(test, feature = "tools"))]
+#[cfg(any(test, feature = "test-support", feature = "tools"))]
 #[allow(clippy::expect_used)]
 impl From<&str> for Id {
     fn from(tag: &str) -> Id {
@@ -740,7 +740,7 @@ impl Rules {
         at.copied().unwrap_or(0)
     }
 
-    #[cfg(any(test, feature = "tools"))]
+    #[cfg(any(test, feature = "test-support", feature = "tools"))]
     #[allow(clippy::unwrap_used)]
     pub fn vanilla() -> Rules {
         use screeps::StructureType;
@@ -764,7 +764,7 @@ pub mod read {
     use screeps::ResourceType;
     use screeps::game::map::RoomStatus;
 
-    use crate::atlas::tiles::{self, BOTTOM, LEFT, RIGHT, TOP};
+    use crate::tiles::{self, BOTTOM, LEFT, RIGHT, TOP};
 
     use super::*;
     use crate::declarations::Declarations;
@@ -1165,7 +1165,7 @@ pub mod terrain {
     pub const SWAMP: u8 = screeps::Terrain::Swamp as u8;
 
     /// For tests and tools, which hold no map cache for a room to borrow from.
-    #[cfg(any(test, feature = "tools"))]
+    #[cfg(any(test, feature = "test-support", feature = "tools"))]
     pub fn leak(bits: Vec<u8>) -> Option<&'static LocalRoomTerrain> {
         let bits = bits.into_boxed_slice().try_into().ok()?;
         Some(Box::leak(Box::new(LocalRoomTerrain::new_from_bits(bits))))

@@ -1,7 +1,7 @@
 //! Built from the room alone, so a plan drawn on it moves only when the
 //! ground does.
-use crate::tiles::{self, Tile};
-use crate::world::{Kind, Room, RoomName, terrain};
+use fabot_base::tiles::{self, Tile};
+use fabot_base::world::{Kind, Room, RoomName, terrain};
 
 use super::place::{SWAMP, WALL};
 

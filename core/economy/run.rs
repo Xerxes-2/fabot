@@ -1,17 +1,18 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::atlas::{self, Atlas, Context, Mover, Target};
-use crate::declarations;
-use crate::engine;
-use crate::grid::{self, Footprint};
-use crate::intel::Scout;
-use crate::intents::{
+use crate::mv::plan;
+use fabot_base::declarations;
+use fabot_base::engine;
+use fabot_base::grid::{self, Footprint};
+use fabot_base::intel::Scout;
+use fabot_base::intents::{
     Action, Ask, CreepAct, LabAct, LinkAct, ModuleOutput, Rank, SpawnAct, Telemetry, TerminalAct,
 };
-use crate::mv::{Wish, plan};
-use crate::tiles::{self, TileSet};
-use crate::vocabulary::{Part, Resource};
-use crate::world::{Creep, Id, Kind, Pos, RoomName};
+use fabot_base::tiles::{self, TileSet};
+use fabot_base::vocabulary::{Part, Resource};
+use fabot_base::wish::Wish;
+use fabot_base::world::{Creep, Id, Kind, Pos, RoomName};
 
 use super::bodies::{self, Pattern};
 use super::derived::{self, Body, Derived, Ground, LinkFact, RefillFact};
@@ -825,7 +826,7 @@ mod tests {
             }
 
             for (_, ask) in &out.asks {
-                assert!(ask.body.len() <= crate::engine::MAX_BODY_PARTS);
+                assert!(ask.body.len() <= fabot_base::engine::MAX_BODY_PARTS);
             }
 
             let wished: BTreeSet<&str> =

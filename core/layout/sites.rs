@@ -1,9 +1,9 @@
 use std::collections::BTreeSet;
 
 use crate::atlas::Atlas;
-use crate::engine;
-use crate::tiles::{self, Tile};
-use crate::world::{Creep, Kind, Pos, Room, Rules, Structure, terrain};
+use fabot_base::engine;
+use fabot_base::tiles::{self, Tile};
+use fabot_base::world::{Creep, Kind, Pos, Room, Rules, Structure, terrain};
 
 use super::plan::{controller_link, haul_level, sized};
 use super::shape::{Item, Plan};
@@ -428,7 +428,7 @@ pub fn place(
 mod tests {
     use super::*;
     use crate::layout::fixtures as fx;
-    use crate::world::{Owner, Structure};
+    use fabot_base::world::{Owner, Structure};
 
     #[test]
     fn no_controller_links_site_lands_on_a_seat_of_a_buffer_another_bot_set() {

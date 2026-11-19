@@ -1,8 +1,8 @@
 //! An augmenting search over the room's whole matching, so swaps and
 //! rotations fall out of it rather than being special cases.
-use crate::grid::Footprint;
-use crate::mv::Wish;
-use crate::tiles::{self, Tile};
+use fabot_base::grid::Footprint;
+use fabot_base::tiles::{self, Tile};
+use fabot_base::wish::Wish;
 
 fn covered(footprint: Footprint, anchor: Tile) -> Vec<Tile> {
     match footprint {

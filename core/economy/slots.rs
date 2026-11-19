@@ -4,13 +4,13 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 
-use crate::HashMap;
 use crate::atlas::{self, Atlas, Mover, Target};
-use crate::declarations;
-use crate::engine;
-use crate::grid::{self, Footprint};
-use crate::vocabulary::{Part, part_count_in};
-use crate::world::{Controller, Id, Pos, RoomName, Spawn};
+use fabot_base::HashMap;
+use fabot_base::declarations;
+use fabot_base::engine;
+use fabot_base::grid::{self, Footprint};
+use fabot_base::vocabulary::{Part, part_count_in};
+use fabot_base::world::{Controller, Id, Pos, RoomName, Spawn};
 
 use super::bodies::{self, Leg, Pattern};
 use super::derived::{Body, Derived, Ground, SiteFact, dig_work, drawn_for};

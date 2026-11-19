@@ -2,20 +2,20 @@ pub mod expand;
 pub mod intel;
 pub mod outposts;
 
-use super::intents::ModuleOutput;
-use crate::intel::Scout;
+use fabot_base::intel::Scout;
+use fabot_base::intents::ModuleOutput;
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::engine;
 use super::fight::shape::{Cast, Engagement};
 use super::layout::{RING_LEVEL, Standing};
-use super::tiles;
-use super::vocabulary::{Part, ResourceType, multiple};
-use super::world::{Kind, RoomName, Rules, World, sightings};
 use crate::atlas::{Context, Derived};
-use crate::declarations::{ColonyPlan, Declarations, Outpost, Stage};
-use crate::intel::Intel;
 use expand::Expansions;
+use fabot_base::declarations::{ColonyPlan, Declarations, Outpost, Stage};
+use fabot_base::engine;
+use fabot_base::intel::Intel;
+use fabot_base::tiles;
+use fabot_base::vocabulary::{Part, ResourceType, multiple};
+use fabot_base::world::{Kind, RoomName, Rules, World, sightings};
 use screeps::LocalRoomTerrain;
 
 #[derive(Clone, Debug, Default, PartialEq)]

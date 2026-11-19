@@ -3,11 +3,11 @@
 /// still be done, so a walk is not turned mid-way.
 use std::collections::BTreeMap;
 
-use crate::HashMap;
 use crate::atlas::Atlas;
-use crate::engine;
-use crate::vocabulary::Resource;
-use crate::world::{Id, Kind, Pos};
+use fabot_base::HashMap;
+use fabot_base::engine;
+use fabot_base::vocabulary::Resource;
+use fabot_base::world::{Id, Kind, Pos};
 
 use super::bodies::Pattern;
 use super::derived::{Body, Derived, Ground, RAMPART_SAFE, StoreKind};
@@ -67,7 +67,7 @@ pub fn fee_short(ground: &Ground) -> i32 {
     let (Some(t), Some((home, _))) = (&ground.terminal, &ground.ship_to) else {
         return 0;
     };
-    let apart = crate::tiles::rooms_apart(ground.room, *home);
+    let apart = fabot_base::tiles::rooms_apart(ground.room, *home);
     let fee: i32 = (ground.shipment.iter())
         .map(|(r, n)| engine::send_cost(*n, apart) + if r.is_energy() { *n } else { 0 })
         .sum();

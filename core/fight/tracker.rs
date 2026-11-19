@@ -2,7 +2,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::shape::Group;
-use crate::world::{Creep, Id, Pos, RoomName, hostiles};
+use fabot_base::world::{Creep, Id, Pos, RoomName, hostiles};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
@@ -248,8 +248,8 @@ pub fn step(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vocabulary::Part;
-    use crate::world::{BodyPart, Owner, Store};
+    use fabot_base::vocabulary::Part;
+    use fabot_base::world::{BodyPart, Owner, Store};
 
     const GRACE: i32 = 3;
 

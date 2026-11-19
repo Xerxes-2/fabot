@@ -2,15 +2,15 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::HashMap;
 use crate::atlas::{self, Atlas, Tree};
-use crate::declarations::{self, Declarations, Outpost};
-use crate::engine;
-use crate::grid::Footprint;
-use crate::intel::{self, Intel, Scout};
-use crate::tiles::{self, Tile};
-use crate::vocabulary::{Part, Resource, part_count_in};
-use crate::world::{
+use fabot_base::HashMap;
+use fabot_base::declarations::{self, Declarations, Outpost};
+use fabot_base::engine;
+use fabot_base::grid::Footprint;
+use fabot_base::intel::{self, Intel, Scout};
+use fabot_base::tiles::{self, Tile};
+use fabot_base::vocabulary::{Part, Resource, part_count_in};
+use fabot_base::world::{
     self, BodyPart, Controller, Creep, Id, Kind, Owner, Pos, Room, RoomName, Source, Spawn, Store,
     Structure, World, terrain,
 };
@@ -637,7 +637,7 @@ fn ores_of(room: &Room) -> Vec<(Id, Pos, Resource, i32)> {
             s.store
                 .held
                 .iter()
-                .filter(|(r, n)| crate::vocabulary::is_mineral(r) && *n > 0)
+                .filter(|(r, n)| fabot_base::vocabulary::is_mineral(r) && *n > 0)
                 .map(|(r, n)| (s.id, s.pos, r.clone(), *n))
         })
         .collect()
@@ -660,7 +660,7 @@ fn buffer_seats_of(atlas: &Atlas, room: &Room, buffer: Option<&StoreFact>) -> Ve
 fn raided(room: &Room, owned: bool) -> bool {
     let foes: Vec<Creep> = room.hostiles().cloned().collect();
     let ours: BTreeSet<RoomName> = owned.then_some(room.name).into_iter().collect();
-    (foes.iter()).any(|c| crate::world::hostiles::armed(&ours, &foes, c))
+    (foes.iter()).any(|c| fabot_base::world::hostiles::armed(&ours, &foes, c))
 }
 
 fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) -> Ground {
@@ -847,7 +847,7 @@ fn stock_labs(
     world: &World,
     grounds: &mut [Ground],
     colonies: usize,
-    (home, targets): (RoomName, &BTreeMap<crate::vocabulary::Compound, i32>),
+    (home, targets): (RoomName, &BTreeMap<fabot_base::vocabulary::Compound, i32>),
     given_up: &dyn Fn(RoomName) -> bool,
 ) {
     let home = &home;
@@ -859,8 +859,8 @@ fn stock_labs(
     let kept: BTreeMap<Id, Resource> = (world.creeps.iter())
         .filter(|c| &c.pos.room == home)
         .filter_map(|c| {
-            let compound = crate::boost::of_name(&c.name)?;
-            let lab = crate::boost::booster(world, *home, compound)?;
+            let compound = fabot_base::boost::of_name(&c.name)?;
+            let lab = fabot_base::boost::booster(world, *home, compound)?;
             Some((lab.id, Resource::Compound(compound)))
         })
         .collect();
@@ -908,7 +908,7 @@ fn stock_labs(
             continue;
         };
         for (r, n) in &lab.store.held {
-            if *n > 0 && r != compound && crate::vocabulary::is_mineral(r) {
+            if *n > 0 && r != compound && fabot_base::vocabulary::is_mineral(r) {
                 plan.drains.push((*id, r.clone()));
             }
         }
@@ -918,7 +918,7 @@ fn stock_labs(
     // stores: the reaction refuses it as a lab of its own.
     let mut waited: BTreeMap<Id, (Resource, i32, i32)> = BTreeMap::new();
     for creep in (world.creeps.iter()).filter(|c| &c.pos.room == home) {
-        let Some(w) = crate::boost::waiting(world, *home, creep) else {
+        let Some(w) = fabot_base::boost::waiting(world, *home, creep) else {
             continue;
         };
         let at = waited

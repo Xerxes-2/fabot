@@ -3,13 +3,14 @@
 //! wishes `plan` builds over generated rooms.
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::Dice;
 use crate::atlas::{Atlas, Mover, Target};
-use crate::grid::{Footprint, factor_of};
-use crate::mv::{Wish, arbitrate::arbitrate, plan};
-use crate::tiles::{self, Tile, TileSet};
-use crate::vocabulary::Part;
-use crate::world::{BodyPart, Creep, Owner, Room, RoomName, Store, World, terrain};
+use crate::mv::{arbitrate::arbitrate, plan};
+use fabot_base::grid::{Footprint, factor_of};
+use fabot_base::testing::Dice;
+use fabot_base::tiles::{self, Tile, TileSet};
+use fabot_base::vocabulary::Part;
+use fabot_base::wish::Wish;
+use fabot_base::world::{BodyPart, Creep, Owner, Room, RoomName, Store, World, terrain};
 
 const ROOM: RoomName = RoomName::named("W1N1");
 const CASES: u64 = 500;
@@ -263,7 +264,7 @@ fn world_of(errand: &Errand) -> World<'static> {
         our_sites: 0,
         rooms_allowed: 1,
         closed: Default::default(),
-        rules: crate::world::Rules::vanilla(),
+        rules: fabot_base::world::Rules::vanilla(),
     }
 }
 

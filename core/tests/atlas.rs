@@ -2,15 +2,15 @@
 //! arithmetic it rests on.
 use std::collections::BTreeSet;
 
-use super::Dice;
 use crate::atlas::{Atlas, Mover, Target};
-use crate::engine;
-use crate::grid::{
+use fabot_base::engine;
+use fabot_base::grid::{
     FatigueFactor, Footprint, empty_factor, factor_of, loaded_factor, on_edge, step_ticks,
 };
-use crate::tiles::{self, Tile, TileSet};
-use crate::vocabulary::{ALL_BODY_PARTS, Part, Resource};
-use crate::world::{
+use fabot_base::testing::Dice;
+use fabot_base::tiles::{self, Tile, TileSet};
+use fabot_base::vocabulary::{ALL_BODY_PARTS, Part, Resource};
+use fabot_base::world::{
     BodyPart, Creep, Kind, Mineral, Owner, Pos, Room, RoomName, Source, Store, Structure, World,
     terrain,
 };
@@ -84,7 +84,7 @@ fn world_of_rooms(rooms: Vec<Room>) -> World {
         our_sites: 0,
         rooms_allowed: 1,
         closed: Default::default(),
-        rules: crate::world::Rules::vanilla(),
+        rules: fabot_base::world::Rules::vanilla(),
     }
 }
 

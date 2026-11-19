@@ -1,8 +1,8 @@
 /// What a body is hired to do; Memory holds it as its `task_id`.
 use std::fmt::Write;
 
-use crate::vocabulary::{Resource, resource_name, resource_of_name};
-use crate::world::{Id, RoomName};
+use fabot_base::vocabulary::{Resource, resource_name, resource_of_name};
+use fabot_base::world::{Id, RoomName};
 
 /// What a task acts on: an object, or a colony's spawn ring or bank pile,
 /// which `run` resolves to the object it serves when the body arrives.

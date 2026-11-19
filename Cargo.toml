@@ -1,5 +1,5 @@
 [workspace]
-members = ["core", "sim"]
+members = ["core/base", "core", "sim"]
 # Old commits' trees build under .scratch/, an agent's workspace under .claude/: cargo must not claim them.
 exclude = [".scratch", ".claude"]
 
@@ -20,6 +20,7 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+fabot-base = { path = "core/base" }
 fabot-core = { path = "core" }
 js-sys = "0.3"
 screeps-game-api.workspace = true
@@ -30,7 +31,7 @@ miniz_oxide = { version = "0.9", default-features = false, features = ["with-all
 
 # The soak's node plan and the generated set's predictions, built natively.
 [features]
-tools = ["fabot-core/tools"]
+tools = ["fabot-base/tools", "fabot-core/tools"]
 
 [[bin]]
 name = "plan"

@@ -1,6 +1,6 @@
-use crate::engine;
-use crate::grid::{self, FatigueFactor};
-use crate::vocabulary::{Part, part_count_in};
+use fabot_base::engine;
+use fabot_base::grid::{self, FatigueFactor};
+use fabot_base::vocabulary::{Part, part_count_in};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Pattern {

@@ -3,13 +3,13 @@
 use std::cell::Cell;
 use std::collections::BTreeMap;
 
-use super::Dice;
 use crate::atlas::{self, Atlas, Context};
-use crate::declarations;
-use crate::intents::{Action, CreepAct, ModuleOutput};
 use crate::state::State;
 use crate::tick::{self, Module, TickResult};
-use crate::world::World;
+use fabot_base::declarations;
+use fabot_base::intents::{Action, CreepAct, ModuleOutput};
+use fabot_base::testing::Dice;
+use fabot_base::world::World;
 
 const NAMES: [&str; 8] = ["m0", "m1", "m2", "m3", "m4", "m5", "m6", "m7"];
 
@@ -40,7 +40,7 @@ fn run(count: usize, state: State) -> TickResult {
         our_sites: 0,
         rooms_allowed: 1,
         closed: Default::default(),
-        rules: crate::world::Rules::vanilla(),
+        rules: fabot_base::world::Rules::vanilla(),
     };
     let mut atlas = Atlas::of_world(&world);
     let declarations = declarations::undeclared();

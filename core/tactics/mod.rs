@@ -6,14 +6,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use crate::atlas::{Atlas, Mover, Target};
-use crate::declarations::{self, TacticRule};
-use crate::grid::{self, Footprint};
-use crate::intents::CreepAct;
-use crate::mv::{Wish, blob, plan};
-use crate::tiles::Tile;
-use crate::vocabulary::Part;
-use crate::world::{Creep, Id, Pos, RoomName};
-use crate::{engine, tiles};
+use crate::mv::{blob, plan};
+use fabot_base::declarations::{self, TacticRule};
+use fabot_base::grid::{self, Footprint};
+use fabot_base::intents::CreepAct;
+use fabot_base::tiles::Tile;
+use fabot_base::vocabulary::Part;
+use fabot_base::wish::Wish;
+use fabot_base::world::{Creep, Id, Pos, RoomName};
+use fabot_base::{engine, tiles};
 
 /// A phase's own tactic (pursue, retreat) is the phase's; this is what a kind
 /// commits to, a price per candidate (§6.3).

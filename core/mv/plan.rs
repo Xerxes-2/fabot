@@ -1,9 +1,9 @@
 /// The caller reads the creep's pace once (`Grid.factorOf`) and hands it in.
 use crate::atlas::{Atlas, Field, Mover, Target};
-use crate::grid::{self, FatigueFactor, Footprint};
-use crate::mv::Wish;
-use crate::tiles::{self, Tile, TileSet};
-use crate::world::Creep;
+use fabot_base::grid::{self, FatigueFactor, Footprint};
+use fabot_base::tiles::{self, Tile, TileSet};
+use fabot_base::wish::Wish;
+use fabot_base::world::Creep;
 
 pub fn can_move(creep: &Creep, factor: FatigueFactor) -> bool {
     creep.fatigue == 0 && factor.moves > 0

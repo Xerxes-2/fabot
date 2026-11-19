@@ -11,17 +11,17 @@ pub use run::{EconomyState, decide};
 
 #[cfg(test)]
 pub(crate) mod dice {
-    use crate::declarations::{Declared, Outpost};
-    use crate::engine;
-    use crate::vocabulary::{Compound, Ore, Part, Resource, part_count_in};
-    use crate::world::{
+    use fabot_base::declarations::{Declared, Outpost};
+    use fabot_base::engine;
+    use fabot_base::vocabulary::{Compound, Ore, Part, Resource, part_count_in};
+    use fabot_base::world::{
         BodyPart, Controller, Creep, Id, Kind, Mineral, Owner, Pile, Pos, Remains, Room, RoomName,
         Site, Source, Spawn, Store, Structure, World,
     };
 
     use super::task::{Target, Task};
 
-    pub use crate::tests::Dice;
+    pub use fabot_base::testing::Dice;
 
     pub fn target(dice: &mut Dice) -> Target {
         let n = dice.between(1, 24);
@@ -115,8 +115,8 @@ pub(crate) mod dice {
         }
     }
 
-    pub fn oven_of(name: &str, parts: &[Part]) -> crate::world::Oven {
-        crate::world::Oven {
+    pub fn oven_of(name: &str, parts: &[Part]) -> fabot_base::world::Oven {
+        fabot_base::world::Oven {
             name: name.to_string(),
             remaining: 5,
             body: parts
@@ -208,7 +208,7 @@ pub(crate) mod dice {
 
         let room = Room {
             name,
-            terrain: crate::world::terrain::leak(vec![0; 2500]),
+            terrain: fabot_base::world::terrain::leak(vec![0; 2500]),
             controller: Some(controller),
             energy_available: if owned { bank } else { 0 },
             energy_capacity: if owned { bank_capacity } else { 0 },
@@ -335,7 +335,7 @@ pub(crate) mod dice {
             our_sites: 0,
             rooms_allowed: rooms.len() as i32 + 1,
             closed: Default::default(),
-            rules: crate::world::Rules::vanilla(),
+            rules: fabot_base::world::Rules::vanilla(),
         };
 
         Generated {

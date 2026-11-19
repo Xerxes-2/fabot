@@ -75,7 +75,7 @@ for (let i = 0; i < rest.length; i++)
   else names.push(rest[i]);
 
 const CORE = join(REPO, "core");
-const modules = readdirSync(CORE).filter((m) => m !== "tests" && statSync(join(CORE, m)).isDirectory());
+const modules = readdirSync(CORE).filter((m) => m !== "tests" && m !== "base" && statSync(join(CORE, m)).isDirectory());
 const library = readdirSync(LIBRARY)
   .filter((f) => f.endsWith(".json"))
   .map((f) => ({ name: basename(f, ".json"), ...JSON.parse(readFileSync(join(LIBRARY, f), "utf8")) }));

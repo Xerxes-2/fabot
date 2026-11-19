@@ -1,9 +1,9 @@
 //! Repair is economy work, but for a rampart about to decay away: a colony
 //! may hold no worker for a life.
-use crate::engine;
-use crate::intents::{Action, TowerAct};
-use crate::vocabulary::{Part, Resource};
-use crate::world::{self, Creep, Pos, Structure};
+use fabot_base::engine;
+use fabot_base::intents::{Action, TowerAct};
+use fabot_base::vocabulary::{Part, Resource};
+use fabot_base::world::{self, Creep, Pos, Structure};
 
 fn power(creep: &Creep, part: Part) -> i32 {
     engine::power_at(
@@ -137,12 +137,12 @@ pub fn fire(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::intents::Action;
     use crate::layout::derive;
     use crate::layout::fixtures as fx;
     use crate::layout::run;
-    use crate::tiles::{self};
-    use crate::world::{Id, Owner};
+    use fabot_base::intents::Action;
+    use fabot_base::tiles::{self};
+    use fabot_base::world::{Id, Owner};
     use std::collections::BTreeMap;
 
     #[test]
@@ -193,12 +193,15 @@ mod tests {
 
             let world = fx::world_of(room, Vec::new(), ours.clone());
 
-            let owned = crate::world::hostiles::owned(&world.rooms);
+            let owned = fabot_base::world::hostiles::owned(&world.rooms);
             let plans = fx::exploited(&owned);
             let (colonies, _) = derive::colonies(&world, &owned, &plans, BTreeMap::new());
             let acts = run::decide_over(&world.rules, &colonies, 0);
 
-            let ids: Vec<String> = acts.iter().map(crate::intents::Action::actor).collect();
+            let ids: Vec<String> = acts
+                .iter()
+                .map(fabot_base::intents::Action::actor)
+                .collect();
             let mut distinct: Vec<String> = Vec::new();
             for id in &ids {
                 if !distinct.contains(id) {

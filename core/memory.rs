@@ -11,11 +11,11 @@ use super::economy::task::{Assignment, of_task_id, task_id};
 use super::fight::shape::FightState;
 use super::state::State;
 use super::strategy::StrategyState;
-use super::vocabulary::{self, Resource};
-use super::world::{Id, Pos, RoomName};
-use crate::declarations::{
+use fabot_base::declarations::{
     ColonyPlan, Declarations, Declared, Flow, Node, Outpost, Stage, undeclared,
 };
+use fabot_base::vocabulary::{self, Resource};
+use fabot_base::world::{Id, Pos, RoomName};
 
 fn assignment(held: &str) -> Assignment {
     let (slot, task) = held.split_once('|').unwrap_or((held, ""));

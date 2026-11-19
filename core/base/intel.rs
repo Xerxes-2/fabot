@@ -242,7 +242,7 @@ pub fn of_text(text: &str) -> Intel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::Dice;
+    use crate::testing::Dice;
 
     #[test]
     fn push_int_writes_as_display() {

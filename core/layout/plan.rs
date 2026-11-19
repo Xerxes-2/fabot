@@ -4,9 +4,9 @@
 use std::borrow::Cow;
 
 use crate::atlas::Atlas;
-use crate::engine;
-use crate::tiles::{self, Tile};
-use crate::world::{Kind, Rules};
+use fabot_base::engine;
+use fabot_base::tiles::{self, Tile};
+use fabot_base::world::{Kind, Rules};
 
 use super::build::{self, Built};
 use super::ground::Ground;
@@ -530,12 +530,12 @@ mod tests {
             for i in plan.items.iter().chain(&plan.ring) {
                 let reach = tiles::range(i.tile, at);
                 assert!(
-                    !(i.kind == Kind::Road && reach <= crate::declarations::MUSTER_RANGE),
+                    !(i.kind == Kind::Road && reach <= fabot_base::declarations::MUSTER_RANGE),
                     "road at {}",
                     i.tile
                 );
                 assert!(
-                    !(i.kind == Kind::Spawn && reach <= crate::declarations::MUSTER_RANGE + 1),
+                    !(i.kind == Kind::Spawn && reach <= fabot_base::declarations::MUSTER_RANGE + 1),
                     "spawn at {}",
                     i.tile
                 );

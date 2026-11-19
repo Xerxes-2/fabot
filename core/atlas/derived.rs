@@ -1,13 +1,13 @@
 use std::collections::BTreeSet;
 
 use super::{Atlas, Mover, Target, Tree};
-use crate::declarations::{Declarations, Outpost, REACH_HOPS};
-use crate::engine;
-use crate::grid::{self, Footprint};
-use crate::intel::Intel;
-use crate::tiles::{self, TileSet};
-use crate::vocabulary::{Part, Resource};
-use crate::world::{Creep, Kind, Owner, Pos, Room, RoomName, Sightings, World, hostiles};
+use fabot_base::declarations::{Declarations, Outpost, REACH_HOPS};
+use fabot_base::engine;
+use fabot_base::grid::{self, Footprint};
+use fabot_base::intel::Intel;
+use fabot_base::tiles::{self, TileSet};
+use fabot_base::vocabulary::{Part, Resource};
+use fabot_base::world::{Creep, Kind, Owner, Pos, Room, RoomName, Sightings, World, hostiles};
 
 pub struct Context<'a> {
     pub world: &'a World<'a>,
@@ -167,7 +167,7 @@ pub fn worked(
 /// stands down the work it can reach and no more.
 fn open(world: &World, sightings: &Sightings, owned: &BTreeSet<RoomName>, room: RoomName) -> bool {
     let Some(seen) = world.room(room) else {
-        return crate::world::sightings::unarmed(sightings, world.time, room);
+        return fabot_base::world::sightings::unarmed(sightings, world.time, room);
     };
 
     let core = seen

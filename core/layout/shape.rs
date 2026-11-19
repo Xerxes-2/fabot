@@ -1,9 +1,9 @@
 use std::borrow::Cow;
 
-use crate::declarations::MUSTER_RANGE;
+use fabot_base::declarations::MUSTER_RANGE;
 /// Ahead of `State` so `State` can hold the standing plan.
-use crate::tiles::{self, Tile};
-use crate::world::{Kind, Pos, RoomName};
+use fabot_base::tiles::{self, Tile};
+use fabot_base::world::{Kind, Pos, RoomName};
 
 /// `Level`: from which the engine allows it (its rank among its kind against
 /// CONTROLLER_STRUCTURES), or the level a rule gives a road or container.

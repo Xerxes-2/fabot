@@ -1,13 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::atlas::Derived;
-use crate::declarations::{ColonyPlan, Declarations, Outpost, REACH_HOPS};
-use crate::engine;
 use crate::fight::shape::{Engagement, Objective};
-use crate::intel::Intel;
-use crate::tiles;
-use crate::vocabulary::Part;
-use crate::world::{Kind, RoomName, World};
+use fabot_base::declarations::{ColonyPlan, Declarations, Outpost, REACH_HOPS};
+use fabot_base::engine;
+use fabot_base::intel::Intel;
+use fabot_base::tiles;
+use fabot_base::vocabulary::Part;
+use fabot_base::world::{Kind, RoomName, World};
 
 /// What one intent costs the engine; a body acts about once a tick.
 const INTENT_CPU: f64 = 0.2;
@@ -186,7 +186,7 @@ pub fn survey(
             || plans.iter().any(|p| p.room == *home && p.pile.is_some());
         let picks = banks && level >= 2;
         let walk = |hops: i32, outpost: &Outpost| {
-            let to = |s: &crate::declarations::Declared| tiles::seam_range(&spawn.pos, &s.pos);
+            let to = |s: &fabot_base::declarations::Declared| tiles::seam_range(&spawn.pos, &s.pos);
             let ranges: Vec<i32> = outpost.sources.iter().filter_map(to).collect();
             let mean = ranges.iter().sum::<i32>() / (ranges.len() as i32).max(1);
             mean.max(hops * engine::ROOM_SIDE)
