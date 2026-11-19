@@ -42,13 +42,7 @@ pub fn of_parts(
         ranged,
         heal: power(Part::Heal),
         work: power(Part::Work),
-        reach: if ranged > 0 {
-            engine::RANGED_RANGE
-        } else if attack > 0 {
-            engine::MELEE_RANGE
-        } else {
-            0
-        },
+        reach: engine::strike_reach(body, hits),
         gait: FatigueFactor {
             weight: body.len() as i32
                 - part_count_in(body, Part::Move)

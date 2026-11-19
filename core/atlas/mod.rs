@@ -19,7 +19,6 @@ use self::grid::{
 };
 use self::tiles::{Table, Tile, TileSet};
 use super::engine;
-use super::exchange::fighter::{self, Fighter};
 use super::vocabulary::Part;
 use super::world::{Id, Kind, Owner, Pos, Room, RoomName, World};
 
@@ -545,12 +544,17 @@ impl Atlas {
         vec![from]
     }
 
-    fn strikes(terrain: &[u8], strikers: &[(Tile, Tile, Fighter)]) -> Vec<Tile> {
-        let walks = strikers.iter().flat_map(|(from, resource, f)| {
-            let walk = Atlas::walk_of(terrain, *from, *resource);
-            walk.into_iter().flat_map(|w| tiles::within(f.reach, w))
+    fn strikes(terrain: &[u8], strikers: &[(Tile, Tile, i32)]) -> Vec<Tile> {
+        let walks = strikers.iter().flat_map(|&(from, resource, reach)| {
+            let walk = Atlas::walk_of(terrain, from, resource);
+            walk.into_iter().flat_map(move |w| tiles::within(reach, w))
         });
         walks.collect()
+    }
+
+    fn keeper_reach() -> i32 {
+        let body = engine::keeper_body();
+        engine::strike_reach(&body, engine::PART_HITS * body.len() as i32)
     }
 
     /// The tiles the keepers strike from anywhere on the walk to their posts:
@@ -559,13 +563,11 @@ impl Atlas {
     fn struck(room: &Room) -> Vec<Tile> {
         let living = room.others.iter().filter(|c| c.owner == Owner::Keeper);
         let striker =
-            |from: Tile, f: Fighter| (from, Atlas::guarded(room, from).unwrap_or(from), f);
-        let mut strikers: Vec<(Tile, Tile, Fighter)> = living
+            |from: Tile, reach: i32| (from, Atlas::guarded(room, from).unwrap_or(from), reach);
+        let mut strikers: Vec<(Tile, Tile, i32)> = living
             .map(|c| {
                 let body: Vec<Part> = c.body.iter().map(|p| p.kind).collect();
-                let boosts: Vec<_> = c.body.iter().map(|p| p.boost).collect();
-                let f = fighter::of_parts(&body, &boosts, c.hits, None);
-                striker(tiles::of_pos(&c.pos), f)
+                striker(tiles::of_pos(&c.pos), engine::strike_reach(&body, c.hits))
             })
             .collect();
         for lair in room
@@ -574,8 +576,7 @@ impl Atlas {
             .filter(|s| s.kind == Kind::KeeperLair)
         {
             if lair.spawn.is_some_and(|t| t <= Atlas::CROSSING_TICKS) {
-                let f = fighter::cast(&engine::keeper_body());
-                strikers.push(striker(tiles::of_pos(&lair.pos), f));
+                strikers.push(striker(tiles::of_pos(&lair.pos), Atlas::keeper_reach()));
             }
         }
         match room.terrain {
@@ -726,9 +727,8 @@ impl Atlas {
                         None => Atlas::ground(terrain),
                     };
                     let placed = posts.get(&name).copied().flatten().filter(|_| keeper(c));
-                    let keeper_of = |&(lair, resource): &Post| {
-                        (lair, resource, fighter::cast(&engine::keeper_body()))
-                    };
+                    let keeper_of =
+                        |&(lair, resource): &Post| (lair, resource, Atlas::keeper_reach());
                     let strikers: Vec<_> = placed.unwrap_or(&[]).iter().map(keeper_of).collect();
                     let struck = Atlas::walled(&mut weights, Atlas::strikes(terrain, &strikers));
                     let weights = Atlas::reused(last.as_ref(), weights);

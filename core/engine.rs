@@ -185,6 +185,17 @@ pub fn live_parts(body: &[Part], hits: i32) -> Vec<Part> {
     body[skip..].to_vec()
 }
 
+pub fn strike_reach(body: &[Part], hits: i32) -> i32 {
+    let live = live_parts(body, hits);
+    if live.contains(&Part::RangedAttack) {
+        RANGED_RANGE
+    } else if live.contains(&Part::Attack) {
+        MELEE_RANGE
+    } else {
+        0
+    }
+}
+
 /// The engine puts hits on parts from the head and only a live MOVE moves:
 /// one MOVE last walks while any part lives.
 pub fn with_move_last(mut body: Vec<Part>) -> Vec<Part> {
