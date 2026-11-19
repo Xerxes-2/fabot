@@ -99,10 +99,14 @@ World ──▶ Derived ──▶ decisions (read Derived & Atlas, never World) 
   and outpost road walks carry across ticks in `atlas.carried` (§4), keyed by a
   fingerprint of every room they read, never hand-invalidated, and verified
   against fresh computation by `--check`.
-- **One search's room pairs (`slots::PairTicks`):** `assign` and `Jobs` each
-  keep the ticks of every room pair they price and drop them at their end:
-  between rooms a distance reads only the pair, and not walking the tree per
-  body and seat saves ~3% of warm economy.
+- **A distance is a walk (`Atlas::toward`), in one room as across rooms:**
+  per target tile, its room's flood carried back along its tree region by
+  region, each exit seeded tile by tile with what its landing walks on (v1's
+  chain), so a body's distance is one lookup, never a range or a flat fee per
+  room. Each walk is kept in `atlas.towards` (§4) by its weights and seeds,
+  reused unread while its tree's rooms read as last tick's by address. A
+  choice walks its ends nearest by tiles apart first, stopping once that
+  bound cannot win (`slots::nearest`): a walk is never shorter.
 - **Counts are a gate (§9.3):** deterministic per-tick counts (floods, Atlas
   miss rate, Hunt threat lookups) have ceilings in `scripts/ceilings.json`.
 
@@ -202,6 +206,8 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
 | `atlas.floods` | per-room cached reverse floods (bounded per room) | Atlas | heap | reused while room weights hold |
 | `atlas.unseen` | out-of-sight room grid + the keeper posts and blind flag it was struck from | Atlas | heap | keyed by those posts, not by sight alone, so intel arriving after a cold tick strikes a keeper room pre-read blind |
 | `atlas.carried` | carried room trees & outpost road walks + room-read fingerprints | Atlas | heap | a search reads no room past its hops so a carried value equals a fresh one while those read the same (saving ~1/10 of decide); drops the tick after going unasked |
+| `atlas.towards` | per target tile, room and region: the walk toward it, its weights, seeds and room read | Atlas | heap | a body asks at its choice of work, so a walk is dropped only `TRIP_TICKS` unasked (at most the targets asked in that span × the rooms of their trees); recomputed when its weights or seeds change |
+| `atlas.reads` | last tick's room reads around each asked room and hops | Atlas | heap | an unchanged read is handed on as last tick's `Rc`, so a kept walk or tree checks its rooms by address; dropped the tick after going unread |
 | `terrain` | room → `LocalRoomTerrain` (borrowed by `World`) + `getRoomStatus` | World | heap | terrain never changes and status only when novice/respawn ends (prefetched to `SIEGE_HOPS` to avoid seam calls); rooms of foreign status are never routed/served (engine traps creeps on exit) and unread rooms never observed (off-shard refuses observer) |
 | `buffers` | emptied `World` lists from last tick | World | heap | capacity reuse without allocation (§9.2) |
 | `fixed` | structure id → immutable type/tile/owner/hitsMax | World (`read.js`) | JS heap | avoids repeated getter cost (~1/5 of `world`); checked by `replay --check` |
@@ -283,7 +289,9 @@ pricer cost ~2× CPU and 580 lines for no gain and was not merged).
   draw reserve.
 - **Build vs upgrade:** paying structures (spawn, extension, container, storage,
   link, tower, extractor, terminal) preempt upgrading because a structure pays
-  only once complete (only RCL3's tower and RCL6's minerals are worth rushing);
+  only once complete (only RCL3's tower and RCL6's minerals are worth rushing:
+  a site's build is owed over a life, the extractor's and terminal's whole
+  before a new upgrader);
   below RCL3, outpost sites wait for the tower: its dig piles on the post (or
   beside the source while no container or site marks one) and is hauled from
   there, while an outpost's harvester with a CARRY on its container site raises

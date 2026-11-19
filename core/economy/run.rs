@@ -45,8 +45,8 @@ fn scouting(
     for b in scouts {
         let walks = |open: &dyn Fn(RoomName) -> bool| {
             let rooms = (derived.scouts.iter()).filter(|(at, _, _)| open(at.room));
-            // A radius room is three apart but its route may run past the
-            // reach the trees hold.
+            // A radius room's route may run past the trees' reach: priced by
+            // crossings, as a walk's tree that far floods every region in it.
             let far = |at: &Pos| {
                 let rooms = atlas.route(
                     &BTreeSet::new(),
@@ -57,7 +57,7 @@ fn scouting(
                 Some(Atlas::CROSSING_TICKS * (rooms.len() as i32 - 1))
             };
             atlas::onward(rooms.filter_map(|(at, age, _)| {
-                let walk = distance(atlas, derived, &b.pos, at).or_else(|| far(at))?;
+                let walk = distance(atlas, &b.pos, at).or_else(|| far(at))?;
                 Some((at.room, *age, walk))
             }))
         };
@@ -756,9 +756,8 @@ fn home(
     if derived.colonies.is_empty() || derived.colonies.iter().any(|c| c.room == creep.pos.room) {
         return plan::stay(&*atlas, creep, mover.factor, 1);
     }
-    let walk = |c: &&derived::Colony| {
-        distance(&*atlas, derived, &creep.pos, &c.spawns[0].pos).unwrap_or(i32::MAX)
-    };
+    let walk =
+        |c: &&derived::Colony| distance(&*atlas, &creep.pos, &c.spawns[0].pos).unwrap_or(i32::MAX);
     let home = (derived.colonies.iter().rev())
         .min_by_key(walk)
         .map_or(creep.pos, |c| c.spawns[0].pos);

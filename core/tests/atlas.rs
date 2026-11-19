@@ -919,3 +919,44 @@ fn each_stretch_into_a_room_split_by_walls_is_a_way_into_its_own_region() {
         assert!(atlas.travel_ticks(mover, &target, &at).is_some(), "{at:?}");
     }
 }
+
+#[test]
+fn a_walk_toward_a_tile_follows_each_regions_way_on_where_split_rooms_lead_into_each_other() {
+    // R and S are each cut in two: R's north half leaves through S's, round
+    // by W, X and U; S's south half leaves through R's.
+    let (r, s, t) = (
+        RoomName::new(0, 0),
+        RoomName::new(1, 0),
+        RoomName::new(0, 1),
+    );
+    let rooms: Vec<Room> = [(0, 0), (1, 0), (2, 0), (0, 1), (1, 1), (2, 1)]
+        .into_iter()
+        .map(|(x, y)| {
+            let mut terrain = vec![0u8; tiles::COUNT];
+            let walls = match (x, y) {
+                (0, 0) => vec![25],
+                (1, 0) => vec![25, 49],
+                _ => vec![],
+            };
+            for (i, row) in (0..tiles::SIDE).flat_map(|i| walls.iter().map(move |r| (i, *r))) {
+                terrain[tiles::index(i, row)] = terrain::WALL;
+            }
+            if (x, y) == (1, 0) {
+                (25..tiles::SIDE).for_each(|y| terrain[tiles::index(49, y)] = terrain::WALL);
+            }
+            room_of(RoomName::new(x, y), terrain, Vec::new())
+        })
+        .collect();
+    let mut world = world_of_rooms(rooms);
+    world.closed = (-1..=3)
+        .flat_map(|x| (-1..=2).map(move |y| (x, y)))
+        .filter(|&(x, y)| !(0..3).contains(&x) || !(0..2).contains(&y))
+        .map(|(x, y)| RoomName::new(x, y))
+        .collect();
+    let atlas = Atlas::of_world(&world);
+    let to = Pos::new(t, 25, 25);
+    let ticks = |room, y| atlas.ticks_toward(8, &to, &Pos::new(room, 25, y)).unwrap();
+    assert!(ticks(r, 10) > ticks(s, 10));
+    assert!(ticks(s, 10) > ticks(s, 40));
+    assert!(ticks(s, 40) > ticks(r, 40));
+}

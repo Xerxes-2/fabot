@@ -51,7 +51,6 @@ pub struct Jobs<'a> {
     sinks: Vec<Vec<Spot>>,
     takes: Vec<Vec<Spot>>,
     booked_load: HashMap<Task, i32>,
-    pair_ticks: slots::PairTicks,
     digging: HashMap<Id, i32>,
     /// Per colony: a carrier stands, so a worker refills the ring only
     /// without one.
@@ -59,6 +58,7 @@ pub struct Jobs<'a> {
     /// Worker id to the carrier holding a load for it.
     booked: BTreeMap<Id, Id>,
     hauls: Vec<i32>,
+    owners: &'a [Option<usize>],
 }
 
 /// The energy the terminal keeps for its shipment's fee, a hundred over as
@@ -350,7 +350,7 @@ impl<'a> Jobs<'a> {
     pub fn new(
         atlas: &'a Atlas,
         derived: &'a Derived,
-        (slots, owners): (&[Slot], &[Option<usize>]),
+        (slots, owners): (&[Slot], &'a [Option<usize>]),
         held: &[(usize, &Body, Option<Task>)],
     ) -> Jobs<'a> {
         let mut sinks: Vec<Vec<Spot>> = (0..derived.colonies.len())
@@ -422,19 +422,18 @@ impl<'a> Jobs<'a> {
             sinks,
             takes,
             booked_load: HashMap::default(),
-            pair_ticks: slots::PairTicks::default(),
             digging,
             carried,
             booked,
             hauls: (0..derived.grounds.len())
                 .map(|gi| derived.haul(owners, gi))
                 .collect(),
+            owners,
         }
     }
 
-    fn distance(&self, a: &Pos, b: &Pos) -> i32 {
-        slots::distance_memo(self.atlas, self.derived, &self.pair_ticks, a, b)
-            .unwrap_or(i32::MAX / 2)
+    fn nearest<R: Ord, T>(&self, from: &Pos, ends: impl Iterator<Item = (R, Pos, T)>) -> Option<T> {
+        slots::nearest(from, ends, |p| slots::distance(self.atlas, from, p)).map(|(end, _)| end)
     }
 
     /// Hivemind's (`dispatcher/resource-*`) priority and weight; `None` where
@@ -519,12 +518,12 @@ impl<'a> Jobs<'a> {
         (body, carrier): (&Body, bool),
         fits: &dyn Fn(&Spot) -> bool,
     ) -> Option<usize> {
-        (spots.iter().enumerate())
+        let ends = (spots.iter().enumerate())
             .filter(|(_, s)| s.amount > 0 && fits(s))
             .filter_map(|(i, s)| Some((i, self.rank(ci, s, body, carrier)?)))
             .filter(|(_, (p, _))| *p >= 0)
-            .min_by_key(|(i, (p, w))| (-p, -w, self.distance(&body.pos, &spots[*i].pos)))
-            .map(|(i, _)| i)
+            .map(|(i, (p, w))| ((-p, -w), spots[i].pos, i));
+        self.nearest(&body.pos, ends)
     }
 
     fn valid(&self, ci: usize, spots: &[Spot], task: &Task, asker: (&Body, bool)) -> Option<usize> {
@@ -760,9 +759,8 @@ impl<'a> Jobs<'a> {
         if let Some((t, _, _)) = near.iter().find(|(t, _, _)| Some(t) == kept) {
             return Some(t.clone());
         }
-        (near.into_iter())
-            .min_by_key(|(_, p, buffer)| (!buffer, self.distance(&body.pos, p)))
-            .map(|(t, _, _)| t)
+        let ends = near.into_iter().map(|(t, p, buffer)| (!buffer, p, t));
+        self.nearest(&body.pos, ends)
     }
 
     fn spend(
@@ -796,12 +794,13 @@ impl<'a> Jobs<'a> {
             return Some(t);
         }
         let grounds: Vec<&Ground> = if own {
-            let owners = &derived.grounds;
-            std::iter::once(ground)
-                .chain(owners.iter().skip(derived.colonies.len()).filter(|g| {
-                    g.controller.as_ref().is_none_or(|c| !c.owner.is_ours()) && self.serves(ci, g)
-                }))
-                .collect()
+            let served = (derived.grounds.iter().zip(self.owners))
+                .skip(derived.colonies.len())
+                .filter(|(g, o)| {
+                    **o == Some(ci) && g.controller.as_ref().is_none_or(|c| !c.owner.is_ours())
+                })
+                .map(|(g, _)| g);
+            std::iter::once(ground).chain(served).collect()
         } else {
             vec![ground]
         };
@@ -817,7 +816,6 @@ impl<'a> Jobs<'a> {
         {
             return Some(t.clone());
         }
-        let near = |pos: &Pos| (pos.room != slot.room, self.distance(&body.pos, pos));
         // A home's worker mends an outpost road at its timer: its wear is the outpost's mender's.
         let haul = |g: &Ground| {
             let gi = derived.grounds.iter().position(|x| x.room == g.room);
@@ -826,7 +824,7 @@ impl<'a> Jobs<'a> {
         };
         // Home first: an outpost has its own mender.
         let repair = |fits: &dyn Fn(&super::derived::RepairFact, i32) -> bool| {
-            (grounds.iter())
+            let ends = (grounds.iter())
                 .flat_map(|g| {
                     let haul = haul(g);
                     g.repairs
@@ -834,11 +832,11 @@ impl<'a> Jobs<'a> {
                         .filter(move |r| fits(r, haul))
                         .map(move |r| (r, haul))
                 })
-                .min_by_key(|(r, haul)| {
-                    let (away, walk) = near(&r.pos);
-                    (away, r.urgency(*haul), walk)
-                })
-                .map(|(r, _)| Task::Repair(r.id.into()))
+                .map(|(r, haul)| {
+                    let rank = (r.pos.room != slot.room, r.urgency(haul));
+                    (rank, r.pos, Task::Repair(r.id.into()))
+                });
+            self.nearest(&body.pos, ends)
         };
         if let Some(t) = repair(&|r, haul| r.urgent(haul)) {
             return Some(t);
@@ -870,11 +868,10 @@ impl<'a> Jobs<'a> {
             _ if s.kind.pays_back() => 3,
             _ => 4,
         };
-        if let Some(s) = (grounds.iter())
-            .flat_map(|g| g.sites.iter())
-            .min_by_key(|s| (first(s), near(&s.pos)))
-        {
-            return Some(Task::Build(s.id.into()));
+        let sites = (grounds.iter()).flat_map(|g| g.sites.iter());
+        let ends = sites.map(|s| ((first(s), s.pos.room != slot.room), s.pos, s.id));
+        if let Some(id) = self.nearest(&body.pos, ends) {
+            return Some(Task::Build(id.into()));
         }
         // A rampart to its target, anything else once it is half gone, by the
         // bodies the surplus hires for it: a floor body's pace is unpriced.
@@ -884,21 +881,6 @@ impl<'a> Jobs<'a> {
             return Some(t);
         }
         controller.map(|c| Task::Upgrade(c.id.into()))
-    }
-
-    fn serves(&self, ci: usize, g: &Ground) -> bool {
-        let at = g
-            .controller
-            .as_ref()
-            .map(|c| c.pos)
-            .or_else(|| g.sources.first().map(|s| s.pos));
-        let homes = &self.derived.colonies;
-        at.is_some_and(|at| {
-            (0..homes.len())
-                .filter(|i| self.derived.grounds[*i].bank().is_some())
-                .min_by_key(|i| self.distance(&homes[*i].spawns[0].pos, &at))
-                == Some(ci)
-        })
     }
 
     fn can_take(&self, slot: &Slot, t: &Task) -> bool {
@@ -985,16 +967,10 @@ impl<'a> Jobs<'a> {
             ));
         }
         // Not Hivemind's rank: ranked, a worker waits idle on a drop another holds.
-        let load = (loads.iter())
+        let loads = (loads.iter())
             .filter(|(_, _, n)| *n > 0 && *n >= body.free.min(100))
-            .min_by_key(|(_, p, n)| {
-                (
-                    p.room != g.room,
-                    *n < body.free,
-                    self.distance(&body.pos, p),
-                )
-            });
-        if let Some((t, _, _)) = load {
+            .map(|(t, p, n)| ((p.room != g.room, *n < body.free), *p, t));
+        if let Some(t) = self.nearest(&body.pos, loads) {
             Jobs::count(&mut self.booked_load, t, body.free);
             return Some(t.clone());
         }
@@ -1005,7 +981,8 @@ impl<'a> Jobs<'a> {
         let open = (g.sources.iter())
             .filter(|s| s.energy > 0)
             .filter(|s| seated(s.id))
-            .min_by_key(|s| self.distance(&body.pos, &s.pos))?;
+            .map(|s| ((), s.pos, s));
+        let open = self.nearest(&body.pos, open)?;
         *self.digging.entry(open.id).or_default() += 1;
         Some(Task::Harvest(open.id.into()))
     }

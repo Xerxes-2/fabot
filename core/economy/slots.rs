@@ -1,11 +1,9 @@
-/// A colony's flows as slots: each slot casts one body and is the work that
-/// body does, so what is cast and what is offered are one list.
-use std::cell::RefCell;
+//! A colony's flows as slots: each slot casts one body and is the work that
+//! body does, so what is cast and what is offered are one list.
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 
 use fabot_atlas::{self as atlas, Atlas, Mover, Target};
-use fabot_base::HashMap;
 use fabot_base::declarations::{self, Declarations};
 use fabot_base::engine;
 use fabot_base::grid::{self, Footprint};
@@ -103,34 +101,49 @@ impl Slot {
     }
 }
 
-/// The ticks from `a` to `b`: in one room its range, else its crossings off
-/// a tree `Derived` grew from either end, a search only without one.
-pub fn distance(atlas: &Atlas, derived: &Derived, a: &Pos, b: &Pos) -> Option<i32> {
-    if let Some(r) = a.range(b) {
-        return Some(r);
+/// The walk from `a` onto `b`, in one room as across rooms.
+pub fn distance(atlas: &Atlas, a: &Pos, b: &Pos) -> Option<i32> {
+    if a == b {
+        return Some(0);
     }
-    let tree = (derived.route(b.room)).or_else(|| derived.route(a.room));
-    let crossed = match tree {
-        Some(tree) => tree.crossings(a.room, b.room),
-        None => (atlas.route(&BTreeSet::new(), declarations::REACH_HOPS, a.room, b.room))
-            .map(|r| r.len() as i32 - 1),
-    };
-    crossed.map(|n| Atlas::CROSSING_TICKS * n)
+    Some(atlas.ticks_toward(declarations::REACH_HOPS, b, a)? + 1)
 }
 
-pub type PairTicks = RefCell<HashMap<(RoomName, RoomName), Option<i32>>>;
+/// No `distance` is shorter: an exit and its landing lie as one tile.
+fn apart(a: &Pos, b: &Pos) -> i32 {
+    let side = engine::ROOM_SIDE - 1;
+    let at = |p: &Pos| {
+        (
+            side * p.room.coords().0 + p.x,
+            side * p.room.coords().1 + p.y,
+        )
+    };
+    let ((ax, ay), (bx, by)) = (at(a), at(b));
+    (ax - bx).abs().max((ay - by).abs())
+}
 
-pub fn distance_memo(
-    atlas: &Atlas,
-    derived: &Derived,
-    kept: &PairTicks,
-    a: &Pos,
-    b: &Pos,
-) -> Option<i32> {
-    if a.room == b.room {
-        return a.range(b);
+/// The first least `(rank, ticks)` of `ends`, walked only while `apart` can win.
+pub fn nearest<R: Ord, T>(
+    from: &Pos,
+    ends: impl Iterator<Item = (R, Pos, T)>,
+    ticks: impl Fn(&Pos) -> Option<i32>,
+) -> Option<(T, i32)> {
+    let mut ends: Vec<(R, i32, usize, Pos, T)> = (ends.enumerate())
+        .map(|(i, (rank, at, end))| (rank, apart(from, &at), i, at, end))
+        .collect();
+    ends.sort_unstable_by(|a, b| (&a.0, a.1, a.2).cmp(&(&b.0, b.1, b.2)));
+    let mut best: Option<(usize, i32)> = None;
+    for (k, (rank, least, i, at, _)) in ends.iter().enumerate() {
+        let beats = |d: i32| best.is_none_or(|(b, bd)| (rank, d, i) < (&ends[b].0, bd, &ends[b].2));
+        if !beats(*least) {
+            break;
+        }
+        if let Some(d) = ticks(at).filter(|d| beats(*d)) {
+            best = Some((k, d));
+        }
     }
-    *(kept.borrow_mut().entry((a.room, b.room))).or_insert_with(|| distance(atlas, derived, a, b))
+    let (k, d) = best?;
+    Some((ends.swap_remove(k).4, d))
 }
 
 pub fn ticks_to(
@@ -171,7 +184,7 @@ fn leg(atlas: &Atlas, derived: &Derived, from: &Pos, to: &Pos) -> Option<Leg> {
         })
     };
     walked().or_else(|| {
-        let d = distance(atlas, derived, from, to)?;
+        let d = distance(atlas, from, to)?;
         Some(Leg {
             even: d,
             roaded: 2 * d,
@@ -729,15 +742,25 @@ impl Plan<'_> {
 
         let mut drunk = 0.0;
         let mut upgraded = if fed { surplus - build - mend } else { 0.0 };
+        // A standing upgrader's body is paid for: only its drink is owed.
+        let standing = (derived.bodies.iter().chain(derived.ovens.iter()))
+            .filter(|b| b.pattern == Pattern::Upgrader && b.pos.room == colony.room)
+            .count() as i32;
+        let work = upgrader
+            .as_deref()
+            .map_or(1, |b| part_count_in(b, Part::Work));
+        let kept = ((upgraded / f64::from(work)).round() as i32).min(standing);
+        let kept = if upgrader.is_some() { kept } else { 0 };
+        let rushed: i32 = (ground.sites.iter())
+            .filter(|s| matches!(s.kind, Kind::Extractor | Kind::Terminal))
+            .map(|s| s.left)
+            .sum();
+        let rush = (upgraded - f64::from(kept.max(0) * work)).clamp(0.0, f64::from(rushed));
+        let build = build + rush;
+        upgraded -= rush;
         if let Some(body) = &upgrader {
-            let work = part_count_in(body, Part::Work);
             let most =
                 (ground.buffer_seats.len() as i32).min(upgradable.saturating_add(work - 1) / work);
-            // A standing upgrader's body is paid for: only its drink is owed.
-            let standing = (derived.bodies.iter().chain(derived.ovens.iter()))
-                .filter(|b| b.pattern == Pattern::Upgrader && b.pos.room == colony.room)
-                .count() as i32;
-            let kept = ((upgraded / f64::from(work)).round() as i32).min(standing);
             let new =
                 ((upgraded - f64::from(kept * work)) / (f64::from(work) + upkeep(body))).max(0.0);
             let n = (kept + new.floor() as i32).clamp(0, most);
@@ -1095,7 +1118,7 @@ pub fn parked(slots: &[Slot], holders: &Holders) -> i32 {
 
 fn walk_to(atlas: &Atlas, derived: &Derived, ci: usize, body: &[Part], to: &Pos) -> Option<i32> {
     let home = derived.colonies[ci].spawns[0].pos;
-    walk(atlas, derived, body, &home, to).or_else(|| distance(atlas, derived, &home, to))
+    walk(atlas, derived, body, &home, to).or_else(|| distance(atlas, &home, to))
 }
 
 /// Dispatch may send a carrier to any of its outposts' digs, so the farthest
@@ -1201,7 +1224,6 @@ pub fn assign<'a>(
                 .flatten()
         })
         .collect();
-    let kept = PairTicks::default();
     for b in loose {
         if b.pattern == Pattern::Scout {
             let free = (slots.iter().enumerate()).find(|(_, s)| {
@@ -1216,23 +1238,15 @@ pub fn assign<'a>(
         // A mender is a body of its own size: a home's loose worker taking it
         // left that home's work, and a young one's.
         let near = |open: bool| {
-            (slots.iter().enumerate())
+            let ends = (slots.iter().enumerate())
                 .filter(|(i, s)| {
                     s.job.pattern() == b.pattern
                         && (if open { !taken[*i] } else { !s.job.seated() })
                 })
                 .filter(|(_, s)| s.rank != MENDER || b.size == s.body.len() as i32)
                 .filter(|(i, s)| !outgrown(derived, b, s) && (!far(s) || serves_far(b, trips[*i])))
-                .filter_map(|(i, s)| {
-                    let first = (s.body.is_empty(), s.rank != DEADLINE);
-                    Some((
-                        first,
-                        distance_memo(atlas, derived, &kept, &b.pos, &s.seat)?,
-                        i,
-                    ))
-                })
-                .min()
-                .map(|(_, _, i)| i)
+                .map(|(i, s)| ((s.body.is_empty(), s.rank != DEADLINE), s.seat, i));
+            nearest(&b.pos, ends, |seat| distance(atlas, &b.pos, seat)).map(|(i, _)| i)
         };
         if let Some(i) = near(true).or_else(|| near(false)) {
             out.insert(b.name.clone(), i);
@@ -1396,4 +1410,48 @@ pub fn casts(
     }
     let short = short.into_iter().map(|((r, p), n)| (r, p, n)).collect();
     (casts, short)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dice::{self, Dice};
+
+    #[test]
+    fn a_distance_is_never_shorter_than_the_tiles_apart_and_the_nearest_is_the_least() {
+        let mut dice = Dice::new(66);
+        for _ in 0..100 {
+            let g = dice::world(&mut dice);
+            let atlas = Atlas::of_world(&g.world);
+            let rooms: Vec<RoomName> = g.world.rooms.iter().map(|r| r.name).collect();
+            let borders = [
+                (49, 1),
+                (1, 48),
+                (0, 48),
+                (48, 1),
+                (24, 0),
+                (24, 49),
+                (1, 0),
+            ];
+            let mut ends: Vec<Pos> = (rooms.iter())
+                .flat_map(|r| borders.map(|(x, y)| Pos::new(*r, x, y)))
+                .collect();
+            for _ in 0..8 {
+                let room = dice.pick(&rooms);
+                ends.push(dice::pos(&mut dice, room));
+            }
+            for a in &ends {
+                for b in &ends {
+                    let d = distance(&atlas, a, b);
+                    assert!(d.is_none_or(|d| d >= apart(a, b)), "{a:?} {b:?} {d:?}");
+                }
+                let ranked = (ends.iter().enumerate()).map(|(i, b)| (i % 3, *b, i));
+                let least = (ends.iter().enumerate())
+                    .filter_map(|(i, b)| Some((i % 3, distance(&atlas, a, b)?, i)))
+                    .min();
+                let found = nearest(a, ranked, |b| distance(&atlas, a, b));
+                assert_eq!(found, least.map(|(_, d, i)| (i, d)));
+            }
+        }
+    }
 }

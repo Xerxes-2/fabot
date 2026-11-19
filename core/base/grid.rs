@@ -198,13 +198,12 @@ impl Dial {
     }
 }
 
-/// Dial's queue: no step costs more than the table's dearest, so a ring of one
-/// bucket more holds every queued distance apart.
+/// From each seed at its own distance; `seeds` rise.
 pub fn flood(
     footprint: Footprint,
     weights: &[Weight; tiles::COUNT],
     steps: &[Option<u16>],
-    goals: &[Tile],
+    seeds: impl Iterator<Item = (Tile, i32)>,
 ) -> (tiles::Table<i32>, i32) {
     let mut dist = tiles::table(UNREACHED);
     // The step off a tile; None where no walk leaves it.
@@ -214,7 +213,7 @@ pub fn flood(
 
     let step_on = |weight: NonZeroU8| steps.get(weight.get() as usize).copied().flatten();
 
-    // A non-goal border tile leads nowhere: a body stepping onto it leaves.
+    // A border tile no seed leaves leads nowhere: a body stepping onto it leaves.
     for t in tiles::all() {
         match weight_of(footprint, weights, t) {
             None => dist[t] = WALL,
@@ -223,19 +222,29 @@ pub fn flood(
         }
     }
 
-    for &goal in goals {
-        if let Some(w) = weight_of(footprint, weights, goal)
-            && dist[goal] > 0
-        {
-            dist[goal] = 0;
-            price[goal] = step_on(w);
-            dial.link(goal, 0);
-        }
-    }
-
+    let mut seeds = seeds.peekable();
     let mut d = 0i32;
     let mut b = 0usize;
-    while dial.queued > 0 {
+    loop {
+        while let Some((seed, at)) = seeds.next_if(|(_, at)| *at <= d) {
+            let old = dist[seed];
+            if let Some(w) = weight_of(footprint, weights, seed)
+                && at < old
+            {
+                if old != UNREACHED {
+                    dial.unlink(seed, &*dist);
+                }
+                dist[seed] = at;
+                price[seed] = step_on(w);
+                dial.link(seed, at);
+            }
+        }
+        if dial.queued == 0 {
+            let Some((_, at)) = seeds.peek() else { break };
+            d = *at;
+            b = (d % dial.ring as i32) as usize;
+            continue;
+        }
         let Some(tile) = dial.head[b] else {
             d += 1;
             b = if b + 1 == dial.ring { 0 } else { b + 1 };

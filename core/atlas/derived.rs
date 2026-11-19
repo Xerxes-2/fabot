@@ -31,7 +31,7 @@ pub fn target_at(pos: &Pos, range: i32) -> Target {
     }
 }
 
-/// Ticks and crossings are not one unit. `trees` holds the homes' rooms'.
+/// `trees` holds the homes' rooms'.
 pub fn nearest<'t>(
     atlas: &mut Atlas,
     trees: &dyn Fn(RoomName) -> Option<&'t Tree>,
@@ -62,8 +62,8 @@ pub fn nearest<'t>(
         }
     })
     .or_else(|| {
-        least(atlas, &|_atlas, home| {
-            (trees(home.room)?.crossings(at.room, home.room)).map(|n| Atlas::CROSSING_TICKS * n)
+        least(atlas, &|atlas, home| {
+            atlas.ticks_toward(REACH_HOPS, home, at)
         })
     })
 }
