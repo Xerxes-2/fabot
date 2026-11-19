@@ -205,7 +205,8 @@ export function standNode(world, room, name, plan) {
   const rooms = node.spare ?? declarations.claims.length;
   const gcl = rooms && !node.short ? Math.ceil(1e6 * rooms ** 2.4) : world.gcl;
   const expansion = node.stale && { expansion: { room: fits[0].room, since: -100000 } };
-  return { ...world, gcl, simMemory: { v2: { ...expansion, declarations } } };
+  const v2 = { ...world.memory?.v2, ...expansion, declarations: { ...declarations, ...world.memory?.v2?.declarations, ...world.declarations } };
+  return { ...world, gcl, simMemory: { ...world.memory, v2 } };
 }
 
 // Mirrors `engine/colony.mjs`'s outposts, which reads xxscreeps' database.

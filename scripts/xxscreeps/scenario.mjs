@@ -140,6 +140,8 @@ for (const { name, start } of scenarios)
     fail(`${name}: a start "at" a tick names its "bundle" by commit id, and no node`);
 for (const { name, start } of scenarios)
   if (start.world && Object.keys(start).some((k) => !["world", "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "follow", "ended", "memory", "gcl"].includes(k))) fail(`${name}: a "world" start takes a "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "follow", "ended", "memory", "gcl" and nothing else`);
+for (const { name, start } of scenarios)
+  if (!start.world && (start.declarations || start.memory || start.gcl)) fail(`${name}: "declarations", "memory" and "gcl" take a "world" start`);
 
 // A world holds its opponents' seats; their config is the scenario's.
 const tag = (opponents = []) => (opponents.length ? `-o${createHash("sha256").update(JSON.stringify(opponents)).digest("hex").slice(0, 8)}` : "");
