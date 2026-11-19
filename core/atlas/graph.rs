@@ -6,7 +6,7 @@ use std::cmp::Reverse;
 use std::collections::{BTreeSet, BinaryHeap};
 use std::rc::Rc;
 
-use super::{Atlas, Coords, Goal, Mover, RoomGrid, Target};
+use super::{Atlas, Coords, Goal, Ground, Mover, RoomGrid, Target};
 use fabot_base::HashMap;
 use fabot_base::grid::{UNREACHED, weight_of};
 use fabot_base::tiles::{self, Table, Tile, TileSet};
@@ -112,15 +112,16 @@ impl Ways {
 }
 
 impl Ways {
-    /// Out of `room` with `danger` walled, the way on through a neighbour's
-    /// region whose own way on never comes back, the fewest ticks first.
+    /// Out of `room` with `danger` and hostiles walled, the way on through a
+    /// neighbour's region whose own way on never comes back, the fewest ticks
+    /// first.
     pub fn round(
         &self,
         atlas: &Atlas,
         mover: Mover,
         room: RoomName,
         at: Tile,
-        danger: &TileSet,
+        danger: Option<&TileSet>,
     ) -> Option<(Rc<Table<i32>>, i32)> {
         let c = room.coords();
         let grid = atlas.rooms.get(&c)?;
@@ -154,7 +155,7 @@ impl Ways {
                 if exit.is_empty() {
                     continue;
                 }
-                let dist = atlas.flood_in(grid, mover, Goal::Exit(&exit), Some(danger));
+                let dist = atlas.flood_in(grid, mover, Goal::Exit(&exit), Ground::Live(danger));
                 if dist[at] == UNREACHED {
                     continue;
                 }
@@ -299,7 +300,8 @@ pub fn search(
     let ends: Vec<Coords> = stops.iter().map(|(c, _)| *c).collect();
     let avoid: Vec<Coords> = avoid.iter().map(|r| r.coords()).collect();
     let grid_of = |c: Coords| atlas.rooms.get(&c);
-    let seats = target.and_then(|t| Some(atlas.flood_seats(grid_of(start)?, mover, t, None)));
+    let seats =
+        target.and_then(|t| Some(atlas.flood_seats(grid_of(start)?, mover, t, Ground::Kept)));
     let on = |d: &Table<i32>, t: Tile| d[Atlas::anchor(mover.footprint, t)];
     ways.nodes.push(Node {
         room: start,
@@ -372,7 +374,8 @@ pub fn search(
         if held {
             continue;
         }
-        let dist = grid_of(r.room).map(|g| atlas.flood_in(g, mover, Goal::Exit(exit), None));
+        let dist =
+            grid_of(r.room).map(|g| atlas.flood_in(g, mover, Goal::Exit(exit), Ground::Kept));
         match ways.regions(r.room).last() {
             Some(last) => ways.nodes[last].next_in_room = Some(ways.nodes.len()),
             None => {

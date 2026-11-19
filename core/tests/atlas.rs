@@ -158,6 +158,21 @@ fn mover(dice: &mut Dice) -> Mover {
     }
 }
 
+fn creep(owner: Owner, pos: Pos) -> Creep {
+    Creep {
+        id: "c".into(),
+        name: "c".into(),
+        owner,
+        pos,
+        body: Vec::new(),
+        hits: 1,
+        hits_max: 1,
+        ticks_to_live: 1,
+        fatigue: 0,
+        store: Store::empty(),
+    }
+}
+
 fn walk(dice: &mut Dice) -> Walk {
     Walk {
         ground: ground(dice),
@@ -635,10 +650,6 @@ fn every_tile_a_keeper_strikes_is_walled_and_a_room_of_keepers_not_due_walls_non
         let alive = dice.chance(2);
         if alive {
             room.others.push(Creep {
-                id: "k".into(),
-                name: "k".into(),
-                owner: Owner::Keeper,
-                pos: pos(at),
                 body: engine::keeper_body()
                     .into_iter()
                     .map(|kind| BodyPart {
@@ -649,13 +660,13 @@ fn every_tile_a_keeper_strikes_is_walled_and_a_room_of_keepers_not_due_walls_non
                     .collect(),
                 hits: 5000,
                 hits_max: 5000,
-                ticks_to_live: 1,
-                fatigue: 0,
-                store: Store::empty(),
+                ..creep(Owner::Keeper, pos(at))
             });
         }
-        let bare = Atlas::of_world(&world_of(&ground)).weights(ROOM).unwrap();
-        let weights = Atlas::of_world(&world).weights(ROOM).unwrap();
+        let bare = Atlas::of_world(&world_of(&ground))
+            .held_weights(ROOM)
+            .unwrap();
+        let weights = Atlas::of_world(&world).held_weights(ROOM).unwrap();
         for t in tiles::all() {
             let solid = t == lair || t == rock;
             assert!(weights[t].is_none() || (bare[t] == weights[t] && !solid));
@@ -794,6 +805,39 @@ fn a_walk_round_a_set_never_steps_on_it() {
             let on = covered(walk.mover.footprint, tiles::of_pos(&pos));
             assert!(on.iter().all(|&(x, y)| !round.contains(tiles::index(x, y))));
         }
+    }
+}
+
+#[test]
+fn a_hostiles_step_redoes_no_flood_tree_or_walk_and_no_first_step_lands_on_one() {
+    for (walk, mut dice) in walks(24) {
+        let hostile = |at: Tile| creep(Owner::Invader, tiles::to_pos(ROOM, at));
+        let mut world = world_of(&walk.ground);
+        let target = target_of(ROOM, &walk);
+        let start = tiles::to_pos(ROOM, walk.start);
+        let kept = |atlas: &Atlas| {
+            atlas.ticks_to(walk.mover, &target, &start);
+            atlas.walk(walk.mover, &target, None, &start, 100);
+            atlas.tree(&BTreeSet::new(), 1, ROOM);
+        };
+        world.rooms[0].others = vec![hostile(tile(&mut dice))];
+        let mut before = Atlas::of_world(&world);
+        before.check = true;
+        kept(&before);
+        let near = tiles::around(walk.start);
+        world.rooms[0].others = vec![hostile(near[dice.below(near.len() as i32) as usize])];
+        let after = Atlas::following(before, &world, [], []);
+        kept(&after);
+        assert_eq!(after.recomputed(), 0);
+        if walk.mover.factor.moves != 0 {
+            assert_eq!(after.misses(), 0);
+        }
+        let step = after.first_step(walk.mover, &target, &start);
+        let landed = step.and_then(|d| tiles::neighbour(walk.start, d));
+        assert!(landed.is_none_or(|t| {
+            (covered(walk.mover.footprint, t).iter())
+                .all(|&(x, y)| after.passable(ROOM, tiles::index(x, y)))
+        }));
     }
 }
 

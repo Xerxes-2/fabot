@@ -30,7 +30,7 @@ impl<'a> Scene<'a> {
         let barriers: Vec<&Structure> = siege::barrier_at(room).values().copied().collect();
         let line: Vec<Pos> = barriers.iter().map(|b| b.pos).collect();
 
-        let mut weights = atlas.weights(room.name)?;
+        let mut weights = atlas.held_weights(room.name)?;
         let gait = gait(set)?;
 
         for b in &barriers {

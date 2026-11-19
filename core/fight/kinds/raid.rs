@@ -162,7 +162,7 @@ pub fn plan(
     set: &[Fighter],
     standing: &[&Creep],
 ) -> Option<(Vec<Id>, Outcome)> {
-    let weights = atlas.weights(room.name)?;
+    let weights = atlas.held_weights(room.name)?;
     let gait = price::gait(set)?;
     let ground = Ground {
         room: room.name,

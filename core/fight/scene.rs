@@ -165,7 +165,7 @@ impl<'a> Scene<'a> {
             .cloned()
             .collect();
         let foes: Vec<Fighter> = escort.iter().map(casting::fighter_of).collect();
-        let weights = atlas.weights(room.name);
+        let weights = atlas.held_weights(room.name);
         let shields: BTreeSet<Tile> = (room.structures.iter())
             .filter(|s| s.kind == Kind::Rampart && !s.owner.is_ours())
             .map(|s| tiles::of_pos(&s.pos))

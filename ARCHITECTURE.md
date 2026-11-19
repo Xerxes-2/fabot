@@ -89,9 +89,11 @@ World ──▶ Derived ──▶ decisions (read Derived & Atlas, never World) 
   (`y * 50 + x`), never `BTreeSet<Tile>` / `BTreeMap<Tile, _>`.
 - **One demand-driven cache (`Atlas`):** goal-seeded reverse floods per room
   keyed by `(footprint, pace class, goal, danger)`, counting hits and misses.
-  Floods outlive the tick while the room's weights hold (within a tick half
+  Floods outlive the tick while the room's creep-free weights hold (within a tick half
   repeat and across ticks nearly all, and a flood is a pure function of weights
-  so a kept one equals a fresh one). Room route trees (`Derived.trees`) are
+  so a kept one equals a fresh one). A step's flood in a room with a hostile
+  on an open tile or danger walls them in a per-tick table never kept, so no
+  kept flood reads a creep or danger (`--check` re-floods each hit). Room route trees (`Derived.trees`) are
   searched once a tick per colony because Economy prices every body against
   every offer (per-query search costs thousands a tick at six colonies); trees
   and outpost road walks carry across ticks in `atlas.carried` (§4), keyed by a
@@ -131,7 +133,7 @@ segments over multiple ticks (economy first); a cold tick never spends more than
 | `Bindings` / `app` | `fabot` | Screeps JS API seam, packed `read.js`, `driver.rs` | `Game`, `RawMemory` | `Game`, `RawMemory`, segments |
 | `Engine` | `fabot-base` | Game formulas & non-global server constants (vanilla tables from `screeps-game-api`) | — | — |
 | `World` | `fabot-base` | Single-pass tick snapshot, event-log strikes/destroys, per-tick `rules` (`CONTROLLER_STRUCTURES`) | `Game` | — |
-| `Atlas` | `fabot-atlas` | Room graph (region nodes, border-stretch crossings, keeper-strike avoidance, blind keeper & stronghold penalty) and per-room tile grid (weights, reverse floods, seats, footprint queries); out-of-sight grids hold what stood when last seen (else terrain) struck where intel places the keepers (`atlas.unseen`) | `World`, `terrain`, `intel.rooms` | flood table, `atlas.carried` |
+| `Atlas` | `fabot-atlas` | Room graph (region nodes, border-stretch crossings, keeper-strike avoidance, blind keeper & stronghold penalty) and per-room tile grid (creep-free weights, reverse floods, seats, footprint queries; a hostile's tile is walled only in this tick's step floods and passability, never in a kept flood, so one moving redoes no flood, tree or walk); out-of-sight grids hold what stood when last seen (else terrain) struck where intel places the keepers (`atlas.unseen`) | `World`, `terrain`, `intel.rooms` | flood table, `atlas.carried` |
 | `Economy` | `fabot-economy` | Slots, casts, sticky tasks, logistics dispatcher, links, labs, terminals, abandon | `Derived`, `Atlas`, `declarations`, `EconomyState`, Strategy's `scouts` | tasks, casts, `assignments`, `spare` |
 | `Layout` | `fabot-layout` | Colony placement plan (Hivemind planner + xxscreeps JPS), rampart ring, construction sites, buried-road destroy, tower firing | `Derived`, `Atlas`, `declarations` | sites, destroys, tower actions, `standing.layout` |
 | `Exchange` | `fabot-exchange` | Pure combat arithmetic (`outcome`, `cheapest_win`, breach planning) | fighters, terrain | — |
@@ -196,7 +198,7 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
 | `sightings` | room → armed hostile / core id → expiry tick | World | heap | vision grace for stood-down outposts |
 | `atlas.floods` | per-room cached reverse floods (bounded per room) | Atlas | heap | reused while room weights hold |
 | `atlas.unseen` | out-of-sight room grid + the keeper posts and blind flag it was struck from | Atlas | heap | keyed by those posts, not by sight alone, so intel arriving after a cold tick strikes a keeper room pre-read blind |
-| `atlas.carried` | carried room trees & outpost road walks + room-read fingerprints | Atlas | heap | a search reads no room past its hops so a carried value equals a fresh one while those read the same (saving ~1/10 of decide; a moving hostile walls its tile so values in reach redo); drops the tick after going unasked |
+| `atlas.carried` | carried room trees & outpost road walks + room-read fingerprints | Atlas | heap | a search reads no room past its hops so a carried value equals a fresh one while those read the same (saving ~1/10 of decide); drops the tick after going unasked |
 | `terrain` | room → `LocalRoomTerrain` (borrowed by `World`) + `getRoomStatus` | World | heap | terrain never changes and status only when novice/respawn ends (prefetched to `SIEGE_HOPS` to avoid seam calls); rooms of foreign status are never routed/served (engine traps creeps on exit) and unread rooms never observed (off-shard refuses observer) |
 | `buffers` | emptied `World` lists from last tick | World | heap | capacity reuse without allocation (§9.2) |
 | `fixed` | structure id → immutable type/tile/owner/hitsMax | World (`read.js`) | JS heap | avoids repeated getter cost (~1/5 of `world`); checked by `replay --check` |
