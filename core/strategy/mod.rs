@@ -8,8 +8,10 @@ use fabot_base::intents::ModuleOutput;
 use std::collections::{BTreeMap, BTreeSet};
 
 use expand::Expansions;
-use fabot_atlas::{Context, Derived};
-use fabot_base::declarations::{ColonyPlan, Declarations, Outpost, Stage};
+use fabot_atlas::{Atlas, Context, Derived};
+use fabot_base::declarations::{
+    ColonyPlan, Declarations, OpKind, Operation, Outpost, Planned, Stage,
+};
 use fabot_base::engine;
 use fabot_base::intel::Intel;
 use fabot_base::tiles;
@@ -23,14 +25,11 @@ use screeps::LocalRoomTerrain;
 pub struct StrategyState {
     /// `Scout room` declarations, rebuilt each tick before Economy reads them.
     pub scouts: Vec<Scout>,
-    /// Sweep candidates this tick, the stalest seen first.
-    pub preyed: Vec<RoomName>,
     pub expansion: Expansions,
 }
 
 pub fn decide(context: &mut Context, state: &mut StrategyState) -> ModuleOutput {
-    let mut preyed = intel::preyed(context.intel, context.declarations, context.world.time);
-    preyed.retain(|room| context.atlas.has_terrain(*room));
+    let preyed: Vec<RoomName> = context.declarations.rooms(OpKind::Sweep).collect();
     // A scout only dies where armed bodies stand, and draws them off; a
     // siege's sight is the fight's.
     let unarmed = |room| sightings::unarmed(context.sightings, context.world.time, room);
@@ -45,7 +44,6 @@ pub fn decide(context: &mut Context, state: &mut StrategyState) -> ModuleOutput 
     );
     scouts.retain(|s| context.declarations.sieges.contains(&s.room) || unarmed(s.room));
     state.scouts = scouts;
-    state.preyed = preyed;
     observed.into()
 }
 
@@ -112,7 +110,7 @@ pub fn reserve(rules: &Rules, lifetimes: f64, level: i32, threatened: bool) -> i
 /// Switched off, the choices are the operator's alone, but each colony keeps
 /// its plan: Economy reads its reserve and Layout drops a room without one.
 pub fn plan<'t>(
-    (on, world): (bool, &World),
+    (on, world, atlas): (bool, &World, &Atlas),
     derived: &Derived,
     declarations: &Declarations,
     intel: &Intel,
@@ -122,7 +120,7 @@ pub fn plan<'t>(
         &dyn Fn(RoomName) -> Option<&'t LocalRoomTerrain>,
         &mut Expansions,
     ),
-) -> (Vec<ColonyPlan>, Vec<Outpost>, Option<Outpost>) {
+) -> Planned {
     let rival = |name: &str| name != world.me && !declarations.allies.contains(name);
     let rivals: Vec<(RoomName, i32)> = (intel.iter())
         .filter(|(_, row)| row.level > 0 && row.owner.as_deref().is_some_and(rival))
@@ -174,11 +172,13 @@ pub fn plan<'t>(
         })
         .collect();
     if !on {
-        return (plans, Vec::new(), None);
+        let operations = operations(derived, declarations, (&[], None), &[]);
+        return (plans, Vec::new(), None, operations);
     }
     // An expansion declared this tick holds the outposts from the next.
     let claimed = expand::claim(intel, derived, expansion.in_flight.as_ref()).map(|c| c.room);
-    let preyed = intel::preyed(intel, declarations, world.time);
+    let mut preyed = intel::preyed(intel, declarations, world.time);
+    preyed.retain(|room| atlas.has_terrain(*room));
     let busy = outposts::busy(
         &plans,
         (declarations, claimed),
@@ -204,5 +204,37 @@ pub fn plan<'t>(
     );
     expand::book(world, derived, &mut plans, &busy);
     let claim = expand::claim(intel, derived, expansion.in_flight.as_ref());
-    (plans, chosen, claim)
+    let operations = operations(derived, declarations, (&chosen, claim.as_ref()), &preyed);
+    (plans, chosen, claim, operations)
+}
+
+/// A home's raid is answered before an outpost's; a siege or sweep takes
+/// only the bodies no defence asks for.
+const HOME: f64 = 2.0;
+const OUTPOST: f64 = 1.0;
+
+fn operations(
+    derived: &Derived,
+    declarations: &Declarations,
+    (chosen, claim): (&[Outpost], Option<&Outpost>),
+    preyed: &[RoomName],
+) -> Vec<Operation> {
+    let row = |kind, priority| {
+        move |room: &RoomName| Operation {
+            kind,
+            room: *room,
+            priority,
+        }
+    };
+    let homes: BTreeSet<RoomName> = derived.colonies.iter().copied().collect();
+    let worked: BTreeSet<RoomName> = (declarations.outposts.iter().chain(chosen))
+        .chain(declarations.claims.iter().chain(claim))
+        .map(|o| o.room)
+        .filter(|r| !homes.contains(r))
+        .collect();
+    (homes.iter().map(row(OpKind::Defend, HOME)))
+        .chain(worked.iter().map(row(OpKind::Defend, OUTPOST)))
+        .chain(declarations.sieges.iter().map(row(OpKind::Siege, 0.0)))
+        .chain(preyed.iter().map(row(OpKind::Sweep, 0.0)))
+        .collect()
 }

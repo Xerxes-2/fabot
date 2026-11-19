@@ -215,6 +215,15 @@ export const measures = {
   },
   // Engagements whose predicted Win or Kite was lost (§10.1).
   predictedWinsLost: (_, __, dir) => bugs(engagementsOf(dir)).length,
+  // The tick `room`'s Defends first drew a body, less the first another
+  // room's did: a home raided beside its outposts is drafted before every
+  // one of them (§7.3). One never drafted: Infinity.
+  draftedAfterOthers: (_, a, dir) => {
+    const firsts = new Map();
+    for (const e of rowsOf(dir).filter((e) => e.kind === "defend"))
+      firsts.set(e.room, Math.min(firsts.get(e.room) ?? Infinity, e.drafted ?? Infinity));
+    return (firsts.get(a.room) ?? Infinity) - Math.min(...[...firsts].filter(([r]) => r !== a.room).map(([, t]) => t));
+  },
   // Engagements opened: an attack the bot never answered tests nothing.
   engagements: (_, __, dir) => engagementsOf(dir).length,
   // Acts the engine refused (the soak's refusals.json), but an observer's

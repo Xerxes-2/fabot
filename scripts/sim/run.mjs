@@ -28,7 +28,7 @@ export const SIM_MEASURES = new Set([
   "rcl2ToTower", "claimSpawned", "claimersCast", "made", "ore", "boosted", "bounced", "stillLoaded", "carriedOut", "castsBelow",
   "spawnStuck", "scoutsCast", "scoutStill", "scoutTicksIn", "reserverOnPost", "castIn", "bodiesOut", "bodiesStruck", "struckOn",
   "deathsError", "attackersAtEnd", "creepsLostBeforeSafeMode", "predictedWinsLost", "engagements", "oscillation", "bodiesLost",
-  "closedOnCore", "heldPastWave", "sentTo",
+  "closedOnCore", "heldPastWave", "sentTo", "draftedAfterOthers",
 ]);
 
 /** Whether a `worlds/`-shaped world holds a spawn of ours: a capture, not a map. */

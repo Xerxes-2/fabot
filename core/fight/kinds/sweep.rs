@@ -20,7 +20,6 @@ pub struct Facts {
     pub safe: bool,
     /// The candidate a set beats that pays most a tick of its walk.
     pub elsewhere: Option<RoomName>,
-    /// The stalest room out of sight, read only once its room is worth nothing.
     pub patrol: Option<RoomName>,
 }
 

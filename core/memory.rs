@@ -144,6 +144,7 @@ impl Memory {
                 .collect(),
             avoid: list(declared, "avoid"),
             tactics: list(declared, "tactics"),
+            operations: Vec::new(),
         }
     }
 }

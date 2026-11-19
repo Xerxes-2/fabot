@@ -318,7 +318,7 @@ pub fn decide<'t>(
     let mut derived = derive(world, &mut atlas);
     phases.push(("derive".to_string(), clock() - start));
     let plans = strategy::plan(
-        (!state.off.contains(STRATEGY), world),
+        (!state.off.contains(STRATEGY), world, &atlas),
         &derived,
         &declarations,
         intel,
@@ -366,7 +366,7 @@ pub const MODULES: [Module; 4] = [
     },
     Module {
         name: "fight",
-        run: |c, s| fabot_fight::decide(c, &mut s.fight, &s.strategy.preyed),
+        run: |c, s| fabot_fight::decide(c, &mut s.fight),
     },
     Module {
         name: "economy",

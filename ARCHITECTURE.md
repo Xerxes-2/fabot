@@ -135,9 +135,9 @@ segments over multiple ticks (economy first); a cold tick never spends more than
 | `Economy` | `fabot-economy` | Slots, casts, sticky tasks, logistics dispatcher, links, labs, terminals, abandon | `Derived`, `Atlas`, `declarations`, `EconomyState`, Strategy's `scouts` | tasks, casts, `assignments`, `spare` |
 | `Layout` | `fabot-layout` | Colony placement plan (Hivemind planner + xxscreeps JPS), rampart ring, construction sites, buried-road destroy, tower firing | `Derived`, `Atlas`, `declarations` | sites, destroys, tower actions, `standing.layout` |
 | `Exchange` | `fabot-exchange` | Pure combat arithmetic (`outcome`, `cheapest_win`, breach planning) | fighters, terrain | — |
-| `Fight` | `fabot-fight` | Hostile `Tracker`, engagements (`kinds/`: defend, siege, sweep, raid), casting | `Derived`, `Atlas`, `Exchange`, `declarations`, `intel`, `FightState`, Strategy's `preyed` | fight actions, asks, wishes, casts, `FightState` |
+| `Fight` | `fabot-fight` | Hostile `Tracker`, engagements (`kinds/`: defend, siege, sweep, raid), casting | `Derived`, `Atlas`, `Exchange`, `declarations` (its operations table), `intel`, `FightState` | fight actions, asks, wishes, casts, `FightState` |
 | `Tactics` | `fabot-tactics` | Per-creep combat actions, stepping, and the operator's tactic rules (`ruling`, `checked`) (no `Fight` import) | `Atlas`, `Move`, `Sight` + plan | creep actions, wishes |
-| `Strategy` | `fabot-strategy` | Intel, observers/scouts, `ColonyPlan` & outpost selection, expansion/abandon, operation opening & global force priority | `World`, `Derived`, `intel`, `Season`, `standing.layout`, `spare`, fight state | `declarations` (`ColonyPlan`, outposts, claims), `intel`, `expansion` |
+| `Strategy` | `fabot-strategy` | Intel, observers/scouts, `ColonyPlan` & outpost selection, expansion/abandon, operation opening & global force priority | `World`, `Derived`, `intel`, `Season`, `standing.layout`, `spare`, fight state | `declarations` (`ColonyPlan`, outposts, claims, operations), `intel`, `expansion` |
 | `Season` | `fabot-strategy` (private `season`) | Disposable seasonal rules (`worth`, `spent`, season structures/scoring) | `World` | declarations to `Strategy`, season actions |
 | `Move` | `fabot-mv` | Room-level movement arbitration (augmenting-path matching) and stepping (`plan`, `blob`) | wishes, `Atlas` | moves & held bodies (`Settled`) |
 | `Executor` | `fabot` | Turning settled actions into API calls | `Settled.actions` | `Game`, refusals |
@@ -181,7 +181,7 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
 | `fight.groups` | list of `Group` (§6.1) | Fight | Memory | hostile cluster identity across ticks |
 | `fight.casts` | pending casts by engagement | Fight | Memory | prevent double-casting while spawning |
 | `fight.due` | colonies with imminent siege successor | Fight | Memory | feeds `ColonyPlan.owes` (§5) |
-| `declarations` | operator overrides + per-tick `Strategy` plans (`ColonyPlan`, outposts, claims, flows, allies, enemies, sieges, avoid, tactic rules) | Strategy | Memory (operator); plans rebuilt per tick | world configuration as data |
+| `declarations` | operator overrides + per-tick `Strategy` plans (`ColonyPlan`, outposts, claims, operations, flows, allies, enemies, sieges, avoid, tactic rules) | Strategy | Memory (operator); plans rebuilt per tick | world configuration as data |
 | `expansion` | in-flight claim, failed rooms (100k fade), abandoned colonies | Strategy | Memory | outlives travel, stock dips, and raze ticks |
 | `switches` | module name → bool (`false` disables; `recorder: true` opts in) | Main | Memory | live kill switches |
 | `observe.*` | health, faults, per-module CPU, counts, tactic offers, alerts | Observe | segment 1 | operator telemetry & benchmark calibration |
@@ -192,7 +192,7 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
 | `metrics` | open window sums & per-creep/site/room deltas | Observe | heap | incremental tick deltas |
 | `standing.layout` | per-room layout plan & incremental drawing state + ground key | Layout | heap | rebuilds at 4 variations/tick after reset |
 | `spare` | colony → spawn ticks/life left by home slots | Economy | heap | Strategy prices outposts against it |
-| `scouts`, `preyed` | scout targets & enemy-worked rooms (stalest first) | Strategy | heap (this tick) | derived from intel for Economy & Fight |
+| `scouts` | scout targets | Strategy | heap (this tick) | derived from intel for Economy |
 | `sightings` | room → armed hostile / core id → expiry tick | World | heap | vision grace for stood-down outposts |
 | `atlas.floods` | per-room cached reverse floods (bounded per room) | Atlas | heap | reused while room weights hold |
 | `atlas.unseen` | out-of-sight room grid + the keeper posts and blind flag it was struck from | Atlas | heap | keyed by those posts, not by sight alone, so intel arriving after a cold tick strikes a keeper room pre-read blind |
@@ -396,39 +396,40 @@ with one phase machine per kind under `core/fight/kinds/`.
   haulers below refill capacity.
 
 **Kinds implemented:**
-- **`Defend`** (`kinds/defend.rs`): opened on threats in or drifting toward
-  owned/worked rooms (including enemy workers in outposts and level-0 Invader
-  cores, treated as structure-less hostiles). Phases: `Forming → Approaching →
-  Fighting → Pursuing → Disengaging → closed`. An outpost whose losses exceed
-  budget while it has lost fewer than two (`OUTPOST_LOSSES = 2`) re-forms and
-  re-prices; it closes only once ours are home and `sightings` clears (closing
-  sooner reopens on the same raid with a fresh budget and feeds it bodies). Home
-  `Defend` never disengages (falls back to `unanswered` on towers/ramparts until
-  the group is gone).
+- **`Defend`** (`kinds/defend.rs`): opened on threats in or drifting toward the
+  table's `Defend` rooms (§7.3: owned and worked; enemy workers in outposts and
+  level-0 Invader cores count, as structure-less hostiles). Phases: `Forming →
+  Approaching → Fighting → Pursuing → Disengaging → closed`. An outpost whose
+  losses exceed budget while it has lost fewer than two (`OUTPOST_LOSSES = 2`)
+  re-forms and re-prices; it closes only once ours are home and `sightings`
+  clears (closing sooner reopens on the same raid with a fresh budget and feeds
+  it bodies). Home `Defend` never disengages (falls back to `unanswered` on
+  towers/ramparts until the group is gone).
 - **`Siege`, `Raid` & `Drain`** (`kinds/siege.rs`, `kinds/raid.rs`): opened on
-  `declarations.sieges` (kept visible by observer/scout). Targets towers and
-  economy structures, least struck by charged towers first and of those highest
-  raze cost to the rival, then declaiming enemy controllers. A **`Raid`** is a
-  ranged blob (`BlobKite`) in an unbarriered room, fighting on the line enemy
-  towers fire into the heal it pools there. A **`Drain`** phase runs while
-  charged enemy towers out-strike breach heal, using **one bouncer/medic pair
-  per 5,100 bank capacity (three pairs at most, full speed on plain)** bouncing
-  across the border gate; a safe mode refuses a breach but not the border edge,
-  so a siege still opens and drains charged towers while safe mode runs if drain
-  pairs out-heal the gate volley (spending safe mode rather than letting it
-  block; otherwise safe mode stands the set off), then enters on the breach plan
-  once drain ends. If towers leave `Ignored` consecutive trips unanswered in the
-  event log (reset on any tower attack), the drain gives up and holds the edge
-  without casting more — staying open so the room does not reopen afresh. Breach
-  barrier order is derived from `Exchange` on open/events, never stored stale.
+  the table's `Siege` rows, one per `declarations.sieges` room (kept visible by
+  observer/scout). Targets towers and economy structures, least struck by
+  charged towers first and of those highest raze cost to the rival, then
+  declaiming enemy controllers. A **`Raid`** is a ranged blob (`BlobKite`) in an
+  unbarriered room, fighting on the line enemy towers fire into the heal it
+  pools there. A **`Drain`** phase runs while charged enemy towers out-strike
+  breach heal, using **one bouncer/medic pair per 5,100 bank capacity (three
+  pairs at most, full speed on plain)** bouncing across the border gate; a safe
+  mode refuses a breach but not the border edge, so a siege still opens and
+  drains charged towers while safe mode runs if drain pairs out-heal the gate
+  volley (spending safe mode rather than letting it block; otherwise safe mode
+  stands the set off), then enters on the breach plan once drain ends. If towers
+  leave `Ignored` consecutive trips unanswered in the event log (reset on any
+  tower attack), the drain gives up and holds the edge without casting more —
+  staying open so the room does not reopen afresh. Breach barrier order is
+  derived from `Exchange` on open/events, never stored stale.
 - **`Sweep`** (`kinds/sweep.rs`): one active at a time on enemy-owned/reserved/
-  worked rooms (`preyed`), priced by prey plus exposed-source harvest over a
-  hunter's life per walk tick (denial is worth as much as kills). Living sets
-  spend their life in the enemy's field, rotating onward via `atlas::onward`
-  (profitable rooms first, else stalest patrol; rooms with a tracker group still
-  in `Lost` grace are not stale so a set never walks straight back into an
-  escort it just left) rather than returning home; closes on death, safe mode,
-  or no remaining targets.
+  worked rooms (the table's `Sweep` rows, §7.3), priced by prey plus
+  exposed-source harvest over a hunter's life per walk tick (denial is worth as
+  much as kills). Living sets spend their life in the enemy's field, rotating
+  onward via `atlas::onward` (profitable rooms first, else stalest patrol; rooms
+  with a tracker group still in `Lost` grace are not stale so a set never walks
+  straight back into an escort it just left) rather than returning home; closes
+  on death, safe mode, or no remaining targets.
 
 **Planned kinds:** `Claim` (claimer + Economy pioneers), `KeeperDuty` (lair
 rotation declaring room minable), `PowerBank` (break → declare `Pickup`),
@@ -551,8 +552,14 @@ expansion, and operation priorities.
 - **Global force allocation:** engagements compete across the world by
   `Priority` (value per body asked); highest priority is staffed first, lower
   starved (§6.2). This is the world-level rule that keeps one rival striking
-  three rooms from being three independent fights over one force. Today `Defend`
-  opens on any threat to held/worked rooms with priority from room worth.
+  three rooms from being three independent fights over one force.
+- **Operations table:** `strategy::plan` writes `declarations.operations`, rows
+  of (kind, room, priority): `Defend` on each home (2) and outpost or claim (1),
+  `Siege` on each declared siege (0), `Sweep` on each preyed room, stalest seen
+  first (0), whether or not a sweep is open. `Fight` opens only on a row's room
+  and ranks by its priority, but keeps its event gate (`stirred`) and prices
+  winnability at open (`Exchange`, `drainable`): which rooms and how they rank
+  is Strategy's call, whether a set wins there is Fight's (§6.2).
 
 ## 8. Season (disposable)
 

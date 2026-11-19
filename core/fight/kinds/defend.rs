@@ -285,38 +285,18 @@ pub fn safe_mode(running: bool, homes: &[Home]) -> Option<Id> {
     }
 }
 
-pub const HOME_PRIORITY: f64 = 2.0;
-pub const OUTPOST_PRIORITY: f64 = 1.0;
-
-/// Strategy's stand-in (§7.3): a home's raid is answered before an outpost's, and a group in a targeted room is that engagement's.
 pub fn opens(
-    homes: &BTreeSet<RoomName>,
-    worked: &BTreeSet<RoomName>,
+    priority: impl Fn(RoomName) -> Option<f64>,
     armed: impl Fn(&Id) -> bool,
     time: i32,
     targeted: &BTreeSet<RoomName>,
     groups: &[Group],
 ) -> Vec<(Group, f64)> {
-    let ranked: Vec<(Group, f64)> = groups
+    let mut ranked: Vec<(Group, f64)> = groups
         .iter()
-        .filter(|g| {
-            g.last_seen == time
-                && (homes.contains(&g.room) || worked.contains(&g.room))
-                && g.members.iter().any(&armed)
-        })
-        .map(|g| {
-            (
-                g.clone(),
-                if homes.contains(&g.room) {
-                    HOME_PRIORITY
-                } else {
-                    OUTPOST_PRIORITY
-                },
-            )
-        })
+        .filter(|g| g.last_seen == time && g.members.iter().any(&armed))
+        .filter_map(|g| Some((g.clone(), priority(g.room)?)))
         .collect();
-
-    let mut ranked = ranked;
     ranked.sort_by(|(a, a_priority), (b, b_priority)| {
         b_priority
             .partial_cmp(a_priority)

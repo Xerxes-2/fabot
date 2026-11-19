@@ -61,6 +61,20 @@ pub struct Flow {
     pub stock: i32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OpKind {
+    Defend,
+    Siege,
+    Sweep,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Operation {
+    pub kind: OpKind,
+    pub room: RoomName,
+    pub priority: f64,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Declarations {
     /// The creep lifetimes of tower fire a colony's reserve holds.
@@ -78,7 +92,16 @@ pub struct Declarations {
     pub avoid: BTreeSet<RoomName>,
     /// The operator's tactic rules, per rival and room (§6.3).
     pub tactics: Vec<TacticRule>,
+    /// Strategy's rows: the rooms each fight may open on, ranked (§7.3).
+    pub operations: Vec<Operation>,
 }
+
+pub type Planned = (
+    Vec<ColonyPlan>,
+    Vec<Outpost>,
+    Option<Outpost>,
+    Vec<Operation>,
+);
 
 /// What `refuse` dropped: the rooms the engine keeps a creep out
 /// of, and the tactic rules no name answers to.
@@ -104,16 +127,26 @@ impl Declarations {
         refused
     }
 
-    pub fn planned(
-        mut self,
-        (plans, outposts, claim): (Vec<ColonyPlan>, Vec<Outpost>, Option<Outpost>),
-    ) -> Declarations {
+    pub fn planned(mut self, (plans, outposts, claim, operations): Planned) -> Declarations {
+        self.operations = operations;
         (self.claims).extend(claim.filter(|c| !self.claims.iter().any(|o| o.room == c.room)));
         let declared: BTreeSet<RoomName> = self.colonies.iter().map(|p| p.room).collect();
         (self.colonies).extend(plans.into_iter().filter(|p| !declared.contains(&p.room)));
         let declared: BTreeSet<RoomName> = self.outposts.iter().map(|o| o.room).collect();
         (self.outposts).extend(outposts.into_iter().filter(|o| !declared.contains(&o.room)));
         self
+    }
+
+    pub fn rooms(&self, kind: OpKind) -> impl Iterator<Item = RoomName> + '_ {
+        (self.operations.iter())
+            .filter(move |o| o.kind == kind)
+            .map(|o| o.room)
+    }
+
+    pub fn priority(&self, kind: OpKind, room: RoomName) -> Option<f64> {
+        (self.operations.iter())
+            .find(|o| o.kind == kind && o.room == room)
+            .map(|o| o.priority)
     }
 
     #[inline]
@@ -147,6 +180,7 @@ pub fn undeclared() -> Declarations {
         flows: Vec::new(),
         avoid: BTreeSet::new(),
         tactics: Vec::new(),
+        operations: Vec::new(),
     }
 }
 

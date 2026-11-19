@@ -44,6 +44,7 @@ export function engagements(write, at) {
         rec.dead = Math.max(rec.dead, e.lost);
         rec.rooms.add(e.room);
         for (const n of e.ours) rec.ours.add(n);
+        if (rec.ours.size) rec.drafted ??= t;
         rec.answered ||= !e.unanswered;
         rec.gaveUp ||= rec.answered && e.unanswered;
         rec.disengaged ||= e.phase === "disengaging";

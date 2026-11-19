@@ -7,7 +7,7 @@ use super::scene::{Asked, Hunting, Scene, fresh};
 use super::shape::{Cast, Engagement, FightState, Group, Objective, Phase};
 use super::{casting, tracker};
 use fabot_atlas::{self as atlas, Atlas, Context};
-use fabot_base::declarations;
+use fabot_base::declarations::{self, OpKind};
 use fabot_base::engine;
 use fabot_base::intents::{Ask, ModuleOutput, Rank};
 use fabot_base::world::{Creep, Id, Kind, Pos, RoomName, hostiles};
@@ -65,9 +65,10 @@ fn changed(e: &Engagement, events: &[tracker::Event], by_id: &BTreeMap<i32, Grou
     })
 }
 
-pub fn decide(context: &mut Context, state: &mut FightState, preyed: &[RoomName]) -> ModuleOutput {
+pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
     let world = context.world;
     let declarations = context.declarations;
+    let preyed: &[RoomName] = &declarations.rooms(OpKind::Sweep).collect::<Vec<_>>();
     let context_trace = context.trace;
     let sightings = context.sightings;
     let intel = context.intel;
@@ -334,7 +335,7 @@ pub fn decide(context: &mut Context, state: &mut FightState, preyed: &[RoomName]
             let next = match &e.objective {
                 Objective::Defend => defend::step(&scene.facts_of(e, &standing, &aging_out), e),
                 Objective::Siege(_) => {
-                    let declared = declarations.sieges.contains(&e.room);
+                    let declared = declarations.priority(OpKind::Siege, e.room).is_some();
                     let f = scene.siege_facts(e, declared, &standing, &aging_out, gates.get(&e.id));
                     siege::step(&f, e)
                 }
@@ -375,8 +376,7 @@ pub fn decide(context: &mut Context, state: &mut FightState, preyed: &[RoomName]
     let first_id = 1 + state.engagements.iter().fold(0, |most, e| most.max(e.id));
 
     let opened: Vec<(Engagement, bool)> = defend::opens(
-        &scene.homes,
-        &scene.worked,
+        |room| declarations.priority(OpKind::Defend, room),
         |id| scene.armed.contains(id),
         world.time,
         &targeted,
@@ -410,18 +410,18 @@ pub fn decide(context: &mut Context, state: &mut FightState, preyed: &[RoomName]
         .collect();
 
     let declared: Vec<(Engagement, bool)> = declarations
-        .sieges
+        .operations
         .iter()
-        .filter(|room| !besieging.contains(*room))
+        .filter(|o| o.kind == OpKind::Siege && !besieging.contains(&o.room))
         // A safe mode refuses the breach but not the edge: his towers are
         // drawn there while it runs, and the siege opens on a drain only where
         // the pairs it casts out-heal his volley on the gate.
-        .filter_map(|room| {
-            let room = scene.in_sight(*room)?;
+        .filter_map(|op| {
+            let room = scene.in_sight(op.room)?;
             let target = siege::next_target(room, None)?;
             let towers = raid::charged(room);
             if !Scene::safe(room) {
-                return Some((&room.name, target));
+                return Some((op, target));
             }
             if towers.is_empty() {
                 return None;
@@ -436,16 +436,15 @@ pub fn decide(context: &mut Context, state: &mut FightState, preyed: &[RoomName]
             watch.capacity = scene.capacity_of(&*atlas, &watch);
             // A safe mode's room opens on the drain that prices: the least his
             // towers strike a border tile is what a gate can draw at.
-            siege::drainable(room.name, watch.capacity, &towers).then_some((&room.name, target))
+            siege::drainable(room.name, watch.capacity, &towers).then_some((op, target))
         })
         .enumerate()
-        .map(|(i, (room, target))| {
+        .map(|(i, (op, target))| {
             let id = first_id + (opened.len() + i) as i32;
             let tactic = Tactic::BlobClose;
-            (
-                fresh(id, Objective::Siege(target), *room, world.time, tactic),
-                false,
-            )
+            let e = fresh(id, Objective::Siege(target), op.room, world.time, tactic);
+            let priority = op.priority;
+            (Engagement { priority, ..e }, false)
         })
         .collect();
 
@@ -456,10 +455,11 @@ pub fn decide(context: &mut Context, state: &mut FightState, preyed: &[RoomName]
         .filter(|_| !sweeping)
         .map(|room| {
             let id = first_id + (opened.len() + declared.len()) as i32;
-            (
-                fresh(id, Objective::Sweep, room, world.time, Tactic::Kite),
-                false,
-            )
+            let e = fresh(id, Objective::Sweep, room, world.time, Tactic::Kite);
+            let priority = declarations
+                .priority(OpKind::Sweep, room)
+                .unwrap_or_default();
+            (Engagement { priority, ..e }, false)
         });
 
     let committed: BTreeSet<&String> = stepped.iter().flat_map(|(e, _)| &e.ours).collect();
