@@ -496,11 +496,7 @@ pub struct EconomyState {
     pub spare: BTreeMap<RoomName, f64>,
 }
 
-pub fn decide(
-    context: &mut Context,
-    state: &mut EconomyState,
-    scouts: &[Scout],
-) -> Result<ModuleOutput, String> {
+pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout]) -> ModuleOutput {
     // `{ World with Creeps = filtered }`: a creep a fight holds is not in the
     // economy, and only the creep list differs.
     let seen: Vec<&Creep> = (context.world.creeps.iter())
@@ -733,14 +729,14 @@ pub fn decide(
     actions.extend(given_up.flat_map(super::abandon::raze));
 
     state.assignments = next;
-    Ok(ModuleOutput {
+    ModuleOutput {
         actions,
         asks,
         wishes: (wishes.into_iter())
             .flat_map(|(room, list)| list.into_iter().map(move |w| (room, w)))
             .collect(),
         telemetry,
-    })
+    }
 }
 
 /// A body with no slot walks home, where one may open, the last of equal
@@ -821,8 +817,8 @@ mod tests {
             };
 
             let mut state = EconomyState::default();
-            decide(&mut context, &mut state, &[]).expect("a world decides");
-            let out = decide(&mut context, &mut state, &[]).expect("a world decides again");
+            decide(&mut context, &mut state, &[]);
+            let out = decide(&mut context, &mut state, &[]);
 
             for (name, held) in &state.assignments {
                 assert!(!held.slot.is_empty(), "{name} {held:?}");

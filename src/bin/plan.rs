@@ -5,6 +5,9 @@
 //! `{ room, terrain, sources: [[x, y]], minerals: [[x, y]], controller: [x, y], level, ring?, labs? }`
 //! (terrain: 2500 digits, the raw buffer's), writes `[{ kind, x, y }]` in
 //! build order, the first spawn first.
+// A tool, not the bot: a panic fails the run that called it.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use std::io::Read;
 
 use fabot_core::layout::{self, sites};

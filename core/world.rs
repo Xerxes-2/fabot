@@ -87,6 +87,7 @@ impl<'de> serde::Deserialize<'de> for Id {
 
 /// A fixture's readable tag, hexed so tags keep their order.
 #[cfg(any(test, feature = "tools"))]
+#[allow(clippy::expect_used)]
 impl From<&str> for Id {
     fn from(tag: &str) -> Id {
         let hex: String = tag.bytes().map(|b| format!("{b:02x}")).collect();
@@ -740,6 +741,7 @@ impl Rules {
     }
 
     #[cfg(any(test, feature = "tools"))]
+    #[allow(clippy::unwrap_used)]
     pub fn vanilla() -> Rules {
         use screeps::StructureType;
         let built = "spawn extension link road constructedWall rampart storage tower observer \

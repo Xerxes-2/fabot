@@ -27,7 +27,7 @@ pub struct StrategyState {
     pub expansion: Expansions,
 }
 
-pub fn decide(context: &mut Context, state: &mut StrategyState) -> Result<ModuleOutput, String> {
+pub fn decide(context: &mut Context, state: &mut StrategyState) -> ModuleOutput {
     let mut preyed = intel::preyed(context.intel, context.declarations, context.world.time);
     preyed.retain(|room| context.atlas.has_terrain(*room));
     // A scout only dies where armed bodies stand, and draws them off; a
@@ -45,7 +45,7 @@ pub fn decide(context: &mut Context, state: &mut StrategyState) -> Result<Module
     scouts.retain(|s| context.declarations.sieges.contains(&s.room) || unarmed(s.room));
     state.scouts = scouts;
     state.preyed = preyed;
-    Ok(observed.into())
+    observed.into()
 }
 
 /// A rival's room this near raids within a creep life.

@@ -119,8 +119,10 @@ segments over multiple ticks (economy first); a cold tick never spends more than
   avoided, siege) are data in `declarations`, never hardcoded.
 - **Creep:** belongs to strictly one of `Fight` (`fight-` name prefix) or
   `Economy` for its entire life.
-- **Fault isolation:** per module (`Main` / `Tick` catches module faults into
-  `observe.faults` so a `Fight` fault does not stop `Economy`).
+- **No in-tick fault isolation:** wasm32 is `panic=abort`, so a panic anywhere
+  traps the instance; the bundle's `loop` starts a fresh one and that tick's
+  intents, Memory, intel and observe are lost (next tick cold). Production
+  code denies `unwrap`/`expect` (clippy) instead.
 
 ## 3. Modules
 
@@ -575,8 +577,8 @@ never bare wall-clock.
 
 Pure at module boundaries, systems Rust inside (measurements override defaults):
 
-- **In-place `State`:** modules mutate `State` in place once past fallible work
-  (`ModuleRun`), avoiding ~700 allocations/tick from per-module clones; tight
+- **In-place `State`:** modules mutate `State` in place (`ModuleRun`),
+  avoiding ~700 allocations/tick from per-module clones; tight
   per-creep/per-tile loops avoid per-tick allocations.
 - **Single-pass JS→WASM seam:** ~90% of world-read cost was seam calls rather
   than work, so `src/app/read.js` packs the tick into one `Int32Array` +
@@ -715,7 +717,7 @@ a live-sized world.
 
 - Every module sits behind a `switches` kill switch (`Fight` off leaves
   `Economy` running).
-- Per-module fault isolation logs to `observe.faults` (§2).
+- A panic costs the whole tick, never one module (§2).
 - **Deploy canary** (not built yet): keep previous bundle, compare `❓ N = 200`
   ticks of income, idle spawns, deaths, faults, and bucket, auto-revert on
   regression.

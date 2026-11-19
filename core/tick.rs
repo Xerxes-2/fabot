@@ -1,5 +1,4 @@
-/// A throw in one module costs that module this tick and nothing else
-/// (`ARCHITECTURE.md` §2). The clock is passed in to keep `decide` deterministic.
+/// The clock is passed in to keep `decide` deterministic.
 use std::collections::BTreeSet;
 
 use crate::HashMap;
@@ -8,7 +7,7 @@ use screeps::LocalRoomTerrain;
 
 use super::atlas::{Atlas, Context, Derived, Mover, derive, target_at, worked};
 use super::boost;
-use super::declarations::{Declarations, Refused, fights};
+use super::declarations::{Declarations, Refused};
 use super::engine;
 use super::grid::{self, Footprint};
 use super::intel::Intel;
@@ -23,27 +22,17 @@ use super::tiles::{self, Tile};
 use super::vocabulary::Compound;
 use super::world::{self, Id, Kind, Pos, Room, RoomName, Sightings, Structure, World};
 
-/// A module writes its rows of the state only once it cannot fault: a fault
-/// leaves the state as it found it.
-pub type ModuleRun = fn(&mut Context, &mut State) -> Result<ModuleOutput, String>;
+pub type ModuleRun = fn(&mut Context, &mut State) -> ModuleOutput;
 
 pub struct Module {
     pub name: &'static str,
     pub run: ModuleRun,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Outcome {
-    Ran,
-    Off,
-    Faulted(String),
-}
-
 #[derive(Clone, Debug)]
 pub struct Report {
     pub module: &'static str,
     pub cpu: f64,
-    pub outcome: Outcome,
 }
 
 pub struct TickResult {
@@ -54,22 +43,16 @@ pub struct TickResult {
 }
 
 fn by_room<T>(pairs: &[(RoomName, T)]) -> Vec<(RoomName, Vec<&T>)> {
-    let mut groups: HashMap<RoomName, Vec<&T>> = HashMap::default();
-    let mut rooms: Vec<RoomName> = Vec::new();
+    let mut index: HashMap<RoomName, usize> = HashMap::default();
+    let mut groups: Vec<(RoomName, Vec<&T>)> = Vec::new();
     for (room, value) in pairs {
-        let room = *room;
-        groups
-            .entry(room)
-            .or_insert_with(|| {
-                rooms.push(room);
-                Vec::new()
-            })
-            .push(value);
+        let i = *index.entry(*room).or_insert_with(|| {
+            groups.push((*room, Vec::new()));
+            groups.len() - 1
+        });
+        groups[i].1.push(value);
     }
-    rooms
-        .into_iter()
-        .map(|room| (room, groups.remove(&room).unwrap()))
-        .collect()
+    groups
 }
 
 /// Hivemind's order: the bays, which their harvesters refill, first. None
@@ -268,46 +251,23 @@ pub fn run(
             reports.push(Report {
                 module: m.name,
                 cpu: 0.0,
-                outcome: Outcome::Off,
             });
             continue;
         }
         let start = clock();
-        let (produced, outcome) = match (m.run)(context, &mut state) {
-            Ok(produced) => (produced, Outcome::Ran),
-            Err(error) => (ModuleOutput::default(), Outcome::Faulted(error)),
-        };
+        let produced = (m.run)(context, &mut state);
         reports.push(Report {
             module: m.name,
             cpu: clock() - start,
-            outcome,
         });
         asked.extend(produced);
     }
 
     let start = clock();
-
-    // A fault settling the fight's asks and wishes costs only the fight's.
-    let (settled, outcome) = if let Ok(settled) =
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| settle(context, &asked)))
-    {
-        (settled, Outcome::Ran)
-    } else {
-        asked.asks.retain(|(_, a)| a.rank != Rank::Fight);
-        asked.wishes.retain(|(_, w)| !fights(&w.creep));
-        let settled =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| settle(context, &asked)))
-                .unwrap_or_else(|_| Settled {
-                    actions: asked.actions.clone(),
-                    held: Vec::new(),
-                });
-        (settled, Outcome::Faulted("settle".to_string()))
-    };
-
+    let settled = settle(context, &asked);
     reports.push(Report {
         module: "settle",
         cpu: clock() - start,
-        outcome,
     });
 
     TickResult {

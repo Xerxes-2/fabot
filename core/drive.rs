@@ -14,7 +14,7 @@ use crate::layout::shape::Standing;
 use crate::memory::Memory;
 use crate::observe::metrics::{self, Metrics};
 use crate::tactics::Offer;
-use crate::tick::{self, Outcome};
+use crate::tick;
 use crate::world::Pos;
 use crate::world::{RoomName, Sightings, World};
 
@@ -98,12 +98,7 @@ where
         (&|room| maps.terrain(room), maps.terrains()),
     );
 
-    let mut faults: Vec<_> = (decided.result.reports.iter())
-        .filter_map(|r| match &r.outcome {
-            Outcome::Faulted(message) => Some((r.module, message.clone())),
-            _ => None,
-        })
-        .collect();
+    let mut faults = Vec::new();
     if misread > 0 {
         faults.push(("world", format!("{misread} objects' ids not hex: dropped")));
     }

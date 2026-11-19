@@ -347,9 +347,11 @@ impl Plan<'_> {
         key: impl Display,
         k: usize,
         body: Vec<Part>,
-    ) {
+    ) -> &mut Slot {
         let own = seat.room == self.derived.colonies[ci].room;
         self.out.push(Slot::new(ci, own, job, seat, key, k, body));
+        let pushed = self.out.len() - 1;
+        &mut self.out[pushed]
     }
 
     fn colony(&mut self, ci: usize, owners: &[Option<usize>], sponsors: &[Option<usize>]) {
@@ -556,8 +558,7 @@ impl Plan<'_> {
                 mined +=
                     f64::from(part_count_in(&body, Part::Work) * engine::MINERAL_HARVEST_PER_WORK)
                         / f64::from(engine::MINERAL_HARVEST_CYCLE);
-                self.push(ci, Job::Dig(m.id), post, m.id, 0, body);
-                self.out.last_mut().expect("pushed").rank = MINE;
+                self.push(ci, Job::Dig(m.id), post, m.id, 0, body).rank = MINE;
             }
         }
 
@@ -696,8 +697,7 @@ impl Plan<'_> {
                 ((upgraded - f64::from(kept * work)) / (f64::from(work) + upkeep(body))).max(0.0);
             let n = (kept + new.floor() as i32).clamp(0, most);
             for (k, &seat) in ground.buffer_seats.iter().enumerate().take(n as usize) {
-                self.push(ci, Job::Upgrade, seat, colony.room, k, body.clone());
-                let slot = self.out.last_mut().expect("pushed");
+                let slot = self.push(ci, Job::Upgrade, seat, colony.room, k, body.clone());
                 slot.spends = true;
                 if banked > 0.0 {
                     slot.rank = STOCKED;
@@ -805,8 +805,7 @@ impl Plan<'_> {
         }
         let first_far = home_carriers.max(1);
         for (k, body) in carriers.into_iter().enumerate() {
-            self.push(ci, Job::Fill, drop, colony.room, k, body);
-            let slot = self.out.last_mut().expect("pushed");
+            let slot = self.push(ci, Job::Fill, drop, colony.room, k, body);
             if let Some(j) = k.checked_sub(first_far) {
                 slot.id = format!("{outposts}{j}");
                 slot.rank = OUTPOST_HAUL;
@@ -845,8 +844,7 @@ impl Plan<'_> {
         } else {
             format!("{room}<{caster}")
         };
-        self.push(ci, Job::Work(builds), seat, &key, k, body);
-        let slot = self.out.last_mut().expect("pushed");
+        let slot = self.push(ci, Job::Work(builds), seat, &key, k, body);
         slot.rank = rank;
         slot.spends = spends;
         cost

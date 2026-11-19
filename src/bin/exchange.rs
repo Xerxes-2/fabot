@@ -4,6 +4,9 @@
 //! side `{ bodies: [{ parts, boosts, hits, x, y, invader? }], towers: [{ x, y, energy }],
 //! ramparts: [{ x, y, hits }] }` (parts head first by engine name, boosts by
 //! compound or ""), and writes `[{ id, kind, ticks, dead, hits }]`.
+// A tool, not the bot: a panic fails the run that called it.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use std::io::Read;
 
 use fabot_core::exchange::{self, Losses, Outcome, Side, Stance, Terrain, Tower, fighter};

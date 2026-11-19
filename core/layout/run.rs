@@ -45,7 +45,7 @@ pub fn decide_over(rules: &Rules, colonies: &[derive::Colony], mut budget: i32) 
     intents
 }
 
-pub fn decide(ctx: &mut Context, standing: &mut LayoutState) -> Result<ModuleOutput, String> {
+pub fn decide(ctx: &mut Context, standing: &mut LayoutState) -> ModuleOutput {
     let world = ctx.world;
     let (colonies, kept) = derive::colonies(
         world,
@@ -82,5 +82,5 @@ pub fn decide(ctx: &mut Context, standing: &mut LayoutState) -> Result<ModuleOut
     intents.extend(sites);
 
     *standing = kept;
-    Ok(intents.into())
+    intents.into()
 }

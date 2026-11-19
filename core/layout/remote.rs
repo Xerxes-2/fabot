@@ -84,11 +84,12 @@ fn place(
     }
 
     opened(taken, pending, planned, room);
-    let tile = tiles::of_pos(pos);
-    let now = pending[&room.name];
+    let (Some(open), Some(now)) = (taken.get_mut(&room.name), pending.get_mut(&room.name)) else {
+        return;
+    };
 
-    if now < SITES_IN_FLIGHT && taken.get_mut(&room.name).unwrap().insert(tile) {
-        pending.insert(room.name, now + 1);
+    if *now < SITES_IN_FLIGHT && open.insert(tiles::of_pos(pos)) {
+        *now += 1;
         *budget -= 1;
         intents.push(Action::Room(
             room.name,

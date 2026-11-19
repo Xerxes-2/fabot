@@ -1,6 +1,5 @@
-//! Invariants of the tick runner (`ARCHITECTURE.md` §2): a module's fault
-//! costs that module alone, a switched-off module does nothing, and the
-//! accounting covers every module.
+//! Invariants of the tick runner: a switched-off module does nothing, and
+//! the accounting covers every module.
 use std::cell::Cell;
 use std::collections::BTreeMap;
 
@@ -9,44 +8,25 @@ use crate::atlas::{self, Atlas, Context};
 use crate::declarations;
 use crate::intents::{Action, CreepAct, ModuleOutput};
 use crate::state::State;
-use crate::tick::{self, Module, Outcome, TickResult};
+use crate::tick::{self, Module, TickResult};
 use crate::world::World;
 
 const NAMES: [&str; 8] = ["m0", "m1", "m2", "m3", "m4", "m5", "m6", "m7"];
 
 /// Module `I` says its name once, as creep `cI`.
-fn say<const I: usize>(_: &mut Context, _: &mut State) -> Result<ModuleOutput, String> {
-    Ok(vec![Action::Creep(
+fn say<const I: usize>(_: &mut Context, _: &mut State) -> ModuleOutput {
+    vec![Action::Creep(
         format!("c{I}"),
         CreepAct::Say(NAMES[I].to_string()),
     )]
-    .into())
+    .into()
 }
 
-fn broke<const I: usize>(_: &mut Context, _: &mut State) -> Result<ModuleOutput, String> {
-    Err(format!("{} broke", NAMES[I]))
-}
+const SAYS: [tick::ModuleRun; 8] = [
+    say::<0>, say::<1>, say::<2>, say::<3>, say::<4>, say::<5>, say::<6>, say::<7>,
+];
 
-macro_rules! modules {
-    ($($i:literal)*) => {
-        fn module_of(i: usize, throws: bool) -> Module {
-            let run = match (i, throws) {
-                $(($i, false) => say::<$i>, ($i, true) => broke::<$i>,)*
-                _ => unreachable!(),
-            };
-            Module { name: NAMES[i], run }
-        }
-    };
-}
-modules!(0 1 2 3 4 5 6 7);
-
-fn throws_of(dice: &mut Dice) -> Vec<bool> {
-    (0..dice.between(0, NAMES.len() as i32))
-        .map(|_| dice.chance(2))
-        .collect()
-}
-
-fn run(throws: &[bool], state: State) -> TickResult {
+fn run(count: usize, state: State) -> TickResult {
     let world = World {
         time: 1,
         me: String::new(),
@@ -75,10 +55,11 @@ fn run(throws: &[bool], state: State) -> TickResult {
         derived: &derived,
         trace: false,
     };
-    let modules: Vec<Module> = throws
-        .iter()
-        .enumerate()
-        .map(|(i, &t)| module_of(i, t))
+    let modules: Vec<Module> = (0..count)
+        .map(|i| Module {
+            name: NAMES[i],
+            run: SAYS[i],
+        })
         .collect();
     // A clock that advances one unit a reading.
     let t = Cell::new(0.0);
@@ -101,36 +82,16 @@ fn said(intents: &[Action]) -> Vec<(String, String)> {
 }
 
 #[test]
-fn a_throw_costs_its_own_modules_intents_and_no_others() {
-    let mut dice = Dice::new(51);
-    for _ in 0..100 {
-        let throws = throws_of(&mut dice);
-        let result = run(&throws, State::default());
-        let expected: Vec<(String, String)> = throws
-            .iter()
-            .enumerate()
-            .filter(|(_, t)| !**t)
-            .map(|(i, _)| (format!("c{i}"), NAMES[i].to_string()))
-            .collect();
-        assert_eq!(said(&result.settled.actions), expected, "{throws:?}");
-    }
-}
-
-#[test]
-fn every_module_is_reported_once_in_order_faults_named_then_the_settling() {
+fn every_module_is_reported_once_in_order_then_the_settling() {
     let mut dice = Dice::new(52);
     for _ in 0..100 {
-        let throws = throws_of(&mut dice);
-        let result = run(&throws, State::default());
-        assert_eq!(result.reports.len(), throws.len() + 1);
-        assert_eq!(result.reports.last().unwrap().module, "settle");
-        for (report, (i, &t)) in result.reports.iter().zip(throws.iter().enumerate()) {
-            assert_eq!(report.module, NAMES[i]);
-            match &report.outcome {
-                Outcome::Faulted(message) => assert!(t && *message == format!("m{i} broke")),
-                Outcome::Ran => assert!(!t),
-                Outcome::Off => panic!("{} was not switched off", NAMES[i]),
-            }
+        let count = dice.between(0, NAMES.len() as i32) as usize;
+        let result = run(count, State::default());
+        assert_eq!(result.reports.len(), count + 1);
+        assert_eq!(result.reports.last().map(|r| r.module), Some("settle"));
+        for (report, name) in result.reports.iter().zip(&NAMES[..count]) {
+            assert_eq!(report.module, *name);
+            assert!(report.cpu > 0.0);
         }
     }
 }
@@ -139,15 +100,12 @@ fn every_module_is_reported_once_in_order_faults_named_then_the_settling() {
 fn a_switched_off_module_runs_nothing_and_spends_nothing() {
     let mut dice = Dice::new(53);
     for _ in 0..100 {
-        let mut throws = throws_of(&mut dice);
-        throws.truncate(NAMES.len() - 1);
-        throws.insert(0, false);
-        let off = dice.below(throws.len() as i32) as usize;
+        let count = dice.between(1, NAMES.len() as i32) as usize;
+        let off = dice.below(count as i32) as usize;
         let mut state = State::default();
         state.off.insert(NAMES[off].to_string());
-        let result = run(&throws, state);
+        let result = run(count, state);
         let report = &result.reports[off];
-        assert_eq!(report.outcome, Outcome::Off);
         assert_eq!(report.cpu, 0.0);
         assert!(
             !said(&result.settled.actions).contains(&(format!("c{off}"), NAMES[off].to_string()))

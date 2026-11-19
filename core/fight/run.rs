@@ -65,11 +65,7 @@ fn changed(e: &Engagement, events: &[tracker::Event], by_id: &BTreeMap<i32, Grou
     })
 }
 
-pub fn decide(
-    context: &mut Context,
-    state: &mut FightState,
-    preyed: &[RoomName],
-) -> Result<ModuleOutput, String> {
+pub fn decide(context: &mut Context, state: &mut FightState, preyed: &[RoomName]) -> ModuleOutput {
     let world = context.world;
     let declarations = context.declarations;
     let context_trace = context.trace;
@@ -578,5 +574,5 @@ pub fn decide(
     state.engagements.sort_by_key(|e| e.id);
     state.casts = casts;
     state.due = asked.due;
-    Ok(out)
+    out
 }

@@ -112,12 +112,10 @@ pub fn wishes(
         })
         .collect();
 
-    let index_of = |creep: &Creep| members.iter().position(|c| c.name == creep.name).unwrap();
-    let lag = |creep: &Creep| lags[index_of(creep)];
-
-    let mut ranked: Vec<&Creep> = members.to_vec();
-    ranked.sort_by_cached_key(|&c| (lag(c), c.name.as_str()));
-    let anchor = ranked[(ranked.len() - 1) / 2];
+    let mut ranked: Vec<usize> = (0..members.len()).collect();
+    ranked.sort_by_cached_key(|&i| (lags[i], members[i].name.as_str()));
+    let a = ranked[(ranked.len() - 1) / 2];
+    let anchor = members[a];
     let r = radius(members.len());
 
     let walks: Vec<Wish> = members
@@ -125,13 +123,13 @@ pub fn wishes(
         .map(|c| plan::toward(atlas, c, mover, target, weight))
         .collect();
 
-    let anchor_wish = walks[index_of(anchor)].clone();
+    let anchor_wish = walks[a].clone();
 
     // Ticks behind and out of reach of its step: one behind on terrain alone,
     // in reach, closes no faster for the anchor waiting.
-    let lagging = members.iter().any(|c| {
-        lag(c) != grid::UNREACHED
-            && lag(c) - lag(anchor) > r + 1
+    let lagging = members.iter().zip(&lags).any(|(c, &lag)| {
+        lag != grid::UNREACHED
+            && lag - lags[a] > r + 1
             && tiles::seam_range(&c.pos, &tiles::to_pos(anchor.pos.room, anchor_wish.head))
                 .is_none_or(|range| range > r + 1)
     });
@@ -158,27 +156,28 @@ pub fn wishes(
 
     // One landing first under towers fights alone, its seat beside one still
     // behind: into such a room the set steps onto the band only gathered.
-    let gathered = |creep: &Creep| -> bool {
-        members.iter().zip(&to_band).all(|(m, band)| {
-            lag(m) == grid::UNREACHED
-                || if m.pos.room == creep.pos.room {
+    let gathered = |i: usize| -> bool {
+        (members.iter().zip(&to_band).zip(&lags)).all(|((m, band), &lag)| {
+            lag == grid::UNREACHED
+                || if m.pos.room == members[i].pos.room {
                     band.is_some_and(|ticks| ticks <= step_back)
                 } else {
-                    lag(m) <= lag(creep)
+                    lag <= lags[i]
                 }
         })
     };
 
-    let fits = |creep: &Creep, tile: Tile| -> bool {
+    let fits = |i: usize, tile: Tile| -> bool {
+        let creep = members[i];
         let at = tiles::to_pos(creep.pos.room, tile);
         // Ahead of an anchor that waits, a pass closes no lag: it swaps two in front.
         (creep.name == anchor.name
-            || lag(creep) >= lag(anchor)
+            || lags[i] >= lags[a]
             || (tiles::seam_range(&at, &head).is_some_and(|range| range <= r)
                 && (!lagging || members.iter().all(|m| m.name == creep.name || m.pos != at))))
             && (!tiles::room_toward(creep.pos.room, tiles::exit_of(tile))
                 .is_some_and(|next| fortified.contains(&next))
-                || gathered(creep))
+                || gathered(i))
     };
 
     // A step into swamp falls behind: a walker sidesteps no slower than its
@@ -196,12 +195,11 @@ pub fn wishes(
     };
 
     let mut out = Vec::with_capacity(members.len());
-    for (creep, wish) in members.iter().zip(walks) {
-        let waits =
-            (creep.name == anchor.name && lagging) || !(wish.stays() || fits(creep, wish.head));
+    for (i, (creep, wish)) in members.iter().zip(walks).enumerate() {
+        let waits = (i == a && lagging) || !(wish.stays() || fits(i, wish.head));
         if waits {
             let stay = plan::stay(atlas, creep, mover.factor, weight);
-            let mut holds = |tile: Tile| fits(creep, tile) && keeps(atlas, step_back, creep, tile);
+            let mut holds = |tile: Tile| fits(i, tile) && keeps(atlas, step_back, creep, tile);
             let mut tail: Vec<Tile> = stay.tail.iter().copied().filter(|t| holds(*t)).collect();
             let regroup = stay.head != stay.at && !holds(stay.head) && !tail.is_empty();
             let head = if regroup { tail.remove(0) } else { stay.head };
@@ -211,7 +209,7 @@ pub fn wishes(
                 .tail
                 .iter()
                 .copied()
-                .filter(|tile| fits(creep, *tile) && keeps(atlas, 0, creep, *tile))
+                .filter(|tile| fits(i, *tile) && keeps(atlas, 0, creep, *tile))
                 .collect();
             out.push(Wish { tail, ..wish });
         }

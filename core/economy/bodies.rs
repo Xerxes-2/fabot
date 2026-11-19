@@ -174,8 +174,12 @@ fn upgrader_body(roads: i32, plains: i32, most: i32, capacity: i32) -> Vec<Part>
             weight: work,
             moves,
         };
-        let step = |weight| grid::step_ticks(factor, weight).expect("a MOVE");
-        let arrives = roads * step(engine::ROAD_WEIGHT) + plains * step(engine::PLAIN_WEIGHT);
+        let step = |weight| grid::step_ticks(factor, weight);
+        let (Some(road), Some(plain)) = (step(engine::ROAD_WEIGHT), step(engine::PLAIN_WEIGHT))
+        else {
+            return (work, 0.0);
+        };
+        let arrives = roads * road + plains * plain;
         let spawned = engine::SPAWN_TICKS_PER_PART * (work + 1 + moves);
         let upgrading = (engine::CREEP_LIFETIME - arrives - spawned).max(0);
         let cost = work * work_cost + carry_cost + moves * move_cost;

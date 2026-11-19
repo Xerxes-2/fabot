@@ -139,11 +139,10 @@ pub fn arbitrate_with(
 
     let reachable: Vec<i32> = (0..n)
         .map(|i| {
-            candidates[i]
-                .iter()
-                .map(|tile| order[i].value(*tile))
-                .max()
-                .unwrap()
+            let wish = &order[i];
+            (candidates[i].iter())
+                .map(|tile| wish.value(*tile))
+                .fold(wish.value(wish.at), i32::max)
         })
         .collect();
 

@@ -327,13 +327,11 @@ pub fn place(
             .iter()
             .find(|(rock, _)| item.kind == Kind::Link && tiles::range(item.tile, *rock) <= 2);
 
-        match post {
-            Some((_, None)) => None,
-            None if item.kind == Kind::Link
-                && census.seat[item.tile] > 0
-                && census.buffer.is_some_and(|(_, b)| !posted(plan, b)) =>
+        match (post, census.buffer) {
+            (Some((_, None)), _) => None,
+            (None, Some((c, b)))
+                if item.kind == Kind::Link && census.seat[item.tile] > 0 && !posted(plan, b) =>
             {
-                let (c, b) = census.buffer.unwrap();
                 let walkable = |t: Tile| census.walkable[t] > 0;
                 let open = |t: Tile| {
                     walkable(t)
@@ -351,7 +349,7 @@ pub fn place(
                     b,
                 )
             }
-            Some((_, Some((post, beside))))
+            (Some((_, Some((post, beside)))), _)
                 if closes(census, *post, item.tile)
                     || (!posted(plan, *post) && tiles::range(item.tile, *post) != 1) =>
             {

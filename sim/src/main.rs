@@ -2,6 +2,9 @@
 //! krebs's processor on our intents, `soak-step.mjs`'s files out.
 //!
 //! Usage: sim --world <world.json> --room <name> --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--follow A,B] [--npc <[[tick, room, bodies or null for a core]]>] [--ended] [--check]
+// A tool, not the bot: a panic fails the run that called it.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 mod act;
 mod driver;
 mod engaged;
