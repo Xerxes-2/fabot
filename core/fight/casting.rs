@@ -38,9 +38,7 @@ const DEFENDER: [Part; 2] = [Part::Move, Part::Attack];
 
 /// v1's `guardCap`: a home's Defend never disengages, and its loss budget,
 /// not a yield, bounds what it asks (§6.2).
-pub fn home_copies(_: &Body) -> i32 {
-    2
-}
+pub const HOME_COPIES: i32 = 2;
 
 pub fn copies_within(worth: i32, spawn_ticks: i32, body: &[Part]) -> i32 {
     (worth / engine::body_cost(body))

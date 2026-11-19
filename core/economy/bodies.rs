@@ -22,9 +22,6 @@ impl Pattern {
     pub fn is_upgrader(self) -> bool {
         self == Pattern::Upgrader
     }
-    pub fn is_claimer(self) -> bool {
-        self == Pattern::Claimer
-    }
     pub fn is_scout(self) -> bool {
         self == Pattern::Scout
     }
@@ -63,15 +60,6 @@ pub fn block_of(pattern: Pattern) -> &'static [Part] {
         Pattern::Upgrader => &UPGRADER,
         Pattern::Claimer => &CLAIMER,
         Pattern::Scout => &[Part::Move],
-    }
-}
-
-pub fn key_part_of(pattern: Pattern) -> Part {
-    match pattern {
-        Pattern::Worker | Pattern::Harvester | Pattern::Upgrader => Part::Work,
-        Pattern::Hauler => Part::Carry,
-        Pattern::Claimer => Part::Claim,
-        Pattern::Scout => Part::Move,
     }
 }
 
@@ -317,13 +305,6 @@ pub fn upgradable_at(level: i32) -> i32 {
     } else {
         i32::MAX
     }
-}
-
-/// A tick of what `n` upgraders of the body are hired at: their drink, as much
-/// as the controller takes, and their cost over a life.
-pub fn upgrader_hire(upgradable: i32, n: i32, body: &[Part]) -> f64 {
-    f64::from(upgradable.min(n * part_count_in(body, Part::Work) * engine::UPGRADE_DRAIN_PER_WORK))
-        + f64::from(n * engine::body_cost(body)) / f64::from(engine::CREEP_LIFETIME)
 }
 
 /// For a seat in the casting colony's own room, which it walks once: legs

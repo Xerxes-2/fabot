@@ -9,7 +9,7 @@ use screeps::LocalRoomTerrain;
 use super::atlas::{Atlas, Mover, Target, Tree};
 use super::engine;
 use super::grid::{self, Footprint};
-use super::intents::{Ask, CreepAct, Intent, SpawnAct};
+use super::intents::{Ask, CreepAct, Intent, Rank, SpawnAct};
 use super::mv;
 use super::state::State;
 use super::strategy::{
@@ -540,12 +540,12 @@ pub fn queue(world: &World, asks: &[(RoomName, &Ask)]) -> Vec<Intent> {
         let mut bank = r.energy_available;
         let mut held = false;
         for a in &asks {
-            if held && a.rank.is_economy() {
+            if held && a.rank == Rank::Economy {
                 break;
             }
             let cost = engine::body_cost(&a.body);
             if cost > bank {
-                held = held || (a.rank.is_fight() && cost <= r.energy_capacity);
+                held = held || (a.rank == Rank::Fight && cost <= r.energy_capacity);
                 continue;
             }
             let Some(spawn) = idle.next() else {
@@ -671,7 +671,7 @@ pub fn run(
     // A fault settling the fight's asks and wishes costs only the fight's.
     let is_fight = |i: &Intent| -> bool {
         match i {
-            Intent::Queue(_, ask) => ask.rank.is_fight(),
+            Intent::Queue(_, ask) => ask.rank == Rank::Fight,
             Intent::Wish(_, wish) => fights(&wish.creep),
             _ => false,
         }

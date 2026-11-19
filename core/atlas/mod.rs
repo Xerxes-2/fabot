@@ -342,7 +342,10 @@ impl Field {
     /// Out of a strike a body stands in, the shortest way across struck
     /// tiles, never deeper, onto the open tile nearest the goal.
     fn escape(&self, from: Tile) -> Option<i32> {
-        let struck = self.struck.as_ref().filter(|_| self.footprint.is_one())?;
+        let struck = self
+            .struck
+            .as_ref()
+            .filter(|_| self.footprint == Footprint::One)?;
         let mut seen = TileSet::default();
         seen.insert(from);
         let mut met = vec![(from, 0)];
@@ -1058,9 +1061,8 @@ impl Atlas {
         target: &Target,
         danger: Option<&TileSet>,
     ) -> Rc<Table<i32>> {
-        let sorted = |t: &[Tile]| t.is_sorted_by(|a, b| a < b);
         let mut owned = Vec::new();
-        let tiles = if sorted(&target.tiles) {
+        let tiles = if target.tiles.is_sorted_by(|a, b| a < b) {
             &target.tiles
         } else {
             owned.extend_from_slice(&target.tiles);

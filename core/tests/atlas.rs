@@ -185,7 +185,7 @@ fn target_of(room: RoomName, walk: &Walk) -> Target {
 
 /// Chebyshev range from what a footprint anchored at `anchor` covers to `tile`.
 fn reach(footprint: Footprint, anchor: Tile, tile: Tile) -> i32 {
-    let span = i32::from(footprint.is_quad());
+    let span = i32::from(footprint == Footprint::Quad);
     let gap = |a: i32, t: i32| 0.max((a - t).max(t - a - span));
     gap(tiles::x_of(anchor), tiles::x_of(tile)).max(gap(tiles::y_of(anchor), tiles::y_of(tile)))
 }

@@ -450,10 +450,6 @@ pub fn dug_at(capacity: i32, home: bool, rate: i32, posted: bool, seats: Option<
 /// Ten decay periods: the margin every bot keeps against losing a rampart.
 pub const RAMPART_SAFE: i32 = 10 * engine::RAMPART_DECAY_AMOUNT;
 
-fn swamp(room: &Room, pos: &Pos) -> bool {
-    terrain::is_swamp(room.terrain, pos.x, pos.y)
-}
-
 /// What keeping `s` standing costs, where it is below the hits we hold it at.
 fn repair_of(room: &Room, wall: i32, owned_room: bool, s: &Structure) -> Option<RepairFact> {
     let per = |amount: i32, time: i32| f64::from(amount) / f64::from(time);
@@ -465,7 +461,7 @@ fn repair_of(room: &Room, wall: i32, owned_room: bool, s: &Structure) -> Option<
             0,
         ),
         Kind::Road => {
-            let ratio = if swamp(room, &s.pos) {
+            let ratio = if terrain::is_swamp(room.terrain, s.pos.x, s.pos.y) {
                 engine::ROAD_SWAMP_RATIO
             } else {
                 1

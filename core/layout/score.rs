@@ -1,12 +1,12 @@
 //! Hivemind's variation generator and plan scorer (MIT, © David Franke): the
 //! room centres and harvest-bay spawns it tries, and how it picks one.
-use crate::tiles::{self, Tile};
+use crate::tiles::{self, Tile, index};
 use crate::world::Rules;
 
 use super::build::{self, Built, Variation};
 use super::ground::Ground;
 use super::path::{Goal, Search};
-use super::place::{BLOCKED, Labels, ROAD, SWAMP, WALL, at, xy};
+use super::place::{BLOCKED, Labels, ROAD, SWAMP, WALL, xy};
 
 /// `varyRoomCenter` then `varySourceSpawns`, in Hivemind's key order.
 pub fn variations(ground: &Ground, walls: &[u8], exits: &[u8]) -> Vec<Variation> {
@@ -16,7 +16,7 @@ pub fn variations(ground: &Ground, walls: &[u8], exits: &[u8]) -> Vec<Variation>
     let mut cores: Vec<Tile> = Vec::new();
     for x in 0..50 {
         for y in 0..50 {
-            let t = at(x, y);
+            let t = index(x, y);
             if ground.terrain[t.index()] & WALL == 0
                 && (3..255).contains(&walls[t.index()])
                 && exits[t.index()] > 8
@@ -35,7 +35,7 @@ pub fn variations(ground: &Ground, walls: &[u8], exits: &[u8]) -> Vec<Variation>
         cx += tiles::x_of(t);
         cy += tiles::y_of(t);
     }
-    let mid = at(cx.div_euclid(count), cy.div_euclid(count));
+    let mid = index(cx.div_euclid(count), cy.div_euclid(count));
     let Some(weighted) = (cores.iter().copied()).min_by_key(|t| tiles::range(*t, mid)) else {
         return Vec::new();
     };

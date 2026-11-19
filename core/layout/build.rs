@@ -1,11 +1,11 @@
 //! Hivemind's room variation builder and its tower step (MIT, © David
 //! Franke), step for step: one variation's plan, as labels.
-use crate::tiles::{self, Tile};
+use crate::tiles::{self, Tile, index};
 use crate::world::Rules;
 
 use super::cut::{self, Rect};
 use super::ground::Ground;
-use super::place::{BLOCKED, Labels, Manager, ROAD, SWAMP, WALL, area, at, xy};
+use super::place::{BLOCKED, Labels, Manager, ROAD, SWAMP, WALL, area, xy};
 use super::score::effect;
 
 const ENDANGERED: u8 = 0;
@@ -34,7 +34,7 @@ const DECORATIVE: [[u8; 12]; 14] = [
 
 /// Hivemind's room intel on one side: a side with no exit tile is safe.
 pub fn safe_sides(terrain: &[u8]) -> [bool; 4] {
-    let open = |x: i32, y: i32| terrain[at(x, y).index()] & WALL == 0;
+    let open = |x: i32, y: i32| terrain[index(x, y).index()] & WALL == 0;
     let any = |f: &dyn Fn(i32) -> bool| (1..49).any(f);
     [
         !any(&|i| open(i, 0)),
@@ -46,7 +46,7 @@ pub fn safe_sides(terrain: &[u8]) -> [bool; 4] {
 
 /// `getExitCenters`, by side N, S, W, E.
 pub fn exit_centers(terrain: &[u8]) -> Vec<Tile> {
-    let open = |x: i32, y: i32| terrain[at(x, y).index()] & WALL == 0;
+    let open = |x: i32, y: i32| terrain[index(x, y).index()] & WALL == 0;
     let mut centers = Vec::new();
     let sides: [&dyn Fn(i32) -> (i32, i32); 4] =
         [&|i| (i, 0), &|i| (i, 49), &|i| (0, i), &|i| (49, i)];
@@ -56,7 +56,7 @@ pub fn exit_centers(terrain: &[u8]) -> Vec<Tile> {
         let mut prev: Option<(i32, i32)> = None;
         let mid = |a: (i32, i32), b: (i32, i32)| {
             let half = |p: i32, q: i32| (p + q + 1).div_euclid(2);
-            at(half(a.0, b.0), half(a.1, b.1))
+            index(half(a.0, b.0), half(a.1, b.1))
         };
         for c in coords {
             let s = *start.get_or_insert(c);
@@ -136,7 +136,7 @@ impl Builder<'_> {
             let mut found = None;
             area(rx, ry, 1, |x, y| {
                 if self.m.buildable(x, y, false, true) {
-                    found = Some(at(x, y));
+                    found = Some(index(x, y));
                 }
                 found.is_none()
             });
@@ -156,7 +156,7 @@ impl Builder<'_> {
                         true
                     });
                     if best.is_none_or(|(_, f)| f < free) {
-                        best = Some((at(x, y), free));
+                        best = Some((index(x, y), free));
                     }
                 }
                 true
@@ -201,7 +201,7 @@ impl Builder<'_> {
     fn spots(&self, x: i32, y: i32, controller: Tile) -> i32 {
         let mut n = 0;
         area(x, y, 1, |x2, y2| {
-            n += i32::from(!self.m.wall(x2, y2) && tiles::range(controller, at(x2, y2)) <= 3);
+            n += i32::from(!self.m.wall(x2, y2) && tiles::range(controller, index(x2, y2)) <= 3);
             true
         });
         n
@@ -219,8 +219,8 @@ impl Builder<'_> {
             if spots < 3 {
                 return true;
             }
-            let mut path = vec![at(x, y)];
-            path.extend(self.m.road(at(x, y), &self.entrances, false));
+            let mut path = vec![index(x, y)];
+            path.extend(self.m.road(index(x, y), &self.entrances, false));
             let score = path.len() as f64 - f64::from(spots) * 1.1;
             if best.as_ref().is_none_or(|(_, s)| *s > score) {
                 best = Some((path, score));
@@ -246,11 +246,11 @@ impl Builder<'_> {
         area(ux, uy, 1, |x, y| {
             if self.m.buildable(x, y, false, true) {
                 let mut score = f64::from(self.spots(x, y, controller) - 1);
-                if tiles::range(controller, at(x, y)) > 3 {
+                if tiles::range(controller, index(x, y)) > 3 {
                     score += 1.5;
                 }
                 if link.is_none_or(|(_, s)| s < score) {
-                    link = Some((at(x, y), score));
+                    link = Some((index(x, y), score));
                 }
             }
             true
@@ -263,9 +263,9 @@ impl Builder<'_> {
 
         let (kx, ky) = xy(container);
         area(kx, ky, 1, |x, y| {
-            if self.m.buildable(x, y, false, true) && self.m.terrain[at(x, y).index()] == SWAMP {
-                self.m.plan_at(at(x, y), "road", Some(ROAD));
-                self.m.plan_at(at(x, y), "road.controller", None);
+            if self.m.buildable(x, y, false, true) && self.m.terrain[index(x, y).index()] == SWAMP {
+                self.m.plan_at(index(x, y), "road", Some(ROAD));
+                self.m.plan_at(index(x, y), "road.controller", None);
             }
             true
         });
@@ -294,13 +294,13 @@ impl Builder<'_> {
             (1, -1),
             (1, 1),
         ] {
-            self.m.plan_at(at(cx + dx, cy + dy), "road", Some(ROAD));
+            self.m.plan_at(index(cx + dx, cy + dy), "road", Some(ROAD));
         }
-        self.m.place(at(cx, cy + 1), "storage");
-        self.m.place(at(cx, cy - 1), "terminal");
-        self.m.place(at(cx + 1, cy), "factory");
-        self.m.place(at(cx - 1, cy), "link");
-        self.m.place(at(cx - 1, cy), "link.storage");
+        self.m.place(index(cx, cy + 1), "storage");
+        self.m.place(index(cx, cy - 1), "terminal");
+        self.m.place(index(cx + 1, cy), "factory");
+        self.m.place(index(cx - 1, cy), "link");
+        self.m.place(index(cx - 1, cy), "link.storage");
     }
 
     fn bay(&mut self, bay: Tile, spawn: bool, source: bool, id: Option<usize>) {
@@ -316,12 +316,12 @@ impl Builder<'_> {
                 }
                 let mut placed = false;
                 area(x, y, 1, |x2, y2| {
-                    if (x2, y2) == (bx, by) || !self.m.plan.has("road", at(x2, y2)) {
+                    if (x2, y2) == (bx, by) || !self.m.plan.has("road", index(x2, y2)) {
                         return true;
                     }
                     let n = self.m.plan.count("spawn");
-                    self.m.place(at(x, y), &format!("spawn.{n}"));
-                    self.m.place(at(x, y), "spawn");
+                    self.m.place(index(x, y), &format!("spawn.{n}"));
+                    self.m.place(index(x, y), "spawn");
                     placed = true;
                     false
                 });
@@ -335,7 +335,7 @@ impl Builder<'_> {
             {
                 return true;
             }
-            let t = at(x, y);
+            let t = index(x, y);
             if linked {
                 self.m.place(t, "extension");
                 if source {
@@ -415,20 +415,20 @@ impl Builder<'_> {
                 if !fits {
                     continue;
                 }
-                self.m.plan_at(at(x, y), "road", Some(ROAD));
+                self.m.plan_at(index(x, y), "road", Some(ROAD));
                 for (lx, ly) in [(x + dx, y), (x, y + dy)] {
-                    self.m.place(at(lx, ly), "lab");
-                    self.m.place(at(lx, ly), "lab.reaction");
+                    self.m.place(index(lx, ly), "lab");
+                    self.m.place(index(lx, ly), "lab.reaction");
                 }
-                self.m.plan_at(at(x + dx, y + dy), "road", Some(ROAD));
+                self.m.plan_at(index(x + dx, y + dy), "road", Some(ROAD));
                 self.m.access_road(next);
                 for (lx, ly) in around {
                     if !self.more("lab") {
                         break;
                     }
                     if free(&self.m, (lx, ly)) {
-                        self.m.place(at(lx, ly), "lab");
-                        self.m.place(at(lx, ly), "lab.reaction");
+                        self.m.place(index(lx, ly), "lab");
+                        self.m.place(index(lx, ly), "lab.reaction");
                     }
                 }
                 break;
@@ -507,7 +507,7 @@ impl Builder<'_> {
             }
         }
         let terrain = self.m.terrain;
-        let wall = |x: i32, y: i32| terrain[at(x, y).index()] & WALL != 0;
+        let wall = |x: i32, y: i32| terrain[index(x, y).index()] & WALL != 0;
         let cut = cut::tiles_of(&wall, &self.rects, safe);
         self.prune(&cut, center, controller, safe);
         for (t, walked) in self.walls.clone() {
@@ -531,7 +531,7 @@ impl Builder<'_> {
         // protected tile no walk from the core reaches, as one behind a wall.
         let mut kept = Vec::new();
         for r in &self.rects {
-            for t in (r.x1..=r.x2).flat_map(|x| (r.y1..=r.y2).map(move |y| at(x, y))) {
+            for t in (r.x1..=r.x2).flat_map(|x| (r.y1..=r.y2).map(move |y| index(x, y))) {
                 match cut.iter().position(|c| *c == t) {
                     Some(w) => relevant[w] = true,
                     None if self.m.terrain[t.index()] & WALL == 0 => kept.push(t),
@@ -549,12 +549,12 @@ impl Builder<'_> {
             *r |= w;
         }
 
-        let open = |x: i32, y: i32| self.m.terrain[at(x, y).index()] & WALL == 0;
+        let open = |x: i32, y: i32| self.m.terrain[index(x, y).index()] & WALL == 0;
         let mut exits = Vec::new();
         for i in 0..50 {
             for (side, x, y) in [(3, 0, i), (1, 49, i), (0, i, 0), (2, i, 49)] {
                 if open(x, y) && !safe[side] {
-                    exits.push(at(x, y));
+                    exits.push(index(x, y));
                 }
             }
         }
@@ -566,9 +566,9 @@ impl Builder<'_> {
 
         for x in 0..50 {
             for y in 0..50 {
-                if self.safety[at(x, y).index()] == UNSAFE {
+                if self.safety[index(x, y).index()] == UNSAFE {
                     area(x, y, 3, |ax, ay| {
-                        let s = &mut self.safety[at(ax, ay).index()];
+                        let s = &mut self.safety[index(ax, ay).index()];
                         if *s == SAFE {
                             *s = ENDANGERED;
                         }
@@ -608,7 +608,7 @@ impl Builder<'_> {
             closed[t.index()] = true;
             let (x, y) = xy(t);
             area(x, y, 1, |nx, ny| {
-                let n = at(nx, ny);
+                let n = index(nx, ny);
                 if n == t || !(1..=48).contains(&nx) || !(1..=48).contains(&ny) {
                     return true;
                 }
@@ -634,7 +634,7 @@ impl Builder<'_> {
         for r in self.m.plan.of("rampart") {
             let (rx, ry) = xy(r);
             area(rx, ry, 3, |x, y| {
-                let t = at(x, y);
+                let t = index(x, y);
                 if self.safety[t.index()] != UNSAFE || self.m.wall(x, y) {
                     return true;
                 }
@@ -646,7 +646,7 @@ impl Builder<'_> {
                     return true;
                 }
                 let near = [(-1, 0), (1, 0), (0, -1), (0, 1)].iter().any(|(dx, dy)| {
-                    let n = at(x + dx, y + dy);
+                    let n = index(x + dx, y + dy);
                     self.m.plan.has("road", n) && !self.m.plan.has("road.rampart", n)
                 });
                 if near || (x + y) % 2 != 0 {
@@ -661,7 +661,7 @@ impl Builder<'_> {
     fn decorative(&mut self) {
         for x in 1..49 {
             for y in 1..49 {
-                let t = at(x, y);
+                let t = index(x, y);
                 if DECORATIVE[(y % 14) as usize][(x % 12) as usize] == 0
                     || self.safety[t.index()] != UNSAFE
                     || self.m.exit_distance(x, y) < 3
@@ -679,7 +679,7 @@ impl Builder<'_> {
     fn seal(&mut self) {
         for x in 1..49 {
             for y in 1..49 {
-                let t = at(x, y);
+                let t = index(x, y);
                 if self.m.wall(x, y) {
                     self.m.block(t);
                 } else if self.safety[t.index()] == SAFE {
@@ -696,9 +696,10 @@ impl Builder<'_> {
         if !safe.iter().all(|s| *s) {
             for x in 1..49 {
                 for y in 1..49 {
-                    if self.m.buildable(x, y, false, false) && self.safety[at(x, y).index()] == SAFE
+                    if self.m.buildable(x, y, false, false)
+                        && self.safety[index(x, y).index()] == SAFE
                     {
-                        positions.push((at(x, y), 0.0));
+                        positions.push((index(x, y), 0.0));
                     }
                 }
             }
@@ -824,7 +825,7 @@ impl Builder<'_> {
         for r in self.m.plan.of("rampart") {
             let (rx, ry) = xy(r);
             area(rx, ry, 3, |x, y| {
-                let t = at(x, y);
+                let t = index(x, y);
                 if self.safety[t.index()] == ENDANGERED
                     && !self.m.wall(x, y)
                     && (self.m.plan.has("road", t) || self.m.plan.has("road.toRampart", t))
@@ -861,10 +862,10 @@ pub fn build(rules: &Rules, ground: &Ground, dist: (&[u8], &[u8]), v: &Variation
     let center = v.center;
     let (cx, cy) = xy(center);
     b.entrances = vec![
-        at(cx + 2, cy),
-        at(cx - 2, cy),
-        at(cx, cy + 2),
-        at(cx, cy - 2),
+        index(cx + 2, cy),
+        index(cx - 2, cy),
+        index(cx, cy + 2),
+        index(cx, cy - 2),
     ];
     b.m.plan_at(center, "center", None);
     b.harvesters()?;

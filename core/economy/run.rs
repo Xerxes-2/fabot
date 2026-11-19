@@ -425,7 +425,7 @@ fn work(
     // The engine withdraws before it upgrades, so the draw tops up the spend.
     if let Some(b) = beside
         && let Some(id) = b.id.object()
-        && task.is_upgrade()
+        && matches!(task, Task::Upgrade(_))
         && body.free > 0
         && body.energy < body.work * engine::UPGRADE_DRAIN_PER_WORK
     {

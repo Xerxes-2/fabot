@@ -150,10 +150,6 @@ impl Task {
         )
     }
 
-    pub fn is_upgrade(&self) -> bool {
-        matches!(self, Task::Upgrade(_))
-    }
-
     pub fn range_of(&self) -> i32 {
         match self {
             Task::Build(_) | Task::Repair(_) | Task::Upgrade(_) => RANGE_UPGRADE,

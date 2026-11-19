@@ -761,7 +761,7 @@ impl<'a> Scene<'a> {
                         tick_worth,
                     )
                 }
-                _ => (Box::new(casting::home_copies), 0),
+                _ => (Box::new(|_: &casting::Body| casting::HOME_COPIES), 0),
             };
 
         let mut ours_now: Vec<Fighter> = bodies.clone();

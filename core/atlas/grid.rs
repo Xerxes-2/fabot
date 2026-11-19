@@ -20,15 +20,6 @@ pub enum Footprint {
     Quad,
 }
 
-impl Footprint {
-    pub fn is_one(self) -> bool {
-        self == Footprint::One
-    }
-    pub fn is_quad(self) -> bool {
-        self == Footprint::Quad
-    }
-}
-
 /// MOVE pays off two fatigue a tick, at its boost's multiple.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct FatigueFactor {

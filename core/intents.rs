@@ -120,15 +120,6 @@ pub enum Rank {
     Economy,
 }
 
-impl Rank {
-    pub fn is_fight(self) -> bool {
-        self == Rank::Fight
-    }
-    pub fn is_economy(self) -> bool {
-        self == Rank::Economy
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Ask {
     pub body: Vec<Part>,

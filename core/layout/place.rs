@@ -3,7 +3,7 @@
 //! as its plan's integer keys are.
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::tiles::{self, Tile};
+use crate::tiles::{self, Tile, index};
 
 use super::path::{Goal, Search};
 
@@ -74,22 +74,18 @@ pub fn area(x: i32, y: i32, range: i32, mut f: impl FnMut(i32, i32) -> bool) {
     }
 }
 
-pub fn at(x: i32, y: i32) -> Tile {
-    tiles::index(x, y)
-}
-
 pub fn xy(t: Tile) -> (i32, i32) {
     (tiles::x_of(t), tiles::y_of(t))
 }
 
 /// The wall and exit distance matrices (`RoomPlanMatrixGenerator`).
 pub fn distances(terrain: &[u8]) -> (Vec<u8>, Vec<u8>) {
-    let wall = |x: i32, y: i32| terrain[at(x, y).index()] & WALL != 0;
+    let wall = |x: i32, y: i32| terrain[index(x, y).index()] & WALL != 0;
     let mut walls = vec![0u8; tiles::COUNT];
     let mut exits = vec![0u8; tiles::COUNT];
     for x in 0..50 {
         for y in 0..50 {
-            let t = at(x, y).index();
+            let t = index(x, y).index();
             if wall(x, y) {
                 walls[t] = 255;
                 exits[t] = 255;
@@ -112,13 +108,13 @@ pub fn distances(terrain: &[u8]) -> (Vec<u8>, Vec<u8>) {
             let mut changed = false;
             for x in 0..50 {
                 for y in 0..50 {
-                    let t = at(x, y).index();
+                    let t = index(x, y).index();
                     if m[t] != 0 {
                         continue;
                     }
                     let mut found = false;
                     area(x, y, 1, |ax, ay| {
-                        found = m[at(ax, ay).index()] == d;
+                        found = m[index(ax, ay).index()] == d;
                         !found
                     });
                     if found {
@@ -189,7 +185,7 @@ impl<'a> Manager<'a> {
             terrain,
             walls,
             exits,
-            origin: at(0, 0),
+            origin: index(0, 0),
             entrances: Vec::new(),
             spots: Vec::new(),
             open: vec![None; tiles::COUNT],
@@ -200,11 +196,11 @@ impl<'a> Manager<'a> {
     }
 
     pub fn wall(&self, x: i32, y: i32) -> bool {
-        self.terrain[at(x, y).index()] & WALL != 0
+        self.terrain[index(x, y).index()] & WALL != 0
     }
 
     pub fn exit_distance(&self, x: i32, y: i32) -> u8 {
-        self.exits[at(x, y).index()]
+        self.exits[index(x, y).index()]
     }
 
     /// `cost` None is Hivemind's `null`: the matrix is left as it is.
@@ -222,7 +218,7 @@ impl<'a> Manager<'a> {
     }
 
     pub fn discourage(&mut self, x: i32, y: i32) {
-        let m = &mut self.matrix[at(x, y).index()];
+        let m = &mut self.matrix[index(x, y).index()];
         if *m < DISCOURAGED && *m != ROAD {
             *m = DISCOURAGED;
         }
@@ -233,7 +229,7 @@ impl<'a> Manager<'a> {
     }
 
     pub fn blocked(&self, x: i32, y: i32) -> bool {
-        self.matrix[at(x, y).index()] >= 100
+        self.matrix[index(x, y).index()] >= 100
     }
 
     pub fn buildable(&self, x: i32, y: i32, roads: bool, near_exit: bool) -> bool {
@@ -243,11 +239,11 @@ impl<'a> Manager<'a> {
         if self.exit_distance(x, y) <= if near_exit { 2 } else { 5 } {
             return false;
         }
-        let m = self.matrix[at(x, y).index()];
+        let m = self.matrix[index(x, y).index()];
         if m > 100 {
             return false;
         }
-        if m == DISCOURAGED && self.walls[at(x, y).index()] <= 2 {
+        if m == DISCOURAGED && self.walls[index(x, y).index()] <= 2 {
             return true;
         }
         m <= 1 && (m != ROAD || roads)
@@ -300,7 +296,7 @@ impl<'a> Manager<'a> {
             let mut found: Vec<Tile> = Vec::new();
             area(x, y, 1, |nx, ny| {
                 if (nx, ny) != (x, y) && self.buildable(nx, ny, true, false) {
-                    found.push(at(nx, ny));
+                    found.push(index(nx, ny));
                 }
                 true
             });
