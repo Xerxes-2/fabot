@@ -796,7 +796,8 @@ mod tests {
             let mut declarations = tick::undeclared();
             declarations.outposts = g.worked.clone();
             declarations.claims = g.claims.clone();
-            let derived = tick::derive(&g.world, &mut atlas, &declarations, &sightings);
+            let mut derived = tick::derive(&g.world, &mut atlas);
+            derived.worked = tick::worked(&g.world, &sightings, &declarations, &derived);
 
             let mut context = Context {
                 world: &g.world,

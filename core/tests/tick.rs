@@ -63,7 +63,7 @@ fn run(throws: &[bool], state: State) -> TickResult {
     let mut atlas = Atlas::of_world(&world);
     let declarations = tick::undeclared();
     let sightings = BTreeMap::new();
-    let derived = tick::derive(&world, &mut atlas, &declarations, &sightings);
+    let derived = tick::derive(&world, &mut atlas);
     let mut context = Context {
         world: &world,
         atlas: &mut atlas,

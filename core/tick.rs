@@ -380,12 +380,7 @@ fn danger(world: &World, owned: &BTreeSet<RoomName>) -> Vec<(RoomName, TileSet)>
         .collect()
 }
 
-pub fn derive(
-    world: &World,
-    atlas: &mut Atlas,
-    declarations: &Declarations,
-    sightings: &Sightings,
-) -> Derived {
+pub fn derive(world: &World, atlas: &mut Atlas) -> Derived {
     let owned = hostiles::owned(&world.rooms);
     let spawned = |room: RoomName| world.spawns.iter().any(|s| s.pos.room == room);
     let colonies: Vec<RoomName> = (world.rooms.iter())
@@ -396,16 +391,14 @@ pub fn derive(
     let trees: Vec<(RoomName, Tree)> = (colonies.iter())
         .map(|home| (*home, atlas.tree(&BTreeSet::new(), REACH_HOPS, *home)))
         .collect();
-    let mut derived = Derived {
+    Derived {
         danger: danger(world, &owned),
         capped: owned.len() as i32 >= world.rooms_allowed,
         owned,
         colonies,
         worked: Vec::new(),
         trees,
-    };
-    derived.worked = worked(world, sightings, declarations, &derived);
-    derived
+    }
 }
 
 pub fn worked(
@@ -744,7 +737,7 @@ pub fn decide<'t>(
     phases.push(("atlas".to_string(), clock() - start));
 
     let start = clock();
-    let mut derived = derive(world, &mut atlas, &declarations, &sightings);
+    let mut derived = derive(world, &mut atlas);
     phases.push(("derive".to_string(), clock() - start));
     let plans = strategy::plan(
         world,
