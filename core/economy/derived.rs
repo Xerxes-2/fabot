@@ -1157,17 +1157,12 @@ fn ovens_of(world: &World) -> Vec<Body> {
                 .as_ref()
                 .filter(|oven| !tick::fights(&oven.name))
                 .map(|oven| {
-                    let life = if oven.body.iter().any(|p| p.kind == Part::Claim) {
-                        engine::CLAIM_LIFETIME
-                    } else {
-                        engine::CREEP_LIFETIME
-                    };
                     body_of(
                         (None, &oven.name),
                         &s.pos,
                         &oven.body,
                         &Store::empty(),
-                        life,
+                        engine::lifetime(oven.body.iter().map(|p| p.kind)),
                     )
                 })
         })

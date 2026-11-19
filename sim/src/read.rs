@@ -116,6 +116,7 @@ impl Reader<'_> {
             fatigue: num(o, atom!("fatigue")) as i32,
             store: Reader::store(o),
         }
+        .clocked()
     }
 
     fn controller(&self, room: RoomName, o: &Obj) -> Controller {
@@ -295,11 +296,8 @@ pub fn world(v: &View, declarations: &Declarations) -> World<'static> {
                 }),
                 "tombstone" => room.remains.push(r.remains(name, o, true)),
                 "ruin" => room.remains.push(r.remains(name, o, false)),
-                "creep" if ours(o) => {
-                    if o.get(Atom::intern("spawning")) != Some(&Val::Bool(true)) {
-                        world.creeps.push(r.creep(name, o));
-                    }
-                }
+                "creep" if o.get(Atom::intern("spawning")) == Some(&Val::Bool(true)) => {}
+                "creep" if ours(o) => world.creeps.push(r.creep(name, o)),
                 "creep" => room.others.push(r.creep(name, o)),
                 "flag" | "powerCreep" | "nuke" => {}
                 kind => {

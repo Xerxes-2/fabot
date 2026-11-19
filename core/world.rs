@@ -672,7 +672,6 @@ pub struct Creep {
     pub body: Vec<BodyPart>,
     pub hits: i32,
     pub hits_max: i32,
-    /// Undefined while spawning; those are not in the world.
     pub ticks_to_live: i32,
     pub fatigue: i32,
     pub store: Store,
@@ -929,6 +928,7 @@ pub mod read {
                 fatigue: self.n(),
                 store: self.store(),
             }
+            .clocked()
         }
 
         fn controller(&mut self) -> Controller {
@@ -1361,6 +1361,15 @@ pub mod sightings {
 }
 
 impl Creep {
+    /// The engine starts a creep's clock on its first tick out: none reads while
+    /// it spawns, nor on an NPC's first tick, and its whole life is ahead.
+    pub fn clocked(mut self) -> Self {
+        if self.ticks_to_live <= 0 {
+            self.ticks_to_live = engine::lifetime(self.body.iter().map(|p| p.kind));
+        }
+        self
+    }
+
     pub fn is_ours(&self) -> bool {
         self.owner.is_ours()
     }

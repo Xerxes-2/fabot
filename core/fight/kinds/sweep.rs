@@ -38,16 +38,9 @@ pub fn prey<'a>(room: &'a Room) -> Vec<&'a Creep> {
         .collect()
 }
 
-/// v1's kill value less the work lost until it is replaced.
 pub fn worth(c: &Creep) -> i32 {
     let body = crate::world::body_kinds(c);
-    let claims = body.contains(&Part::Claim);
-    let life = if claims {
-        engine::CLAIM_LIFETIME
-    } else {
-        engine::CREEP_LIFETIME
-    };
-
+    let life = engine::lifetime(body.iter().copied());
     engine::body_cost(&body) * c.ticks_to_live.clamp(0, life) / life + c.store.used()
 }
 
