@@ -293,6 +293,7 @@ export const measures = {
   // The most floods one tick ran (a miss is one flood), and the percent of
   // `fieldOn` lookups that missed: §1's "counting hits and misses".
   floodsMost: (_, a, dir) => withCounts(dir, a, (rows) => Math.max(0, ...rows.map((c) => c.atlasMisses ?? 0))),
+  parkedTicks: (_, a, dir) => withCounts(dir, a, (rows) => rows.filter((c) => (c.parkedCarriers ?? 0) > 0).length),
   threatLookupsMost: (_, a, dir) => withCounts(dir, a, (rows) => Math.max(0, ...rows.map((c) => c.threatLookups ?? 0))),
   atlasMissRate: (_, a, dir) =>
     withCounts(dir, a, (rows) => {

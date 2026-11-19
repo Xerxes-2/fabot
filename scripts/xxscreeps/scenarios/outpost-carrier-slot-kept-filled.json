@@ -1,0 +1,7 @@
+{
+  "why": "a carrier past its slot's one takes an open outpost carrier slot before it waits at home (main at 155045d4: a home carrier slot held an extra body while an outpost carrier slot stood empty on 8413 of 15000 ticks, five of seven home haulers on hauler:W8N3:0 at t13390 with three outpost slots empty)",
+  "modules": ["economy"],
+  "start": { "room": "W8N3", "seed": 2 },
+  "ticks": 15000,
+  "assert": [{ "measure": "parkedTicks", "max": 1500 }]
+}

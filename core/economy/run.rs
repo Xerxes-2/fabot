@@ -520,7 +520,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
         .collect();
 
     let owners = slots::owners(context.atlas, &derived);
-    let slots = slots::plan(context.atlas, &derived, &owners);
+    let slots = slots::plan(context.atlas, &derived, &owners, &state.assignments);
     state.spare = slots::spare(&derived, &slots);
     let (assigned, holders, retired) =
         slots::assign(&*context.atlas, &derived, &slots, &state.assignments);
@@ -543,6 +543,10 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
             )
         })
         .collect();
+    intents.push(Intent::Count(
+        "parkedCarriers",
+        slots::parked(&slots, &holders),
+    ));
     intents.extend(
         short
             .into_iter()

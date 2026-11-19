@@ -205,7 +205,7 @@ recorder's ring; the rest are assigned here as their stores land.
 
 | Store | Shape | Owner | Lives in | Why |
 |---|---|---|---|---|
-| `assignments` | creep → `slot|task` | Economy | Memory | a body keeps its slot; its task held while it can be done |
+| `assignments` | creep → `slot|task` | Economy | Memory | a body keeps its slot; its task held while it can be done; the only record of which body carried for an outpost last tick |
 | `fight.engagements` | id → Engagement (§6.2), with the tick it opened, never moved | Fight | Memory | the commitment; read every tick; not the offers (§6.3); a home's deaths since it opened are its raid's |
 | `fight.groups` | id → Group (§6.1) | Fight | Memory | hostile identity across ticks |
 | `fight.casts` | pending casts by engagement | Fight | Memory | never cast twice |
@@ -250,7 +250,10 @@ dig, one carrier pool for its own and its outposts' dig, the ring, the
 controller's drink and the ore, a reserver per outpost, workers for its sites
 and repairs, and upgraders on the buffer's seats. Casts are slots less the
 bodies that stand; a body keeps its slot until the slot goes or the body
-dies, so an arriving body never re-matches the others. While the pool's
+dies, so an arriving body never re-matches the others. A carrier past its
+slot's one takes an open carrier slot first, and the outposts' carrier
+slots are numbered apart from home's: a shrinking pool never parks an
+outpost's carrier at home while an outpost slot stands empty. While the pool's
 CARRY falls short, a hauler under half the cast shape (cast on an empty bank)
 holds a slot of its own. A hauler is 2:1 or
 1:1 CARRY:MOVE, whichever delivers more over a life per energy on its route
@@ -319,8 +322,9 @@ comes (v1's hold while a defender is owed).
 The spend follows the **surplus**: dig less the upkeep paid at any stock (the
 fixed bodies, a claim's pioneers, the outposts' mender), plus
 the stock past the reserve over a creep life. Before a storage, an outpost's
-dig counts as far as the carriers that bring it home stand: with no reserve
-to draw down, spend sized to the rest drinks the bank that would cast them. The pile is drawn down over
+dig counts as far as the CARRY on the outposts' carrier slots stands: with
+no reserve to draw down, spend sized to the rest drinks the bank that would
+cast them. The pile is drawn down over
 √(2·D·u·life) ticks instead and its decay counts as upkeep (D the engine's
 1000, u a worker's upkeep an energy it spends): over h ticks it loses h/2D
 of itself to decay, and the bodies cast to spend it outlive it by life − h.
