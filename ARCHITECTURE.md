@@ -335,9 +335,10 @@ extension, container, storage, link, tower, extractor, terminal) every worker bu
 surplus is its: a structure pays only once complete, so a level is built out
 before it is upgraded, as Hivemind does (owner, 2026-11-12: only RCL3's tower
 and RCL6's minerals are worth rushing), and below the reserve too. Below RCL3 an outpost's sites wait for
-the tower: its dig piles on the post, or beside the source while no container or site marks one, and is hauled from there. An outpost's harvester with a CARRY on its container site raises it with its dig, which no carrier or spend counts until the container stands; a home source's dig is carried from its post before its container stands too. Other sites and repairs
-wait behind the controller (owner, 2026-11-14: a lab is worth little at
-first, built when there is room): with a storage they take only the stock
+the tower: its dig piles on the post, or beside the source while no container or site marks one, and is hauled from there. An outpost's harvester with a CARRY on its container site raises it with its dig, which no carrier or spend counts until the container stands; a home source's dig is carried from its post before its container stands too. Layout places no lab
+below RCL8 (owner, 2026-11-14: a lab is worth little at first; S11's
+leaders built theirs at RCL7-8). Other sites and repairs
+wait behind the controller: with a storage they take only the stock
 past the reserve over a life, the controller the income; before one, half
 the income, so remote roads never stall the controller. At RCL8 the controller is fed only inside its downgrade
 deadline (owner, 2026-11-13: upgrading there only feeds GCL; sites, ramparts,
@@ -488,7 +489,8 @@ reaction, its reagent pair and its outputs from the labs' tiles alone and names
 every fill and drain, re-derived each tick from the stocks so no plan is a
 state. A lab a cast waits at is out of the plan (§6.5) and what that cast's
 parts still ask is `Ground::boost_lab`: the compound and the energy, drawn from
-the home's stores by the pool as any other load.
+the home's stores by the pool as any other load. Below RCL8 a declared cluster
+in a new room is inert: Layout places no lab there (§5).
 
 A colony declared `abandon` (owner, 2026-10-18: given up once its mineral is
 dug out) digs, builds and upgrades nothing past its downgrade deadline, casts

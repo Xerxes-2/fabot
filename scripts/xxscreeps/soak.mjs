@@ -17,7 +17,8 @@
 //            drifts from a small change, which the seed alone does not
 //   --node   a start from §10.2's nodes (default ticks 5000): N1 is the
 //            respawn above; N2-T7 stand what Layout's plan (`src/bin/plan.rs`)
-//            builds by the node's level, the first spawn on its planned
+//            builds by the node's level (a node declaring `labs` with
+//            them too, which Layout never places below RCL8), the first spawn on its planned
 //            tile, and the node's stock in storage; E1 is N4 with the two
 //            neighbours `colony.mjs` picks declared as outposts
 //            (Memory.v2.declarations.outposts) and an Invader wave in each;

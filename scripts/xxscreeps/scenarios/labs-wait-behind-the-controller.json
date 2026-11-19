@@ -1,9 +1,11 @@
 {
-  "why": "labs placed while the stock stands about its reserve wait behind the controller (owner, 2026-11-14: a lab is worth little at first, built when there is room): W8N3 places three at t~7000 and its stock holds 11k-23k, so all three still stand as sites at t15000. Sites built from half the income past the reserve took the labs ahead of the controller",
-  "modules": ["economy"],
+  "why": "below RCL8 no lab site is placed and no lab built (owner, 2026-11-14: a lab is worth little before the controller tops out): W8N3 stays below RCL8 through t15000 with stock past its reserve",
+  "modules": ["economy", "layout"],
   "start": { "room": "W8N3", "seed": 1, "node": "R6" },
   "ticks": 15000,
   "assert": [
-    { "measure": "sitesAtEnd", "kind": "lab", "min": 3 }
+    { "measure": "homeLevel", "max": 7 },
+    { "measure": "sitesAtEnd", "kind": "lab", "max": 0 },
+    { "measure": "builtAtEnd", "kind": "lab", "max": 0 }
   ]
 }

@@ -1,7 +1,8 @@
 //! A soak node's structures (`ARCHITECTURE.md` §10.2): the Layout's plan for
 //! a room, built at a level the way the bot's sites would build it with every
-//! site finished at once. Reads the room on stdin as JSON
-//! `{ room, terrain, sources: [[x, y]], minerals: [[x, y]], controller: [x, y], level, ring? }`
+//! site finished at once (with `labs`, also the labs Layout holds back below
+//! RCL8). Reads the room on stdin as JSON
+//! `{ room, terrain, sources: [[x, y]], minerals: [[x, y]], controller: [x, y], level, ring?, labs? }`
 //! (terrain: 2500 digits, the raw buffer's), writes `[{ kind, x, y }]` in
 //! build order, the first spawn first.
 use std::io::Read;
@@ -78,6 +79,11 @@ fn main() {
         }
     }
 
+    let labs = input["labs"].as_bool().unwrap_or(false);
+    for i in (plan.items.iter()).filter(|i| labs && i.level <= level && !sites::placeable(i, level))
+    {
+        build(&mut built, i.kind.clone(), i.tile);
+    }
     // `"ring": true` stands the ring too, as a kept room's from its level.
     let ring = input["ring"].as_bool().unwrap_or(false);
     for i in plan.ring.iter().filter(|i| ring && i.level <= level) {

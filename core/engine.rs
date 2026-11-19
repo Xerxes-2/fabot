@@ -81,6 +81,11 @@ pub const UPGRADE_DRAIN_PER_WORK: i32 = screeps::UPGRADE_CONTROLLER_POWER as i32
 /// the tally upgrades and spends nothing.
 pub const MAX_UPGRADE_PER_TICK: i32 = screeps::CONTROLLER_MAX_UPGRADE_PER_TICK as i32;
 pub const CONTROLLER_MAX_LEVEL: i32 = 8;
+
+pub fn topped_out(level: i32) -> bool {
+    level >= CONTROLLER_MAX_LEVEL
+}
+
 /// The fatigue a weighted part makes stepping onto a road, plain and swamp.
 pub const ROAD_WEIGHT: i32 = screeps::MOVE_COST_ROAD as i32;
 pub const PLAIN_WEIGHT: i32 = screeps::MOVE_COST_PLAIN as i32;

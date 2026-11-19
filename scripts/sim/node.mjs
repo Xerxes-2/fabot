@@ -116,7 +116,7 @@ export function unstood(name) {
  */
 export function planNode(ground, node, plan) {
   const planned = (level) => {
-    const res = spawnSync(plan, { input: JSON.stringify({ ...ground, level }), encoding: "utf8" });
+    const res = spawnSync(plan, { input: JSON.stringify({ ...ground, level, labs: Boolean(node.labs) }), encoding: "utf8" });
     if (res.status !== 0) throw new Error(`the plan tool failed: ${res.stderr}`);
     return JSON.parse(res.stdout);
   };

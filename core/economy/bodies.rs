@@ -319,7 +319,7 @@ pub fn hauler(ratio: i32, carry: i32, capacity: i32) -> Option<Vec<Part>> {
 
 /// The energy a controller takes a tick: past it an upgrader drinks nothing.
 pub fn upgradable_at(level: i32) -> i32 {
-    if level >= engine::CONTROLLER_MAX_LEVEL {
+    if engine::topped_out(level) {
         engine::MAX_UPGRADE_PER_TICK
     } else {
         i32::MAX

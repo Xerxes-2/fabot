@@ -252,7 +252,7 @@ pub fn inside_deadline(c: &crate::world::Controller) -> bool {
 /// Owner, 2026-11-13: past the last level upgrading only feeds GCL, so the
 /// controller is fed only to keep its level.
 pub fn fed(c: &crate::world::Controller) -> bool {
-    c.level < engine::CONTROLLER_MAX_LEVEL || inside_deadline(c)
+    !engine::topped_out(c.level) || inside_deadline(c)
 }
 
 /// An upgrader brought its loads waits by the controller's feed (`jobs::supply`).

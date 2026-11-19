@@ -286,6 +286,10 @@ pub fn astray(plan: &Plan, census: &Census) -> Vec<(Tile, Tile)> {
         .collect()
 }
 
+pub fn placeable(item: &Item, level: i32) -> bool {
+    item.level <= level && (!item.kind.is_lab() || engine::topped_out(level))
+}
+
 /// The engine stacks a road only with a rampart, any other kind only with a
 /// road or a rampart.
 pub fn place(
@@ -314,7 +318,7 @@ pub fn place(
         if !i.kind.walkable() {
             solid[i.tile] = 1;
         }
-        if !i.kind.is_road() && !i.kind.is_rampart() && i.level <= level {
+        if !i.kind.is_road() && !i.kind.is_rampart() && placeable(i, level) {
             under[i.tile] = 1;
         }
     }
@@ -401,7 +405,7 @@ pub fn place(
                 .all(|rc| astray.contains(rc))
     };
 
-    for item in plan.items.iter().filter(|i| i.level <= level) {
+    for item in plan.items.iter().filter(|i| placeable(i, level)) {
         match tile_of(item) {
             Some(t)
                 if (placed.len() as i32) < budget
@@ -619,7 +623,7 @@ mod tests {
                     .filter(|q| q.kind.name() == i.kind.name())
                     .count() as i32;
 
-                i.level <= case.level
+                placeable(i, case.level)
                     && !room.sites.iter().any(|x| tiles::of_pos(&x.pos) == t)
                     && !tiles_placed.contains(&t)
                     && !(i.kind.is_container() && counted.served[t] > 0)
@@ -704,6 +708,31 @@ mod tests {
                     (room.structures.iter())
                         .any(|s| s.kind.is_rampart() && tiles::of_pos(&s.pos) == t),
                     "{t} open"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn no_lab_is_placed_below_the_top_level() {
+        let rules = Rules::vanilla();
+        for colony in fx::samples(14).take(fx::MAX_TEST) {
+            let Some((_, mut plan)) = fx::plan_of(&colony) else {
+                continue;
+            };
+            plan.items.retain(|i| i.kind.is_lab());
+            for level in 6..=engine::CONTROLLER_MAX_LEVEL {
+                let placed = place(
+                    &rules,
+                    &census_of(&colony.room, &[]),
+                    level,
+                    &plan,
+                    i32::MAX,
+                );
+                assert_eq!(
+                    placed.is_empty(),
+                    level < engine::CONTROLLER_MAX_LEVEL,
+                    "{level}"
                 );
             }
         }

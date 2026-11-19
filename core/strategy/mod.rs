@@ -85,7 +85,7 @@ pub fn wall(rules: &Rules, rival: i32, level: i32, threatened: bool) -> (i32, bo
     let kept = match () {
         _ if threatened => full.max(FLOOR),
         // The controller there takes no surplus, so a quiet wall thickens instead.
-        _ if level >= engine::CONTROLLER_MAX_LEVEL => (full / 3).max(FLOOR),
+        _ if engine::topped_out(level) => (full / 3).max(FLOOR),
         _ => FLOOR,
     };
     (kept, fire <= heal)
