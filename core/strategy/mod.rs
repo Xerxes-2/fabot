@@ -108,8 +108,10 @@ pub fn reserve(rules: &Rules, lifetimes: f64, level: i32, threatened: bool) -> i
     if threatened { full } else { full / 3 }
 }
 
+/// Switched off, the choices are the operator's alone, but each colony keeps
+/// its plan: Economy reads its reserve and Layout drops a room without one.
 pub fn plan<'t>(
-    world: &World,
+    (on, world): (bool, &World),
     derived: &Derived,
     declarations: &Declarations,
     intel: &Intel,
@@ -155,7 +157,7 @@ pub fn plan<'t>(
             let muster = plan.and_then(|p| p.muster);
             Some(ColonyPlan {
                 room: room.name,
-                stage: if expansion.abandoning(room.name) {
+                stage: if on && expansion.abandoning(room.name) {
                     Stage::Abandon
                 } else {
                     Stage::Exploit
@@ -170,6 +172,9 @@ pub fn plan<'t>(
             })
         })
         .collect();
+    if !on {
+        return (plans, Vec::new(), None);
+    }
     // An expansion declared this tick holds the outposts from the next.
     let claimed = expand::claim(intel, derived, expansion.in_flight.as_ref()).map(|c| c.room);
     let preyed = intel::preyed(intel, declarations, world.time);

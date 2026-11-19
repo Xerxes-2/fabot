@@ -317,7 +317,7 @@ pub fn decide<'t>(
     let mut derived = derive(world, &mut atlas);
     phases.push(("derive".to_string(), clock() - start));
     let plans = strategy::plan(
-        world,
+        (!state.off.contains(STRATEGY), world),
         &derived,
         &declarations,
         intel,
@@ -355,10 +355,12 @@ pub fn decide<'t>(
     }
 }
 
+const STRATEGY: &str = "strategy";
+
 /// The modules `Main` runs, in this order.
 pub const MODULES: [Module; 4] = [
     Module {
-        name: "strategy",
+        name: STRATEGY,
         run: |c, s| super::strategy::decide(c, &mut s.strategy),
     },
     Module {

@@ -716,7 +716,10 @@ a live-sized world.
 ## 11. Live safety
 
 - Every module sits behind a `switches` kill switch (`Fight` off leaves
-  `Economy` running).
+  `Economy` running). `Strategy` off chooses nothing: colony plans stay at
+  Exploit with no expansion, outpost choice, claim or refill booking, and a
+  running abandon pauses; bot-chosen outposts and an in-flight claim drop on
+  the next tick, operator-declared ones stay.
 - A panic costs the whole tick, never one module (§2).
 - **Deploy canary** (not built yet): keep previous bundle, compare `❓ N = 200`
   ticks of income, idle spawns, deaths, faults, and bucket, auto-revert on
