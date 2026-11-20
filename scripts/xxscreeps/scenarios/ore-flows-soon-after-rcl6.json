@@ -1,11 +1,11 @@
 {
-  "why": "RCL6 is reached for its ore: the extractor and the terminal are built before the level's stock upgrades, under the reserve too, and the ore flows. Main ed6e269c built neither in 10000 ticks (0 ore); the fix built both by t4500 and dug its first ore by t5200",
+  "why": "RCL6 is reached for its ore: the extractor and the terminal are built before the level's stock upgrades, under the reserve too, and the ore flows soon after the extractor stands. Main ed6e269c built neither in 10000 ticks (0 ore). The ore is timed from the extractor, not from the start, so the terminal's or the outposts' build time moves neither end: main 3136149d banked its first ore 600-900 ticks after the extractor over seeds 1-4 (on 100-tick samples)",
   "modules": ["economy", "layout"],
   "start": { "room": "W8N3", "seed": 1, "node": "R6" },
-  "ticks": 6500,
+  "ticks": 7000,
   "assert": [
-    { "measure": "builtAtEnd", "kind": "extractor", "min": 1 },
-    { "measure": "builtAtEnd", "kind": "terminal", "min": 1 },
-    { "measure": "ore", "min": 1 }
+    { "measure": "builtAtEnd", "kind": "extractor", "to": 6500, "min": 1 },
+    { "measure": "builtAtEnd", "kind": "terminal", "to": 6500, "min": 1 },
+    { "measure": "extractorToOre", "max": 1000 }
   ]
 }

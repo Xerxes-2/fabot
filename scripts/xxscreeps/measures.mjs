@@ -61,6 +61,8 @@ const AGED = 5;
 const CREEP_LIFE_TIME = 1500;
 // `STRUCK_LATELY` there: struck within these ticks of its death, a body was killed.
 const STRUCK_LATELY = 5;
+// `MENDER_WORK` in `core/economy/slots.rs`.
+const MENDER_WORK = 2;
 const firstClaimed = (samples, met) => samples.find((s) => Object.keys(s.claimed ?? {}).length && Object.values(s.claimed).every(met))?.t ?? Infinity;
 export const measures = {
   metric: (_, a, dir) => {
@@ -69,11 +71,13 @@ export const measures = {
     return a.min !== undefined ? Math.min(...values) : Math.max(...values);
   },
   // A body cast before the stock fell is not one cast under it, nor one cast
-  // between two samples while the stock climbed past the line.
+  // between two samples while the stock climbed past the line. An outpost's
+  // mender is upkeep, not spend; a stocked colony casts no other 2-WORK worker.
   castsBelow: (samples, a, dir) =>
     new Set(
       livesOf(dir)
         .filter((b) => b.ours && b.name.startsWith(`${a.pattern}-`))
+        .filter((b) => b.body.split("w").length - 1 !== MENDER_WORK)
         .filter((b) => {
           const at = samples.findLastIndex((s) => s.time <= b.first);
           const [before, after] = [samples[at], samples[at + 1] ?? samples[at]];
@@ -172,7 +176,11 @@ export const measures = {
   // What `room`'s storage, terminal, labs, factory and power spawn hold at the window's end, and the non-energy of it.
   heldAtEnd: (samples, a) => at(samples, a.to ?? Infinity).rooms[a.room]?.held ?? Infinity,
   oresAtEnd: (samples, a) => at(samples, a.to ?? Infinity).rooms[a.room]?.ores ?? 0,
-  ore: (samples, a) => at(samples, a.to ?? Infinity).ore - at(samples, a.from ?? 0).ore,
+  // From the extractor standing to the ore banked first growing, so how long the terminal or the outposts took moves neither end.
+  extractorToOre: (samples) => {
+    const built = samples.find((s) => s.built.extractor);
+    return built ? (samples.find((s) => s.t > built.t && s.ore > built.ore)?.t ?? Infinity) - built.t : Infinity;
+  },
   bounced: (samples, a) => at(samples, a.to ?? Infinity).bounced - at(samples, a.from ?? 0).bounced,
   sentTo: (samples, a) => (at(samples, a.to ?? Infinity).sent?.[a.room] ?? 0) - (at(samples, a.from ?? 0).sent?.[a.room] ?? 0),
   // Energy spent on construction (`room`: in that room alone).

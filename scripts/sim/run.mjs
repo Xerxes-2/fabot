@@ -25,7 +25,7 @@ export const SIM_MEASURES = new Set([
   "levelsLost", "spawnsLost", "fewestCreeps", "safeModeAfterCull", "rising", "outpostDug", "upgradeWhileQueued",
   "upgradeStall", "leastDowngrade", "coresAtEnd", "hostilesAtEnd", "homeHostileTicks", "floodsMost", "atlasMissRate",
   "threatLookupsMost", "parkedTicks", "slotIdsShared", "refusals", "faults", "heldAtEnd", "oresAtEnd", "homeLevel", "claimSafeMode", "claimLevelOf", "claimsOwned",
-  "rcl2ToTower", "claimSpawned", "claimersCast", "made", "ore", "boosted", "bounced", "stillLoaded", "carriedOut", "castsBelow",
+  "rcl2ToTower", "claimSpawned", "claimersCast", "made", "extractorToOre", "boosted", "bounced", "stillLoaded", "carriedOut", "castsBelow",
   "spawnStuck", "scoutsCast", "scoutStill", "scoutTicksIn", "reserverOnPost", "castIn", "bodiesOut", "bodiesStruck", "struckOn",
   "deathsError", "attackersAtEnd", "creepsLostBeforeSafeMode", "predictedWinsLost", "engagements", "oscillation", "bodiesLost",
   "closedOnCore", "heldPastWave", "sentTo", "draftedAfterOthers",

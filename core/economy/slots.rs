@@ -968,13 +968,13 @@ const MEND: i32 = 3;
 const MINE: i32 = 3;
 /// Cast before the outposts' haul (§5).
 const STOCKED: i32 = 4;
-const OUTPOST_HAUL: i32 = 5;
+/// Ahead of the far haul, as Hivemind's mine builder: its recasts hold every spawn.
+const MENDER: i32 = 5;
+const OUTPOST_HAUL: i32 = 6;
 const MOST: i32 = engine::MAX_BODY_PARTS as i32;
 /// A load mends two plain roads whole.
 const MENDER_WORK: i32 = 2;
-/// After the home's floor: casting it ahead of the far haul cost the fight casts.
-const MENDER: i32 = 7;
-const FLOOR: i32 = 6;
+const FLOOR: i32 = 7;
 const CREW: i32 = 8;
 /// After the sponsor's own dig and carriers, before its outposts (The International's).
 const PIONEER: i32 = 2;
@@ -985,8 +985,8 @@ const SPEND: i32 = 10;
 const SIGHT: i32 = 3;
 
 /// Cast order: a colony's own dig and its carriers first, the pioneers it
-/// sponsors, then its outposts' reservers, whose bodies see them, their dig
-/// and haul, its floor of workers, and the surplus last.
+/// sponsors, then its outposts' reservers, whose bodies see them, their dig,
+/// mender and haul, its floor of workers, and the surplus last.
 fn rank_of(job: &Job, own: bool) -> i32 {
     match (job, own) {
         (Job::Dig(_), true) => 0,
