@@ -9,7 +9,7 @@ use fabot_base::intents::{
     TowerAct,
 };
 use fabot_base::vocabulary::{self, Part, Resource};
-use fabot_base::world;
+use fabot_base::{engine, tiles, world};
 use krebs::atom;
 use krebs::doc::{Atom, Id, Obj, Val};
 use krebs::intents::{RoomIntents, UserRoomIntents};
@@ -278,6 +278,23 @@ impl Run<'_> {
         Ok(())
     }
 
+    /// `StructureObserver.observeRoom`, less `PWR_OPERATE_OBSERVER`, which we never use.
+    fn observe(&mut self, id: world::Id, target: world::RoomName) -> Result<(), ErrorCode> {
+        let (room, observer) = self.at.get(id).ok_or(NotFound)?;
+        check(!ours(observer), NotOwner)?;
+        let mut controllers = self.v.rooms[room].of("controller");
+        let active = controllers.any(|c| ours(c) && num(c, atom!("level")) >= 8.0);
+        check(!active, RclNotEnough)?;
+        let at = world::RoomName::parse(self.v.rooms[room].name).ok_or(InvalidArgs)?;
+        check(
+            tiles::rooms_apart(at, target) > engine::OBSERVER_RANGE,
+            NotInRange,
+        )?;
+        let value = json!({ "roomName": target.to_string() });
+        self.stored.put(room, &id.text(), "observeRoom", value);
+        Ok(())
+    }
+
     fn spawn(
         &mut self,
         id: world::Id,
@@ -365,10 +382,7 @@ impl Run<'_> {
                     "targetRoomName": room.to_string(), "description": "" });
                 ("send", self.on(*id, &[], "send", value))
             }
-            Action::Observe(id, room) => {
-                let value = json!({ "roomName": room.to_string() });
-                ("observeRoom", self.on(*id, &[], "observeRoom", value))
-            }
+            Action::Observe(id, room) => ("observeRoom", self.observe(*id, *room)),
             Action::Spawn(id, SpawnAct::RecycleCreep(c)) => (
                 "recycle",
                 self.on(*id, &[*c], "recycleCreep", json!({ "id": c })),
