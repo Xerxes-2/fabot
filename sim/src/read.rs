@@ -1,6 +1,7 @@
 //! `World.ofGame` off krebs's documents: what the game API derives from a
 //! document (ticks to live, to regenerate, to downgrade) is derived here as
-//! the API does, and the rooms are those our objects give vision of.
+//! the API does, and the rooms are those our objects give vision of or our
+//! observers looked at last tick.
 use std::collections::BTreeSet;
 
 use fabot_base::declarations::Declarations;
@@ -245,7 +246,14 @@ pub fn world(v: &View, declarations: &Declarations) -> World<'static> {
         let sites = room.of("constructionSite");
         world.our_sites += sites.filter(|o| ours(o)).count() as i32;
     }
-    let sees = |i: &usize| (k.rooms[*i].presence.iter()).any(|(u, p)| *u == us && p.vision > 0);
+    let observed: BTreeSet<&str> = (k.rooms.iter().flat_map(|r| r.presence.iter()))
+        .filter(|(u, _)| *u == us)
+        .filter_map(|(_, p)| Some(&*p.observe.as_ref()?.1))
+        .collect();
+    let sees = |i: &usize| {
+        (k.rooms[*i].presence.iter()).any(|(u, p)| *u == us && p.vision > 0)
+            || observed.contains(v.rooms[*i].name)
+    };
     let mut seen: Vec<usize> = (0..v.rooms.len()).filter(sees).collect();
     seen.sort_by_key(|i| v.rooms[*i].name);
     for i in seen {
