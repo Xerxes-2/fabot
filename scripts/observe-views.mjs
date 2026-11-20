@@ -343,7 +343,6 @@ export function replay(file, traced, bundle = new URL("../dist/main.js", import.
     last = tick.time;
     const intents = [];
     const game = stand(tick, intents, getHeapStatistics, () => 0);
-    globalThis.__fabotRead = bot.read;
     const traces = [];
     const log = console.log;
     console.log = (text, ...rest) => (String(text).startsWith("#trace ") ? traces.push(JSON.parse(text.slice(7))) : log(text, ...rest));

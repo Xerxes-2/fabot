@@ -67,7 +67,6 @@ async function replayOne(file) {
 function decide(bot, tick) {
   const list = [];
   const game = stand(tick, list, () => ({}), () => 0);
-  globalThis.__fabotRead = bot.read;
   bot.loop();
   // An id reads as its creep's or spawn's name where it has one.
   const names = Object.fromEntries([...Object.entries(tick.creeps), ...Object.entries(tick.spawns)].map(([name, id]) => [id, name]));

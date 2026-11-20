@@ -197,11 +197,12 @@ function Terrain(name) {
 }
 
 const require = createRequire(import.meta.url);
-// Each bundle installs its own world reader on the global; a tick runs on its own.
+// Each bundle installs its own world reader and executor on the global; a tick runs on its own.
 export const load = (path) => {
   delete require.cache[path];
   const bot = require(path);
-  return { loop: () => bot.loop(), read: globalThis.__fabotRead };
+  const { __fabotRead, __fabotExec } = globalThis;
+  return { loop: () => (Object.assign(globalThis, { __fabotRead, __fabotExec }), bot.loop()) };
 };
 
 // Stands `captured` as globalThis's Game, Memory and RawMemory, the intents
