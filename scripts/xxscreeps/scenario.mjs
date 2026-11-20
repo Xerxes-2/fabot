@@ -9,7 +9,7 @@
 // soak-runs/worlds/, and the bundle under test runs on from it as a deploy
 // would, Memory kept.
 //
-// Usage: npm run scenario -- [name...] [--modules m,n] [--list] [--bot main.js] [--jobs J] [--nightly] [--fetch] [--capture] [--base name] [--seeds N]
+// Usage: npm run scenario -- [name...] [--modules m,n] [--list] [--bot main.js] [--jobs J] [--nightly] [--fetch] [--capture] [--base name] [--seeds N] [--force-xxscreeps]
 //        npm run scenario -- <name> --watch [--tick-ms N] [--port N]
 //   name    the scenarios to run (default all but the nightly ones), by file name
 //   --modules  also the scenarios naming any of these modules (directories under core)
@@ -24,6 +24,8 @@
 //   --seeds each start also on the N - 1 seeds after its own
 //   --capture  every tick each soak decides, to its capture.jsonl, which
 //           `npm run replay` decides again with another bundle
+//   --force-xxscreeps  run on xxscreeps the sim-native scenarios that --bot, --base
+//           or --capture would SKIP, where one may fail for the engine's sake
 //   --jobs  soaks at once (default a quarter of the hardware threads, as soak:many)
 //   --watch the one scenario's soak watched (soak's --watch), in this terminal
 //
@@ -68,10 +70,10 @@ const WATCH_VALUES = ["--tick-ms", "--port"];
 const rest = process.argv.slice(2);
 for (let i = 0; i < rest.length; i++)
   if (["--bot", "--jobs", "--modules", "--base", "--seeds"].includes(rest[i])) flags[rest[i]] = rest[++i] ?? fail(`${rest[i - 1]} takes a value`);
-  else if (rest[i] === "--list" || rest[i] === "--nightly" || rest[i] === "--fetch" || rest[i] === "--capture") flags[rest[i]] = true;
+  else if (rest[i] === "--list" || rest[i] === "--nightly" || rest[i] === "--fetch" || rest[i] === "--capture" || rest[i] === "--force-xxscreeps") flags[rest[i]] = true;
   else if (rest[i] === "--watch") watch.push(rest[i]);
   else if (WATCH_VALUES.includes(rest[i])) watch.push(rest[i], rest[++i]);
-  else if (rest[i].startsWith("--")) fail("usage: npm run scenario -- [name...] [--modules m,n] [--list] [--bot main.js] [--jobs J] [--nightly] [--fetch] | <name> --watch [--tick-ms N] [--port N]");
+  else if (rest[i].startsWith("--")) fail("usage: npm run scenario -- [name...] [--modules m,n] [--list] [--bot main.js] [--jobs J] [--nightly] [--fetch] [--capture] [--base name] [--seeds N] [--force-xxscreeps] | <name> --watch [--tick-ms N] [--port N]");
   else names.push(rest[i]);
 
 const CORE = join(REPO, "core");
@@ -90,7 +92,7 @@ for (const s of defends)
   if (!s.assert.some((a) => a.measure === "bodiesLost" && a.max !== undefined)) fail(`${s.name}: a fight scenario bounds bodiesLost by a "max"`);
 // A scenario runs on `sim` (ARCHITECTURE.md §10.2) unless its start or a
 // measure needs what only xxscreeps stands or writes, or its "xxscreeps" says
-// why it stays there; a bundle, base, capture or watch runs every one there.
+// why it stays there.
 const xxscreepsWhy = (s) =>
   s.xxscreeps ??
   (Object.keys(s.start).filter((k) => !SIM_START.includes(k)).map((k) => `its start's ${k}`)[0] ||
@@ -100,7 +102,8 @@ const xxscreepsWhy = (s) =>
     (s.assert.some((a) => a.who) && "a measure of an opponent's side") ||
     s.assert.filter((a) => !SIM_MEASURES.has(a.metric !== undefined ? "metric" : a.measure)).map((a) => `${a.measure} is not read off sim`)[0] ||
     null);
-const forced = ["--bot", "--base", "--capture"].find((f) => flags[f]) ?? (watch.length ? "--watch" : undefined);
+const bundled = ["--bot", "--base", "--capture"].find((f) => flags[f]);
+const forced = watch.length ? "--watch" : flags["--force-xxscreeps"] ? "--force-xxscreeps" : undefined;
 for (const s of library) s.engine = forced || xxscreepsWhy(s) ? "xxscreeps" : "sim";
 
 // name@sK names a scenario on seed K alone, as --seeds names its runs.
@@ -115,14 +118,32 @@ const meets = (s) => (touched.length ? s.modules.some((m) => touched.includes(m)
 // game, and a change of behaviour is read over several.
 const seeds = Number(flags["--seeds"] ?? 1);
 if (!Number.isInteger(seeds) || seeds < 1) fail("--seeds takes a count of seeds, 1 or more");
-const scenarios = library
+const selected = library
   .filter((s) => names.includes(s.name) || (!pinned.length && meets(s) && (flags["--nightly"] || !s.nightly)))
   .flatMap((s) => Array.from({ length: seeds }, (_, k) => seeded(s, (s.start.seed ?? 1) + k)))
   .concat(pinned.map(([n, seed]) => seeded(library.find((s) => s.name === n), seed)));
+const offSim = bundled && !forced ? selected.filter((s) => s.engine === "sim") : [];
+const scenarios = selected.filter((s) => !offSim.includes(s));
+const OFF_SIM = {
+  "--bot": "sim builds this checkout's core, never a bundle: check out and build that revision, then plain `npm run scenario`",
+  "--base": "a base's runs are xxscreeps runs, so a sim run has none to stand beside",
+  "--capture": "sim writes no capture",
+};
+const offSimWhy = `sim-native, skipped with ${bundled}: ${OFF_SIM[bundled]}`;
+const offSimNames = [...new Set(offSim.map((s) => s.name.replace(/@s\d+$/, "")))];
 if (flags["--list"]) {
   for (const s of scenarios) console.log(`${s.name}  ${s.modules.join(",")}  ${s.engine === "sim" ? "sim" : `xxscreeps: ${xxscreepsWhy(s) ?? forced}`}`);
-  console.log(`${scenarios.length} of ${library.length} scenarios`);
+  for (const n of offSimNames) console.log(`${n}  SKIP: ${offSimWhy}`);
+  console.log(`${scenarios.length} of ${library.length} scenarios${offSimNames.length ? `, ${offSimNames.length} skipped` : ""}`);
   process.exit(0);
+}
+// A soak that skipped (soak.mjs's exit 4) measured nothing: a rival's tarball is
+// not in the cache, and the run may not reach the registry.
+const SKIPPED = 4;
+for (const n of offSimNames) console.log(`SKIP ${n}: ${offSimWhy}`);
+if (selected.length && !scenarios.length) {
+  console.log(`0 passed, ${offSimNames.length} skipped`);
+  process.exit(SKIPPED);
 }
 if (watch.length && names.length !== 1) fail("--watch runs exactly one scenario: npm run scenario -- <name> --watch");
 // The Ctrl-C that ends a watched soak reaches this process too; its asserts still print.
@@ -163,7 +184,7 @@ const worldDir = (start) => join(REPO, "soak-runs/worlds", worldOf(start));
 const keyOf = ({ start, ticks, engine }, name = engine === "sim" ? `sim-${simCode}` : basename(bot, ".js")) => `scenario-${name}-${start.at ? `${worldOf(start)}${tag(start.opponents)}` : recipe(start, start.opponents)}-${ticks}`;
 const sim = scenarios.some((s) => s.engine === "sim") ? (simBinary() ?? fail("sim did not build")) : null;
 const simCode = sim && createHash("sha256").update(readFileSync(sim)).digest("hex").slice(0, 8);
-if (forced && scenarios.some((s) => !xxscreepsWhy(s))) console.error(`${forced}: every scenario on xxscreeps, which runs bundles, bases, captures and the client`);
+if (forced && scenarios.some((s) => !xxscreepsWhy(s))) console.error(`WARNING ${forced}: every scenario on xxscreeps; a sim-native one may fail for the engine's sake, not the bot's`);
 const runs = new Map();
 for (const s of scenarios) {
   const run = runs.get(keyOf(s)) ?? { name: keyOf(s), label: `${recipe(s.start, s.start.opponents)}${s.start.at ? `-t${s.start.at}` : ""}-${s.ticks}${s.engine === "sim" ? " (sim)" : ""}`, start: s.start, ticks: s.ticks, engine: s.engine, scenarios: [], secs: 0 };
@@ -290,9 +311,6 @@ if (invalid.length) {
 
 let failed = 0;
 const moved = { better: 0, worse: 0 };
-// A soak that skipped (soak.mjs's exit 4) measured nothing: a rival's tarball is
-// not in the cache, and the run may not reach the registry.
-const SKIPPED = 4;
 let skipped = 0;
 for (const s of scenarios) {
   const run = runs.get(keyOf(s));
@@ -365,5 +383,6 @@ if (timed.length) {
     console.log(`  ${t.label} ${t.ticks} ticks: ${PHASES.map((k) => `${k} ${(t[k] / 1000).toFixed(1)}`).join(" ")} (${(t.step / t.ticks).toFixed(1)} ms/tick)`);
   writeFileSync(join(REPO, "soak-runs", "scenario-timing.json"), JSON.stringify(timed, null, 1) + "\n");
 }
-console.log(`${failed ? `${failed} failed` : "all passed"}${skipped ? `, ${skipped} skipped` : ""} in ${((Date.now() - started) / 1000).toFixed(0)} s`);
-process.exit(failed ? 1 : 0);
+const skips = skipped + offSimNames.length;
+console.log(`${failed ? `${failed} failed` : skips ? `${scenarios.length - skipped} passed` : "all passed"}${skips ? `, ${skips} skipped` : ""} in ${((Date.now() - started) / 1000).toFixed(0)} s`);
+process.exit(failed ? 1 : selected.length && skipped === scenarios.length ? SKIPPED : 0);

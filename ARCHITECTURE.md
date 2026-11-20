@@ -661,7 +661,8 @@ Two engines complement each other:
   - `❓` Cut worlds lacking sector bus rooms throw in `genDeposits` (logged and
     skipped as backend cron does).
 - **`xxscreeps` (`npm run xx`):** isolated-vm vanilla engine used for active
-  rival bots, `--bot`/`--base` comparisons, `--capture`, and `--watch`.
+  rival bots, `--bot`/`--base` comparisons, `--capture`, and `--watch`; with the
+  first three, `npm run scenario` skips sim-native scenarios unless `--force-xxscreeps`.
 
 **Scenario library (`npm run scenario`):** every live incident becomes a recipe
 scenario with outcome bounds (`scripts/xxscreeps/scenarios/`). `jj ship` runs
