@@ -385,21 +385,11 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
     .into_iter()
     .enumerate()
     .map(|(i, (g, priority))| {
-        let e = fresh(
-            first_id + i as i32,
-            Objective::Defend,
-            g.room,
-            world.time,
-            Tactic::Close,
-        );
-        (
-            Engagement {
-                group: g.id,
-                priority,
-                ..e
-            },
-            true,
-        )
+        let id = first_id + i as i32;
+        let mut e = fresh(id, Objective::Defend, g.room, world.time, Tactic::Close);
+        e.group = g.id;
+        e.priority = priority;
+        (e, true)
     })
     .collect();
 

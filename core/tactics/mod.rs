@@ -750,24 +750,13 @@ pub fn siege(
 }
 
 pub fn rampart(sight: &mut Sight, creep: &Creep) -> Wish {
-    let ramparts: Vec<Pos> = sight
-        .ramparts
-        .get(&creep.pos.room)
-        .cloned()
-        .unwrap_or_default();
+    let nearest = (sight.ramparts.get(&creep.pos.room).into_iter().flatten())
+        .min_by_key(|p| (creep.pos.range(p).unwrap_or(99), p.x, p.y))
+        .copied();
 
-    if ramparts.contains(&creep.pos) {
-        hold(sight, creep)
-    } else {
-        let nearest = ramparts
-            .iter()
-            .min_by_key(|p| (creep.pos.range(p).unwrap_or(99), p.x, p.y))
-            .copied();
-
-        match nearest {
-            Some(p) => toward(sight, creep, &p, 0),
-            None => hold(sight, creep),
-        }
+    match nearest {
+        Some(p) if p != creep.pos => toward(sight, creep, &p, 0),
+        _ => hold(sight, creep),
     }
 }
 
@@ -792,13 +781,10 @@ pub fn retreat(sight: &mut Sight, creep: &Creep) -> Wish {
     hold(sight, creep)
 }
 
-/// v1's heal reflex: a hurt healer heals itself, else the deepest wound beside
-/// it, else one within three at the ranged rate; each heal counts off what it
-/// closes. The engine keeps one of a swing and a heal, and one of a shot and a
-/// ranged heal: a swinging body does not heal, a shooting one heals beside it.
-/// A heal lands in the tick's sum with the strikes, so what is `incoming` is owed.
-/// Each healer heals the patient in its reach nearest death after what strikes
-/// it, then owed most, and that heal comes off what it is owed.
+/// v1's heal reflex. The engine keeps one of a swing and a heal, and one of a
+/// shot and a ranged heal: a swinging body does not heal, a shooting one heals
+/// beside it. A heal lands in the tick's sum with the strikes, so what is
+/// `incoming` is owed.
 pub fn allot<'p>(
     healers: &[&Creep],
     patients: &[&'p Creep],

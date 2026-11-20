@@ -23,7 +23,7 @@ impl<'a> Scene<'a> {
         atlas: &Atlas,
         room: &Room,
         target: &Structure,
-        colony: RoomName,
+        from: &Pos,
         set: &[Fighter],
         standing: &[&Creep],
     ) -> Option<(Vec<Id>, Outcome)> {
@@ -39,13 +39,8 @@ impl<'a> Scene<'a> {
                 .iter()
                 .all(|s| s.pos != b.pos || s.walkable || Scene::rival(s))
             {
-                weights[tiles::of_pos(&b.pos)] = grid::weight(
-                    if world::terrain::is_swamp(room.terrain, b.pos.x, b.pos.y) {
-                        engine::SWAMP_WEIGHT
-                    } else {
-                        engine::PLAIN_WEIGHT
-                    },
-                );
+                weights[tiles::of_pos(&b.pos)] =
+                    grid::weight(casting::terrain_at(room, &b.pos).weight);
             }
         }
 
@@ -71,10 +66,7 @@ impl<'a> Scene<'a> {
 
         let towers: Vec<Pos> = self.towers_in(room).into_iter().map(|s| s.pos).collect();
 
-        let from = (self.world.spawns.iter())
-            .find(|s| s.pos.room == colony)
-            .map_or_else(|| middle(colony), |s| s.pos);
-        let sources = entries(atlas, &ground, gait, &from, set, standing);
+        let sources = entries(atlas, &ground, gait, from, set, standing);
 
         let attempt = |seated: i32| {
             exchange::breach_plan(
@@ -158,7 +150,7 @@ impl<'a> Scene<'a> {
             let capacity = self.capacity_of(atlas, e);
 
             let priced = |set: &[casting::Body]| {
-                self.breach_in(atlas, room, goal, colony, &cast_all(set), &[])
+                self.breach_in(atlas, room, goal, &from, &cast_all(set), &[])
             };
             // Shot in where no barrier stands in the way, which a ranged set's
             // plan never breaks: it dismantles nothing. What the dismantlers'
@@ -266,12 +258,8 @@ impl<'a> Scene<'a> {
 
             let struck = |b: &Structure| exchange::tower_strike(&towers, &b.pos);
 
-            let late = match e.predicted {
-                Some(Outcome::Win(ticks, _)) => {
-                    e.phase == Phase::Fighting && self.world.time > e.since + ticks
-                }
-                _ => false,
-            };
+            let late = matches!(e.predicted, Some(Outcome::Win(ticks, _))
+                if e.phase == Phase::Fighting && self.world.time > e.since + ticks);
 
             let event = left
                 || self.landed.iter().any(|c| c.engagement == e.id)
@@ -296,7 +284,7 @@ impl<'a> Scene<'a> {
             }
 
             let planned = self
-                .breach_in(atlas, room, goal, colony, &set, &breaking)
+                .breach_in(atlas, room, goal, &from, &set, &breaking)
                 .map(|plan| (Vec::new(), plan))
                 .or_else(|| {
                     let fielded = self.fielded_bodies(e);
@@ -314,7 +302,7 @@ impl<'a> Scene<'a> {
                     }
 
                     let priced = |set: &[casting::Body]| {
-                        self.breach_in(atlas, room, goal, colony, &cast_all(set), &breaking)
+                        self.breach_in(atlas, room, goal, &from, &cast_all(set), &breaking)
                     };
 
                     casting::reinforce(e.capacity, &fielded, &priced)

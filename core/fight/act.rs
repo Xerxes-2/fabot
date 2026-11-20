@@ -208,8 +208,6 @@ pub(super) fn act(
 
         let wish = match e.phase {
             // The towers' room is the only one a drain presses into.
-            // A drain that gave up stands off in the room beside his, casting
-            // nothing more (§6.2).
             Phase::Draining => match gates.get(&e.id) {
                 Some(gate) if given_up.contains(&e.id) => {
                     tactics::toward(sight, c, &middle(gate.from), engine::ROOM_SIDE / 2)

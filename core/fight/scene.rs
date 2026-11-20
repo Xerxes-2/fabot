@@ -46,7 +46,6 @@ pub(super) struct Hunting {
     pub(super) at: Pos,
 }
 
-/// What this tick's world says, read once and handed down.
 pub(super) struct Scene<'a> {
     pub(super) world: &'a World<'a>,
     pub(super) sightings: &'a Sightings,
@@ -304,9 +303,7 @@ impl<'a> Scene<'a> {
 
     /// A home's Defend is the home's alone.
     pub(super) fn colonies_of(&self, atlas: &Atlas, e: &Engagement) -> Vec<&'a Room<'a>> {
-        let world = self.world;
-
-        world
+        self.world
             .rooms
             .iter()
             .filter(|r| {
@@ -397,27 +394,18 @@ impl<'a> Scene<'a> {
 
             if let Some(colony) = colony {
                 asked.queue(colony, body);
-                let compound = fighter::boosted_by(body, boost);
+                let suffix =
+                    fighter::boosted_by(body, boost).map_or_else(String::new, |c| format!("-{c}"));
+                let name = format!(
+                    "{}{}-{}-{slot}{suffix}",
+                    declarations::FIGHT_PREFIX,
+                    self.world.time,
+                    e.id
+                );
 
                 asked.casts.push(Cast {
                     engagement: e.id,
-                    name: match compound {
-                        Some(compound) => format!(
-                            "{}{}-{}-{}-{}",
-                            declarations::FIGHT_PREFIX,
-                            self.world.time,
-                            e.id,
-                            slot,
-                            compound
-                        ),
-                        None => format!(
-                            "{}{}-{}-{}",
-                            declarations::FIGHT_PREFIX,
-                            self.world.time,
-                            e.id,
-                            slot
-                        ),
-                    },
+                    name,
                     room: colony,
                     body: body.clone(),
                 });
@@ -435,7 +423,6 @@ impl<'a> Scene<'a> {
             return;
         };
 
-        let slot = slot_of;
         let members = self.members_of(e);
 
         let lasts = |c: &Creep, lead: i32| {
@@ -445,20 +432,20 @@ impl<'a> Scene<'a> {
         let held: BTreeSet<String> = members
             .iter()
             .filter(|c| lasts(c, 0))
-            .map(|c| slot(&c.name))
+            .map(|c| slot_of(&c.name))
             .chain(
                 asked
                     .casts
                     .iter()
                     .filter(|c| c.engagement == e.id)
-                    .map(|c| slot(&c.name)),
+                    .map(|c| slot_of(&c.name)),
             )
             .collect();
 
         let due: BTreeMap<String, casting::Body> = members
             .iter()
-            .filter(|c| !held.contains(&slot(&c.name)))
-            .map(|c| (slot(&c.name), fabot_base::world::body_kinds(c)))
+            .filter(|c| !held.contains(&slot_of(&c.name)))
+            .map(|c| (slot_of(&c.name), fabot_base::world::body_kinds(c)))
             .collect();
 
         let lead = engine::SPAWN_TICKS_PER_PART * engine::MAX_BODY_PARTS as i32;
@@ -489,11 +476,6 @@ impl<'a> Scene<'a> {
         };
 
         let in_reach = e.ours.iter().any(|n| near(n));
-        let home = e.ours.iter().all(|n| {
-            self.ours
-                .get(n.as_str())
-                .is_some_and(|c| self.homes.contains(&c.pos.room))
-        });
         let on_our_ground = group
             .as_ref()
             .is_some_and(|g| self.homes.contains(&g.room) || self.worked.contains(&g.room));
@@ -504,7 +486,7 @@ impl<'a> Scene<'a> {
             standing: standing.clone(),
             aging_out: aging_out.clone(),
             in_reach,
-            home,
+            home: self.home(e),
             held: self.homes.contains(&e.room),
             asked: self.spawning.iter().any(|c| c.engagement == e.id),
             on_our_ground,
@@ -515,6 +497,11 @@ impl<'a> Scene<'a> {
                 || sightings::clear(self.sightings, self.world.time, e.room),
             raided: !sightings::unarmed(self.sightings, self.world.time, e.room),
         }
+    }
+
+    fn home(&self, e: &Engagement) -> bool {
+        (e.ours.iter())
+            .all(|n| (self.ours.get(n.as_str())).is_some_and(|c| self.homes.contains(&c.pos.room)))
     }
 
     pub(super) fn siege_facts(
@@ -533,11 +520,7 @@ impl<'a> Scene<'a> {
             standing: standing.clone(),
             aging_out: aging_out.clone(),
             asked: self.spawning.iter().any(|c| c.engagement == e.id),
-            home: e.ours.iter().all(|n| {
-                self.ours
-                    .get(n.as_str())
-                    .is_some_and(|c| self.homes.contains(&c.pos.room))
-            }),
+            home: self.home(e),
             under_fire: e.ours.iter().any(|n| {
                 self.ours
                     .get(n.as_str())
