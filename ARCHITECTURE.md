@@ -187,7 +187,7 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
 | `expansion` | in-flight claim, failed rooms (100k fade), abandoned colonies | Strategy | Memory | outlives travel, stock dips, and raze ticks |
 | `switches` | module name → bool (`false` disables; `recorder: true` opts in) | Main | Memory | live kill switches |
 | `observe.*` | health, faults, per-module CPU, counts, tactic offers, alerts | Observe | segment 1 | operator telemetry & benchmark calibration |
-| `intel.rooms` | per-room snapshot (seen tick, owner/level, reservation, worker, keeper posts, controller/sources/containers, mineral, stronghold; by username, never stance) | Strategy | heap + segment 2 (every 100 ticks) | serve out-of-sight rooms; price outposts & expansion |
+| `intel.rooms` | per-room snapshot (seen tick, owner/level, reservation, worker (another player's WORK body, never an Invader), keeper posts, controller/sources/containers, mineral, stronghold; by username, never stance) | Strategy | heap + segment 2 (every 100 ticks) | serve out-of-sight rooms; price outposts & expansion |
 | `metrics.windows` | 100-tick aligned windows (per-room + world, up to 150 windows) | Observe | segment 3 | `observe metrics` & soak `metrics.jsonl` (§10.5) |
 | `recorder` | deflated `read.js` pass + Memory + intel ring | Main | segments 10–14 | live capture for benchmark & replay (§9.1) |
 | `engagements.log` | closed engagements (`Predicted` vs `Actual`) | Observe | segment `❓` | live `Exchange` error tracking (§10.1) |
@@ -781,7 +781,7 @@ a live-sized world.
 | Milestone | Scope | Exit | Status |
 |---|---|---|---|
 | M1 economy | core economy slots, logistics, layout | seat-extreme soak beats v1 across seeds | ✅ |
-| M1b outposts | remote harvest/haul/reserve; stand-down rule: a player's armed hostile stands down an outpost while it reaches its sources/containers, an Invader raid on sight (its only aim is that work), a stronghold core outright, and a blind room's last-seen hostile for its life (`sightings`) | E1 outposts net positive after Invaders | ✅ |
+| M1b outposts | remote harvest/haul/reserve; stand-down rule: a player's armed hostile stands down an outpost while it reaches its sources/containers, an Invader raid on sight (its only aim is that work; bodies withdraw while Defend answers, the outpost stays chosen), a stronghold core outright, and a blind room's last-seen hostile for its life (`sightings`) | E1 outposts net positive after Invaders | ✅ |
 | M2 structures | nodes N1–N7; links (controller's + longest-way source's first beat hub-first by +5–17k over 20k ticks on N4); labs & boosts; factory and RCL8 set wait for a sink (one room mines one ore, reactions need two, offline has no market) | links beat no-links; labs feed boosts | ✅ |
 | M3 defence | `Exchange`, `Defend`, tactics, casting, rival harness | fixed rivals & self-play held; error in bound | ✅ (self-play `❓`) |
 | M4 live | v2 replaces v1 live | live since 2026-10-17 | ✅ |

@@ -4,7 +4,7 @@
   "start": { "room": "W8N3", "seed": 1, "node": "N3", "invaders": "W8N3:1000:1000", "ended": true },
   "ticks": 2500,
   "assert": [
-    { "measure": "homeHostileTicks", "min": 1 },
+    { "measure": "hostileTicks", "min": 1 },
     { "metric": "exposure", "room": "W8N3", "max": 0 }
   ]
 }

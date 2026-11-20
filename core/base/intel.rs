@@ -17,6 +17,7 @@ pub struct Row {
     /// The reserver and the tick its hold lapses, so it ends unseen.
     pub reservation: Option<(String, i32)>,
     /// Whose economy the room is; a hauler only passes, so WORK alone marks it.
+    /// Never an Invader: its raid is Defend's to answer, not a rival working the room.
     pub worker: Option<String>,
     /// None on a row written before posts were read: unknown, not none.
     pub lairs: Option<Vec<Post>>,

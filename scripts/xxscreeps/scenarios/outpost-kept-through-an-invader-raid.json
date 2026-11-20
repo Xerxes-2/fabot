@@ -1,0 +1,10 @@
+{
+  "why": "An Invader raid on an outpost is answered by Defend and the outpost stays chosen: a wave every 1,000 ticks lands while the spawn time left is tight",
+  "modules": ["strategy"],
+  "start": { "room": "W9N8", "seed": 1, "invaders": "W9N9:1000:12500", "wave": "melee" },
+  "ticks": 22500,
+  "assert": [
+    { "measure": "hostileTicks", "room": "W9N9", "from": 12500, "to": 22500, "max": 1500 },
+    { "measure": "dug", "room": "W9N9", "from": 12500, "to": 22500, "min": 150000 }
+  ]
+}

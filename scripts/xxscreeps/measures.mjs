@@ -225,11 +225,11 @@ export const measures = {
   oldestPayingSite: (samples, a) => Math.max(0, ...within(samples, a).map((s) => s.oldestPaying ?? 0)),
   // Energy lost to link transfers: none means no link ever sent.
   linked: (samples, a) => at(samples, a.to ?? Infinity).ledger.linked - at(samples, a.from ?? 0).ledger.linked,
-  // Ticks an enemy stood in the colony's own room.
-  homeHostileTicks: (samples, a) => {
+  // Ticks an enemy stood in `room`, else the colony's own.
+  hostileTicks: (samples, a) => {
     const [first, last] = [at(samples, a.from ?? 0), at(samples, a.to ?? Infinity)];
-    const home = Object.keys(last.rooms)[0];
-    return last.rooms[home].hostile - (first.rooms[home]?.hostile ?? 0);
+    const room = a.room ?? Object.keys(last.rooms)[0];
+    return (last.rooms[room]?.hostile ?? 0) - (first.rooms[room]?.hostile ?? 0);
   },
   // Engagements whose predicted Win or Kite was lost (§10.1).
   predictedWinsLost: (_, __, dir) => bugs(engagementsOf(dir)).length,

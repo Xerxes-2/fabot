@@ -33,6 +33,7 @@ pub fn step(world: &World, intel: &mut Intel) {
             // An ally's body is never hunted, so it never hides an enemy's.
             worker: room
                 .hostiles()
+                .filter(|h| h.owner != Owner::Invader)
                 .find(|h| h.body.iter().any(|p| p.kind == Part::Work))
                 .and_then(|h| user(&world.me, &h.owner)),
             lairs: Some(Atlas::posts(room)),

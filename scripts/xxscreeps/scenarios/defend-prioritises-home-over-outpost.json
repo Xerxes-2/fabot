@@ -5,7 +5,7 @@
   "ticks": 2500,
   "assert": [
     { "measure": "draftedAfterOthers", "room": "W8N3", "max": 0 },
-    { "measure": "homeHostileTicks", "max": 60 },
+    { "measure": "hostileTicks", "max": 60 },
     { "metric": "hostile.dwell", "room": "W8N3", "max": 20 },
     { "metric": "hostile.dwell", "room": "W7N3", "max": 20 },
     { "metric": "hostile.dwell", "room": "W8N2", "max": 20 },
