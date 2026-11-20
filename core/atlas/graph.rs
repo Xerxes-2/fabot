@@ -317,6 +317,7 @@ pub fn search(
 
     let mut reached: Vec<Reached> = Vec::new();
     let mut exits: Vec<(Tile, Tile)> = Vec::new();
+    let mut entries: Vec<i32> = Vec::new();
     let mut queue: BinaryHeap<Reverse<(i32, i32, usize)>> = BinaryHeap::default();
     let mut settled = Some(0);
     loop {
@@ -344,6 +345,7 @@ pub fn search(
                     let d = s.iter().map(entry).min().unwrap_or(UNREACHED);
                     if d != UNREACHED {
                         exits.push((s[0].0, s[s.len() - 1].0));
+                        entries.push(d);
                         ticks = ticks.min(d);
                     }
                 }
@@ -364,16 +366,43 @@ pub fn search(
         let Some(Reverse((_, _, r))) = queue.pop() else {
             break;
         };
-        let r = &reached[r];
-        let exit = &exits[r.exit.clone()];
-        let exit_tiles = exit.iter().flat_map(|(a, b)| Atlas::stretch(*a, *b));
-        let held = ways.regions(r.room).any(|n| {
-            (ways.nodes[n].dist.as_ref())
-                .is_none_or(|d| exit_tiles.clone().any(|t| on(d, *t) != UNREACHED))
-        });
-        if held {
+        let held = |(a, b): (Tile, Tile)| {
+            ways.regions(reached[r].room).any(|n| {
+                (ways.nodes[n].dist.as_ref())
+                    .is_none_or(|d| Atlas::stretch(a, b).iter().any(|t| on(d, *t) != UNREACHED))
+            })
+        };
+        let free: Vec<usize> = reached[r]
+            .exit
+            .clone()
+            .filter(|e| !held(exits[*e]))
+            .collect();
+        if free.is_empty() {
             continue;
         }
+        // The free stretches can cost more than the popped node, so settling now breaks cheapest-first.
+        if free.len() < reached[r].exit.len() {
+            let first = exits.len();
+            for e in free {
+                exits.push(exits[e]);
+                entries.push(entries[e]);
+            }
+            let ticks = entries[first..].iter().min().copied().unwrap_or(UNREACHED);
+            let r = &reached[r];
+            let value = ways.nodes[r.next].value + ticks;
+            queue.push(Reverse((r.blind, value, reached.len())));
+            reached.push(Reached {
+                room: r.room,
+                exit: first..exits.len(),
+                value,
+                hops: r.hops,
+                blind: r.blind,
+                next: r.next,
+            });
+            continue;
+        }
+        let r = &reached[r];
+        let exit = &exits[r.exit.clone()];
         let dist =
             grid_of(r.room).map(|g| atlas.flood_in(g, mover, Goal::Exit(exit), Ground::Kept));
         match ways.regions(r.room).last() {

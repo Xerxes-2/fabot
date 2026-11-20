@@ -868,3 +868,54 @@ fn an_unseen_keeper_room_reads_as_its_intel_once_intel_arrives() {
     let kept = Atlas::following(warm, &world, intel(), [(keeper, &open)]);
     assert_eq!(route(&kept), route(&fresh));
 }
+
+/// The root's serpentine makes its east border dearer than the way round
+/// north, so the east room's north region is settled first and only the
+/// root's border reaches its south one.
+#[test]
+fn each_stretch_into_a_room_split_by_walls_is_a_way_into_its_own_region() {
+    let open = || vec![0u8; tiles::COUNT];
+    let mut root = open();
+    for (n, x) in [6, 12, 18, 24, 30, 36, 42].into_iter().enumerate() {
+        let gap = if n % 2 == 0 { 48 } else { 1 };
+        for y in (0..50).filter(|y| *y != gap) {
+            root[tiles::index(x, y)] = terrain::WALL;
+        }
+    }
+    let mut split = open();
+    for x in 0..50 {
+        split[tiles::index(x, 25)] = terrain::WALL;
+    }
+    let (r, north, round, east) = (
+        RoomName::new(0, 0),
+        RoomName::new(0, -1),
+        RoomName::new(1, -1),
+        RoomName::new(1, 0),
+    );
+    let mut world = world_of_rooms(vec![
+        room_of(r, root, Vec::new()),
+        room_of(north, open(), Vec::new()),
+        room_of(round, open(), Vec::new()),
+        room_of(east, split, Vec::new()),
+    ]);
+    world.closed = (-1..=2)
+        .flat_map(|x| (-2..=1).map(move |y| RoomName::new(x, y)))
+        .filter(|c| ![r, north, round, east].contains(c))
+        .collect();
+    let atlas = Atlas::of_world(&world);
+    let mover = Mover {
+        footprint: Footprint::One,
+        factor: empty_factor(&[Part::Move]),
+    };
+    let target = Target {
+        room: r,
+        tiles: vec![tiles::index(2, 2)],
+        range: 0,
+        avoid: BTreeSet::new(),
+        max_hops: 4,
+    };
+    for y in [10, 40] {
+        let at = Pos::new(east, 10, y);
+        assert!(atlas.travel_ticks(mover, &target, &at).is_some(), "{at:?}");
+    }
+}
