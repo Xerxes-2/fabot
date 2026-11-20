@@ -350,6 +350,7 @@ pub struct Derived<'t> {
     /// The declared outposts a foe stands down this tick.
     pub closed: Vec<Outpost>,
     pub spots: HashMap<Target, Pos>,
+    pub ours: &'t atlas::Derived,
 }
 
 impl Derived<'_> {
@@ -1266,6 +1267,7 @@ pub fn of_world<'t>(
             .filter(|o| !ours.owned.contains(&o.room))
             .cloned()
             .collect(),
+        ours,
     }
 }
 

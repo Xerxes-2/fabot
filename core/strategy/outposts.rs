@@ -1,12 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use fabot_atlas::Derived;
-use fabot_base::declarations::{ColonyPlan, Declarations, Outpost, REACH_HOPS};
+use crate::expand;
+use fabot_atlas::{self as atlas, Atlas, Derived};
+use fabot_base::declarations::{
+    ColonyPlan, Declarations, OpKind, Operation, Outpost, REACH_HOPS, SIEGE_HOPS, Stage,
+};
 use fabot_base::engine;
 use fabot_base::intel::Intel;
 use fabot_base::tiles;
 use fabot_base::vocabulary::Part;
 use fabot_base::world::{Kind, RoomName, World};
+use fabot_fight::casting;
 use fabot_fight::shape::{Engagement, Objective};
 
 /// What one intent costs the engine; a body acts about once a tick.
@@ -72,26 +76,47 @@ fn price(c: &Candidate, capacity: i32) -> Price {
     }
 }
 
-/// A claim, siege or sweep is not tied to the colony serving it, so it holds
-/// every colony.
+/// An operation holds only the colonies it casts from: a claim its sponsor, a
+/// siege or sweep the colonies Fight casts it from at rest, declared to closed,
+/// since between waves none is owed; a Defend its owed casts (`ColonyPlan.owes`).
 pub fn busy(
-    plans: &[ColonyPlan],
-    (declarations, claimed): (&Declarations, Option<RoomName>),
-    (engagements, preyed, derived): (&[Engagement], &[RoomName], &Derived),
+    atlas: &mut Atlas,
+    (plans, derived): (&[ColonyPlan], &Derived),
+    (declarations, claimed): (&Declarations, Option<&Outpost>),
+    (operations, engagements): (&[Operation], &[Engagement]),
 ) -> BTreeSet<RoomName> {
-    let hunts = |home: RoomName| {
-        (derived.tree(home)).is_some_and(|tree| preyed.iter().any(|r| tree.contains(*r)))
+    // Merged as `Declarations::planned` merges them, so Economy picks the same.
+    let given_up = |room| {
+        (declarations.colonies.iter().chain(plans))
+            .find(|p| p.room == room)
+            .is_some_and(|p| p.stage == Stage::Abandon)
     };
-    let raising = |room: &RoomName| !derived.colonies.contains(room);
-    let operation = (declarations.claims.iter()).any(|c| raising(&c.room))
-        || claimed.is_some()
-        || !declarations.sieges.is_empty()
-        || (engagements.iter()).any(|e| !matches!(e.objective, Objective::Defend));
+    let mut serving = BTreeSet::new();
+    for c in expand::raising(derived, declarations, claimed) {
+        let ci = atlas::sponsor(atlas, derived, &given_up, &c.controller.pos);
+        serving.extend(ci.map(|i| derived.colonies[i]));
+    }
+    let fights: BTreeSet<RoomName> = (operations.iter())
+        .filter(|o| o.kind != OpKind::Defend)
+        .map(|o| o.room)
+        .chain(
+            (engagements.iter())
+                .filter(|e| e.objective != Objective::Defend)
+                .map(|e| e.room),
+        )
+        .collect();
+    let colonies: Vec<(RoomName, i32)> = (derived.colonies.iter().zip(&derived.homes))
+        .map(|(r, h)| (*r, h.capacity))
+        .collect();
+    for room in fights {
+        let tree = atlas.tree(&declarations.avoid, SIEGE_HOPS, room);
+        serving.extend(casting::homes(&colonies, |from| tree.crossings(from, room)));
+    }
     let boosting = (declarations.labs())
         .filter(|(_, targets)| !targets.is_empty())
         .map(|(home, _)| home);
     (plans.iter())
-        .filter(|p| operation || p.owes || boosting == Some(p.room) || hunts(p.room))
+        .filter(|p| serving.contains(&p.room) || p.owes || boosting == Some(p.room))
         .map(|p| p.room)
         .collect()
 }

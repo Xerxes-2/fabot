@@ -318,7 +318,7 @@ pub fn decide<'t>(
     let mut derived = derive(world, &mut atlas);
     phases.push(("derive".to_string(), clock() - start));
     let plans = strategy::plan(
-        (!state.off.contains(STRATEGY), world, &atlas),
+        (!state.off.contains(STRATEGY), world, &mut atlas),
         &derived,
         &declarations,
         intel,

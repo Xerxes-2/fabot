@@ -136,9 +136,29 @@ fn sponsors(world: &World, plans: &[ColonyPlan], busy: &BTreeSet<RoomName>) -> V
         .collect()
 }
 
+/// The claims not yet a colony: the operator's and `claim`, an expansion's.
+pub fn raising<'a>(
+    derived: &'a Derived,
+    declarations: &'a Declarations,
+    claim: Option<&'a Outpost>,
+) -> impl Iterator<Item = &'a Outpost> {
+    (declarations.claims.iter().chain(claim)).filter(|c| !derived.colonies.contains(&c.room))
+}
+
+/// One claim in flight at a time (owner, 2026-11-13).
+pub fn may_start(derived: &Derived, declarations: &Declarations, expansion: &Expansions) -> bool {
+    expansion.in_flight.is_none() && raising(derived, declarations, None).next().is_none()
+}
+
 /// A refill past the gate keeps the stock off its line between due ticks (§5).
-pub fn book(world: &World, derived: &Derived, plans: &mut [ColonyPlan], busy: &BTreeSet<RoomName>) {
-    if derived.capped {
+pub fn book(
+    world: &World,
+    derived: &Derived,
+    plans: &mut [ColonyPlan],
+    busy: &BTreeSet<RoomName>,
+    may_start: bool,
+) {
+    if derived.capped || !may_start {
         return;
     }
     let richest = (plans.iter_mut())
@@ -178,7 +198,6 @@ fn fate(age: i32, owned: bool, lost: bool, stored: bool) -> Fate {
     }
 }
 
-/// One claim in flight at a time (owner, 2026-11-13); `held` the last tick's.
 pub fn step<'t>(
     world: &World,
     derived: &Derived,
@@ -194,7 +213,7 @@ pub fn step<'t>(
         busy,
         fought,
     } = *around;
-    let raising = (declarations.claims.iter()).any(|c| !derived.colonies.contains(&c.room));
+    let raising = raising(derived, declarations, None).next().is_some();
     (expansion.failed).retain(|f| world.time - f.since < FORGET);
     (expansion.abandoned).retain(|a| derived.owned.contains(&a.room));
     let given =
@@ -252,7 +271,10 @@ pub fn step<'t>(
         }
         return;
     }
-    if world.time % DUE != 0 || raising || world.bucket < BUCKET {
+    if world.time % DUE != 0
+        || !may_start(derived, declarations, expansion)
+        || world.bucket < BUCKET
+    {
         return;
     }
     let capped = derived.capped;

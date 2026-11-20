@@ -68,6 +68,36 @@ pub fn nearest<'t>(
     })
 }
 
+/// The colony a claim is served from, its claimer, raising and pioneers alike
+/// (§5), so the claim holds that one alone (§7.2): the nearest stocked, else
+/// the nearest whose bank casts a claimer, so no claim waits on a storage.
+pub fn sponsor(
+    atlas: &mut Atlas,
+    derived: &Derived,
+    given_up: &dyn Fn(RoomName) -> bool,
+    at: &Pos,
+) -> Option<usize> {
+    let spawns: Vec<Pos> = derived.homes.iter().map(|h| h.spawn).collect();
+    let claimer = engine::body_cost(&[Part::Claim, Part::Move]);
+    let pays = |i: usize| {
+        let room = derived.colonies[i];
+        room != at.room && !given_up(room) && derived.homes[i].capacity >= claimer
+    };
+    let stocked = |i: usize| pays(i) && derived.homes[i].stocked;
+    let trees = |room| derived.tree(room);
+    nearest(atlas, &trees, &spawns, stocked, at)
+        .or_else(|| nearest(atlas, &trees, &spawns, pays, at))
+}
+
+/// A colony's facts a sponsor is picked by, `Derived.colonies`' order.
+#[derive(Debug)]
+pub struct Home {
+    pub spawn: Pos,
+    pub stocked: bool,
+    pub capacity: i32,
+}
+
+#[derive(Debug)]
 pub struct Derived {
     pub owned: BTreeSet<RoomName>,
     /// Every room GCL allows is owned.
@@ -80,6 +110,7 @@ pub struct Derived {
     /// What a body outside a fight walks round, per room with any.
     pub danger: Vec<(RoomName, TileSet)>,
     pub trees: Vec<(RoomName, Tree)>,
+    pub homes: Vec<Home>,
 }
 
 impl Derived {
@@ -135,8 +166,20 @@ pub fn derive(world: &World, atlas: &mut Atlas) -> Derived {
     let trees: Vec<(RoomName, Tree)> = (colonies.iter())
         .map(|home| (*home, atlas.tree(&BTreeSet::new(), REACH_HOPS, *home)))
         .collect();
+    let homes = (colonies.iter())
+        .filter_map(|home| {
+            let room = world.room(*home)?;
+            Some(Home {
+                spawn: world.spawns.iter().find(|s| s.pos.room == *home)?.pos,
+                stocked: (room.structures.iter())
+                    .any(|s| s.kind == Kind::Storage && s.owner.is_ours()),
+                capacity: room.energy_capacity,
+            })
+        })
+        .collect();
     Derived {
         danger: danger(world, &owned),
+        homes,
         capped: owned.len() as i32 >= world.rooms_allowed,
         owned,
         colonies,

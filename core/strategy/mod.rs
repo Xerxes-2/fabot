@@ -110,7 +110,7 @@ pub fn reserve(rules: &Rules, lifetimes: f64, level: i32, threatened: bool) -> i
 /// Switched off, the choices are the operator's alone, but each colony keeps
 /// its plan: Economy reads its reserve and Layout drops a room without one.
 pub fn plan<'t>(
-    (on, world, atlas): (bool, &World, &Atlas),
+    (on, world, atlas): (bool, &World, &mut Atlas),
     derived: &Derived,
     declarations: &Declarations,
     intel: &Intel,
@@ -176,13 +176,16 @@ pub fn plan<'t>(
         return (plans, Vec::new(), None, operations);
     }
     // An expansion declared this tick holds the outposts from the next.
-    let claimed = expand::claim(intel, derived, expansion.in_flight.as_ref()).map(|c| c.room);
+    let claiming = expand::claim(intel, derived, expansion.in_flight.as_ref());
+    let claimed = claiming.as_ref().map(|c| c.room);
     let mut preyed = intel::preyed(intel, declarations, world.time);
     preyed.retain(|room| atlas.has_terrain(*room));
+    let declared = operations(derived, declarations, (&[], claiming.as_ref()), &preyed);
     let busy = outposts::busy(
-        &plans,
-        (declarations, claimed),
-        (engagements, &preyed, derived),
+        atlas,
+        (&plans, derived),
+        (declarations, claiming.as_ref()),
+        (&declared, engagements),
     );
     let candidates = outposts::survey(world, derived, (declarations, &plans, claimed), intel);
     let chosen = outposts::chosen(world, candidates, (&busy, spare));
@@ -202,7 +205,8 @@ pub fn plan<'t>(
         terrain,
         expansion,
     );
-    expand::book(world, derived, &mut plans, &busy);
+    let may_start = expand::may_start(derived, declarations, expansion);
+    expand::book(world, derived, &mut plans, &busy, may_start);
     let claim = expand::claim(intel, derived, expansion.in_flight.as_ref());
     let operations = operations(derived, declarations, (&chosen, claim.as_ref()), &preyed);
     (plans, chosen, claim, operations)
@@ -228,7 +232,7 @@ fn operations(
     };
     let homes: BTreeSet<RoomName> = derived.colonies.iter().copied().collect();
     let worked: BTreeSet<RoomName> = (declarations.outposts.iter().chain(chosen))
-        .chain(declarations.claims.iter().chain(claim))
+        .chain(expand::raising(derived, declarations, claim))
         .map(|o| o.room)
         .filter(|r| !homes.contains(r))
         .collect();

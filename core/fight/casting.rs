@@ -381,7 +381,7 @@ pub fn holds(set: &[Fighter], strike: i32) -> bool {
 }
 
 pub fn kill_order(hostiles: &[Creep]) -> Vec<Id> {
-    let ranked: Vec<(Id, (bool, f64))> = hostiles
+    let mut ranked: Vec<(Id, (bool, f64))> = hostiles
         .iter()
         .map(|h| {
             let f = fighter_of(h);
@@ -392,8 +392,6 @@ pub fn kill_order(hostiles: &[Creep]) -> Vec<Id> {
             )
         })
         .collect();
-
-    let mut ranked = ranked;
     ranked.sort_by(|(a_id, a), (b_id, b)| {
         a.0.cmp(&b.0)
             .then(a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
@@ -433,21 +431,49 @@ pub fn colony_for(
             + i64::from(spawn_ticks) * short / i64::from(cost)
     };
 
-    let ranked: Vec<(i64, RoomName)> = colonies
-        .iter()
+    (colonies.iter())
         .filter(|r| r.energy_capacity >= cost)
         .filter_map(|r| walk(r.name).map(|w| (i64::from(w) + wait(r), r.name)))
-        .collect();
+        .min()
+        .map(|(_, room)| room)
+}
 
-    let mut ranked = ranked;
-    ranked.sort();
-    ranked.into_iter().next().map(|(_, room)| room)
+/// Each colony `colony_for` picks at rest (no queue, full banks) for some body
+/// a fight casts: those no nearer colony out-banks.
+pub fn homes(banks: &[(RoomName, i32)], walk: impl Fn(RoomName) -> Option<i32>) -> Vec<RoomName> {
+    let mut reached: Vec<_> = (banks.iter())
+        .filter_map(|&(r, c)| Some((walk(r)?, r, c)))
+        .collect();
+    reached.sort();
+    let mut most = 0;
+    (reached.into_iter())
+        .filter(|&(.., capacity)| (capacity > most).then(|| most = capacity).is_some())
+        .map(|(_, room, _)| room)
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use fabot_base::grid;
+
+    #[test]
+    fn homes_are_the_colonies_no_nearer_one_out_banks() {
+        let room = |x| RoomName::new(x, 1);
+        let banks = [
+            (room(1), 12_700),
+            (room(3), 5_500),
+            (room(5), 700),
+            (room(7), 12_700),
+        ];
+        let walk = |r: RoomName| {
+            banks
+                .iter()
+                .position(|(b, _)| *b == r)
+                .map(|i| [3, 1, 0, 5][i])
+        };
+        assert_eq!(homes(&banks, walk), vec![room(5), room(3), room(1)]);
+    }
 
     /// A pair is 5,100 of the bank and three pairs are the most a drain casts,
     /// a pair's medic seating 156 of heal a tick.

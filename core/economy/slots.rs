@@ -210,17 +210,18 @@ fn haulers(flows: &[(f64, Leg)], capacity: i32) -> Vec<Vec<Part>> {
     vec![most; ((carry + per - 1) / per) as usize]
 }
 
-/// Per colony, the stocked colony that sends its pioneers while it is young.
+fn sponsor(atlas: &mut Atlas, derived: &Derived, at: &Pos) -> Option<usize> {
+    let given_up = |room| (derived.grounds.iter()).any(|g| g.room == room && g.abandoned);
+    atlas::sponsor(atlas, derived.ours, &given_up, at)
+}
+
+/// Per colony, the colony that sends its pioneers while it is young.
 fn sponsors(atlas: &mut Atlas, derived: &Derived) -> Vec<Option<usize>> {
-    let homes: Vec<Pos> = derived.colonies.iter().map(|c| c.spawns[0].pos).collect();
-    let banks = |ci: usize| !derived.grounds[ci].abandoned && derived.grounds[ci].has_storage();
     (derived.colonies.iter().enumerate())
         .map(|(cj, c)| {
             let g = &derived.grounds[cj];
             let young = c.controller.level <= STORAGE_LEVEL && !g.has_storage() && !g.abandoned;
-            let can = |ci: usize| ci != cj && banks(ci);
-            let at = c.controller.pos;
-            young.then(|| atlas::nearest(atlas, &|r| derived.route(r), &homes, can, &at))?
+            young.then(|| sponsor(atlas, derived, &c.controller.pos))?
         })
         .collect()
 }
@@ -229,14 +230,17 @@ fn banks(derived: &Derived, ci: usize) -> bool {
     !derived.grounds[ci].abandoned && derived.grounds[ci].bank().is_some()
 }
 
-/// The colony that serves each ground: its own colony, else the nearest that
-/// banks the haul (`ARCHITECTURE.md` §5).
+/// The colony that serves each ground: its own colony, a raised claim its
+/// sponsor, else the nearest that banks the haul (`ARCHITECTURE.md` §5).
 pub fn owners(atlas: &mut Atlas, derived: &Derived) -> Vec<Option<usize>> {
     let homes: Vec<Pos> = derived.colonies.iter().map(|c| c.spawns[0].pos).collect();
     (derived.grounds.iter().enumerate())
         .map(|(gi, ground)| {
             if gi < derived.colonies.len() {
                 return Some(gi);
+            }
+            if let Some(c) = ground.controller.as_ref().filter(|c| c.owner.is_ours()) {
+                return sponsor(atlas, derived, &c.pos);
             }
             let at = (ground.controller.as_ref().map(|c| c.pos))
                 .or_else(|| ground.sources.first().map(|s| s.pos))?;
@@ -857,16 +861,17 @@ fn claimed(derived: &Derived, controller: Id) -> bool {
     derived.claims.iter().any(|c| c.id == controller)
 }
 
-fn errand(atlas: &mut Atlas, derived: &Derived, job: Job, seat: Pos, key: &str) -> Option<Slot> {
-    let pattern = job.pattern();
-    let homes: Vec<Pos> = derived.colonies.iter().map(|c| c.spawns[0].pos).collect();
-    let can = |ci: usize| {
-        !derived.grounds[ci].abandoned
-            && derived.colonies[ci].bank_capacity >= engine::body_cost(bodies::block_of(pattern))
-    };
-    let ci = atlas::nearest(atlas, &|room| derived.route(room), &homes, can, &seat)?;
-    let body = bodies::sized(pattern, 1, derived.colonies[ci].bank_capacity)?;
+fn errand(derived: &Derived, ci: usize, job: Job, seat: Pos, key: &str) -> Option<Slot> {
+    let body = bodies::sized(job.pattern(), 1, derived.colonies[ci].bank_capacity)?;
     Some(Slot::new(ci, false, job, seat, key, 0, body))
+}
+
+fn scouter(atlas: &mut Atlas, derived: &Derived, at: &Pos) -> Option<usize> {
+    let homes: Vec<Pos> = derived.colonies.iter().map(|c| c.spawns[0].pos).collect();
+    let block = engine::body_cost(bodies::block_of(Pattern::Scout));
+    let can =
+        |ci: usize| !derived.grounds[ci].abandoned && derived.colonies[ci].bank_capacity >= block;
+    atlas::nearest(atlas, &|room| derived.route(room), &homes, can, at)
 }
 
 pub fn plan(
@@ -915,13 +920,8 @@ pub fn plan(
         }
     }
     for c in &derived.claims {
-        out.extend(errand(
-            atlas,
-            derived,
-            Job::Claim(c.id),
-            c.pos,
-            &c.id.text(),
-        ));
+        let ci = sponsor(atlas, derived, &c.pos);
+        out.extend(ci.and_then(|ci| errand(derived, ci, Job::Claim(c.id), c.pos, &c.id.text())));
     }
     // A scout takes whichever room its walk picks, so a slot is a count, one
     // a colony, keyed by it so a living scout keeps it however rooms reorder.
@@ -932,7 +932,9 @@ pub fn plan(
         if held.len() == derived.colonies.len() {
             break;
         }
-        let Some(mut slot) = errand(atlas, derived, Job::Scout(at.room), *at, "") else {
+        let ci = scouter(atlas, derived, at);
+        let Some(mut slot) = ci.and_then(|ci| errand(derived, ci, Job::Scout(at.room), *at, ""))
+        else {
             continue;
         };
         if held.insert(slot.colony) {

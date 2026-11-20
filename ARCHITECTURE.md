@@ -300,8 +300,9 @@ pricer cost ~2× CPU and 580 lines for no gain and was not merged).
   CREEP_LIFETIME × n` (`n` live-declared via `observe declare reserve`, default
   `2`); quiet colonies keep 1/3 because a full reserve costs a quiet young
   colony a lifetime of upgrading while threats come from neighbours intel sees.
-  Owed fight casts and (when GCL allows expanding) one sponsor's 30k expansion
-  margin + one refill (`expand::book`) are added to reserve. Builders draw
+  Owed fight casts and (when GCL allows expanding and `expand::may_start`, since
+  one claim flies at a time) one sponsor's 30k expansion margin + one refill
+  (`expand::book`) are added to reserve. Builders draw
   reserve only for paying sites and ramparts (`Ground::kept_from_builders`,
   `derived::drawn_for`), because lowering the reserve itself also feeds surplus
   upgraders and drains a raided stock.
@@ -341,8 +342,10 @@ pricer cost ~2× CPU and 580 lines for no gain and was not merged).
 
 ### Served declarations, labs & abandon
 
-- **External declarations:** Economy serves `Claim` (claimer + 4 pioneers from
-  nearest stocked sponsor until RCL4/storage), `Scout`, `Boost`, and future
+- **External declarations:** Economy serves `Claim` (claimer, raising and 4
+  pioneers until RCL4/storage, all from `atlas::sponsor`: the nearest stocked
+  colony not given up, else the nearest whose bank casts a claimer; one rule
+  on `Derived` facts that `outposts::busy` holds too), `Scout`, `Boost`, and future
   `Mine`/`Pickup` declarations without owning them.
 - **Labs (`economy/labs.rs`):** `labs::plan_for` derives a stateless per-tick
   reaction plan from `declarations.flows` toward target compound stocks; labs
@@ -530,8 +533,13 @@ expansion, and operation priorities.
   its spawns' life for workers so its pile does not decay unspent. Stocked homes
   add one non-standing outpost at a time so spawns absorb one room's bodies at
   once; young homes open all paying ones because waiting on containers delayed
-  RCL3. Colonies held by an active operation (`outposts::busy`) add no new
-  outposts.
+  RCL3. An operation holds only the colonies it casts from (`outposts::busy`):
+  a claim's sponsor until its spawn stands; a siege or sweep, from its
+  operation row to its engagement's close, every colony Fight's `colony_for`
+  picks at rest for some body (`fight::casting::homes`: none nearer out-banks
+  it), since between waves no cast is owed; a
+  Defend its owed casts (`ColonyPlan.owes`). Held, they add no new outposts
+  and sponsor nothing, while the others keep growing.
 - **Expansion (`strategy::expand`):** automatic, one in flight. On due ticks
   (100) while GCL allows and `bucket >= 9000`, a non-busy RCL4+ sponsor with
   storage holding `reserve + 30k` scores free 2-source rooms ≥ 2 rooms from
