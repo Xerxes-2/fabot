@@ -58,6 +58,7 @@ const SEEN_AFTER_CAST = 2;
 const SPAWN_TIME_PER_PART = 3;
 // `AGED` in `core/observe/metrics.rs`: fewer ticks to live, a body died of age.
 const AGED = 5;
+const CREEP_LIFE_TIME = 1500;
 // `STRUCK_LATELY` there: struck within these ticks of its death, a body was killed.
 const STRUCK_LATELY = 5;
 const firstClaimed = (samples, met) => samples.find((s) => Object.keys(s.claimed ?? {}).length && Object.values(s.claimed).every(met))?.t ?? Infinity;
@@ -116,10 +117,18 @@ export const measures = {
     const seen = within(samples, a);
     return seen.slice(1).reduce((n, s, i) => n + Math.max(0, standing(seen[i]) - standing(s)), 0);
   },
-  // From the peak, so a road that decays and is rebuilt is not lost.
+  // A road rebuilt within a creep lifetime, or being rebuilt at the end, is not lost (owner).
   roadsLost: (samples, a) => {
-    const seen = within(samples, a).map((s) => s.rooms[a.room]?.roads ?? 0);
-    return Math.max(0, ...seen) - (seen.at(-1) ?? 0);
+    const seen = within(samples, a).map((s) => [s.t, s.rooms[a.room]?.roads ?? 0]);
+    const end = seen.at(-1)?.[0] ?? 0;
+    let [peak, lost] = [0, 0];
+    for (const [t, roads] of seen) {
+      peak = Math.max(peak, roads);
+      if (t + CREEP_LIFE_TIME > end) break;
+      const after = seen.filter(([u]) => u >= t && u <= t + CREEP_LIFE_TIME).map(([, r]) => r);
+      lost = Math.max(lost, peak - Math.max(...after));
+    }
+    return lost;
   },
   roadsAtEnd: (samples, a) => at(samples, a.to ?? Infinity).rooms[a.room]?.roads ?? 0,
   stillLoaded: (samples, a) => at(samples, a.to ?? Infinity).stillLoaded,
