@@ -1,8 +1,6 @@
 //! Hivemind's room plan (MIT, © David Franke): every variation built and
 //! scored as its planner does, the best one taken, and each structure given
 //! the level its room manager builds it at.
-use std::borrow::Cow;
-
 use fabot_atlas::Atlas;
 use fabot_base::engine;
 use fabot_base::tiles::{self, Tile};
@@ -15,9 +13,8 @@ use super::score;
 use super::shape::{self, Item, Plan};
 
 pub fn level_of(rules: &Rules, kind: &Kind, rank: i32) -> i32 {
-    let name = kind.name();
     (0..=engine::CONTROLLER_MAX_LEVEL)
-        .find(|level| rules.allowed(&name, *level) > rank)
+        .find(|level| rules.allowed(kind, *level) > rank)
         .unwrap_or(engine::CONTROLLER_MAX_LEVEL + 1)
 }
 
@@ -129,11 +126,16 @@ fn order(plan: &Labels, kind: &str, level: i32, controller: Option<Tile>) -> Vec
 
 /// Each kind's tiles with the level the room manager first builds them at,
 /// in the order it builds them.
-fn leveled(rules: &Rules, plan: &Labels, name: &str, controller: Option<Tile>) -> Vec<(Tile, i32)> {
+fn leveled(
+    rules: &Rules,
+    plan: &Labels,
+    kind: &Kind,
+    controller: Option<Tile>,
+) -> Vec<(Tile, i32)> {
     let mut built: Vec<(Tile, i32)> = Vec::new();
     for level in 1..=engine::CONTROLLER_MAX_LEVEL {
-        let allowed = rules.allowed(name, level).max(0) as usize;
-        for t in order(plan, name, level, controller) {
+        let allowed = rules.allowed(kind, level).max(0) as usize;
+        for t in order(plan, kind.as_ref(), level, controller) {
             if built.len() >= allowed {
                 break;
             }
@@ -209,7 +211,7 @@ fn to_plan(rules: &Rules, ground: &Ground, built: &Built) -> Plan {
         Kind::Observer,
         Kind::Factory,
     ] {
-        for (t, level) in leveled(rules, plan, &kind.name(), ground.controller) {
+        for (t, level) in leveled(rules, plan, &kind, ground.controller) {
             push(kind.clone(), t, level);
         }
     }
@@ -220,7 +222,7 @@ fn to_plan(rules: &Rules, ground: &Ground, built: &Built) -> Plan {
     // Main's: each spawn, tower, storage and terminal has its own rampart
     // from the ring's level, which a ring the roads hold back would leave bare.
     for kind in [Kind::Spawn, Kind::Tower, Kind::Storage, Kind::Terminal] {
-        for (t, level) in leveled(rules, plan, &kind.name(), ground.controller) {
+        for (t, level) in leveled(rules, plan, &kind, ground.controller) {
             push(Kind::Rampart, t, level.max(RING_LEVEL));
         }
     }
@@ -269,10 +271,9 @@ fn to_plan(rules: &Rules, ground: &Ground, built: &Built) -> Plan {
     let unfit = (sized().into_iter())
         .filter(|kind| {
             (items.iter().filter(|i| i.kind == *kind).count() as i32)
-                < rules.allowed(&kind.name(), engine::CONTROLLER_MAX_LEVEL)
+                < rules.allowed(kind, engine::CONTROLLER_MAX_LEVEL)
         })
-        .map(|kind| kind.name())
-        .collect::<Vec<Cow<'static, str>>>();
+        .collect();
 
     let planned: Vec<&Item> = items.iter().chain(&ring).collect();
     let open = |t: Tile| ground.terrain[t] != place::WALL;
@@ -366,7 +367,8 @@ mod tests {
         let rules = Rules::vanilla();
         for name in rules.structures.keys() {
             for level in 0..engine::CONTROLLER_MAX_LEVEL {
-                assert!(rules.allowed(name, level) <= rules.allowed(name, level + 1));
+                let kind = Kind::from(name.as_str());
+                assert!(rules.allowed(&kind, level) <= rules.allowed(&kind, level + 1));
             }
         }
     }
@@ -387,10 +389,7 @@ mod tests {
                     let seated = (plan.items.iter())
                         .filter(|i| i.kind == kind && i.level <= level)
                         .count() as i32;
-                    assert!(
-                        seated <= rules.allowed(&kind.name(), level),
-                        "{kind:?} at {level}"
-                    );
+                    assert!(seated <= rules.allowed(&kind, level), "{kind:?} at {level}");
                 }
             }
             let solid: Vec<Tile> = (plan.items.iter())
@@ -500,7 +499,7 @@ mod tests {
     #[test]
     fn every_extension_beside_a_source_container_ranks_with_the_bays() {
         let rules = Rules::vanilla();
-        let early = rules.allowed(&Kind::Extension.name(), haul_level(&rules));
+        let early = rules.allowed(&Kind::Extension, haul_level(&rules));
         for colony in fx::samples(15).take(fx::MAX_TEST) {
             let Some((ground, plan)) = fx::plan_of(&colony) else {
                 continue;

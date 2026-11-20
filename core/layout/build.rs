@@ -1,7 +1,7 @@
 //! Hivemind's room variation builder and its tower step (MIT, © David
 //! Franke), step for step: one variation's plan, as labels.
 use fabot_base::tiles::{self, Tile, index};
-use fabot_base::world::Rules;
+use fabot_base::world::{Kind, Rules};
 
 use super::cut::{self, Rect};
 use super::ground::Ground;
@@ -103,7 +103,7 @@ fn allowed(rules: &Rules, label: &str) -> usize {
         "wall" => "constructedWall",
         other => other,
     };
-    rules.allowed(name, 8).max(0) as usize
+    rules.allowed(&Kind::from(name), 8).max(0) as usize
 }
 
 impl Builder<'_> {

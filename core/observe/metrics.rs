@@ -4,6 +4,8 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write;
 
+use strum::IntoStaticStr;
+
 use fabot_atlas::{Atlas, Derived};
 use fabot_base::HashMap;
 use fabot_base::declarations::{self, Declarations, Refused};
@@ -300,23 +302,13 @@ struct Stale {
     since: i32,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, IntoStaticStr)]
+#[strum(serialize_all = "lowercase")]
 enum Cause {
     Player,
     Tower,
     Npc,
     Unknown,
-}
-
-impl Cause {
-    fn name(self) -> &'static str {
-        match self {
-            Cause::Player => "player",
-            Cause::Tower => "tower",
-            Cause::Npc => "npc",
-            Cause::Unknown => "unknown",
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -490,9 +482,10 @@ fn spent(
 /// The actor and the executor's verb for an act that spends, as a refusal names them.
 fn verb(intent: &Action) -> Option<(Cow<'_, str>, &'static str)> {
     Some(match intent {
-        Action::Creep(name, CreepAct::Build(_)) => (name.into(), "build"),
-        Action::Creep(name, CreepAct::Repair(_)) => (name.into(), "repair"),
-        Action::Creep(name, CreepAct::Upgrade(_)) => (name.into(), "upgrade"),
+        Action::Creep(
+            name,
+            act @ (CreepAct::Build(_) | CreepAct::Repair(_) | CreepAct::Upgrade(_)),
+        ) => (name.into(), act.into()),
         Action::Spawn(id, SpawnAct::SpawnCreep(..)) => (id.to_string().into(), "spawn"),
         Action::Tower(id, TowerAct::Attack(_)) => (id.to_string().into(), "attack"),
         Action::Tower(id, TowerAct::Heal(_)) => (id.to_string().into(), "heal"),
@@ -722,8 +715,9 @@ fn deaths(sums: &mut Sums, tracks: &mut HashMap<String, Track>, world: &World) {
             Some((cause, at)) if time - at <= STRUCK_LATELY => Some(cause),
             _ => (t.wounded || unseen).then_some(Cause::Unknown),
         };
+        let cause: Option<&str> = cause.map(Into::into);
         if t.ttl > AGED
-            && let Some(cause) = cause.map(Cause::name)
+            && let Some(cause) = cause
         {
             let row = Some(t.at.room);
             add(sums, row, &format!("{DEATH}{cause}"), 1.0);
@@ -982,7 +976,7 @@ impl Metrics {
         let mut sums = std::mem::take(&mut self.sums);
         add(&mut sums, None, BUCKET, f64::from(world.bucket));
         for (p, pace) in std::mem::take(&mut self.paces) {
-            let name = bodies::name_of(p);
+            let name: &str = p.into();
             add(&mut sums, None, BODIES, pace.bodies);
             add(&mut sums, None, &format!("{BODIES_OF}{name}"), pace.bodies);
             add(&mut sums, None, &format!("{IDLE_OF}{name}"), pace.idle);

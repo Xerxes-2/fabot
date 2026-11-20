@@ -38,7 +38,7 @@ pub fn raze(room: &Room) -> Vec<Action> {
         return Vec::new();
     }
     let ours: Vec<Action> = (room.structures.iter())
-        .filter(|s| s.owner.is_ours() && s.kind.name() != "controller")
+        .filter(|s| s.owner.is_ours() && s.kind.as_ref() != "controller")
         .map(|s| Action::Room(room.name, RoomAct::Destroy(s.id)))
         .collect();
     if ours.is_empty() {

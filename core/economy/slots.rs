@@ -77,8 +77,9 @@ impl Slot {
         k: usize,
         body: Vec<Part>,
     ) -> Slot {
+        let pattern: &str = job.pattern().into();
         Slot {
-            id: format!("{}:{key}:{k}", bodies::name_of(job.pattern())),
+            id: format!("{pattern}:{key}:{k}"),
             colony: ci,
             room: seat.room,
             rank: rank_of(&job, own),
@@ -938,11 +939,8 @@ pub fn plan(
             continue;
         };
         if held.insert(slot.colony) {
-            slot.id = format!(
-                "{}:{}:0",
-                bodies::name_of(Pattern::Scout),
-                derived.colonies[slot.colony].room
-            );
+            let scout: &str = Pattern::Scout.into();
+            slot.id = format!("{scout}:{}:0", derived.colonies[slot.colony].room);
             if !cast {
                 slot.body.clear();
             }
@@ -1034,7 +1032,8 @@ pub fn far(slot: &Slot) -> bool {
 /// Numbered apart from home's, so a pool that shrinks never turns an outpost's
 /// slot into a home one under its body.
 fn far_id(home: RoomName) -> String {
-    format!("{}:{home}:far:", bodies::name_of(Pattern::Hauler))
+    let hauler: &str = Pattern::Hauler.into();
+    format!("{hauler}:{home}:far:")
 }
 
 /// An id is its holders' key.

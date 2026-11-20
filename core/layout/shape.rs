@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use fabot_base::declarations::MUSTER_RANGE;
 /// Ahead of `State` so `State` can hold the standing plan.
 use fabot_base::tiles::{self, Tile};
@@ -22,7 +20,7 @@ pub struct Plan {
     pub items: Vec<Item>,
     /// Built only while Strategy declares it (`ColonyPlan.ring`).
     pub ring: Vec<Item>,
-    pub unfit: Vec<Cow<'static, str>>,
+    pub unfit: Vec<Kind>,
     /// Where a free fight set waits (`muster`).
     pub muster: Option<Pos>,
 }

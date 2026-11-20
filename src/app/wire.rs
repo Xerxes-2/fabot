@@ -7,7 +7,7 @@ use wasm_bindgen::{JsCast, JsValue};
 use fabot_base::intel::{self, Intel};
 use fabot_core::memory::Memory;
 use fabot_observe::metrics::Metrics;
-use fabot_tactics::{self as tactics, Offer};
+use fabot_tactics::Offer;
 
 /// Read by `npm run observe` and `scripts/capture`.
 pub const OBSERVE_SEGMENT: u8 = 1;
@@ -90,7 +90,7 @@ pub struct Observed {
 fn offer_rows<S: Serializer>(offers: &[(i32, Vec<Offer>)], s: S) -> Result<S::Ok, S::Error> {
     s.collect_seq(offers.iter().map(|(id, list)| {
         let rows: Vec<_> = (list.iter())
-            .map(|o| (tactics::name(o.tactic), o.value, o.cost, o.bodies))
+            .map(|o| (o.tactic, o.value, o.cost, o.bodies))
             .collect();
         (id, rows)
     }))

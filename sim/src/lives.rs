@@ -3,6 +3,7 @@
 //! of ours stood loaded and idle, and its crossings back over a border.
 use std::collections::BTreeMap;
 
+use fabot_base::vocabulary;
 use krebs::atom;
 use krebs::doc::{Atom, Obj, Val};
 use serde_json::{Value, json};
@@ -29,20 +30,11 @@ struct Step {
 }
 
 pub fn letters(body: &[&str]) -> String {
+    let letter = |p: &str| {
+        p.parse()
+            .map_or('t', |p| vocabulary::part_letter(p).to_ascii_lowercase())
+    };
     body.iter().map(|p| letter(p)).collect()
-}
-
-fn letter(part: &str) -> &'static str {
-    match part {
-        "move" => "m",
-        "work" => "w",
-        "carry" => "c",
-        "attack" => "a",
-        "ranged_attack" => "r",
-        "heal" => "h",
-        "claim" => "k",
-        _ => "t",
-    }
 }
 
 fn array<'a>(v: &'a mut Value, key: &str) -> &'a mut Vec<Value> {

@@ -143,7 +143,7 @@ impl Reader<'_> {
     }
 
     fn structure(&self, room: RoomName, kind: &str, o: &Obj) -> Structure {
-        let kind = Kind::of_name(kind);
+        let kind = Kind::from(kind);
         let owner = self.owner(o);
         let cooldown = match o.get(Atom::intern("cooldown")) {
             Some(Val::Num(c)) => *c as i32,
@@ -286,7 +286,7 @@ pub fn world(v: &View, declarations: &Declarations) -> World<'static> {
                     amount: num(o, atom!("mineralAmount")) as i32,
                 }),
                 "constructionSite" => room.sites.push(Site {
-                    kind: Kind::of_name(text(o, atom!("structureType"))),
+                    kind: Kind::from(text(o, atom!("structureType"))),
                     id: Id::of_engine(text(o, atom!("_id"))),
                     pos: r.pos(name, o),
                     owner: r.owner(o),

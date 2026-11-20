@@ -94,7 +94,7 @@ fn main() {
     }
     let out: Vec<Value> = built
         .iter()
-        .map(|s| json!({ "kind": s.kind.name(), "x": s.pos.x, "y": s.pos.y }))
+        .map(|s| json!({ "kind": s.kind.as_ref(), "x": s.pos.x, "y": s.pos.y }))
         .collect();
     println!("{}", Value::Array(out));
 }

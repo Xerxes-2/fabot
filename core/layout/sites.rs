@@ -258,7 +258,7 @@ pub fn may_place(rules: &Rules, census: &Census, level: i32) -> bool {
     level >= haul_level(rules)
         || kinds
             .iter()
-            .any(|kind| held_of(census, kind) < rules.allowed(&kind.name(), level))
+            .any(|kind| held_of(census, kind) < rules.allowed(kind, level))
 }
 
 pub fn posted(plan: &Plan, t: Tile) -> bool {
@@ -405,7 +405,7 @@ pub fn place(
                     && (item.kind != Kind::Container || census.served[t] == 0 || replaces(t))
                     && (item.kind != Kind::Road || census.road[t] == 0)
                     && held_of(census, &item.kind) + added_of(&added, &item.kind)
-                        < rules.allowed(&item.kind.name(), level) =>
+                        < rules.allowed(&item.kind, level) =>
             {
                 taken.insert(t);
                 paid += i32::from(item.kind.pays_back());
@@ -552,16 +552,8 @@ mod tests {
             let placed = place(&rules, &counted, case.level, &plan, case.budget);
 
             let held = |kind: &Kind| -> i32 {
-                (room
-                    .structures
-                    .iter()
-                    .filter(|s| s.kind.name() == kind.name())
-                    .count()
-                    + room
-                        .sites
-                        .iter()
-                        .filter(|s| s.kind.name() == kind.name())
-                        .count()) as i32
+                (room.structures.iter().filter(|s| s.kind == *kind).count()
+                    + room.sites.iter().filter(|s| s.kind == *kind).count()) as i32
             };
 
             let tiles_placed: Vec<Tile> = placed.iter().map(|p| tiles::index(p.x, p.y)).collect();
@@ -600,17 +592,14 @@ mod tests {
             // reached, its kind short, its tile clear.
             let admitted = |i: &Item| -> bool {
                 let t = i.tile;
-                let added = placed
-                    .iter()
-                    .filter(|q| q.kind.name() == i.kind.name())
-                    .count() as i32;
+                let added = placed.iter().filter(|q| q.kind == i.kind).count() as i32;
 
                 placeable(i, case.level)
                     && !room.sites.iter().any(|x| tiles::of_pos(&x.pos) == t)
                     && !tiles_placed.contains(&t)
                     && !(i.kind == Kind::Container && counted.served[t] > 0)
                     && clear(&i.kind, &standing(t))
-                    && held(&i.kind) + added < rules.allowed(&i.kind.name(), case.level)
+                    && held(&i.kind) + added < rules.allowed(&i.kind, case.level)
             };
 
             assert!(may_place(&rules, &counted, case.level) || placed.is_empty());
@@ -638,19 +627,14 @@ mod tests {
             }
 
             for p in &placed {
-                let added = placed
-                    .iter()
-                    .filter(|q| q.kind.name() == p.kind.name())
-                    .count() as i32;
+                let added = placed.iter().filter(|q| q.kind == p.kind).count() as i32;
 
-                assert!(held(&p.kind) + added <= rules.allowed(&p.kind.name(), case.level));
+                assert!(held(&p.kind) + added <= rules.allowed(&p.kind, case.level));
             }
 
             for p in &placed {
                 assert!(plan.items.iter().any(|i| {
-                    i.tile == tiles::index(p.x, p.y)
-                        && i.kind.name() == p.kind.name()
-                        && i.level <= case.level
+                    i.tile == tiles::index(p.x, p.y) && i.kind == p.kind && i.level <= case.level
                 }));
             }
         }

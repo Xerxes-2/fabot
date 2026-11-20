@@ -304,8 +304,7 @@ impl Run<'_> {
             NotEnough,
         )?;
         self.created.push(name.to_string());
-        let parts: Vec<&str> = body.iter().map(|p| part_name(*p)).collect();
-        let mut value = json!({ "name": name, "body": parts });
+        let mut value = json!({ "name": name, "body": body });
         if !drawn.is_empty() {
             value["energyStructures"] = json!(drawn);
         }
@@ -316,14 +315,14 @@ impl Run<'_> {
     fn act(&mut self, intent: &Action) -> (&'static str, Result<(), ErrorCode>) {
         let resource = |r: &Resource| vocabulary::resource_name(r).to_string();
         match intent {
-            Action::Creep(name, act) => (verb(act), self.creep(name, act)),
+            Action::Creep(name, act) => (act.into(), self.creep(name, act)),
             Action::Room(room, RoomAct::CreateSite(x, y, kind)) => {
                 let Some(r) = self.v.index(&room.to_string()) else {
                     return ("site", Err(NotFound));
                 };
                 self.sites += 1;
                 let value = json!({ "roomName": room.to_string(), "x": x, "y": y,
-                    "structureType": kind.name(), "name": format!("Spawn{}", self.sites) });
+                    "structureType": kind.as_ref(), "name": format!("Spawn{}", self.sites) });
                 self.stored.push(r, "createConstructionSite", value);
                 ("site", Ok(()))
             }
@@ -388,45 +387,7 @@ fn stored(act: &CreepAct) -> &'static str {
         CreepAct::Reserve(_) => "reserveController",
         CreepAct::Unreserve(_) => "attackController",
         CreepAct::ClaimController(_) => "claimController",
-        act => verb(act),
-    }
-}
-
-fn part_name(part: Part) -> &'static str {
-    match part {
-        Part::Work => "work",
-        Part::Carry => "carry",
-        Part::Move => "move",
-        Part::Attack => "attack",
-        Part::RangedAttack => "ranged_attack",
-        Part::Heal => "heal",
-        Part::Claim => "claim",
-        _ => "tough",
-    }
-}
-
-/// `src/app/executor.rs`'s verb, which a refusal is counted under.
-fn verb(act: &CreepAct) -> &'static str {
-    match act {
-        CreepAct::Move(_) => "move",
-        CreepAct::Say(_) => "say",
-        CreepAct::Harvest(_) => "harvest",
-        CreepAct::Transfer(..) => "transfer",
-        CreepAct::Withdraw(..) => "withdraw",
-        CreepAct::Pickup(_) => "pickup",
-        CreepAct::Drop(_) => "drop",
-        CreepAct::Build(_) => "build",
-        CreepAct::Repair(_) => "repair",
-        CreepAct::Upgrade(_) => "upgrade",
-        CreepAct::Reserve(_) => "reserve",
-        CreepAct::Unreserve(_) => "unreserve",
-        CreepAct::ClaimController(_) => "claim",
-        CreepAct::AttackCreep(_) => "attack",
-        CreepAct::RangedAttackCreep(_) => "rangedAttack",
-        CreepAct::RangedMassAttack => "rangedMassAttack",
-        CreepAct::HealCreep(_) => "heal",
-        CreepAct::RangedHealCreep(_) => "rangedHeal",
-        CreepAct::Dismantle(_) => "dismantle",
+        act => act.into(),
     }
 }
 

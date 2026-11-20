@@ -13,6 +13,7 @@ fabot-base = { path = "../base" }
 fabot-atlas = { path = "../atlas" }
 fabot-economy = { path = "../economy" }
 fabot-fight = { path = "../fight" }
+strum.workspace = true
 
 [dev-dependencies]
 fabot-base = { path = "../base", features = ["test-support"] }

@@ -12,6 +12,7 @@ doctest = false
 screeps-game-api.workspace = true
 serde.workspace = true
 rustc-hash.workspace = true
+strum.workspace = true
 
 [features]
 tools = []

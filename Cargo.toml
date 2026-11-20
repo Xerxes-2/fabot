@@ -9,6 +9,7 @@ serde = { version = "1", features = ["derive"] }
 # Memory's keys keep their order, so its text is written back as the engine wrote it.
 serde_json = { version = "1", features = ["preserve_order"] }
 rustc-hash = { version = "2.1.3", default-features = false }
+strum = { version = "0.28", default-features = false, features = ["derive"] }
 
 [package]
 name = "fabot"

@@ -4,6 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
+use strum::{EnumString, IntoStaticStr};
 
 use fabot_atlas::{Atlas, Mover, Target};
 use fabot_base::declarations::{self, TacticRule};
@@ -18,8 +19,23 @@ use fabot_mv::{blob, plan};
 
 /// A phase's own tactic (pursue, retreat) is the phase's; this is what a kind
 /// commits to, a price per candidate (§6.3).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    EnumString,
+    IntoStaticStr,
+)]
+#[cfg_attr(test, derive(strum::EnumIter))]
+// Read borrowed, as Memory's `list` reads it: an owned string is refused.
+#[serde(into = "&'static str", try_from = "&str")]
+#[strum(serialize_all = "kebab-case")]
 pub enum Tactic {
     Kite,
     Close,
@@ -27,25 +43,8 @@ pub enum Tactic {
     Hold,
     /// A blob is a set that walks in as one, then fights by the tactic it names.
     BlobKite,
-    #[serde(rename = "blob")]
+    #[strum(serialize = "blob")]
     BlobClose,
-}
-
-pub fn name(tactic: Tactic) -> &'static str {
-    match tactic {
-        Tactic::Kite => "kite",
-        Tactic::Close => "close",
-        Tactic::Hold => "hold",
-        Tactic::BlobKite => "blob-kite",
-        Tactic::BlobClose => "blob",
-    }
-}
-
-pub fn by_name(name: &str) -> Option<Tactic> {
-    use Tactic::*;
-    [Kite, Close, Hold, BlobKite, BlobClose]
-        .into_iter()
-        .find(|t| self::name(*t) == name)
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -63,9 +62,9 @@ pub fn ruling(rules: &[TacticRule], room: RoomName, rivals: &BTreeSet<&str>) -> 
 
     for rule in rules.iter().filter(|r| applies(r)) {
         out.forbid
-            .extend(rule.forbid.iter().filter_map(|n| by_name(n)));
+            .extend(rule.forbid.iter().filter_map(|n| n.parse::<Tactic>().ok()));
 
-        out.pin = rule.pin.as_deref().and_then(by_name).or(out.pin);
+        out.pin = rule.pin.as_deref().and_then(|n| n.parse().ok()).or(out.pin);
     }
 
     out
@@ -87,20 +86,21 @@ pub fn checked(rules: Vec<TacticRule>) -> (Vec<TacticRule>, Vec<String>) {
             .pin
             .iter()
             .chain(&rule.forbid)
-            .find(|name| by_name(name).is_none());
+            .find(|name| name.parse::<Tactic>().is_err());
 
-        let pin = rule.pin.as_deref().and_then(by_name);
+        let pin = rule.pin.as_deref().and_then(|n| n.parse::<Tactic>().ok());
 
         let contradicts = rules
             .iter()
             .filter(|other| joins(rule, other))
-            .flat_map(|other| other.forbid.iter().filter_map(|n| by_name(n)))
+            .flat_map(|other| other.forbid.iter().filter_map(|n| n.parse().ok()))
             .any(|forbidden| Some(forbidden) == pin);
 
         match (unknown, pin) {
             (Some(name), _) => refused.push(format!("tactics {name}")),
             (None, Some(pin)) if contradicts => {
-                refused.push(format!("tactics pin {}", name(pin)));
+                let pin: &str = pin.into();
+                refused.push(format!("tactics pin {pin}"));
             }
             _ => kept.push(rule.clone()),
         }
@@ -1073,6 +1073,8 @@ pub fn hunt(
 
 #[cfg(test)]
 mod tests {
+    use strum::IntoEnumIterator;
+
     use super::*;
 
     fn rule(
@@ -1164,16 +1166,11 @@ mod tests {
 
     #[test]
     fn every_tactic_names_itself_and_only_itself() {
-        for tactic in [
-            Tactic::Kite,
-            Tactic::Close,
-            Tactic::Hold,
-            Tactic::BlobKite,
-            Tactic::BlobClose,
-        ] {
-            assert_eq!(by_name(name(tactic)), Some(tactic));
+        for tactic in Tactic::iter() {
+            let name: &str = tactic.into();
+            assert_eq!(name.parse(), Ok(tactic));
         }
-        assert_eq!(by_name("bounce"), None);
+        assert!("bounce".parse::<Tactic>().is_err());
     }
 
     #[test]
@@ -1195,10 +1192,11 @@ mod tests {
 
     #[test]
     fn a_tactic_is_written_and_read_by_its_name() {
-        use Tactic::*;
-        for t in [Kite, Close, Hold, BlobKite, BlobClose] {
-            assert_eq!(serde_json::to_value(t).unwrap(), name(t));
-            assert_eq!(serde_json::from_value::<Tactic>(name(t).into()).unwrap(), t);
+        for t in Tactic::iter() {
+            let name: &str = t.into();
+            let value = serde_json::to_value(t).unwrap();
+            assert_eq!(value, name);
+            assert_eq!(Tactic::deserialize(&value).unwrap(), t);
         }
     }
 }

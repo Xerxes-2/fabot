@@ -554,7 +554,7 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
             ("slotIdsShared", slots::shared_ids(&slots)),
         ],
         short: (short.into_iter())
-            .map(|(room, p, n)| (room, bodies::name_of(p), n))
+            .map(|(room, p, n)| (room, p.into(), n))
             .collect(),
         traces: Vec::new(),
     };

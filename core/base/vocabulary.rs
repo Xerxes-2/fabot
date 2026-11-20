@@ -2,6 +2,7 @@ use std::{borrow::Cow, cmp::Ordering};
 
 use screeps::Boost;
 pub use screeps::{Part, ResourceType};
+use strum::{EnumString, IntoStaticStr};
 
 pub fn part_letter(part: Part) -> char {
     match part {
@@ -60,14 +61,21 @@ pub fn part_count_in(body: &[Part], part: Part) -> i32 {
 
 /// Each union compares by a hand-written ordinal: Fable's generic union
 /// equality walks the case structure, and v1 measured it on hot paths.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString, IntoStaticStr)]
 pub enum Ore {
+    #[strum(serialize = "H")]
     Hydrogen,
+    #[strum(serialize = "O")]
     Oxygen,
+    #[strum(serialize = "U")]
     Utrium,
+    #[strum(serialize = "K")]
     Keanium,
+    #[strum(serialize = "L")]
     Lemergium,
+    #[strum(serialize = "Z")]
     Zynthium,
+    #[strum(serialize = "X")]
     Catalyst,
 }
 
@@ -78,10 +86,13 @@ impl Ore {
 }
 
 /// The UH line alone; a compound joins the day a decision names it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString, IntoStaticStr)]
 pub enum Compound {
+    #[strum(serialize = "OH")]
     Hydroxide,
+    #[strum(serialize = "UH")]
     UtriumHydride,
+    #[strum(serialize = "UH2O")]
     UtriumAcid,
 }
 
@@ -134,16 +145,8 @@ impl Ord for Resource {
 pub fn resource_name(resource: &Resource) -> Cow<'static, str> {
     match resource {
         Resource::Energy => "energy".into(),
-        Resource::Ore(Ore::Hydrogen) => "H".into(),
-        Resource::Ore(Ore::Oxygen) => "O".into(),
-        Resource::Ore(Ore::Utrium) => "U".into(),
-        Resource::Ore(Ore::Keanium) => "K".into(),
-        Resource::Ore(Ore::Lemergium) => "L".into(),
-        Resource::Ore(Ore::Zynthium) => "Z".into(),
-        Resource::Ore(Ore::Catalyst) => "X".into(),
-        Resource::Compound(Compound::Hydroxide) => "OH".into(),
-        Resource::Compound(Compound::UtriumHydride) => "UH".into(),
-        Resource::Compound(Compound::UtriumAcid) => "UH2O".into(),
+        Resource::Ore(ore) => Cow::Borrowed(ore.into()),
+        Resource::Compound(compound) => Cow::Borrowed(compound.into()),
         Resource::Other(name) => name.to_owned().into(),
     }
 }
@@ -151,17 +154,9 @@ pub fn resource_name(resource: &Resource) -> Cow<'static, str> {
 pub fn resource_of_name(name: &str) -> Resource {
     match name {
         "energy" => Resource::Energy,
-        "H" => Resource::Ore(Ore::Hydrogen),
-        "O" => Resource::Ore(Ore::Oxygen),
-        "U" => Resource::Ore(Ore::Utrium),
-        "K" => Resource::Ore(Ore::Keanium),
-        "L" => Resource::Ore(Ore::Lemergium),
-        "Z" => Resource::Ore(Ore::Zynthium),
-        "X" => Resource::Ore(Ore::Catalyst),
-        "OH" => Resource::Compound(Compound::Hydroxide),
-        "UH" => Resource::Compound(Compound::UtriumHydride),
-        "UH2O" => Resource::Compound(Compound::UtriumAcid),
-        other => Resource::Other(other.to_string()),
+        name => (name.parse().map(Resource::Ore))
+            .or_else(|_| name.parse().map(Resource::Compound))
+            .unwrap_or_else(|_| Resource::Other(name.to_string())),
     }
 }
 

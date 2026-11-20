@@ -63,13 +63,13 @@ const HEALERS: i32 = 3;
 /// The threat in, the hits a rampart is kept at out, and whether the quad
 /// out-heals the towers, which rings a colony below `RING_LEVEL` (§5).
 pub fn wall(rules: &Rules, rival: i32, level: i32, threatened: bool) -> (i32, bool) {
-    let capacity =
-        engine::SPAWN_ENERGY + rules.allowed("extension", rival) * engine::extension_energy(rival);
+    let capacity = engine::SPAWN_ENERGY
+        + rules.allowed(&Kind::Extension, rival) * engine::extension_energy(rival);
     let pairs = |part: Part| {
         (capacity / engine::body_cost(&[part, Part::Move])).min(engine::MAX_BODY_PARTS as i32 / 2)
     };
     let boost = |part: Part, catalyzed: ResourceType| {
-        if rules.allowed("lab", rival) > 0 {
+        if rules.allowed(&Kind::Lab, rival) > 0 {
             multiple(part, Some(catalyzed))
         } else {
             1
@@ -80,7 +80,8 @@ pub fn wall(rules: &Rules, rival: i32, level: i32, threatened: bool) -> (i32, bo
         * pairs(Part::Heal)
         * engine::HEAL_POWER
         * boost(Part::Heal, ResourceType::CatalyzedLemergiumAlkalide);
-    let fire = rules.allowed("tower", level) * engine::tower_attack_at(engine::TOWER_FALLOFF_RANGE);
+    let fire =
+        rules.allowed(&Kind::Tower, level) * engine::tower_attack_at(engine::TOWER_FALLOFF_RANGE);
     let hits = 2 * work * engine::PART_HITS;
     let held = if fire > heal {
         HOLD.min(hits / (fire - heal) + 1)
@@ -102,7 +103,8 @@ pub fn wall(rules: &Rules, rival: i32, level: i32, threatened: bool) -> (i32, bo
 
 /// The threat in, a reserve out, as a priced choice would be (§5).
 pub fn reserve(rules: &Rules, lifetimes: f64, level: i32, threatened: bool) -> i32 {
-    let fire = rules.allowed("tower", level) * engine::TOWER_ENERGY_COST * engine::CREEP_LIFETIME;
+    let fire =
+        rules.allowed(&Kind::Tower, level) * engine::TOWER_ENERGY_COST * engine::CREEP_LIFETIME;
     let full = (f64::from(fire) * lifetimes) as i32;
     if threatened { full } else { full / 3 }
 }

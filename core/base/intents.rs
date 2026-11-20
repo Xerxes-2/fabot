@@ -1,8 +1,12 @@
+use strum::IntoStaticStr;
+
 use super::vocabulary::{Part, Resource};
 use super::wish::Wish;
 use super::world::{Id, Kind, RoomName};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// Into `src/app/executor.rs`'s verb, which a refusal is counted under.
+#[derive(Clone, Debug, PartialEq, Eq, IntoStaticStr)]
+#[strum(serialize_all = "camelCase")]
 pub enum CreepAct {
     /// TOP = 1, clockwise to TOP_LEFT = 8.
     Move(i32),
@@ -17,11 +21,16 @@ pub enum CreepAct {
     Upgrade(Id),
     Reserve(Id),
     Unreserve(Id),
+    #[strum(serialize = "claim")]
     ClaimController(Id),
+    #[strum(serialize = "attack")]
     AttackCreep(Id),
+    #[strum(serialize = "rangedAttack")]
     RangedAttackCreep(Id),
     RangedMassAttack,
+    #[strum(serialize = "heal")]
     HealCreep(Id),
+    #[strum(serialize = "rangedHeal")]
     RangedHealCreep(Id),
     Dismantle(Id),
 }

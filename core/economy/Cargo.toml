@@ -12,6 +12,7 @@ doctest = false
 fabot-base = { path = "../base" }
 fabot-atlas = { path = "../atlas" }
 fabot-mv = { path = "../mv" }
+strum.workspace = true
 
 [dev-dependencies]
 fabot-base = { path = "../base", features = ["test-support"] }

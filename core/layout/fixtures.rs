@@ -303,7 +303,7 @@ pub fn same(a: &Plan, b: &Plan) -> bool {
         && a.items
             .iter()
             .zip(b.items.iter())
-            .all(|(x, y)| x.kind.name() == y.kind.name() && x.tile == y.tile && x.level == y.level)
+            .all(|(x, y)| x.kind == y.kind && x.tile == y.tile && x.level == y.level)
 }
 
 /// Our structures and sites standing on some of the plan's tiles, at a level.

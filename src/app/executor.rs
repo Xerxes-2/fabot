@@ -115,44 +115,41 @@ fn act(intent: &Action) -> (String, i32) {
                 return ("creep".to_string(), NOT_FOUND);
             };
             let creep = actor(&creep);
+            let verb: &str = act.into();
             match act {
-                CreepAct::Move(direction) => outcome("move", creep.move_(*direction)),
-                CreepAct::Say(message) => outcome("say", creep.say(message)),
-                CreepAct::Harvest(id) => on("harvest", id, |t| creep.harvest(t)),
-                CreepAct::Transfer(id, resource) => on("transfer", id, |t| {
+                CreepAct::Move(direction) => outcome(verb, creep.move_(*direction)),
+                CreepAct::Say(message) => outcome(verb, creep.say(message)),
+                CreepAct::Harvest(id) => on(verb, id, |t| creep.harvest(t)),
+                CreepAct::Transfer(id, resource) => on(verb, id, |t| {
                     creep.transfer(t, &vocabulary::resource_name(resource))
                 }),
-                CreepAct::Withdraw(id, resource) => on("withdraw", id, |t| {
+                CreepAct::Withdraw(id, resource) => on(verb, id, |t| {
                     creep.withdraw(t, &vocabulary::resource_name(resource))
                 }),
-                CreepAct::Pickup(id) => on("pickup", id, |t| creep.pickup(t)),
+                CreepAct::Pickup(id) => on(verb, id, |t| creep.pickup(t)),
                 CreepAct::Drop(resource) => {
-                    outcome("drop", creep.drop(&vocabulary::resource_name(resource)))
+                    outcome(verb, creep.drop(&vocabulary::resource_name(resource)))
                 }
-                CreepAct::Build(id) => on("build", id, |t| creep.build(t)),
-                CreepAct::Repair(id) => on("repair", id, |t| creep.repair(t)),
-                CreepAct::Upgrade(id) => on("upgrade", id, |t| creep.upgrade_controller(t)),
-                CreepAct::Reserve(id) => on("reserve", id, |t| creep.reserve_controller(t)),
-                CreepAct::Unreserve(id) => on("unreserve", id, |t| creep.attack_controller(t)),
-                CreepAct::ClaimController(id) => on("claim", id, |t| creep.claim_controller(t)),
-                CreepAct::AttackCreep(id) => on("attack", id, |t| creep.attack(t)),
-                CreepAct::RangedAttackCreep(id) => {
-                    on("rangedAttack", id, |t| creep.ranged_attack(t))
-                }
-                CreepAct::RangedMassAttack => {
-                    outcome("rangedMassAttack", creep.ranged_mass_attack())
-                }
-                CreepAct::HealCreep(id) => on("heal", id, |t| creep.heal(t)),
-                CreepAct::RangedHealCreep(id) => on("rangedHeal", id, |t| creep.ranged_heal(t)),
-                CreepAct::Dismantle(id) => on("dismantle", id, |t| creep.dismantle(t)),
+                CreepAct::Build(id) => on(verb, id, |t| creep.build(t)),
+                CreepAct::Repair(id) => on(verb, id, |t| creep.repair(t)),
+                CreepAct::Upgrade(id) => on(verb, id, |t| creep.upgrade_controller(t)),
+                CreepAct::Reserve(id) => on(verb, id, |t| creep.reserve_controller(t)),
+                CreepAct::Unreserve(id) => on(verb, id, |t| creep.attack_controller(t)),
+                CreepAct::ClaimController(id) => on(verb, id, |t| creep.claim_controller(t)),
+                CreepAct::AttackCreep(id) => on(verb, id, |t| creep.attack(t)),
+                CreepAct::RangedAttackCreep(id) => on(verb, id, |t| creep.ranged_attack(t)),
+                CreepAct::RangedMassAttack => outcome(verb, creep.ranged_mass_attack()),
+                CreepAct::HealCreep(id) => on(verb, id, |t| creep.heal(t)),
+                CreepAct::RangedHealCreep(id) => on(verb, id, |t| creep.ranged_heal(t)),
+                CreepAct::Dismantle(id) => on(verb, id, |t| creep.dismantle(t)),
             }
         }
         Action::Room(name, RoomAct::CreateSite(x, y, kind)) => {
-            let verb = format!("site:{}", kind.name());
+            let verb = format!("site:{}", kind.as_ref());
             match world::room_by_name(*name) {
                 None => (verb, NOT_FOUND),
                 Some(room) => {
-                    let site = actor(&room).create_construction_site(*x, *y, &kind.name());
+                    let site = actor(&room).create_construction_site(*x, *y, kind.as_ref());
                     outcome(&verb, site)
                 }
             }

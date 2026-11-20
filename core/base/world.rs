@@ -1,7 +1,7 @@
 use screeps::LocalRoomTerrain;
-use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
+use strum::{AsRefStr, EnumDiscriminants, EnumString};
 
 use super::engine;
 use super::vocabulary::{Part, Resource, ResourceType};
@@ -382,7 +382,11 @@ impl Store {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString, AsRefStr, EnumDiscriminants,
+)]
+#[strum(serialize_all = "camelCase")]
+#[strum_discriminants(vis(pub(crate)))]
 pub enum Kind {
     Spawn,
     Extension,
@@ -392,6 +396,7 @@ pub enum Kind {
     Storage,
     Link,
     Rampart,
+    #[strum(serialize = "constructedWall")]
     Wall,
     Extractor,
     Terminal,
@@ -404,6 +409,7 @@ pub enum Kind {
     InvaderCore,
     PowerBank,
     Portal,
+    #[strum(default, transparent)]
     Other(String),
 }
 
@@ -424,81 +430,7 @@ impl Kind {
     }
 
     pub fn ordinal(&self) -> i32 {
-        match self {
-            Kind::Spawn => 0,
-            Kind::Extension => 1,
-            Kind::Tower => 2,
-            Kind::Road => 3,
-            Kind::Container => 4,
-            Kind::Storage => 5,
-            Kind::Link => 6,
-            Kind::Rampart => 7,
-            Kind::Wall => 8,
-            Kind::Extractor => 9,
-            Kind::Terminal => 10,
-            Kind::Observer => 11,
-            Kind::Lab => 12,
-            Kind::Factory => 13,
-            Kind::PowerSpawn => 14,
-            Kind::Nuker => 15,
-            Kind::KeeperLair => 16,
-            Kind::InvaderCore => 17,
-            Kind::PowerBank => 18,
-            Kind::Portal => 19,
-            Kind::Other(_) => 20,
-        }
-    }
-
-    pub fn of_name(name: &str) -> Kind {
-        match name {
-            "spawn" => Kind::Spawn,
-            "extension" => Kind::Extension,
-            "tower" => Kind::Tower,
-            "road" => Kind::Road,
-            "container" => Kind::Container,
-            "storage" => Kind::Storage,
-            "link" => Kind::Link,
-            "rampart" => Kind::Rampart,
-            "constructedWall" => Kind::Wall,
-            "extractor" => Kind::Extractor,
-            "terminal" => Kind::Terminal,
-            "observer" => Kind::Observer,
-            "lab" => Kind::Lab,
-            "factory" => Kind::Factory,
-            "powerSpawn" => Kind::PowerSpawn,
-            "nuker" => Kind::Nuker,
-            "keeperLair" => Kind::KeeperLair,
-            "invaderCore" => Kind::InvaderCore,
-            "powerBank" => Kind::PowerBank,
-            "portal" => Kind::Portal,
-            other => Kind::Other(other.to_string()),
-        }
-    }
-
-    pub fn name(&self) -> Cow<'static, str> {
-        match self {
-            Kind::Spawn => "spawn".into(),
-            Kind::Extension => "extension".into(),
-            Kind::Tower => "tower".into(),
-            Kind::Road => "road".into(),
-            Kind::Container => "container".into(),
-            Kind::Storage => "storage".into(),
-            Kind::Link => "link".into(),
-            Kind::Rampart => "rampart".into(),
-            Kind::Wall => "constructedWall".into(),
-            Kind::Extractor => "extractor".into(),
-            Kind::Terminal => "terminal".into(),
-            Kind::Observer => "observer".into(),
-            Kind::Lab => "lab".into(),
-            Kind::Factory => "factory".into(),
-            Kind::PowerSpawn => "powerSpawn".into(),
-            Kind::Nuker => "nuker".into(),
-            Kind::KeeperLair => "keeperLair".into(),
-            Kind::InvaderCore => "invaderCore".into(),
-            Kind::PowerBank => "powerBank".into(),
-            Kind::Portal => "portal".into(),
-            Kind::Other(name) => name.to_owned().into(),
-        }
+        KindDiscriminants::from(self) as i32
     }
 
     /// The kinds the engine gives a `store`: the seam reads none on the rest.
@@ -740,8 +672,11 @@ pub struct Rules {
 impl Rules {
     /// `CONTROLLER_STRUCTURES`; sites count with standing structures.
     #[inline]
-    pub fn allowed(&self, kind: &str, level: i32) -> i32 {
-        let row = self.structures.get(kind).map_or(&[][..], Vec::as_slice);
+    pub fn allowed(&self, kind: &Kind, level: i32) -> i32 {
+        let row = self
+            .structures
+            .get(kind.as_ref())
+            .map_or(&[][..], Vec::as_slice);
         let at = usize::try_from(level).map_or(None, |l| row.get(l).or(row.last()));
         at.copied().unwrap_or(0)
     }
@@ -926,7 +861,7 @@ pub mod read {
         }
 
         fn structure(&mut self, room: RoomName) -> Structure {
-            let kind = Kind::of_name(self.word());
+            let kind = Kind::from(self.word());
             let id = self.id();
             let pos = self.pos_in(room);
             let owner = self.owner();
@@ -1016,7 +951,7 @@ pub mod read {
                 }),
                 structures: self.list_into(lists.structures, |r| r.structure(name)),
                 sites: self.list_into(lists.sites, |r| Site {
-                    kind: Kind::of_name(r.word()),
+                    kind: Kind::from(r.word()),
                     id: r.id(),
                     pos: r.pos_in(name),
                     owner: r.owner(),
@@ -1415,7 +1350,12 @@ pub fn body_cost(creep: &Creep) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::Id;
+    use super::{Id, Kind};
+
+    #[test]
+    fn a_kind_the_engine_adds_keeps_its_name() {
+        assert_eq!(Kind::from("foo").as_ref(), "foo");
+    }
 
     #[test]
     fn an_id_reads_back_as_its_text_and_orders_as_it() {

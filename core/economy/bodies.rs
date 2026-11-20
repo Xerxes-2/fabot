@@ -1,8 +1,12 @@
+use strum::{EnumString, IntoStaticStr};
+
 use fabot_base::engine;
 use fabot_base::grid::{self, FatigueFactor};
 use fabot_base::vocabulary::{Part, part_count_in};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString, IntoStaticStr)]
+#[cfg_attr(test, derive(strum::EnumIter))]
+#[strum(serialize_all = "lowercase")]
 pub enum Pattern {
     Worker,
     Harvester,
@@ -10,26 +14,6 @@ pub enum Pattern {
     Upgrader,
     Claimer,
     Scout,
-}
-
-pub const ALL_PATTERNS: [Pattern; 6] = [
-    Pattern::Worker,
-    Pattern::Harvester,
-    Pattern::Hauler,
-    Pattern::Upgrader,
-    Pattern::Claimer,
-    Pattern::Scout,
-];
-
-pub fn name_of(pattern: Pattern) -> &'static str {
-    match pattern {
-        Pattern::Worker => "worker",
-        Pattern::Harvester => "harvester",
-        Pattern::Hauler => "hauler",
-        Pattern::Upgrader => "upgrader",
-        Pattern::Claimer => "claimer",
-        Pattern::Scout => "scout",
-    }
 }
 
 pub fn block_of(pattern: Pattern) -> &'static [Part] {
@@ -50,14 +34,14 @@ pub fn block_of(pattern: Pattern) -> &'static [Part] {
 
 /// Unique because a spawn casts one body a tick.
 pub fn cast_name(pattern: Pattern, time: i32, spawn: &str) -> String {
-    format!("{}-{}-{}", name_of(pattern), time, spawn)
+    let name: &str = pattern.into();
+    format!("{name}-{time}-{spawn}")
 }
 
 /// Read off the name, not the parts: damage strips parts head-first, so no
 /// reading of the standing parts holds the pattern for the body's life.
 pub fn pattern_of_name(name: &str) -> Option<Pattern> {
-    let prefix = name.split_once('-').map_or(name, |(p, _)| p);
-    ALL_PATTERNS.into_iter().find(|p| name_of(*p) == prefix)
+    name.split_once('-').map_or(name, |(p, _)| p).parse().ok()
 }
 
 /// At most one CARRY to four WORK, a delivery is a commute for its WORK;
@@ -297,6 +281,8 @@ pub fn home_harvester(most: i32, capacity: i32) -> Option<Vec<Part>> {
 
 #[cfg(test)]
 mod tests {
+    use strum::IntoEnumIterator;
+
     use super::*;
 
     /// The F# drew these; a swept grid says the same over every size a bank
@@ -311,14 +297,11 @@ mod tests {
     fn a_sized_body_fits_the_bank_and_the_part_cap_or_the_block_does_not_fit() {
         for capacity in capacities() {
             for most in 0..60 {
-                for pattern in ALL_PATTERNS {
+                for pattern in Pattern::iter() {
                     match sized(pattern, most, capacity) {
                         None => assert!(
                             capacity < engine::body_cost(block_of(pattern)),
-                            "{} {} {}",
-                            name_of(pattern),
-                            most,
-                            capacity
+                            "{pattern:?} {most} {capacity}"
                         ),
                         Some(body) => {
                             assert!(body.len() <= engine::MAX_BODY_PARTS);
