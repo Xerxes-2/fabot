@@ -328,6 +328,12 @@ export const measures = {
   // The most floods one tick ran (a miss is one flood), and the percent of
   // `fieldOn` lookups that missed: §1's "counting hits and misses".
   floodsMost: (_, a, dir) => withCounts(dir, a, (rows) => Math.max(0, ...rows.map((c) => c.atlasMisses ?? 0))),
+  // Ticks whose outposts differ from the tick before's: each re-plans their slots.
+  outpostFlips: (_, a, dir) =>
+    withCounts(dir, a, (rows) => {
+      const set = (c) => Object.keys(c).filter((k) => k.startsWith("outpost:")).sort().join();
+      return rows.filter((c, i) => i > 0 && set(c) !== set(rows[i - 1])).length;
+    }),
   parkedTicks: (_, a, dir) => withCounts(dir, a, (rows) => rows.filter((c) => (c.parkedCarriers ?? 0) > 0).length),
   slotIdsShared: (_, a, dir) => withCounts(dir, a, (rows) => Math.max(0, ...rows.map((c) => c.slotIdsShared ?? 0))),
   threatLookupsMost: (_, a, dir) => withCounts(dir, a, (rows) => Math.max(0, ...rows.map((c) => c.threatLookups ?? 0))),

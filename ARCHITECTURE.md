@@ -193,7 +193,7 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
 | `engagements.log` | closed engagements (`Predicted` vs `Actual`) | Observe | segment `❓` | live `Exchange` error tracking (§10.1) |
 | `metrics` | open window sums & per-creep/site/room deltas | Observe | heap | incremental tick deltas |
 | `standing.layout` | per-room layout plan & incremental drawing state + ground key | Layout | heap | rebuilds at 4 variations/tick after reset |
-| `spare` | colony → spawn ticks/life left by home slots | Economy | heap | Strategy prices outposts against it |
+| `spare` | colony → spawn ticks/life left by home's own bodies at a steady pace; never an outpost's body or spend | Economy | heap | Strategy prices outposts against it |
 | `scouts` | scout targets | Strategy | heap (this tick) | derived from intel for Economy |
 | `sightings` | room → armed hostile / core id → expiry tick | World | heap | vision grace for stood-down outposts |
 | `atlas.floods` | per-room cached reverse floods (bounded per room) | Atlas | heap | reused while room weights hold |
@@ -239,6 +239,9 @@ pricer cost ~2× CPU and 580 lines for no gain and was not merged).
   bodies leave over a life, so a far ring of outposts never casts nothing but
   haulers. While `ColonyPlan.owes` is true (a fight cast owed or imminent siege
   successor), no surplus-spending body is spawned so spawns stay free.
+- **Spare (§4 `spare`):** home's own bodies at a steady pace, its floor a
+  constant 2 workers whatever this tick's floor: home's repairs and sites move
+  with the outposts' haul wear, so a floor read from them made the choice flap.
 
 ### Logistics, banks & links
 

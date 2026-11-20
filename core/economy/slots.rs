@@ -336,11 +336,41 @@ fn worker_pace(atlas: &Atlas, derived: &Derived, ci: usize, body: &[Part], power
     f64::from(power) * working / (working + trip)
 }
 
+/// Bodies' upkeep, all and home's own steady share: `spare` reads only the
+/// latter, or each outpost chosen would move the price it was chosen at.
+#[derive(Default)]
+struct Upkeep {
+    all: f64,
+    own: f64,
+}
+
+impl Upkeep {
+    fn add(&mut self, all: f64, own: f64) {
+        self.all += all;
+        self.own += own;
+    }
+}
+
+/// Carried flows, all and home's own steady share, split as `Upkeep` is.
+#[derive(Default)]
+struct Flows {
+    all: Vec<(f64, Leg)>,
+    own: Vec<(f64, Leg)>,
+}
+
+impl Flows {
+    fn push(&mut self, all: f64, own: f64, leg: Leg) {
+        self.all.push((all, leg));
+        self.own.push((own, leg));
+    }
+}
+
 struct Plan<'a> {
     atlas: &'a Atlas,
     derived: &'a Derived<'a>,
     held: &'a BTreeMap<String, Assignment>,
     out: Vec<Slot>,
+    spare: BTreeMap<RoomName, f64>,
 }
 
 impl Plan<'_> {
@@ -369,26 +399,24 @@ impl Plan<'_> {
         let home = colony.spawns[0].pos;
         let drop = bank.map_or(home, |s| s.pos);
 
+        let worker = bodies::sized(Pattern::Worker, MOST, capacity);
         if ground.abandoned {
+            let mut own = Vec::new();
             if !ground.shipment.is_empty() {
                 let body = bodies::hauler(2, engine::MAX_BODY_PARTS as i32, capacity);
-                self.push(
-                    ci,
-                    Job::Fill,
-                    drop,
-                    colony.room,
-                    0,
-                    body.unwrap_or_default(),
-                );
+                let body = body.unwrap_or_default();
+                own.push(body.clone());
+                self.push(ci, Job::Fill, drop, colony.room, 0, body);
             }
             if inside_deadline(&colony.controller) {
+                own.extend(worker.clone());
                 self.worker(ci, colony.room, 0, (false, false), FLOOR, MOST);
             }
+            self.spare(ci, &own);
             return;
         }
 
-        let mut fixed = 0.0;
-        let worker = bodies::sized(Pattern::Worker, MOST, capacity);
+        let mut fixed = Upkeep::default();
         let mut dug = 0.0;
         let mut far_dug = 0.0;
         let mut owed = 0;
@@ -397,7 +425,7 @@ impl Plan<'_> {
         let mut mends = false;
         let mut crews = 0;
         let mut digs: Vec<String> = Vec::new();
-        let mut local: Vec<(f64, Leg)> = Vec::new();
+        let mut local = Flows::default();
         let mut remote: Vec<(f64, Leg)> = Vec::new();
         let mut far: Vec<String> = Vec::new();
         let fed = fed(&colony.controller);
@@ -429,14 +457,16 @@ impl Plan<'_> {
             if raised {
                 // A claim without its spawn is raised by workers sent from here.
                 for k in 0..PIONEERS {
-                    fixed += self.worker(ci, g.room, k, (true, false), PIONEER, MOST);
+                    let cost = self.worker(ci, g.room, k, (true, false), PIONEER, MOST);
+                    fixed.add(cost, cost);
                 }
                 continue;
             }
             // Hivemind's mine builder.
             let paves = g.sites.iter().any(|s| s.kind == Kind::Road);
             if !own && (at_risk || paves) && storage.is_some() {
-                fixed += self.worker(ci, g.room, 0, (false, false), MENDER, MENDER_WORK);
+                let mender = self.worker(ci, g.room, 0, (false, false), MENDER, MENDER_WORK);
+                fixed.add(mender, 0.0);
             }
             for s in &g.sources {
                 let body = if own {
@@ -463,7 +493,8 @@ impl Plan<'_> {
                 }
                 let Some(body) = body else { continue };
                 let post = s.post.unwrap_or(s.pos);
-                fixed += upkeep(&body);
+                let cost = upkeep(&body);
+                fixed.add(cost, if own { cost } else { 0.0 });
                 // No store holds an outpost's dig raising its site. At home it still
                 // sizes the spend: those workers dig the free seats themselves.
                 let raises = !own
@@ -484,16 +515,20 @@ impl Plan<'_> {
                 if !own {
                     far_dug += f64::from(rate);
                 }
-                // A source link carries the dig to a hub without limit, to the
-                // controller's link as fast as the room's bodies drink it.
-                let linked = match (&s.link, &g.receiver) {
-                    (Some(_), Some(r)) if r.role.is_hub() => rate,
-                    (Some(_), Some(_)) => rate.min(drink),
-                    _ => 0,
+                // A source link sends a hub what the controller's link has no room for
+                // (`run::link_send`); alone, that link drinks it all below the last level.
+                let hub = g.links.iter().any(|l| l.role.is_hub());
+                let (linked, steady) = match (&s.link, &g.receiver) {
+                    (Some(_), _) if hub => (rate, 0),
+                    (Some(_), Some(_)) => (
+                        rate.min(drink),
+                        rate * i32::from(engine::topped_out(colony.controller.level)),
+                    ),
+                    _ => (0, rate),
                 };
                 drink -= linked;
                 let rate = rate - linked;
-                if rate <= 0 {
+                if rate.max(steady) <= 0 {
                     continue;
                 }
                 // A backlog is carried off within the ticks its source fills a
@@ -510,16 +545,16 @@ impl Plan<'_> {
                     )
                     .sum();
                 let fills = engine::CONTAINER_CAPACITY / engine::HELD_OUTPUT_PER_TICK;
-                let rate = rate + (waiting / fills).min(rate);
+                let backlog = (waiting / fills).min(rate);
                 let to =
                     bank.map_or_else(|| ground.buffer.as_ref().map_or(home, |b| b.pos), |s| s.pos);
                 let Some(leg) = leg(atlas, derived, &post, &to) else {
                     continue;
                 };
                 if own {
-                    local.push((f64::from(rate), leg));
+                    local.push(f64::from(rate + backlog), f64::from(steady), leg);
                 } else {
-                    remote.push((f64::from(rate), leg));
+                    remote.push((f64::from(rate + backlog), leg));
                     far.push(dig_id.clone());
                 }
             }
@@ -531,7 +566,7 @@ impl Plan<'_> {
                             capacity >= engine::body_cost(bodies::block_of(Pattern::Claimer))
                         })
                     {
-                        fixed += upkeep(&body);
+                        fixed.add(upkeep(&body), 0.0);
                         self.push(ci, Job::Reserve(c.id), c.pos, c.id, 0, body);
                     }
                 }
@@ -543,14 +578,9 @@ impl Plan<'_> {
             // Past its tower's level they build: upgrading, they drank what its builders draw.
             let builds = derived.colonies[cj].controller.level >= TOWER_LEVEL;
             for k in 0..PIONEERS {
-                fixed += self.worker(
-                    ci,
-                    derived.colonies[cj].room,
-                    k,
-                    (builds, false),
-                    PIONEER,
-                    MOST,
-                );
+                let room = derived.colonies[cj].room;
+                let cost = self.worker(ci, room, k, (builds, false), PIONEER, MOST);
+                fixed.add(cost, cost);
             }
         }
 
@@ -560,7 +590,8 @@ impl Plan<'_> {
                 continue;
             };
             if let Some(body) = bodies::sized(Pattern::Harvester, bodies::MINER_WORK, capacity) {
-                fixed += upkeep(&body);
+                let cost = upkeep(&body);
+                fixed.add(cost, cost);
                 mined +=
                     f64::from(part_count_in(&body, Part::Work) * engine::MINERAL_HARVEST_PER_WORK)
                         / f64::from(engine::MINERAL_HARVEST_CYCLE);
@@ -615,10 +646,18 @@ impl Plan<'_> {
             _ if owed > 0 || repairs => 2,
             _ => 1,
         };
-        fixed += f64::from(floor) * worker.as_deref().map_or(0.0, upkeep);
-        let carried: Vec<(f64, Leg)> = local.iter().chain(&remote).copied().collect();
+        let worker_upkeep = worker.as_deref().map_or(0.0, upkeep);
+        fixed.add(
+            f64::from(floor + crews) * worker_upkeep,
+            f64::from(KEPT_FLOOR + crews) * worker_upkeep,
+        );
+        let carried: Vec<(f64, Leg)> = local.all.iter().chain(&remote).copied().collect();
         let shapes = haulers(&carried, capacity);
-        fixed += shapes.iter().map(|b| upkeep(b)).sum::<f64>();
+        fixed.add(shapes.iter().map(|b| upkeep(b)).sum(), 0.0);
+        let Upkeep {
+            all: fixed,
+            own: own_upkeep,
+        } = fixed;
         // With no reserve to draw down, spend sized to dig no carrier brings
         // home drinks the bank that would cast those carriers.
         let carry = |flows: &[(f64, Leg)]| {
@@ -779,21 +818,22 @@ impl Plan<'_> {
                     .then(|| leg(atlas, derived, &s.pos, at))
                     .flatten()
             };
-            for (rate, leg) in [
-                (fixed.max(drawn), ring),
-                (build + mend, brought(&home)),
-                (upgraded, brought(&colony.controller.pos)),
-                (drunk, fed),
-                (mined, ore),
+            for (rate, own, leg) in [
+                (fixed.max(drawn), own_upkeep, ring),
+                (build + mend, 0.0, brought(&home)),
+                (upgraded, 0.0, brought(&colony.controller.pos)),
+                (drunk, 0.0, fed),
+                (mined, mined, ore),
             ] {
-                local.extend(leg.map(|leg| (rate, leg)));
+                if let Some(leg) = leg {
+                    local.push(rate, own, leg);
+                }
             }
         }
         // The carriers home's flows need come first, then the outposts',
         // each cast once an outpost's dig stands.
-        let home_carriers = haulers(&local, capacity).len();
-        local.extend(remote);
-        let mut carriers = haulers(&local, capacity);
+        let home_carriers = haulers(&local.all, capacity).len();
+        let mut carriers = haulers(&[&local.all[..], &remote].concat(), capacity);
         let spawn_time = f64::from(engine::CREEP_LIFETIME) * colony.spawns.len() as f64;
         let mut spent = (self.out.iter().filter(|s| s.colony == ci))
             .map(|s| spawn_ticks(&s.body))
@@ -824,6 +864,28 @@ impl Plan<'_> {
         for slot in self.out.iter_mut().filter(|s| s.colony == ci && s.spends) {
             slot.fed_by = Some(digs.join(","));
         }
+        let workers = (KEPT_FLOOR + crews) as usize;
+        let mut own = haulers(&local.own, capacity);
+        if let Some(w) = worker {
+            own.extend(std::iter::repeat_n(w, workers));
+        }
+        self.spare(ci, &own);
+    }
+
+    fn spare(&mut self, ci: usize, own: &[Vec<Part>]) {
+        let home = self.derived.colonies[ci].room;
+        // A claim's pioneers outrank the far haul, so the outposts they leave
+        // unhauled are given up until the claim stands.
+        let kept: f64 = (self.out.iter())
+            .filter(|s| s.colony == ci && !s.spends && s.job != Job::Fill)
+            .filter(|s| s.rank == PIONEER || (s.room == home && !matches!(s.job, Job::Work(_))))
+            .map(|s| &s.body)
+            .chain(own)
+            .map(|b| spawn_ticks(b))
+            .sum();
+        let life = f64::from(engine::CREEP_LIFETIME);
+        let spawns = self.derived.colonies[ci].spawns.len() as f64;
+        self.spare.insert(home, life * spawns - kept);
     }
 
     fn worker(
@@ -880,18 +942,19 @@ pub fn plan(
     derived: &Derived,
     owners: &[Option<usize>],
     held: &BTreeMap<String, Assignment>,
-) -> Vec<Slot> {
+) -> (Vec<Slot>, BTreeMap<RoomName, f64>) {
     let sponsors = sponsors(atlas, derived);
     let mut plan = Plan {
         atlas: &*atlas,
         derived,
         held,
         out: Vec::new(),
+        spare: BTreeMap::new(),
     };
     for ci in 0..derived.colonies.len() {
         plan.colony(ci, owners, &sponsors);
     }
-    let mut out = plan.out;
+    let (mut out, spare) = (plan.out, plan.spare);
     // A stood-down outpost keeps its dig and reserver slots, never cast, so
     // its bodies hold them and come back when it reopens.
     let homes: Vec<Pos> = derived.colonies.iter().map(|c| c.spawns[0].pos).collect();
@@ -956,7 +1019,7 @@ pub fn plan(
         s.home_walk = walk_to(atlas, derived, s.colony, &s.body, &s.seat).unwrap_or(0);
     }
     debug_assert_eq!(shared_ids(&out), 0);
-    out
+    (out, spare)
 }
 
 /// A controller inside its downgrade deadline is worked before any other
@@ -975,6 +1038,9 @@ const MOST: i32 = engine::MAX_BODY_PARTS as i32;
 /// A load mends two plain roads whole.
 const MENDER_WORK: i32 = 2;
 const FLOOR: i32 = 7;
+/// What `spare` charges for home's floor whatever it is this tick: a stock
+/// about its reserve and the outposts' sites and wear move the floor.
+const KEPT_FLOOR: i32 = 2;
 const CREW: i32 = 8;
 /// After the sponsor's own dig and carriers, before its outposts (The International's).
 const PIONEER: i32 = 2;
@@ -1002,27 +1068,6 @@ fn rank_of(job: &Job, own: bool) -> i32 {
 fn spawn_ticks(body: &[Part]) -> f64 {
     f64::from(engine::SPAWN_TICKS_PER_PART * body.len() as i32 * engine::CREEP_LIFETIME)
         / f64::from(engine::lifetime(body.iter().copied()))
-}
-
-/// Strategy prices the outposts and the spend their dig casts against it.
-pub fn spare(derived: &Derived, slots: &[Slot]) -> BTreeMap<RoomName, f64> {
-    let mut out: BTreeMap<RoomName, f64> = (derived.colonies.iter())
-        .map(|c| {
-            (
-                c.room,
-                f64::from(engine::CREEP_LIFETIME) * c.spawns.len() as f64,
-            )
-        })
-        .collect();
-    for s in slots {
-        // A claim's pioneers outrank the far haul, so the outposts they leave
-        // unhauled are given up until the claim stands.
-        let home = derived.colonies[s.colony].room;
-        if (s.room == home || s.rank == PIONEER) && !far(s) && !s.spends {
-            *out.entry(home).or_default() -= spawn_ticks(&s.body);
-        }
-    }
-    out
 }
 
 pub fn far(slot: &Slot) -> bool {

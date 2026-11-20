@@ -1179,6 +1179,7 @@ pub fn counts(
     for room in abandoning.filter_map(|p| world.room(p.room)) {
         counts.push((format!("abandon:{}", room.name), abandon::left(room)));
     }
+    counts.extend((declarations.outposts.iter()).map(|o| (format!("outpost:{}", o.room), 1)));
     counts.extend((refused.rooms.iter()).map(|room| (format!("closed:{room}"), 1)));
     counts.extend((refused.rules.iter()).map(|rule| (format!("refused:{rule}"), 1)));
     counts.extend(telemetry.iter().map(|(name, n)| (name.to_string(), *n)));

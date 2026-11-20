@@ -525,8 +525,8 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
         .collect();
 
     let owners = slots::owners(context.atlas, &derived);
-    let slots = slots::plan(context.atlas, &derived, &owners, &state.assignments);
-    state.spare = slots::spare(&derived, &slots);
+    let (slots, spare) = slots::plan(context.atlas, &derived, &owners, &state.assignments);
+    state.spare = spare;
     let (assigned, holders, retired) =
         slots::assign(&*context.atlas, &derived, &slots, &state.assignments);
     let (casts, short) = slots::casts(&derived, &slots, &holders);
