@@ -410,8 +410,9 @@ with one phase machine per kind under `core/fight/kinds/`.
   losses exceed budget while it has lost fewer than two (`OUTPOST_LOSSES = 2`)
   re-forms and re-prices; it closes only once ours are home and `sightings`
   clears (closing sooner reopens on the same raid with a fresh budget and feeds
-  it bodies). Home `Defend` never disengages (falls back to `unanswered` on
-  towers/ramparts until the group is gone).
+  it bodies). Blind, with no body of ours standing or asked, it disengages
+  and keeps its budget the same way. Home `Defend` never disengages (falls
+  back to `unanswered` on towers/ramparts until the group is gone).
 - **`Siege`, `Raid` & `Drain`** (`kinds/siege.rs`, `kinds/raid.rs`): opened on
   the table's `Siege` rows, one per `declarations.sieges` room (kept visible by
   observer/scout). Targets towers and economy structures, least struck by

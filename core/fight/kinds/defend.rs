@@ -84,6 +84,11 @@ pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
         return None;
     }
 
+    // Blind with no body to seek the raid: closed, the same raid would reopen it with a fresh budget.
+    if facts.group.is_none() && e.ours.is_empty() && !facts.asked {
+        return quit();
+    }
+
     if facts.group.is_some() && e.lost > e.budget {
         return if facts.held || e.lost >= OUTPOST_LOSSES {
             quit()
@@ -704,6 +709,53 @@ mod tests {
                 let next = step(&facts, &e).expect("a raid still standing keeps its room held");
                 assert_eq!(next.phase, Phase::Disengaging);
             }
+        }
+    }
+
+    #[test]
+    fn a_blind_outpost_defend_stands_down_only_with_no_body_standing_or_asked() {
+        let mut rng = Rng(0x0b11_d0ef_e2d5_0000);
+        let phases = [
+            Phase::Forming,
+            Phase::Approaching,
+            Phase::Fighting,
+            Phase::Pursuing,
+        ];
+
+        for _ in 0..DRAWS {
+            let e = Engagement {
+                phase: phases[rng.below(phases.len() as u64) as usize],
+                ours: BTreeSet::from(["fight-1-1-0".to_string()]),
+                lost: rng.between(0, OUTPOST_LOSSES),
+                budget: rng.between(0, 3),
+                unanswered: rng.flip(),
+                ..crate::scene::fresh(
+                    1,
+                    Objective::Defend,
+                    RoomName::named("W1N1"),
+                    0,
+                    Tactic::Close,
+                )
+            };
+            let standing: BTreeSet<String> =
+                e.ours.iter().filter(|_| rng.flip()).cloned().collect();
+            let facts = Facts {
+                time: 1,
+                group: None,
+                standing: standing.clone(),
+                aging_out: BTreeSet::new(),
+                in_reach: rng.flip(),
+                home: rng.flip(),
+                held: false,
+                asked: rng.flip(),
+                on_our_ground: rng.flip(),
+                clear: false,
+                raided: true,
+            };
+
+            let next = step(&facts, &e).expect("a blind outpost Defend keeps its budget");
+            let stands_down = standing.is_empty() && !facts.asked;
+            assert_eq!(next.phase == Phase::Disengaging, stands_down);
         }
     }
 }

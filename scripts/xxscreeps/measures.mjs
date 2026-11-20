@@ -314,6 +314,7 @@ export const measures = {
   // A wave's engagement left open holds its bodies and asks: the most ticks
   // one with no core stayed open after its group was last seen.
   heldPastWave: (samples, _, dir) => Math.max(0, ...rowsOf(dir).filter((e) => !e.core).map((e) => (e.closed ?? samples.at(-1).t) - (e.seen ?? e.opened))),
+  idleMost: (_, __, dir) => Math.max(0, ...rowsOf(dir).map((e) => e.idle ?? 0)),
   // Invader cores standing in the declared outposts at the window's end.
   coresAtEnd: (samples, a) => Object.values(at(samples, a.to ?? Infinity).rooms).reduce((n, r) => n + (r.cores ?? 0), 0),
   // Enemies standing in our room at the window's end.

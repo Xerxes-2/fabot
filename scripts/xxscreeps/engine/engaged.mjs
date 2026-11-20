@@ -11,7 +11,7 @@ export function engagements(write, at) {
   // it targeted, which catch a death that closed it before it counted one.
   async function close(rec, t) {
     const graves = (await at([...rec.rooms])).filter((o) => o.type === "tombstone" && o.ours && o.ttl > 1 && rec.ours.has(o.name));
-    const { members, ours, rooms, swing, ...rest } = rec;
+    const { members, ours, rooms, swing, blind, ...rest } = rec;
     const swung = Object.fromEntries(Object.entries(swing).map(([n, { ticks, swings }]) => [n, { ticks, swings }]));
     const outlived = t === null || (await at()).some((o) => members.has(o.id));
     write({ ...rest, dead: Math.max(rest.dead, graves.length), swung, closed: t, outlived });
@@ -35,9 +35,10 @@ export function engagements(write, at) {
     // `struck`: the ids the tick's event logs show attacking or healing.
     async tick(t, fight, objects, struck) {
       const now = new Set();
+      const asked = new Set((fight?.casts ?? []).map((c) => c.engagement));
       for (const e of fight?.engagements ?? []) {
         now.add(e.id);
-        const rec = open.get(e.id) ?? { id: e.id, kind: e.kind ?? "defend", room: e.room, opened: t, members: new Set(), ours: new Set(), rooms: new Set(), swing: {}, answered: false, gaveUp: false, disengaged: false, contact: null, seen: null, dead: 0 };
+        const rec = open.get(e.id) ?? { id: e.id, kind: e.kind ?? "defend", room: e.room, opened: t, members: new Set(), ours: new Set(), rooms: new Set(), swing: {}, answered: false, gaveUp: false, disengaged: false, contact: null, seen: null, dead: 0, blind: 0, idle: 0 };
         open.set(e.id, rec);
         for (const m of (fight.groups ?? []).find((g) => g.id === e.group)?.members ?? []) rec.members.add(m);
         rec.predicted = e.predicted;
@@ -48,6 +49,10 @@ export function engagements(write, at) {
         rec.answered ||= !e.unanswered;
         rec.gaveUp ||= rec.answered && e.unanswered;
         rec.disengaged ||= e.phase === "disengaging";
+        // `idle`: the most ticks on end a Defend neither acted (held a body, asked one, saw its group) nor stood down.
+        const sighted = (fight.groups ?? []).some((g) => g.id === e.group && g.seen === t);
+        rec.blind = rec.kind !== "defend" || e.ours.length || asked.has(e.id) || sighted || e.phase === "disengaging" ? 0 : rec.blind + 1;
+        rec.idle = Math.max(rec.idle, rec.blind);
         const theirs = objects.filter((o) => rec.members.has(o.id));
         if (theirs.length) rec.seen = t;
         rec.core ||= theirs.some((o) => o.type === "invaderCore");
