@@ -121,6 +121,7 @@ export const measures = {
     const seen = within(samples, a).map((s) => s.rooms[a.room]?.roads ?? 0);
     return Math.max(0, ...seen) - (seen.at(-1) ?? 0);
   },
+  roadsAtEnd: (samples, a) => at(samples, a.to ?? Infinity).rooms[a.room]?.roads ?? 0,
   stillLoaded: (samples, a) => at(samples, a.to ?? Infinity).stillLoaded,
   // The ticks from every claim at RCL2 to every one with a tower, whether a safe mode ran in one, and `room`'s level.
   rcl2ToTower: (samples) => firstClaimed(samples, (c) => c.towers > 0) - firstClaimed(samples, (c) => c.level >= 2),

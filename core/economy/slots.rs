@@ -10,7 +10,7 @@ use fabot_base::declarations;
 use fabot_base::engine;
 use fabot_base::grid::{self, Footprint};
 use fabot_base::vocabulary::{Part, part_count_in};
-use fabot_base::world::{Controller, Id, Pos, RoomName, Spawn};
+use fabot_base::world::{Controller, Id, Kind, Pos, RoomName, Spawn};
 
 use super::bodies::{self, Leg, Pattern};
 use super::derived::{Body, Derived, Ground, SiteFact, dig_work, drawn_for};
@@ -429,7 +429,8 @@ impl Plan<'_> {
                 continue;
             }
             // Hivemind's mine builder.
-            if !own && at_risk && storage.is_some() {
+            let paves = g.sites.iter().any(|s| s.kind == Kind::Road);
+            if !own && (at_risk || paves) && storage.is_some() {
                 fixed += self.worker(ci, g.room, 0, (false, false), MENDER, MENDER_WORK);
             }
             for s in &g.sources {

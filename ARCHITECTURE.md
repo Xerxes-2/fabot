@@ -290,7 +290,8 @@ pricer cost ~2× CPU and 580 lines for no gain and was not merged).
   colony holding less so it never flows back.
 - **Repairs:** structures decaying within a creep lifetime are repaired ahead of
   building; stocked colonies dispatch a dedicated 2-WORK outpost mender when an
-  outpost road is at risk.
+  outpost road is at risk or its walk lacks one (Hivemind's mine builder counts
+  a missing road as work, first paving or lost alike).
 - **Reserve (`strategy::reserve`):** threatened colonies (rival within 3 rooms,
   home fight open, or fight cast owed) keep `towers × TOWER_ENERGY_COST ×
   CREEP_LIFETIME × n` (`n` live-declared via `observe declare reserve`, default
