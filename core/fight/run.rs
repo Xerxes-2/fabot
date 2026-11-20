@@ -122,6 +122,10 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
     let hostile_at: BTreeMap<Id, Pos> = hostiles.iter().map(|h| (h.id, h.pos)).collect();
     let ours: BTreeMap<&str, &Creep> = world.creeps.iter().map(|c| (c.name.as_str(), c)).collect();
     let standing: BTreeSet<String> = world.creeps.iter().map(|c| c.name.clone()).collect();
+    let able: BTreeSet<String> = (world.creeps.iter())
+        .filter(|c| !c.spent())
+        .map(|c| c.name.clone())
+        .collect();
     let aging_out: BTreeSet<String> = world
         .creeps
         .iter()
@@ -333,7 +337,11 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
         .iter()
         .filter_map(|e| {
             let next = match &e.objective {
-                Objective::Defend => defend::step(&scene.facts_of(e, &standing, &aging_out), e),
+                Objective::Defend => {
+                    let home = scene.homes.contains(&e.room);
+                    let counted = if home { &standing } else { &able };
+                    defend::step(&scene.facts_of(e, counted, &aging_out), e)
+                }
                 Objective::Siege(_) => {
                     let declared = declarations.priority(OpKind::Siege, e.room).is_some();
                     let f = scene.siege_facts(e, declared, &standing, &aging_out, gates.get(&e.id));
@@ -459,6 +467,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
         .iter()
         .filter(|c| {
             declarations::fights(&c.name)
+                && able.contains(&c.name)
                 && !(committed.contains(&c.name) || aging_out.contains(&c.name))
         })
         .map(|c| c.name.clone())

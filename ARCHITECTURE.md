@@ -414,8 +414,11 @@ with one phase machine per kind under `core/fight/kinds/`.
   re-forms and re-prices; it closes only once ours are home and `sightings`
   clears (closing sooner reopens on the same raid with a fresh budget and feeds
   it bodies). Blind, with no body of ours standing or asked, it disengages
-  and keeps its budget the same way. Home `Defend` never disengages (falls
-  back to `unanswered` on towers/ramparts until the group is gone).
+  and keeps its budget the same way. A body with nothing alive but MOVE,
+  TOUGH and CARRY counts as lost to an outpost (nothing there heals it; it can
+  end no raid) and no engagement drafts it until healed. Home `Defend` never
+  disengages (falls back to `unanswered` on towers/ramparts until the group
+  is gone).
 - **`Siege`, `Raid` & `Drain`** (`kinds/siege.rs`, `kinds/raid.rs`): opened on
   the table's `Siege` rows, one per `declarations.sieges` room (kept visible by
   observer/scout). Targets towers and economy structures, least struck by
@@ -473,7 +476,7 @@ and `cheapest_win` (adds only to already-standing `ours`).
 | Tactic | Behaviour |
 |---|---|
 | `Kite` | Maintain optimal range while firing |
-| `Close` | Close distance + glue onto moving marks |
+| `Close` | Close distance + glue onto moving marks; a `Defend` body (`Kite` too, not the blobs) outside its centre's room enters it by any tile and ranks no mark until in. A siege's loose bodies keep its blob's line in |
 | `Hold` | Hold rampart / `Atlas` seat |
 | `Pursue` | Chase across room borders |
 | `Retreat` | Fall back to `ColonyPlan.muster` (off plan roads/structures) |

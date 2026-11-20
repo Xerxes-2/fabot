@@ -201,6 +201,7 @@ pub(super) fn act(
 
         let (centre, _) = centre_of(e);
         let order = &e.plan.order;
+        let enter = e.objective == Objective::Defend;
 
         if e.unanswered {
             return (None, tactics::rampart(sight, c));
@@ -216,7 +217,7 @@ pub(super) fn act(
                 None => tactics::hold(sight, c),
             },
             Phase::Forming => tactics::hold(sight, c),
-            Phase::Pursuing => tactics::close(sight, order, &centre, c),
+            Phase::Pursuing => tactics::close(sight, order, &centre, enter, c),
             Phase::Disengaging => tactics::retreat(sight, c),
             Phase::Approaching | Phase::Fighting => {
                 if let Some(wish) = walking.get(&c.name) {
@@ -270,12 +271,11 @@ pub(super) fn act(
                 {
                     tactics::step_back(sight, centre.room, &scene.members_of(e), c)
                 } else if matches!(tactic, Tactic::Kite | Tactic::BlobKite) && !swings(c) {
-                    let anchor = raid::raids(e).then_some(&centre);
-                    tactics::kite(sight, anchor, order, &centre, c)
+                    tactics::kite(sight, order, &centre, enter, c)
                 } else if matches!(tactic, Tactic::Hold) {
                     tactics::rampart(sight, c)
                 } else {
-                    tactics::close(sight, order, &centre, c)
+                    tactics::close(sight, order, &centre, enter, c)
                 }
             }
         };

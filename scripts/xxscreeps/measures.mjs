@@ -315,6 +315,10 @@ export const measures = {
   // one with no core stayed open after its group was last seen.
   heldPastWave: (samples, _, dir) => Math.max(0, ...rowsOf(dir).filter((e) => !e.core).map((e) => (e.closed ?? samples.at(-1).t) - (e.seen ?? e.opened))),
   idleMost: (_, __, dir) => Math.max(0, ...rowsOf(dir).map((e) => e.idle ?? 0)),
+  // Over the Defends that drafted a body in [from, to) and never stood down, the most ticks from
+  // that draft to their close.
+  answeredMost: (samples, a, dir) =>
+    Math.max(0, ...rowsOf(dir).filter((e) => e.kind === "defend" && !e.disengaged && e.drafted != null && e.drafted >= (a.from ?? 0) && e.drafted < (a.to ?? Infinity)).map((e) => (e.closed ?? samples.at(-1).t) - e.drafted)),
   // Invader cores standing in the declared outposts at the window's end.
   coresAtEnd: (samples, a) => Object.values(at(samples, a.to ?? Infinity).rooms).reduce((n, r) => n + (r.cores ?? 0), 0),
   // Enemies standing in our room at the window's end.

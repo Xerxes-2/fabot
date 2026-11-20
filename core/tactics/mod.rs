@@ -246,15 +246,19 @@ pub fn hold(sight: &Sight, creep: &Creep) -> Wish {
     plan::stay(&*sight.atlas, creep, mover_of(creep).factor, WEIGHT)
 }
 
-fn aim(sight: &Sight, order: &[Id], centre: &Pos, creep: &Creep) -> Pos {
-    ranked(sight, order, creep)
-        .first()
-        .map_or(*centre, |h| h.pos)
+/// `enter` ranks no mark outside the centre's room: a mark moving there swings the
+/// route between borders, and the room's middle may be walled in.
+fn aim(sight: &mut Sight, order: &[Id], centre: &Pos, enter: bool, c: &Creep, range: i32) -> Wish {
+    let half = engine::ROOM_SIDE / 2;
+    if enter && c.pos.room != centre.room {
+        return toward(sight, c, &Pos::new(centre.room, half, half), half);
+    }
+    let at = ranked(sight, order, c).first().map_or(*centre, |h| h.pos);
+    toward(sight, c, &at, range)
 }
 
-pub fn close(sight: &mut Sight, order: &[Id], centre: &Pos, creep: &Creep) -> Wish {
-    let at = aim(sight, order, centre, creep);
-    toward(sight, creep, &at, engine::MELEE_RANGE)
+pub fn close(sight: &mut Sight, order: &[Id], centre: &Pos, enter: bool, creep: &Creep) -> Wish {
+    aim(sight, order, centre, enter, creep, engine::MELEE_RANGE)
 }
 
 fn reach_next_tick(kind: Part, h: &Creep) -> Option<i32> {
@@ -289,14 +293,8 @@ fn step_to(creep: &Creep, tile: Tile) -> Wish {
 }
 
 /// v1's kiteStep without its threat maps: off every swing's next reach, else
-/// to a shot's range of `at`, or of the mark the kill order puts first.
-pub fn kite(
-    sight: &mut Sight,
-    at: Option<&Pos>,
-    order: &[Id],
-    centre: &Pos,
-    creep: &Creep,
-) -> Wish {
+/// to a shot's range of the mark the kill order puts first; `enter` as `aim`.
+pub fn kite(sight: &mut Sight, order: &[Id], centre: &Pos, enter: bool, creep: &Creep) -> Wish {
     let room = creep.pos.room;
 
     let swings: Vec<&Creep> = hostiles_in(sight, room)
@@ -315,10 +313,7 @@ pub fn kite(
     let here = tiles::of_pos(&creep.pos);
 
     if swings.is_empty() {
-        let at = at
-            .copied()
-            .unwrap_or_else(|| aim(sight, order, centre, creep));
-        toward(sight, creep, &at, engine::RANGED_RANGE)
+        aim(sight, order, centre, enter, creep, engine::RANGED_RANGE)
     } else {
         let step = (tiles::around(here))
             .iter()
