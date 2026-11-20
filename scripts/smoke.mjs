@@ -203,6 +203,52 @@ Game.time = 202;
 main.loop();
 if (JSON.stringify(active) !== "[[2,3]]") fail(`the tick after a timeout ran on a warm heap: ${JSON.stringify(active)}`);
 
+// Refusals as the executor names them, the world changed between read and execute.
+const exec = globalThis.__fabotExec;
+const patch = (o, k, v) => {
+  const was = o[k];
+  o[k] = v;
+  return () => (o[k] = was);
+};
+const refusals = (time, ...patches) => {
+  globalThis.__fabotExec = (ints, text) => {
+    const undo = patches.map(([o, k, v]) => patch(o, k, v));
+    try {
+      return exec(ints, text);
+    } finally {
+      undo.forEach((u) => u());
+    }
+  };
+  Game.time = time;
+  main.loop();
+  globalThis.__fabotExec = exec;
+  return JSON.stringify(JSON.parse(segments[1]).refusals.map(({ actor, act, code }) => [actor, act, code]));
+};
+const seen = Game.getObjectById;
+let spawned;
+const thrown = refusals(
+  203,
+  [spawn, "spawnCreep", () => { throw new Error("refused"); }],
+  [creep, "move", () => -11],
+  [Game, "getObjectById", (id) => (id === "a7" ? null : seen(id))],
+);
+if (thrown !== '[["a1","threw",-100],["a","pickup",-5],["a","move",-11]]') fail(`a throw, a missing target and a code refused as ${thrown}`);
+const gone = refusals(204, [Game, "creeps", {}], [spawn, "spawnCreep", (...args) => ((spawned = args), 0)]);
+if (gone !== '[["a","creep",-5],["a","creep",-5]]') fail(`a gone creep's intents refused as ${gone}`);
+if (!/^\[\["work","work","carry","move"\],"harvester-204-Spawn1",\{/.test(JSON.stringify(spawned))) fail(`spawnCreep got ${JSON.stringify(spawned)}`);
+// The actors smoke's world has none of, through the JS half alone: a tower whose
+// lookup throws reads gone, and the site after it is still made.
+const undo = [
+  patch(room, "createConstructionSite", (x, y, kind) => (x === 3 && y === 4 && kind === "road" ? -8 : 0)),
+  patch(Game, "getObjectById", (id) => {
+    if (id === "t9") throw new Error("lookup");
+    return seen(id);
+  }),
+];
+const direct = Array.from(exec(Int32Array.of(2, 0, 1, 1, 2, 2, 1, 3, 4, 3, 0, 3, 0, 4, 1, 5), "t9\0attack\0a3\0W1N1\0createConstructionSite\0road\0"));
+undo.forEach((u) => u());
+if (direct.join() !== "0,-5,1,1,-8,0") fail(`a tower whose lookup threw and a refused site came back ${direct}`);
+
 // What the recorder kept, stood as the bench's Game, reads as the tick did.
 stand(recorded, [], getHeapStatistics, () => 0);
 const again = globalThis.__fabotRead().map((each) => (typeof each === "string" ? each : Array.from(each)));

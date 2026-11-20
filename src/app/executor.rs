@@ -1,9 +1,9 @@
-//! `Executor` turns each intent into one API call (`ARCHITECTURE.md` §1).
-use js_sys::{Array, Object};
-use wasm_bindgen::prelude::wasm_bindgen;
-use wasm_bindgen::{JsCast, JsValue};
+//! `Executor` hands the tick's intents to `exec.js` in one call, which makes
+//! each its API call (`ARCHITECTURE.md` §1).
+use std::fmt::{Display, Write};
 
-use crate::app::world;
+use wasm_bindgen::prelude::wasm_bindgen;
+
 use fabot_base::intents::{
     Action, ControllerAct, CreepAct, LabAct, LinkAct, Refusal, RoomAct, SpawnAct, TerminalAct,
     TowerAct,
@@ -11,224 +11,230 @@ use fabot_base::intents::{
 use fabot_base::vocabulary;
 use fabot_base::world::Id;
 
-const NOT_FOUND: i32 = -5;
-const THREW: i32 = -100;
-
-// Typed imports, not `Reflect::apply`: one seam call each. The engine returns
-// a number or `undefined`, which reads NaN and casts to 0.
 #[wasm_bindgen]
 extern "C" {
-    type Actor;
-    #[wasm_bindgen(method, catch, js_name = move)]
-    fn move_(this: &Actor, direction: i32) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch)]
-    fn say(this: &Actor, message: &str) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch)]
-    fn harvest(this: &Actor, target: &JsValue) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch)]
-    fn transfer(this: &Actor, target: &JsValue, resource: &str) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch)]
-    fn withdraw(this: &Actor, target: &JsValue, resource: &str) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch)]
-    fn pickup(this: &Actor, target: &JsValue) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch)]
-    fn drop(this: &Actor, resource: &str) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch)]
-    fn build(this: &Actor, target: &JsValue) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch)]
-    fn repair(this: &Actor, target: &JsValue) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch, js_name = upgradeController)]
-    fn upgrade_controller(this: &Actor, target: &JsValue) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch, js_name = reserveController)]
-    fn reserve_controller(this: &Actor, target: &JsValue) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch, js_name = attackController)]
-    fn attack_controller(this: &Actor, target: &JsValue) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch, js_name = claimController)]
-    fn claim_controller(this: &Actor, target: &JsValue) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch)]
-    fn attack(this: &Actor, target: &JsValue) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch, js_name = rangedAttack)]
-    fn ranged_attack(this: &Actor, target: &JsValue) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch, js_name = rangedMassAttack)]
-    fn ranged_mass_attack(this: &Actor) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch)]
-    fn heal(this: &Actor, target: &JsValue) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch, js_name = rangedHeal)]
-    fn ranged_heal(this: &Actor, target: &JsValue) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch)]
-    fn dismantle(this: &Actor, target: &JsValue) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch, js_name = createConstructionSite)]
-    fn create_construction_site(this: &Actor, x: i32, y: i32, kind: &str) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch)]
-    fn destroy(this: &Actor) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch, js_name = activateSafeMode)]
-    fn activate_safe_mode(this: &Actor) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch)]
-    fn unclaim(this: &Actor) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch, js_name = transferEnergy)]
-    fn transfer_energy(this: &Actor, target: &JsValue, amount: i32) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch, js_name = runReaction)]
-    fn run_reaction(this: &Actor, a: &JsValue, b: &JsValue) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch, js_name = boostCreep)]
-    fn boost_creep(this: &Actor, creep: &JsValue) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch)]
-    fn send(this: &Actor, resource: &str, amount: i32, room: &str) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch, js_name = observeRoom)]
-    fn observe_room(this: &Actor, room: &str) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch, js_name = recycleCreep)]
-    fn recycle_creep(this: &Actor, creep: &JsValue) -> Result<f64, JsValue>;
-    #[wasm_bindgen(method, catch, js_name = spawnCreep)]
-    fn spawn_creep(
-        this: &Actor,
-        body: &Array,
-        name: &str,
-        options: &SpawnOptions,
-    ) -> Result<f64, JsValue>;
-
-    type SpawnOptions;
-    #[wasm_bindgen(method, setter, js_name = energyStructures)]
-    fn set_energy_structures(this: &SpawnOptions, structures: &Array);
+    #[wasm_bindgen(js_name = __fabotExec)]
+    fn exec(ints: &[i32], strs: &str) -> Vec<i32>;
 }
 
-fn outcome(verb: &str, result: Result<f64, JsValue>) -> (String, i32) {
-    match result {
-        Ok(code) => (verb.to_string(), code as i32),
-        Err(_) => ("threw".to_string(), THREW),
+const CREEP: i32 = 0;
+const ROOM: i32 = 1;
+const OBJECT: i32 = 2;
+const INT: i32 = 0;
+const TEXT: i32 = 1;
+const BY_ID: i32 = 2;
+const TEXTS: i32 = 3;
+const DRAWN: i32 = 4;
+const GONE: i32 = 1;
+const THREW: i32 = 2;
+const ERR_INVALID_ARGS: i32 = -10;
+
+/// Each string NUL-ended in `strs`, named in `ints` by its index; `argc` is
+/// where the current record counts its arguments.
+#[derive(Default)]
+struct Pack {
+    ints: Vec<i32>,
+    strs: String,
+    words: i32,
+    argc: usize,
+    nul: bool,
+    invalid: Vec<usize>,
+}
+
+impl Pack {
+    fn word(&mut self, x: impl Display) -> i32 {
+        let start = self.strs.len();
+        let _ = write!(self.strs, "{x}");
+        self.nul |= self.strs[start..].contains('\0');
+        self.strs.push('\0');
+        self.words += 1;
+        self.words - 1
     }
-}
 
-fn actor(v: &JsValue) -> &Actor {
-    v.unchecked_ref()
-}
-
-fn on(verb: &str, target: &Id, f: impl FnOnce(&JsValue) -> Result<f64, JsValue>) -> (String, i32) {
-    match world::object_by_id(target) {
-        None => (verb.to_string(), NOT_FOUND),
-        Some(t) => outcome(verb, f(&t)),
+    fn call(&mut self, kind: i32, actor: impl Display, method: &str) -> &mut Self {
+        let (actor, method) = (self.word(actor), self.word(method));
+        self.ints.extend([kind, actor, method, 0]);
+        self.argc = self.ints.len() - 1;
+        self
     }
-}
 
-fn act(intent: &Action) -> (String, i32) {
-    match intent {
-        Action::Creep(name, act) => {
-            let Some(creep) = world::creep_by_name(name) else {
-                return ("creep".to_string(), NOT_FOUND);
-            };
-            let creep = actor(&creep);
-            let verb: &str = act.into();
-            match act {
-                CreepAct::Move(direction) => outcome(verb, creep.move_(*direction)),
-                CreepAct::Say(message) => outcome(verb, creep.say(message)),
-                CreepAct::Harvest(id) => on(verb, id, |t| creep.harvest(t)),
-                CreepAct::Transfer(id, resource) => on(verb, id, |t| {
-                    creep.transfer(t, &vocabulary::resource_name(resource))
-                }),
-                CreepAct::Withdraw(id, resource) => on(verb, id, |t| {
-                    creep.withdraw(t, &vocabulary::resource_name(resource))
-                }),
-                CreepAct::Pickup(id) => on(verb, id, |t| creep.pickup(t)),
-                CreepAct::Drop(resource) => {
-                    outcome(verb, creep.drop(&vocabulary::resource_name(resource)))
-                }
-                CreepAct::Build(id) => on(verb, id, |t| creep.build(t)),
-                CreepAct::Repair(id) => on(verb, id, |t| creep.repair(t)),
-                CreepAct::Upgrade(id) => on(verb, id, |t| creep.upgrade_controller(t)),
-                CreepAct::Reserve(id) => on(verb, id, |t| creep.reserve_controller(t)),
-                CreepAct::Unreserve(id) => on(verb, id, |t| creep.attack_controller(t)),
-                CreepAct::ClaimController(id) => on(verb, id, |t| creep.claim_controller(t)),
-                CreepAct::AttackCreep(id) => on(verb, id, |t| creep.attack(t)),
-                CreepAct::RangedAttackCreep(id) => on(verb, id, |t| creep.ranged_attack(t)),
-                CreepAct::RangedMassAttack => outcome(verb, creep.ranged_mass_attack()),
-                CreepAct::HealCreep(id) => on(verb, id, |t| creep.heal(t)),
-                CreepAct::RangedHealCreep(id) => on(verb, id, |t| creep.ranged_heal(t)),
-                CreepAct::Dismantle(id) => on(verb, id, |t| creep.dismantle(t)),
-            }
+    fn arg(&mut self, tag: i32, x: i32) -> &mut Self {
+        self.ints[self.argc] += 1;
+        self.ints.extend([tag, x]);
+        self
+    }
+
+    fn int(&mut self, x: i32) -> &mut Self {
+        self.arg(INT, x)
+    }
+
+    fn text(&mut self, x: impl Display) -> &mut Self {
+        let word = self.word(x);
+        self.arg(TEXT, word)
+    }
+
+    fn by_id(&mut self, id: &Id) -> &mut Self {
+        let word = self.word(id);
+        self.arg(BY_ID, word)
+    }
+
+    fn list<T: Display>(&mut self, tag: i32, xs: &[T]) -> &mut Self {
+        self.arg(tag, xs.len() as i32);
+        for x in xs {
+            let word = self.word(x);
+            self.ints.push(word);
         }
-        Action::Room(name, RoomAct::CreateSite(x, y, kind)) => {
-            let verb = format!("site:{}", kind.as_ref());
-            match world::room_by_name(*name) {
-                None => (verb, NOT_FOUND),
-                Some(room) => {
-                    let site = actor(&room).create_construction_site(*x, *y, kind.as_ref());
-                    outcome(&verb, site)
-                }
-            }
+        self
+    }
+
+    /// A NUL inside a string would shift every later index, so that intent goes
+    /// out as a lookup of nothing and comes back invalid.
+    fn intent(&mut self, at: usize, intent: &Action) {
+        let mark = (self.ints.len(), self.strs.len(), self.words);
+        self.nul = false;
+        self.pack(intent);
+        if self.nul {
+            self.ints.truncate(mark.0);
+            self.strs.truncate(mark.1);
+            self.words = mark.2;
+            self.call(OBJECT, "", "");
+            self.invalid.push(at);
         }
-        Action::Room(_, RoomAct::Destroy(id)) => on("destroy", id, |s| actor(s).destroy()),
-        Action::Tower(id, act) => match world::object_by_id(id) {
-            None => ("tower".to_string(), NOT_FOUND),
-            Some(tower) => {
-                let tower = actor(&tower);
+    }
+
+    fn pack(&mut self, intent: &Action) {
+        match intent {
+            Action::Creep(name, act) => {
+                let method = match act {
+                    CreepAct::Move(_) => "move",
+                    CreepAct::Say(_) => "say",
+                    CreepAct::Harvest(_) => "harvest",
+                    CreepAct::Transfer(..) => "transfer",
+                    CreepAct::Withdraw(..) => "withdraw",
+                    CreepAct::Pickup(_) => "pickup",
+                    CreepAct::Drop(_) => "drop",
+                    CreepAct::Build(_) => "build",
+                    CreepAct::Repair(_) => "repair",
+                    CreepAct::Upgrade(_) => "upgradeController",
+                    CreepAct::Reserve(_) => "reserveController",
+                    CreepAct::Unreserve(_) => "attackController",
+                    CreepAct::ClaimController(_) => "claimController",
+                    CreepAct::AttackCreep(_) => "attack",
+                    CreepAct::RangedAttackCreep(_) => "rangedAttack",
+                    CreepAct::RangedMassAttack => "rangedMassAttack",
+                    CreepAct::HealCreep(_) => "heal",
+                    CreepAct::RangedHealCreep(_) => "rangedHeal",
+                    CreepAct::Dismantle(_) => "dismantle",
+                };
+                let call = self.call(CREEP, name, method);
                 match act {
-                    TowerAct::Attack(target) => on("attack", target, |t| tower.attack(t)),
-                    TowerAct::Heal(target) => on("heal", target, |t| tower.heal(t)),
-                    TowerAct::Repair(target) => on("repair", target, |t| tower.repair(t)),
+                    CreepAct::Move(direction) => call.int(*direction),
+                    CreepAct::Say(message) => call.text(message),
+                    CreepAct::Transfer(id, resource) | CreepAct::Withdraw(id, resource) => {
+                        call.by_id(id).text(vocabulary::resource_name(resource))
+                    }
+                    CreepAct::Drop(resource) => call.text(vocabulary::resource_name(resource)),
+                    CreepAct::RangedMassAttack => call,
+                    CreepAct::Harvest(id)
+                    | CreepAct::Pickup(id)
+                    | CreepAct::Build(id)
+                    | CreepAct::Repair(id)
+                    | CreepAct::Upgrade(id)
+                    | CreepAct::Reserve(id)
+                    | CreepAct::Unreserve(id)
+                    | CreepAct::ClaimController(id)
+                    | CreepAct::AttackCreep(id)
+                    | CreepAct::RangedAttackCreep(id)
+                    | CreepAct::HealCreep(id)
+                    | CreepAct::RangedHealCreep(id)
+                    | CreepAct::Dismantle(id) => call.by_id(id),
                 }
             }
-        },
-        Action::Controller(id, ControllerAct::ActivateSafeMode) => {
-            on("safeMode", id, |c| actor(c).activate_safe_mode())
-        }
-        Action::Controller(id, ControllerAct::Unclaim) => on("unclaim", id, |c| actor(c).unclaim()),
-        Action::Link(id, LinkAct::TransferEnergy(target, amount)) => {
-            match world::object_by_id(id) {
-                None => ("link".to_string(), NOT_FOUND),
-                Some(link) => on("link", target, |t| actor(&link).transfer_energy(t, *amount)),
+            Action::Room(name, RoomAct::CreateSite(x, y, kind)) => (self
+                .call(ROOM, name, "createConstructionSite")
+                .int(*x)
+                .int(*y))
+            .text(kind.as_ref()),
+            Action::Room(_, RoomAct::Destroy(id)) => self.call(OBJECT, id, "destroy"),
+            Action::Tower(id, TowerAct::Attack(t)) => self.call(OBJECT, id, "attack").by_id(t),
+            Action::Tower(id, TowerAct::Heal(t)) => self.call(OBJECT, id, "heal").by_id(t),
+            Action::Tower(id, TowerAct::Repair(t)) => self.call(OBJECT, id, "repair").by_id(t),
+            Action::Controller(id, ControllerAct::ActivateSafeMode) => {
+                self.call(OBJECT, id, "activateSafeMode")
             }
-        }
-        Action::Lab(id, LabAct::RunReaction(a, b)) => match (
-            world::object_by_id(id),
-            world::object_by_id(a),
-            world::object_by_id(b),
-        ) {
-            (Some(lab), Some(a), Some(b)) => {
-                outcome("runReaction", actor(&lab).run_reaction(&a, &b))
+            Action::Controller(id, ControllerAct::Unclaim) => self.call(OBJECT, id, "unclaim"),
+            Action::Link(id, LinkAct::TransferEnergy(target, amount)) => {
+                (self.call(OBJECT, id, "transferEnergy").by_id(target)).int(*amount)
             }
-            _ => ("runReaction".to_string(), NOT_FOUND),
-        },
-        Action::Lab(id, LabAct::BoostCreep(creep)) => {
-            match (world::object_by_id(id), world::object_by_id(creep)) {
-                (Some(lab), Some(creep)) => outcome("boostCreep", actor(&lab).boost_creep(&creep)),
-                _ => ("boostCreep".to_string(), NOT_FOUND),
+            Action::Lab(id, LabAct::RunReaction(a, b)) => {
+                self.call(OBJECT, id, "runReaction").by_id(a).by_id(b)
             }
-        }
-        Action::Terminal(id, TerminalAct::Send(resource, amount, room)) => on("send", id, |t| {
-            let name = vocabulary::resource_name(resource);
-            actor(t).send(&name, *amount, &room.to_string())
-        }),
-        Action::Observe(id, room) => on("observeRoom", id, |o| {
-            actor(o).observe_room(&room.to_string())
-        }),
-        Action::Spawn(id, SpawnAct::RecycleCreep(creep)) => {
-            match (world::object_by_id(id), world::object_by_id(creep)) {
-                (Some(spawn), Some(creep)) => {
-                    outcome("recycle", actor(&spawn).recycle_creep(&creep))
-                }
-                _ => ("recycle".to_string(), NOT_FOUND),
+            Action::Lab(id, LabAct::BoostCreep(creep)) => {
+                self.call(OBJECT, id, "boostCreep").by_id(creep)
             }
-        }
-        Action::Spawn(id, SpawnAct::SpawnCreep(body, name, drawn)) => on("spawn", id, |spawn| {
-            let parts: Array = body.iter().map(|p| JsValue::from(*p)).collect();
-            let options: SpawnOptions = Object::new().unchecked_into();
-            if !drawn.is_empty() {
-                let structures: Array = drawn.iter().filter_map(world::object_by_id).collect();
-                options.set_energy_structures(&structures);
+            Action::Terminal(id, TerminalAct::Send(resource, amount, room)) => (self
+                .call(OBJECT, id, "send")
+                .text(vocabulary::resource_name(resource)))
+            .int(*amount)
+            .text(room),
+            Action::Observe(id, room) => self.call(OBJECT, id, "observeRoom").text(room),
+            Action::Spawn(id, SpawnAct::RecycleCreep(creep)) => {
+                self.call(OBJECT, id, "recycleCreep").by_id(creep)
             }
-            actor(spawn).spawn_creep(&parts, name, &options)
-        }),
+            Action::Spawn(id, SpawnAct::SpawnCreep(body, name, drawn)) => {
+                (self.call(OBJECT, id, "spawnCreep").list(TEXTS, body))
+                    .text(name)
+                    .list(DRAWN, drawn)
+            }
+        };
     }
+}
+
+/// The refusal's act: the verb, or the actor's kind where a creep or tower is gone.
+fn act(intent: &Action, tag: i32) -> String {
+    let verb = match intent {
+        _ if tag == THREW => "threw",
+        Action::Creep(..) if tag == GONE => "creep",
+        Action::Tower(..) if tag == GONE => "tower",
+        Action::Creep(_, act) => act.into(),
+        Action::Room(_, RoomAct::CreateSite(_, _, kind)) => {
+            return format!("site:{}", kind.as_ref());
+        }
+        Action::Room(_, RoomAct::Destroy(_)) => "destroy",
+        Action::Tower(_, TowerAct::Attack(_)) => "attack",
+        Action::Tower(_, TowerAct::Heal(_)) => "heal",
+        Action::Tower(_, TowerAct::Repair(_)) => "repair",
+        Action::Controller(_, ControllerAct::ActivateSafeMode) => "safeMode",
+        Action::Controller(_, ControllerAct::Unclaim) => "unclaim",
+        Action::Link(..) => "link",
+        Action::Lab(_, LabAct::RunReaction(..)) => "runReaction",
+        Action::Lab(_, LabAct::BoostCreep(_)) => "boostCreep",
+        Action::Terminal(..) => "send",
+        Action::Observe(..) => "observeRoom",
+        Action::Spawn(_, SpawnAct::RecycleCreep(_)) => "recycle",
+        Action::Spawn(_, SpawnAct::SpawnCreep(..)) => "spawn",
+    };
+    verb.to_string()
 }
 
 /// One bad intent costs itself, never the rest of the tick's.
 pub fn run(intents: &[Action]) -> Vec<Refusal> {
-    (intents.iter())
-        .filter_map(|intent| {
-            let (act, code) = act(intent);
-            (code != 0).then(|| Refusal {
+    let mut pack = Pack::default();
+    (intents.iter().enumerate()).for_each(|(at, intent)| pack.intent(at, intent));
+    let refused = exec(&pack.ints, &pack.strs);
+    (refused.as_chunks::<3>().0.iter())
+        .map(|&[at, code, tag]| {
+            let intent = &intents[at as usize];
+            let (code, tag) = if pack.invalid.contains(&(at as usize)) {
+                (ERR_INVALID_ARGS, 0)
+            } else {
+                (code, tag)
+            };
+            Refusal {
                 actor: intent.actor(),
-                act,
+                act: act(intent, tag),
                 code,
-            })
+            }
         })
         .collect()
 }

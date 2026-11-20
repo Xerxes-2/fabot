@@ -56,6 +56,8 @@ if (!glue.includes(loader)) throw new Error("rust.mjs: wasm-pack's loader change
 const prelude = `globalThis.__FABOT_VERSION__ = ${JSON.stringify(version())};
 ${readFileSync(join(REPO, "src", "app", "read.js"), "utf8")}
 
+${readFileSync(join(REPO, "src", "app", "exec.js"), "utf8")}
+
 ${readFileSync(join(REPO, "src", "app", "text.js"), "utf8")}
 `;
 

@@ -12,8 +12,8 @@ use screeps::game::{
     self,
     map::{self, RoomStatus},
 };
+use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::wasm_bindgen;
-use wasm_bindgen::{JsCast, JsValue};
 
 use fabot_base::declarations::Declarations;
 use fabot_base::tiles;
@@ -24,22 +24,6 @@ use fabot_base::world::*;
 extern "C" {
     #[wasm_bindgen(js_name = __fabotRead)]
     fn read(drain: Option<String>) -> Array;
-
-    type Game;
-    #[wasm_bindgen(static_method_of = Game, catch, js_name = getObjectById)]
-    fn object(id: &str) -> Result<JsValue, JsValue>;
-    #[wasm_bindgen(static_method_of = Game, catch, getter)]
-    fn creeps() -> Result<Named, JsValue>;
-    #[wasm_bindgen(static_method_of = Game, catch, getter)]
-    fn rooms() -> Result<Named, JsValue>;
-
-    type Named;
-    #[wasm_bindgen(method, structural, catch, indexing_getter)]
-    fn get(this: &Named, name: &str) -> Result<JsValue, JsValue>;
-}
-
-fn absent(v: &JsValue) -> bool {
-    v.is_undefined() || v.is_null()
 }
 
 /// `ARCHITECTURE.md` §4's `terrain` row.
@@ -140,26 +124,4 @@ fn status_of(name: RoomName) -> Option<RoomStatus> {
 
 fn engine_name(name: RoomName) -> Option<screeps::RoomName> {
     name.to_string().parse().ok()
-}
-
-/// `Game.getObjectById` as `Executor` reads it: absent is a refusal, never an error.
-pub fn object_by_id(id: &Id) -> Option<JsValue> {
-    Game::object(&id.text()).ok().filter(|found| !absent(found))
-}
-
-/// `Game.creeps[name]`, for the executor's creep.
-pub fn creep_by_name(name: &str) -> Option<JsValue> {
-    Game::creeps()
-        .ok()?
-        .get(name)
-        .ok()
-        .filter(|creep| !absent(creep))
-}
-
-pub fn room_by_name(name: RoomName) -> Option<JsValue> {
-    Game::rooms()
-        .ok()?
-        .get(&name.to_string())
-        .ok()
-        .filter(|room| !absent(room))
 }
