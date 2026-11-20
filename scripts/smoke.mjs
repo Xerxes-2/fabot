@@ -185,10 +185,28 @@ Game.time = 200;
 main.loop();
 if (!/^@0 100\nW1N1 5$/m.test(segments[3]) || !/^@100 1$/m.test(segments[3])) fail(`the metrics' ring after a reset: ${segments[3]}`);
 
+// A vm timeout terminates as the engine's CPU limit does, past any catch or finally.
+globalThis.__fabotRead = () => {
+  for (;;);
+};
+let aborted = false;
+try {
+  Game.time = 201;
+  runInContext("loop()", createContext({ loop: main.loop }), { timeout: 50 });
+} catch (thrown) {
+  aborted = thrown.code === "ERR_SCRIPT_EXECUTION_TIMEOUT";
+}
+globalThis.__fabotRead = read;
+if (!aborted) fail("a spinning read did not time out");
+active.length = 0;
+Game.time = 202;
+main.loop();
+if (JSON.stringify(active) !== "[[2,3]]") fail(`the tick after a timeout ran on a warm heap: ${JSON.stringify(active)}`);
+
 // What the recorder kept, stood as the bench's Game, reads as the tick did.
 stand(recorded, [], getHeapStatistics, () => 0);
 const again = globalThis.__fabotRead().map((each) => (typeof each === "string" ? each : Array.from(each)));
 if (JSON.stringify(again) !== JSON.stringify(pass)) fail(`the recorded tick reads otherwise: ${JSON.stringify(again).slice(0, 200)}`);
 
 const version = readFileSync(new URL(bundle, import.meta.url), "utf8").split("\n")[0];
-console.log(`smoke: 4 ticks clean, and two after a trap (${version.match(/"(.*)"/)?.[1] ?? "unnamed"})`);
+console.log(`smoke: 4 ticks clean, and after a trap and a timeout (${version.match(/"(.*)"/)?.[1] ?? "unnamed"})`);

@@ -59,29 +59,28 @@ ${readFileSync(join(REPO, "src", "app", "read.js"), "utf8")}
 ${readFileSync(join(REPO, "src", "app", "text.js"), "utf8")}
 `;
 
-// A trap (every Rust panic is one) can leave a RefCell borrowed or the heap
-// mid-write, and the engine calls the same instance next tick. A fresh
-// instance of the compiled module starts clean, as a global reset does; the
-// glue's views of the old memory are dropped with it.
+// A trap or CPU timeout can leave a RefCell borrowed or the heap mid-write; a
+// timeout skips catch/finally, so recovery keys on a loop() that never returned.
 const loop = "function loop() {\n    wasm.loop();\n}";
 const views = [...glue.matchAll(/^let (cached\w*Memory0) = null;$/gm)].map((m) => m[1]);
 const instance = "let wasmInstance = new WebAssembly.Instance(wasmModule, __wbg_get_imports());\nlet wasm = wasmInstance.exports;";
 if (!glue.includes(loop) || !glue.includes(instance) || views.length === 0)
-  throw new Error("rust.mjs: wasm-bindgen's loop or instance changed; the trap recovery is stale");
-const recovering = `function loop() {
-    try {
-        wasm.loop();
-    } catch (error) {
+  throw new Error("rust.mjs: wasm-bindgen's loop or instance changed; the recovery is stale");
+const recovering = `let running = false;
+function loop() {
+    if (running) {
         wasmInstance = new WebAssembly.Instance(wasmModule, __wbg_get_imports());
         wasm = wasmInstance.exports;
         ${views.map((v) => `${v} = null;`).join("\n        ")}
         wasm.__wbindgen_start();
-        throw error;
     }
+    running = true;
+    wasm.loop();
+    running = false;
 }`;
 
 // The engine caches a required module for the global's life; the compiled
-// module is all the trap recovery needs, so the bytes are let go.
+// module is all the recovery needs, so the bytes are let go.
 const compile = `const wasmModule = new WebAssembly.Module(require('fabot_bg'));
 if (require.cache) delete require.cache.fabot_bg;`;
 const body = glue.replace(loader, compile).replace(loop, recovering);
