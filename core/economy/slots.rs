@@ -6,7 +6,7 @@ use std::fmt::Display;
 
 use fabot_atlas::{self as atlas, Atlas, Mover, Target};
 use fabot_base::HashMap;
-use fabot_base::declarations;
+use fabot_base::declarations::{self, Declarations};
 use fabot_base::engine;
 use fabot_base::grid::{self, Footprint};
 use fabot_base::vocabulary::{Part, part_count_in};
@@ -227,26 +227,26 @@ fn sponsors(atlas: &mut Atlas, derived: &Derived) -> Vec<Option<usize>> {
         .collect()
 }
 
-fn banks(derived: &Derived, ci: usize) -> bool {
-    !derived.grounds[ci].abandoned && derived.grounds[ci].bank().is_some()
+fn server(
+    atlas: &mut Atlas,
+    (derived, declarations): (&Derived, &Declarations),
+    at: (&Pos, bool),
+) -> Option<usize> {
+    let planned = |room| (declarations.colonies.iter()).find(|p| p.room == room);
+    atlas::server(atlas, derived.ours, &planned, at)
 }
 
-/// The colony that serves each ground: its own colony, a raised claim its
-/// sponsor, else the nearest that banks the haul (`ARCHITECTURE.md` §5).
-pub fn owners(atlas: &mut Atlas, derived: &Derived) -> Vec<Option<usize>> {
-    let homes: Vec<Pos> = derived.colonies.iter().map(|c| c.spawns[0].pos).collect();
+pub fn owners(atlas: &mut Atlas, of: (&Derived, &Declarations)) -> Vec<Option<usize>> {
+    let derived = of.0;
     (derived.grounds.iter().enumerate())
         .map(|(gi, ground)| {
             if gi < derived.colonies.len() {
                 return Some(gi);
             }
-            if let Some(c) = ground.controller.as_ref().filter(|c| c.owner.is_ours()) {
-                return sponsor(atlas, derived, &c.pos);
-            }
+            let claim = (ground.controller.as_ref()).is_some_and(|c| c.owner.is_ours());
             let at = (ground.controller.as_ref().map(|c| c.pos))
                 .or_else(|| ground.sources.first().map(|s| s.pos))?;
-            let route = |room| derived.route(room);
-            atlas::nearest(atlas, &route, &homes, |ci| banks(derived, ci), &at)
+            server(atlas, of, (&at, claim))
         })
         .collect()
 }
@@ -939,7 +939,7 @@ fn scouter(atlas: &mut Atlas, derived: &Derived, at: &Pos) -> Option<usize> {
 
 pub fn plan(
     atlas: &mut Atlas,
-    derived: &Derived,
+    (derived, declarations): (&Derived, &Declarations),
     owners: &[Option<usize>],
     held: &BTreeMap<String, Assignment>,
 ) -> (Vec<Slot>, BTreeMap<RoomName, f64>) {
@@ -957,16 +957,9 @@ pub fn plan(
     let (mut out, spare) = (plan.out, plan.spare);
     // A stood-down outpost keeps its dig and reserver slots, never cast, so
     // its bodies hold them and come back when it reopens.
-    let homes: Vec<Pos> = derived.colonies.iter().map(|c| c.spawns[0].pos).collect();
     for o in &derived.closed {
         let at = o.controller.pos;
-        let Some(ci) = atlas::nearest(
-            atlas,
-            &|r| derived.route(r),
-            &homes,
-            |ci| banks(derived, ci),
-            &at,
-        ) else {
+        let Some(ci) = server(atlas, (derived, declarations), (&at, false)) else {
             continue;
         };
         let jobs = (o.sources.iter())

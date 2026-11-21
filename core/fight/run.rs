@@ -139,6 +139,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
     let outpost = |r: &RoomName| worked.contains(r) && !homes.contains(r);
     let works = |h: &Creep| outpost(&h.pos.room) && hostiles::works(h);
     let armed: BTreeSet<Id> = (hostiles.iter())
+        .filter(|h| hostiles::foe(h))
         .filter(|h| cores.contains(&h.id) || hostiles::armed(owned, &hostiles, h) || works(h))
         .map(|h| h.id)
         .collect();
@@ -226,6 +227,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
         rules: &declarations.tactics,
         walks,
         homes,
+        defended: declarations.rooms(OpKind::Defend).collect(),
         musters,
         worked,
         foes,

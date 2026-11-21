@@ -54,6 +54,7 @@ pub(super) struct Scene<'a> {
     pub(super) rules: &'a [TacticRule],
     pub(super) walks: BTreeMap<(RoomName, i32), Tree>,
     pub(super) homes: BTreeSet<RoomName>,
+    pub(super) defended: BTreeSet<RoomName>,
     pub(super) musters: Vec<Pos>,
     pub(super) worked: BTreeSet<RoomName>,
     pub(super) foes: BTreeMap<RoomName, Vec<Creep>>,
@@ -478,7 +479,7 @@ impl<'a> Scene<'a> {
         let in_reach = e.ours.iter().any(|n| near(n));
         let on_our_ground = group
             .as_ref()
-            .is_some_and(|g| self.homes.contains(&g.room) || self.worked.contains(&g.room));
+            .is_some_and(|g| self.defended.contains(&g.room));
 
         DefendFacts {
             time: self.world.time,

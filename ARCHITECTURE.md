@@ -133,7 +133,7 @@ segments over multiple ticks (economy first); a cold tick never spends more than
 | `Bindings` / `app` | `fabot` | Screeps JS API seam, packed `read.js`, `driver.rs` | `Game`, `RawMemory` | `Game`, `RawMemory`, segments |
 | `Engine` | `fabot-base` | Game formulas & non-global server constants (vanilla tables from `screeps-game-api`) | — | — |
 | `World` | `fabot-base` | Single-pass tick snapshot, event-log strikes/destroys, per-tick `rules` (`CONTROLLER_STRUCTURES`) | `Game` | — |
-| `Atlas` | `fabot-atlas` | Room graph (region nodes, border-stretch crossings, keeper-strike avoidance, blind keeper & stronghold penalty) and per-room tile grid (creep-free weights, reverse floods, seats, footprint queries; a hostile's tile is walled only in this tick's step floods and passability, never in a kept flood, so one moving redoes no flood, tree or walk); out-of-sight grids hold what stood when last seen (else terrain) struck where intel places the keepers (`atlas.unseen`) | `World`, `terrain`, `intel.rooms` | flood table, `atlas.carried` |
+| `Atlas` | `fabot-atlas` | Room graph (region nodes, border-stretch crossings, keeper-strike avoidance, blind keeper & stronghold penalty) and per-room tile grid (creep-free weights, reverse floods, seats, footprint queries; a hostile's tile is walled only in this tick's step floods and passability, never in a kept flood, so one moving redoes no flood, tree or walk); out-of-sight grids hold what stood when last seen (else terrain) struck where intel places the keepers (`atlas.unseen`) | `World`, `terrain`, `intel.rooms`, `Declarations` (colony plans, for `server`) | flood table, `atlas.carried` |
 | `Economy` | `fabot-economy` | Slots, casts, sticky tasks, logistics dispatcher, links, labs, terminals, abandon | `Derived`, `Atlas`, `declarations`, `EconomyState`, Strategy's `scouts` | tasks, casts, `assignments`, `spare` |
 | `Layout` | `fabot-layout` | Colony placement plan (Hivemind planner + xxscreeps JPS), rampart ring, construction sites, buried-road destroy, tower firing | `Derived`, `Atlas`, `declarations` | sites, destroys, tower actions, `standing.layout` |
 | `Exchange` | `fabot-exchange` | Pure combat arithmetic (`outcome`, `cheapest_win`, breach planning) | fighters, terrain | — |
@@ -407,8 +407,10 @@ with one phase machine per kind under `core/fight/kinds/`.
 
 **Kinds implemented:**
 - **`Defend`** (`kinds/defend.rs`): opened on threats in or drifting toward the
-  table's `Defend` rooms (§7.3: owned and worked; enemy workers in outposts and
-  level-0 Invader cores count, as structure-less hostiles). Phases: `Forming →
+  table's `Defend` rooms (§7.3: owned, worked, and the rooms their haul
+  crosses; enemy workers in outposts and level-0 Invader cores count, as
+  structure-less hostiles; Source Keepers never (`hostiles::foe`); the same
+  rooms are the ground it pursues on). Phases: `Forming →
   Approaching → Fighting → Pursuing → Disengaging → closed`. An outpost whose
   losses exceed budget while it has lost fewer than two (`OUTPOST_LOSSES = 2`)
   re-forms and re-prices; it closes only once ours are home and `sightings`
@@ -588,7 +590,12 @@ expansion, and operation priorities.
   starved (§6.2). This is the world-level rule that keeps one rival striking
   three rooms from being three independent fights over one force.
 - **Operations table:** `strategy::plan` writes `declarations.operations`, rows
-  of (kind, room, priority): `Defend` on each home (2) and outpost or claim (1),
+  of (kind, room, priority): `Defend` on each home (2) and outpost or claim (1)
+  and each room on its tree route from the colony that serves it
+  (`atlas::server`, Economy's choice too) that no other player owns or, unless
+  an ally, reserves (1: Hivemind's remote is under attack while any room its
+  haul path crosses is, and its paths never cross an owned room; a Defend in
+  a rival's remote fights his guards, a stance the enemies list sets),
   `Siege` on each declared siege (0), `Sweep` on each preyed room, stalest seen
   first (0), whether or not a sweep is open. `Fight` opens only on a row's room
   and ranks by its priority, but keeps its event gate (`stirred`) and prices

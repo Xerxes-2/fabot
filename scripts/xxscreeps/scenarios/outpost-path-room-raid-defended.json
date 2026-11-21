@@ -1,0 +1,16 @@
+{
+  "why": "A raid in a room an outpost's haul crosses is defended as the outpost's own is (Hivemind's remote is under attack when any room on its path is): W5S5 is worked from W7S5 only through W6S5 (haul-through-keepers with the keepers lifted, strategy off so W6S5 stays a transit room), and an Invader lands in W6S5 at t400. main opened no Defend there: it stood all 1500 ticks, 12 bodies died crossing and W5S5 dug 7716 after it; the fix kills it in 147 ticks, none dies, W5S5 digs 19536",
+  "modules": ["fight", "strategy"],
+  "start": {
+    "world": "scripts/xxscreeps/worlds/haul-through-a-raided-room.json",
+    "seed": 1,
+    "invaders": "W6S5:100000:400",
+    "wave": "melee"
+  },
+  "ticks": 2500,
+  "assert": [
+    { "measure": "bodiesOut", "max": 0 },
+    { "measure": "hostileTicks", "room": "W6S5", "max": 500 },
+    { "measure": "dug", "room": "W5S5", "from": 400, "min": 15000 }
+  ]
+}

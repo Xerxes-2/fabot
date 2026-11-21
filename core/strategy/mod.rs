@@ -8,7 +8,7 @@ use fabot_base::intents::ModuleOutput;
 use std::collections::{BTreeMap, BTreeSet};
 
 use expand::Expansions;
-use fabot_atlas::{Atlas, Context, Derived};
+use fabot_atlas::{self as atlas, Atlas, Context, Derived};
 use fabot_base::declarations::{
     ColonyPlan, Declarations, OpKind, Operation, Outpost, Planned, Stage,
 };
@@ -124,10 +124,20 @@ pub fn plan<'t>(
     ),
 ) -> Planned {
     let rival = |name: &str| name != world.me && !declarations.allies.contains(name);
-    let rivals: Vec<(RoomName, i32)> = (intel.iter())
-        .filter(|(_, row)| row.level > 0 && row.owner.as_deref().is_some_and(rival))
-        .map(|(room, row)| (*room, row.level))
-        .collect();
+    let mut rivals: Vec<(RoomName, i32)> = Vec::new();
+    let mut theirs: BTreeSet<RoomName> = BTreeSet::new();
+    for (room, row) in intel {
+        let owner = row.owner.as_deref().filter(|_| row.level > 0);
+        let reserver = (row.reservation.as_ref())
+            .filter(|(user, lapse)| *lapse > world.time && user != engine::INVADER_USER)
+            .map(|(user, _)| user.as_str());
+        if owner.is_some_and(rival) {
+            rivals.push((*room, row.level));
+        }
+        if owner.is_some_and(|o| o != world.me) || reserver.is_some_and(rival) {
+            theirs.insert(*room);
+        }
+    }
     let fought = |room: RoomName| engagements.iter().any(|e| e.room == room);
     let mut plans: Vec<ColonyPlan> = (derived.owned.iter().filter_map(|r| world.room(*r)))
         .filter_map(|room| {
@@ -174,7 +184,9 @@ pub fn plan<'t>(
         })
         .collect();
     if !on {
-        let operations = operations(derived, declarations, (&[], None), &[]);
+        let mut operations = operations(derived, declarations, (&[], None), &[]);
+        let planned = (declarations, &plans[..]);
+        operations.extend(crossed((atlas, derived), planned, (&[], None), &theirs));
         return (plans, Vec::new(), None, operations);
     }
     // An expansion declared this tick holds the outposts from the next.
@@ -210,7 +222,9 @@ pub fn plan<'t>(
     let may_start = expand::may_start(derived, declarations, expansion);
     expand::book(world, derived, &mut plans, &busy, may_start);
     let claim = expand::claim(intel, derived, expansion.in_flight.as_ref());
-    let operations = operations(derived, declarations, (&chosen, claim.as_ref()), &preyed);
+    let mut operations = operations(derived, declarations, (&chosen, claim.as_ref()), &preyed);
+    let (planned, worked) = ((declarations, &plans[..]), (&chosen[..], claim.as_ref()));
+    operations.extend(crossed((atlas, derived), planned, worked, &theirs));
     (plans, chosen, claim, operations)
 }
 
@@ -225,22 +239,58 @@ fn operations(
     (chosen, claim): (&[Outpost], Option<&Outpost>),
     preyed: &[RoomName],
 ) -> Vec<Operation> {
-    let row = |kind, priority| {
-        move |room: &RoomName| Operation {
-            kind,
-            room: *room,
-            priority,
-        }
-    };
     let homes: BTreeSet<RoomName> = derived.colonies.iter().copied().collect();
-    let worked: BTreeSet<RoomName> = (declarations.outposts.iter().chain(chosen))
-        .chain(expand::raising(derived, declarations, claim))
-        .map(|o| o.room)
-        .filter(|r| !homes.contains(r))
+    let worked: BTreeSet<RoomName> = (worked(derived, declarations, (chosen, claim)))
+        .map(|(o, _)| o.room)
         .collect();
     (homes.iter().map(row(OpKind::Defend, HOME)))
         .chain(worked.iter().map(row(OpKind::Defend, OUTPOST)))
         .chain(declarations.sieges.iter().map(row(OpKind::Siege, 0.0)))
         .chain(preyed.iter().map(row(OpKind::Sweep, 0.0)))
         .collect()
+}
+
+fn worked<'a>(
+    derived: &'a Derived,
+    declarations: &'a Declarations,
+    (chosen, claim): (&'a [Outpost], Option<&'a Outpost>),
+) -> impl Iterator<Item = (&'a Outpost, bool)> {
+    let outposts = (declarations.outposts.iter().chain(chosen)).map(|o| (o, false));
+    (outposts.chain(expand::raising(derived, declarations, claim).map(|o| (o, true))))
+        .filter(|(o, _)| !derived.colonies.contains(&o.room))
+}
+
+/// Hivemind's remote is under attack while any room its haul walks is: each
+/// room on the route from the colony that serves a worked room is defended.
+fn crossed(
+    (atlas, derived): (&mut Atlas, &Derived),
+    (declarations, plans): (&Declarations, &[ColonyPlan]),
+    worked: (&[Outpost], Option<&Outpost>),
+    theirs: &BTreeSet<RoomName>,
+) -> Vec<Operation> {
+    let planned = |room| (declarations.colonies.iter().chain(plans)).find(|p| p.room == room);
+    let worked: Vec<(&Outpost, bool)> = self::worked(derived, declarations, worked).collect();
+    let mut crossed = BTreeSet::new();
+    for (o, claim) in &worked {
+        if let Some(ci) = atlas::server(atlas, derived, &planned, (&o.controller.pos, *claim)) {
+            let (home, tree) = &derived.trees[ci];
+            crossed.extend(tree.route(o.room, *home).into_iter().flatten());
+        }
+    }
+    // A Defend where another player holds fights his guards on his ground:
+    // a stance the owner's enemies list sets, not a haul's route.
+    crossed.retain(|r| {
+        !derived.colonies.contains(r)
+            && !theirs.contains(r)
+            && !worked.iter().any(|(o, _)| o.room == *r)
+    });
+    crossed.iter().map(row(OpKind::Defend, OUTPOST)).collect()
+}
+
+fn row(kind: OpKind, priority: f64) -> impl Fn(&RoomName) -> Operation {
+    move |room| Operation {
+        kind,
+        room: *room,
+        priority,
+    }
 }

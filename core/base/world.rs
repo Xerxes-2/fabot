@@ -1127,13 +1127,17 @@ pub mod terrain {
 }
 
 pub mod hostiles {
-    use super::{Creep, Part, Room, RoomName};
+    use super::{Creep, Owner, Part, Room, RoomName};
     use crate::engine;
     use std::collections::BTreeSet;
 
     pub fn works(creep: &Creep) -> bool {
         (creep.body.iter())
             .any(|p| p.kind == Part::Work || p.kind == Part::Carry || p.kind == Part::Claim)
+    }
+
+    pub fn foe(creep: &Creep) -> bool {
+        creep.owner != Owner::Keeper
     }
 
     pub fn strikes(creep: &Creep) -> bool {

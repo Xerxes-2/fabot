@@ -664,7 +664,9 @@ fn shots(sums: &mut Sums, world: &World, asked: &HashMap<&str, Asked>) {
             continue;
         };
         let foe = |h: &Creep| {
-            !matches!(h.owner, Owner::Stranger(_) | Owner::Keeper) && c.pos.within(reach, &h.pos)
+            !matches!(h.owner, Owner::Stranger(_))
+                && hostiles::foe(h)
+                && c.pos.within(reach, &h.pos)
         };
         if !a.heal
             && world
@@ -741,7 +743,7 @@ fn lost(sums: &mut Sums, world: &World) {
 }
 
 fn armed(r: &Room) -> bool {
-    (r.hostiles()).any(|h| h.owner != Owner::Keeper && hostiles::strikes(h))
+    (r.hostiles()).any(|h| hostiles::foe(h) && hostiles::strikes(h))
 }
 
 fn towers(r: &Room) -> bool {

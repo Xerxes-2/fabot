@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use super::{Atlas, Mover, Target, Tree};
-use fabot_base::declarations::{Declarations, Outpost, REACH_HOPS};
+use fabot_base::declarations::{ColonyPlan, Declarations, Outpost, REACH_HOPS, Stage};
 use fabot_base::engine;
 use fabot_base::grid::{self, Footprint};
 use fabot_base::intel::Intel;
@@ -89,6 +89,28 @@ pub fn sponsor(
         .or_else(|| nearest(atlas, &trees, &spawns, pays, at))
 }
 
+/// The colony that serves a worked room, for Economy's haul and Strategy's
+/// defence alike (§5): a claim its sponsor, an outpost the nearest on foot
+/// whose storage or pile banks the haul. `planned`: a colony's merged plan.
+pub fn server<'p>(
+    atlas: &mut Atlas,
+    derived: &Derived,
+    planned: &dyn Fn(RoomName) -> Option<&'p ColonyPlan>,
+    (at, claim): (&Pos, bool),
+) -> Option<usize> {
+    let given_up = |room| planned(room).is_some_and(|p| p.stage == Stage::Abandon);
+    if claim {
+        return sponsor(atlas, derived, &given_up, at);
+    }
+    let banks = |i: usize| {
+        let room = derived.colonies[i];
+        let piled = planned(room).is_some_and(|p| p.pile.is_some());
+        !given_up(room) && (derived.homes[i].stocked || piled)
+    };
+    let spawns: Vec<Pos> = derived.homes.iter().map(|h| h.spawn).collect();
+    nearest(atlas, &|room| derived.tree(room), &spawns, banks, at)
+}
+
 /// A colony's facts a sponsor is picked by, `Derived.colonies`' order.
 #[derive(Debug)]
 pub struct Home {
@@ -131,7 +153,7 @@ impl Derived {
 fn danger(world: &World, owned: &BTreeSet<RoomName>) -> Vec<(RoomName, TileSet)> {
     let reaches = |r: &Room| {
         let creeps = (r.hostiles())
-            .filter(|c| c.owner != Owner::Keeper && hostiles::strikes(c))
+            .filter(|c| hostiles::foe(c) && hostiles::strikes(c))
             .map(|c| (tiles::of_pos(&c.pos), hostiles::reach(c)));
         let towers = (r.structures.iter())
             .filter(|s| {
