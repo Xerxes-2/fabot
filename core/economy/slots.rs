@@ -464,7 +464,7 @@ impl Plan<'_> {
             }
             // Hivemind's mine builder.
             let paves = g.sites.iter().any(|s| s.kind == Kind::Road);
-            if !own && (at_risk || paves) && storage.is_some() {
+            if !own && (at_risk || paves) && colony.controller.level >= TOWER_LEVEL {
                 let mender = self.worker(ci, g.room, 0, (false, false), MENDER, MENDER_WORK);
                 fixed.add(mender, 0.0);
             }

@@ -1,9 +1,10 @@
 {
-  "why": "an outpost's mender is cast while its far haul keeps every spawn busy: an invader breaks E23S8's walk at t21309, the storage stands by t23500, and the mender mends and paves the walk within ~4000 ticks. Main 3136149d ranked the mender behind eleven outpost haulers' recasts: no mender until t28098, E23S8 at 56 roads at t27500 (seeds 2-4: 57), the fix 73 (seeds 2-4: 69/68/64)",
+  "why": "an outpost road lost before the home has a storage is rebuilt within a creep lifetime: an invader breaks E23S8 walk at 23,17 at t21310 while E23S9 builds its storage; main 1fea393d gated the mender on the storage and ranked the site behind it, rebuilding at t23813 (roadsLost 1). Earlier, main 3136149d ranked the mender behind eleven outpost haulers recasts: E23S8 at 56 roads at t27500, the fix 73",
   "modules": ["economy"],
   "start": { "world": "scripts/xxscreeps/worlds/season-outpost-ring.json", "room": "E23S9", "seed": 1 },
   "ticks": 27500,
   "assert": [
-    { "measure": "roadsAtEnd", "room": "E23S8", "min": 60 }
+    { "measure": "roadsAtEnd", "room": "E23S8", "min": 60 },
+    { "measure": "roadsLost", "room": "E23S8", "max": 0 }
   ]
 }

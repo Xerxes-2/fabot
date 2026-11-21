@@ -297,7 +297,8 @@ pricer cost ~2× CPU and 580 lines for no gain and was not merged).
   colony, to one under half its reserve, furthest short) — flowing only to a
   colony holding less so it never flows back.
 - **Repairs:** structures decaying within a creep lifetime are repaired ahead of
-  building; stocked colonies dispatch a dedicated 2-WORK outpost mender when an
+  building; a colony at the tower level (where its outposts' sites are first
+  owed) dispatches a dedicated 2-WORK outpost mender when an
   outpost road is at risk or its walk lacks one (Hivemind's mine builder counts
   a missing road as work, first paving or lost alike), cast ahead of the far
   haul as Hivemind's is, since the haul's recasts otherwise hold every spawn.
