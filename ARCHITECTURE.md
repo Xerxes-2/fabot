@@ -470,7 +470,9 @@ and `cheapest_win` (adds only to already-standing `ours`).
 - **Losses:** a set's cost charges every body of ours the outcome loses,
   standing or cast, once at its body cost (a survivor at the share of hits it
   lost, never its cast: it fights the next raid), so a death never prices
-  below a few ticks saved.
+  below a few ticks saved. `cheapest_win` also charges each cast it buys, by
+  design, not a double charge: without the cast a survivor is free and the
+  set grows to its cap; without the losses it buys bodies too cheap to survive.
 - **Consequence pricing:** every threat, structure, and seat is valued in
   **energy/tick** (razed, killed, healed, or denied) — never by body parts or
   creep kind. Feature-keyed rules leave exploitable gaps (Trepidimous's
