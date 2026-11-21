@@ -3,15 +3,7 @@
 use fabot_base::engine;
 use fabot_base::intents::{Action, TowerAct};
 use fabot_base::vocabulary::{Part, Resource};
-use fabot_base::world::{self, Creep, Pos, Structure};
-
-fn power(creep: &Creep, part: Part) -> i32 {
-    engine::power_at(
-        &world::body_kinds(creep),
-        &world::body_boosts(creep),
-        creep.hits,
-    )(part)
-}
+use fabot_base::world::{self, Creep, Pos, Structure, power};
 
 fn range(a: &Creep, b: &Creep) -> i32 {
     a.pos.range(&b.pos).unwrap_or(i32::MAX)

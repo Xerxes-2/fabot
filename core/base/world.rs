@@ -1470,6 +1470,10 @@ pub fn body_boosts(creep: &Creep) -> Vec<Option<ResourceType>> {
     creep.body.iter().map(|p| p.boost).collect()
 }
 
+pub fn power(creep: &Creep, part: Part) -> i32 {
+    engine::power_at(&body_kinds(creep), &body_boosts(creep), creep.hits)(part)
+}
+
 /// A creep's body as the engine prices it.
 pub fn body_cost(creep: &Creep) -> i32 {
     engine::body_cost(&body_kinds(creep))

@@ -297,11 +297,16 @@ pricer cost ~2× CPU and 580 lines for no gain and was not merged).
   colony, to one under half its reserve, furthest short) — flowing only to a
   colony holding less so it never flows back.
 - **Repairs:** structures decaying within a creep lifetime are repaired ahead of
-  building; a colony at the tower level (where its outposts' sites are first
-  owed) dispatches a dedicated 2-WORK outpost mender when an
-  outpost road is at risk or its walk lacks one (Hivemind's mine builder counts
-  a missing road as work, first paving or lost alike), cast ahead of the far
-  haul as Hivemind's is, since the haul's recasts otherwise hold every spawn.
+  building, and any lost within ten rampart decay periods (to decay, haul wear,
+  or last tick's strikes) ahead of upgrading too. Soonest lost first, kind
+  aside: one lost by the next tick, then by rampart decay periods, nearest
+  within one. A held load is spent first: yielding it walked builders off their
+  sites.
+- **Outpost mender:** a colony at the tower level (where its outposts' sites
+  are first owed) dispatches a dedicated 2-WORK outpost mender when an outpost
+  road is at risk or its walk lacks one (Hivemind's mine builder counts a
+  missing road as work, first paving or lost alike), cast ahead of the far haul
+  as Hivemind's is, since the haul's recasts otherwise hold every spawn.
 - **Reserve (`strategy::reserve`):** threatened colonies (rival within 3 rooms,
   home fight open, or fight cast owed) keep `towers × TOWER_ENERGY_COST ×
   CREEP_LIFETIME × n` (`n` live-declared via `observe declare reserve`, default

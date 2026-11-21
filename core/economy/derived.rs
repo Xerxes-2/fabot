@@ -181,14 +181,36 @@ pub struct RepairFact {
     pub hits: i32,
     pub hits_max: i32,
     pub decay: f64,
+    /// Hits one decay takes; when the next falls is unseen.
+    pub chunk: i32,
     /// Hits a tick worn off by each energy a tick hauled across it.
     pub wear: f64,
+    /// Hits last tick's hostile strikers took off it.
+    pub struck: i32,
     pub rebuild: i32,
 }
 
 impl RepairFact {
     pub fn loss(&self, haul: i32) -> f64 {
         self.decay + self.wear * f64::from(haul)
+    }
+
+    /// Lower first: 0 if it may fall next tick, else 1 + rampart decay periods
+    /// past the next decay, capped at a life. Unbucketed ticks walked builders across the ring.
+    pub fn urgency(&self, haul: i32) -> i32 {
+        let lasts =
+            f64::from((self.hits - self.chunk).max(0)) / (self.loss(haul) + f64::from(self.struck));
+        let life = f64::from(engine::CREEP_LIFETIME);
+        if lasts < 1.0 {
+            0
+        } else {
+            1 + (lasts.min(life) / f64::from(engine::RAMPART_DECAY_TIME)) as i32
+        }
+    }
+
+    /// Mended ahead of upgrade and sites.
+    pub fn urgent(&self, haul: i32) -> bool {
+        self.urgency(haul) < SAFE_PERIODS
     }
 
     pub fn at_risk(&self, haul: i32) -> bool {
@@ -439,31 +461,37 @@ pub fn dug_at(capacity: i32, home: bool, rate: i32, posted: bool, seats: Option<
     rate.min(diggers * part_count_in(&body, Part::Work) * engine::HARVEST_PER_WORK)
 }
 
-/// Ten decay periods: the margin every bot keeps against losing a rampart.
-pub const RAMPART_SAFE: i32 = 10 * engine::RAMPART_DECAY_AMOUNT;
+/// Every bot's rampart margin in decay periods, the next counted: 3000 hits unstruck.
+const SAFE_PERIODS: i32 = 10;
 
 /// What keeping `s` standing costs, where it is below the hits we hold it at.
 fn repair_of(room: &Room, wall: i32, owned_room: bool, s: &Structure) -> Option<RepairFact> {
     let per = |amount: i32, time: i32| f64::from(amount) / f64::from(time);
-    let (hits_max, decay, wear, rebuild) = match s.kind {
-        Kind::Rampart if s.owner.is_ours() => (
-            wall.min(s.hits_max),
-            per(engine::RAMPART_DECAY_AMOUNT, engine::RAMPART_DECAY_TIME),
-            0.0,
-            0,
-        ),
+    let (hits_max, chunk, decay, wear, rebuild) = match s.kind {
+        Kind::Rampart if s.owner.is_ours() => {
+            let chunk = engine::RAMPART_DECAY_AMOUNT;
+            let decay = per(chunk, engine::RAMPART_DECAY_TIME);
+            (wall.min(s.hits_max), chunk, decay, 0.0, 0)
+        }
         Kind::Road => {
             let ratio = if terrain::is_swamp(room.terrain, s.pos.x, s.pos.y) {
                 engine::ROAD_SWAMP_RATIO
             } else {
                 1
             };
+            let chunk = engine::ROAD_DECAY_AMOUNT * ratio;
             let block = bodies::block_of(Pattern::Hauler);
             let load = part_count_in(block, Part::Carry) * engine::CARRY_PART_CAPACITY;
             let steps = 2.0 / f64::from(load);
-            let decay = per(engine::ROAD_DECAY_AMOUNT * ratio, engine::ROAD_DECAY_TIME);
+            let decay = per(chunk, engine::ROAD_DECAY_TIME);
             let wear = decay * steps * f64::from(block.len() as i32 * engine::ROAD_WEAROUT);
-            (s.hits_max, decay, wear, engine::ROAD_BUILD_COST * ratio)
+            (
+                s.hits_max,
+                chunk,
+                decay,
+                wear,
+                engine::ROAD_BUILD_COST * ratio,
+            )
         }
         Kind::Container => {
             let period = if owned_room {
@@ -471,8 +499,14 @@ fn repair_of(room: &Room, wall: i32, owned_room: bool, s: &Structure) -> Option<
             } else {
                 engine::CONTAINER_DECAY_TIME
             };
-            let decay = per(engine::CONTAINER_DECAY_AMOUNT, period);
-            (s.hits_max, decay, 0.0, engine::CONTAINER_BUILD_COST)
+            let chunk = engine::CONTAINER_DECAY_AMOUNT;
+            (
+                s.hits_max,
+                chunk,
+                per(chunk, period),
+                0.0,
+                engine::CONTAINER_BUILD_COST,
+            )
         }
         _ => return None,
     };
@@ -483,9 +517,28 @@ fn repair_of(room: &Room, wall: i32, owned_room: bool, s: &Structure) -> Option<
         hits: s.hits,
         hits_max,
         decay,
+        chunk,
         wear,
+        struck: 0,
         rebuild,
     })
+}
+
+/// At its strikers' full live power: `World.attacks` drops the event's damage.
+fn strikes_of(world: &World) -> BTreeMap<Id, i32> {
+    let hostiles: BTreeMap<Id, &Creep> = (world.rooms.iter())
+        .flat_map(|r| r.hostiles().map(|c| (c.id, c)))
+        .collect();
+    let mut strikes = BTreeMap::new();
+    for (by, at) in &world.attacks {
+        if let Some(c) = hostiles.get(by) {
+            *strikes.entry(*at).or_default() += engine::ATTACK_POWER
+                * world::power(c, Part::Attack)
+                + engine::RANGED_ATTACK_POWER * world::power(c, Part::RangedAttack)
+                + engine::DISMANTLE_POWER * world::power(c, Part::Work);
+        }
+    }
+    strikes
 }
 
 fn links_of(
@@ -1172,6 +1225,11 @@ pub fn of_world<'t>(
 
     for outpost in ours.worked.iter().filter(|o| !is_colony(o.room)) {
         grounds.push(remote_of(outpost));
+    }
+
+    let strikes = strikes_of(world);
+    for r in grounds.iter_mut().flat_map(|g| &mut g.repairs) {
+        r.struck = strikes.get(&r.id).copied().unwrap_or(0);
     }
 
     let given_up = |room: RoomName| declarations.abandoning(room);

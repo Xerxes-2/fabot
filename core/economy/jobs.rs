@@ -10,7 +10,7 @@ use fabot_base::vocabulary::Resource;
 use fabot_base::world::{Id, Kind, Pos};
 
 use super::bodies::Pattern;
-use super::derived::{Body, Derived, Ground, RAMPART_SAFE, StoreKind};
+use super::derived::{Body, Derived, Ground, StoreKind};
 use super::slots::{self, Job, Slot};
 use super::task::{Target, Task};
 
@@ -824,17 +824,23 @@ impl<'a> Jobs<'a> {
             gi.filter(|_| g.room == slot.room)
                 .map_or(0, |gi| self.hauls[gi])
         };
+        // Home first: an outpost has its own mender.
         let repair = |fits: &dyn Fn(&super::derived::RepairFact, i32) -> bool| {
             (grounds.iter())
                 .flat_map(|g| {
                     let haul = haul(g);
-                    g.repairs.iter().filter(move |r| fits(r, haul))
+                    g.repairs
+                        .iter()
+                        .filter(move |r| fits(r, haul))
+                        .map(move |r| (r, haul))
                 })
-                .min_by_key(|r| near(&r.pos))
-                .map(|r| Task::Repair(r.id.into()))
+                .min_by_key(|(r, haul)| {
+                    let (away, walk) = near(&r.pos);
+                    (away, r.urgency(*haul), walk)
+                })
+                .map(|(r, _)| Task::Repair(r.id.into()))
         };
-        // Built at 1 hit, a rampart is gone at its first decay.
-        if let Some(t) = repair(&|r, _| r.kind == Kind::Rampart && r.hits <= RAMPART_SAFE) {
+        if let Some(t) = repair(&|r, haul| r.urgent(haul)) {
             return Some(t);
         }
         if slot.draws_reserve() {
