@@ -10,7 +10,7 @@ use fabot_atlas::{self as atlas, Atlas, Context};
 use fabot_base::declarations::{self, OpKind};
 use fabot_base::engine;
 use fabot_base::intents::{Ask, ModuleOutput, Rank};
-use fabot_base::world::{Creep, Id, Kind, Pos, RoomName, hostiles};
+use fabot_base::world::{Creep, Id, Kind, Pos, RoomName, hostiles, sightings};
 use fabot_tactics::{self as tactics, Tactic};
 
 /// A merge keeps the older group's id; two engagements on one group are one,
@@ -223,6 +223,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
     let scene = Scene {
         world,
         sightings,
+        remembered: sightings::remembered(sightings, world),
         avoid: &declarations.avoid,
         rules: &declarations.tactics,
         walks,

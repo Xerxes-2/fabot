@@ -198,6 +198,7 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
 | `spare` | colony → spawn ticks/life left by home's own bodies at a steady pace; never an outpost's body or spend | Economy | heap | Strategy prices outposts against it |
 | `scouts` | scout targets | Strategy | heap (this tick) | derived from intel for Economy |
 | `sightings` | room → armed hostile / core id → expiry tick | World | heap | vision grace for stood-down outposts |
+| `sightings.last` | per sighting (room, id): its creep's parts, boosts, hits, hits max and tile as last seen (`Glimpse`; none for a core); written on sight, cleared when that creep stands in another room, expires with its sighting; `--check`: in sight it is the creep now and every armed creep there has one, out of sight its creep stands nowhere | World | heap (a stored observation, like the sighting, not a derived memo) | a blind `Defend` prices and seeks the raid it last saw (§6.2) |
 | `atlas.floods` | per-room cached reverse floods (bounded per room) | Atlas | heap | reused while room weights hold |
 | `atlas.unseen` | out-of-sight room grid + the keeper posts and blind flag it was struck from | Atlas | heap | keyed by those posts, not by sight alone, so intel arriving after a cold tick strikes a keeper room pre-read blind |
 | `atlas.carried` | carried room trees & outpost road walks + room-read fingerprints | Atlas | heap | a search reads no room past its hops so a carried value equals a fresh one while those read the same (saving ~1/10 of decide); drops the tick after going unasked |
@@ -417,8 +418,11 @@ with one phase machine per kind under `core/fight/kinds/`.
   losses exceed budget while it has lost fewer than two (`OUTPOST_LOSSES = 2`)
   re-forms and re-prices; it closes only once ours are home and `sightings`
   clears (closing sooner reopens on the same raid with a fresh budget and feeds
-  it bodies). Blind, with no body of ours standing or asked, it disengages
-  and keeps its budget the same way. A body with nothing alive but MOVE,
+  it bodies). Blind, with no body of ours standing or asked, it re-forms and
+  re-prices the raid `sightings.last` remembers after each loss or age-out
+  while it has lost fewer than two, until the sighting expires, and casts and
+  seeks it as a seen one; with none remembered, or a re-price casting nothing,
+  it disengages and keeps its budget the same way. A body with nothing alive but MOVE,
   TOUGH and CARRY counts as lost to an outpost (nothing there heals it; it can
   end no raid) and no engagement drafts it until healed. Home `Defend` never
   disengages (falls back to `unanswered` on towers/ramparts until the group

@@ -33,6 +33,7 @@ pub struct Facts {
     pub on_our_ground: bool,
     pub clear: bool,
     pub raided: bool,
+    pub remembered: bool,
 }
 
 /// A home's Defend never disengages: it stops asking, holds and is unanswered.
@@ -84,9 +85,13 @@ pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
         return None;
     }
 
-    // Blind with no body to seek the raid: closed, the same raid would reopen it with a fresh budget.
+    // Closed, a raid still remembered would reopen it with a fresh budget;
+    // Forming has already re-priced it and found nothing to cast.
     if facts.group.is_none() && e.ours.is_empty() && !facts.asked {
-        return quit();
+        let again = facts.remembered && e.phase != Phase::Forming && e.lost < OUTPOST_LOSSES;
+        return again
+            .then(|| enter(Phase::Forming, facts.time, e))
+            .or_else(quit);
     }
 
     if facts.group.is_some() && e.lost > e.budget {
@@ -702,6 +707,7 @@ mod tests {
                 on_our_ground: rng.flip(),
                 clear: rng.flip(),
                 raided: true,
+                remembered: rng.flip(),
             };
 
             let beaten = facts.group.is_some() && e.lost > e.budget;
@@ -713,7 +719,7 @@ mod tests {
     }
 
     #[test]
-    fn a_blind_outpost_defend_stands_down_only_with_no_body_standing_or_asked() {
+    fn a_blind_idle_outpost_defend_re_forms_while_its_raid_is_remembered() {
         let mut rng = Rng(0x0b11_d0ef_e2d5_0000);
         let phases = [
             Phase::Forming,
@@ -750,12 +756,16 @@ mod tests {
                 asked: rng.flip(),
                 on_our_ground: rng.flip(),
                 clear: false,
-                raided: true,
+                raided: rng.flip(),
+                remembered: rng.flip(),
             };
 
             let next = step(&facts, &e).expect("a blind outpost Defend keeps its budget");
-            let stands_down = standing.is_empty() && !facts.asked;
-            assert_eq!(next.phase == Phase::Disengaging, stands_down);
+            let idle = standing.is_empty() && !facts.asked;
+            let again = facts.remembered && e.phase != Phase::Forming && next.lost < OUTPOST_LOSSES;
+            assert_eq!(next.phase == Phase::Disengaging, idle && !again);
+            let formed = next.phase == Phase::Forming && next.since == 1;
+            assert_eq!(formed, idle && again);
         }
     }
 }

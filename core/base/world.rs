@@ -281,6 +281,16 @@ impl Pos {
     pub fn within(&self, range: i32, b: &Pos) -> bool {
         self.range(b).map(|r| r <= range).unwrap_or_default()
     }
+
+    /// Across rooms, which no walk beats.
+    pub fn crow_flies(&self, b: &Pos) -> i32 {
+        let ((ax, ay), (bx, by)) = (self.room.coords(), b.room.coords());
+        let side = engine::ROOM_SIDE;
+
+        (side * (ax - bx) + self.x - b.x)
+            .abs()
+            .max((side * (ay - by) + self.y - b.y).abs())
+    }
 }
 
 impl PartialOrd for Pos {
@@ -1182,17 +1192,47 @@ pub mod hostiles {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Seen {
     pub gone: i32,
     pub armed: bool,
+    pub last: Option<Glimpse>,
+}
+
+/// What pricing and the approach read of a raider out of sight.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Glimpse {
+    pub body: Vec<BodyPart>,
+    pub hits: i32,
+    pub hits_max: i32,
+    pub pos: Pos,
+    pub invader: bool,
+}
+
+impl Glimpse {
+    pub fn of(creep: &Creep) -> Glimpse {
+        Glimpse {
+            body: creep.body.clone(),
+            hits: creep.hits,
+            hits_max: creep.hits_max,
+            pos: creep.pos,
+            invader: creep.owner == Owner::Invader,
+        }
+    }
 }
 
 pub type Sightings = BTreeMap<RoomName, BTreeMap<Id, Seen>>;
 
 pub mod sightings {
-    use super::{Creep, Id, Kind, RoomName, Seen, Sightings, World, hostiles};
+    use super::hostiles;
+    use super::{Creep, Glimpse, Id, Kind, Owner, Pos, RoomName, Seen, Sightings, Store, World};
     use std::collections::BTreeMap;
+
+    fn standing<'w>(world: &'w World) -> BTreeMap<Id, (RoomName, &'w Creep)> {
+        (world.rooms.iter())
+            .flat_map(|r| r.hostiles().map(move |h| (h.id, (r.name, h))))
+            .collect()
+    }
 
     pub fn step(world: &World, previous: Sightings) -> Sightings {
         let mut next = previous;
@@ -1214,6 +1254,7 @@ pub mod sightings {
                         Seen {
                             gone: world.time + creep.ticks_to_live,
                             armed: true,
+                            last: Some(Glimpse::of(creep)),
                         },
                     );
                 }
@@ -1226,6 +1267,7 @@ pub mod sightings {
                         Seen {
                             gone: world.time + s.collapse,
                             armed: s.level > 0,
+                            last: None,
                         },
                     );
                 }
@@ -1236,6 +1278,14 @@ pub mod sightings {
             } else {
                 next.insert(room.name, seen);
             }
+        }
+
+        // A body seen in one room is not another's raid.
+        let standing = standing(world);
+        for (room, seen) in &mut next {
+            (seen.iter_mut())
+                .filter(|(id, _)| standing.get(id).is_some_and(|(at, _)| at != room))
+                .for_each(|(_, s)| s.last = None);
         }
 
         next
@@ -1257,6 +1307,73 @@ pub mod sightings {
 
     pub fn unarmed(sightings: &Sightings, time: i32, room: RoomName) -> bool {
         none(|s| s.armed, sightings, time, room)
+    }
+
+    /// Each room out of sight's armed bodies as last seen, at the life they have left.
+    pub fn remembered(sightings: &Sightings, world: &World) -> BTreeMap<RoomName, Vec<Creep>> {
+        let blind = |room: &RoomName| world.rooms.iter().all(|r| r.name != *room);
+        (sightings.iter().filter(|(room, _)| blind(room)))
+            .map(|(&room, seen)| (room, glimpsed(seen, world.time)))
+            .filter(|(_, raid)| !raid.is_empty())
+            .collect()
+    }
+
+    fn glimpsed(seen: &BTreeMap<Id, Seen>, time: i32) -> Vec<Creep> {
+        (seen.iter().filter(|(_, s)| s.armed && s.gone > time))
+            .filter_map(|(&id, s)| {
+                let g = s.last.clone()?;
+                Some(Creep {
+                    id,
+                    name: String::new(),
+                    owner: if g.invader {
+                        Owner::Invader
+                    } else {
+                        Owner::Nobody
+                    },
+                    pos: g.pos,
+                    body: g.body,
+                    hits: g.hits,
+                    hits_max: g.hits_max,
+                    ticks_to_live: s.gone - time,
+                    fatigue: 0,
+                    store: Store::empty(),
+                })
+            })
+            .collect()
+    }
+
+    /// Where a blind raid is sought: its body nearest any of `from`.
+    pub fn raid_at(raid: &[Creep], from: &[Pos]) -> Option<Pos> {
+        (raid.iter().map(|h| h.pos)).min_by_key(|p| from.iter().map(|f| f.crow_flies(p)).min())
+    }
+
+    /// `--check`: a room in sight holds its armed bodies as seen now and expiring
+    /// with their life; one out of sight remembers no body standing anywhere now.
+    pub fn kept(world: &World, sightings: &Sightings) -> bool {
+        let standing = standing(world);
+        let owned = hostiles::owned(&world.rooms);
+        let blind = |room: &RoomName| world.rooms.iter().all(|r| r.name != *room);
+        let glimpsed = world.rooms.iter().all(|r| {
+            let foes: Vec<Creep> = r.hostiles().cloned().collect();
+            let seen = |h: &Creep| sightings.get(&r.name)?.get(&h.id)?.last.as_ref();
+            (foes.iter())
+                .filter(|h| hostiles::armed(&owned, &foes, h))
+                .all(|h| seen(h).is_some())
+        });
+        glimpsed
+            && sightings.iter().all(|(room, seen)| {
+                seen.iter()
+                    .all(|(id, s)| match (&s.last, standing.get(id)) {
+                        (None, _) => s.gone > world.time,
+                        (Some(_), Some(_)) if blind(room) => false,
+                        (Some(_), None) => blind(room) && s.gone > world.time,
+                        (Some(g), Some((at, h))) => {
+                            at == room
+                                && *g == Glimpse::of(h)
+                                && s.gone == world.time + h.ticks_to_live
+                        }
+                    })
+            })
     }
 }
 
@@ -1360,7 +1477,89 @@ pub fn body_cost(creep: &Creep) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{Id, Kind};
+    use super::{BodyPart, Creep, Id, Kind, Owner, Pos, Room, RoomName, Rules, Sightings, Store};
+    use super::{World, sightings};
+    use crate::testing::Dice;
+    use crate::vocabulary::Part;
+
+    fn seen_in(name: RoomName, others: Vec<Creep>) -> Room<'static> {
+        Room {
+            name,
+            terrain: None,
+            controller: None,
+            energy_available: 0,
+            energy_capacity: 0,
+            sources: Vec::new(),
+            minerals: Vec::new(),
+            structures: Vec::new(),
+            sites: Vec::new(),
+            piles: Vec::new(),
+            remains: Vec::new(),
+            others,
+        }
+    }
+
+    #[test]
+    fn a_room_out_of_sight_never_remembers_a_body_standing_now() {
+        let mut dice = Dice::new(0x5167_7105);
+        let names = [
+            RoomName::named("W1N1"),
+            RoomName::named("W2N1"),
+            RoomName::named("W3N1"),
+        ];
+        let part = |kind| BodyPart {
+            kind,
+            hits: 100,
+            boost: None,
+        };
+        for _ in 0..200 {
+            let mut kept = Sightings::new();
+            for time in 1..40 {
+                let at = dice.pick(&names);
+                let raider = Creep {
+                    id: Id::from("r1"),
+                    name: String::new(),
+                    owner: Owner::Invader,
+                    pos: Pos::new(at, dice.between(1, 48), dice.between(1, 48)),
+                    body: vec![part(Part::Attack), part(Part::Move)],
+                    hits: dice.between(1, 200),
+                    hits_max: 200,
+                    ticks_to_live: 1500 - time,
+                    fatigue: 0,
+                    store: Store::empty(),
+                };
+                let rooms = (names.iter().filter(|_| dice.chance(2)))
+                    .map(|&r| {
+                        seen_in(
+                            r,
+                            if r == at {
+                                vec![raider.clone()]
+                            } else {
+                                Vec::new()
+                            },
+                        )
+                    })
+                    .collect();
+                let world = World {
+                    time,
+                    me: String::new(),
+                    cpu_limit: 20.0,
+                    bucket: 10_000,
+                    rooms,
+                    spawns: Vec::new(),
+                    creeps: Vec::new(),
+                    our_sites: 0,
+                    rooms_allowed: 1,
+                    closed: Default::default(),
+                    attacks: Vec::new(),
+                    destroyed: Vec::new(),
+                    rules: Rules::vanilla(),
+                };
+                kept = sightings::step(&world, kept);
+                assert!(sightings::kept(&world, &kept));
+            }
+        }
+    }
 
     #[test]
     fn a_kind_the_engine_adds_keeps_its_name() {

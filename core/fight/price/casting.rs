@@ -135,11 +135,11 @@ fn biggest(capacity: i32, block: &[Part]) -> Option<Body> {
     (most > 0).then(|| with_heal(block.repeat(most as usize)))
 }
 
-pub fn terrain_at(room: &Room, at: &Pos) -> exchange::Terrain {
+pub fn terrain_at(room: Option<&Room>, at: &Pos) -> exchange::Terrain {
     let last = engine::ROOM_SIDE - 1;
 
     exchange::Terrain {
-        weight: if terrain::is_swamp(room.terrain, at.x, at.y) {
+        weight: if terrain::is_swamp(room.and_then(|r| r.terrain), at.x, at.y) {
             engine::SWAMP_WEIGHT
         } else {
             engine::PLAIN_WEIGHT
@@ -148,10 +148,9 @@ pub fn terrain_at(room: &Room, at: &Pos) -> exchange::Terrain {
     }
 }
 
-pub fn side_in(room: &Room, bodies: Vec<Fighter>) -> exchange::Side {
+pub fn side_in(room: Option<&Room>, bodies: Vec<Fighter>) -> exchange::Side {
     let ours = |kind: Kind| -> Vec<&Structure> {
-        room.structures
-            .iter()
+        (room.iter().flat_map(|r| &r.structures))
             .filter(|s| s.kind == kind && s.owner.is_ours())
             .collect()
     };

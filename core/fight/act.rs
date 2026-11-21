@@ -91,6 +91,10 @@ pub(super) fn act(
             }
             (Objective::Siege(_), _, Some(b)) => (b.pos, engine::RANGED_RANGE),
             (Objective::Defend, Some(g), _) => (g.centre, engine::RANGED_RANGE),
+            (Objective::Defend, None, _) => (
+                scene.raid_at(e, e.room).unwrap_or_else(|| middle(e.room)),
+                engine::RANGED_RANGE,
+            ),
             (Objective::Siege(_), _, None) => (middle(e.room), engine::ROOM_SIDE / 2),
             _ => (middle(e.room), engine::RANGED_RANGE),
         }

@@ -973,16 +973,6 @@ fn broken_by(terrain: Terrain, horizon: i32, price: &Price, ramparts: &[(Pos, i3
         .sum()
 }
 
-/// Across rooms, which no walk beats.
-fn crow_flies(a: &Pos, b: &Pos) -> i32 {
-    let ((ax, ay), (bx, by)) = (a.room.coords(), b.room.coords());
-    let side = engine::ROOM_SIDE;
-
-    (side * (ax - bx) + a.x - b.x)
-        .abs()
-        .max((side * (ay - by) + a.y - b.y).abs())
-}
-
 fn walk_in(terrain: Terrain, cast_walk: Option<i32>, f: &Fighter, raid: &[Fighter]) -> i32 {
     let step = |weight| step_ticks(f.gait, weight).unwrap_or(CAST_WALK);
     match (&f.pos, cast_walk) {
@@ -991,7 +981,7 @@ fn walk_in(terrain: Terrain, cast_walk: Option<i32>, f: &Fighter, raid: &[Fighte
             engine::SPAWN_TICKS_PER_PART * f.body.len() as i32 + tiles * step(engine::PLAIN_WEIGHT)
         }
         (Some(at), _) => (raid.iter())
-            .filter_map(|h| Some(crow_flies(at, h.pos.as_ref()?)))
+            .filter_map(|h| Some(at.crow_flies(h.pos.as_ref()?)))
             .min()
             .map_or(0, |nearest| {
                 (nearest - f.reach).max(0) * step(terrain.weight)
@@ -1160,7 +1150,7 @@ fn exchange(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> Out
     let struck: Vec<bool> = (fighters.iter())
         .map(|f| {
             (theirs.bodies.iter()).any(|h| match (&f.pos, &h.pos) {
-                (Some(at), Some(from)) => crow_flies(at, from) <= h.reach,
+                (Some(at), Some(from)) => at.crow_flies(from) <= h.reach,
                 _ => false,
             })
         })

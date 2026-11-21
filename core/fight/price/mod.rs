@@ -38,7 +38,7 @@ impl<'a> Scene<'a> {
                 .all(|s| s.pos != b.pos || s.walkable || Scene::rival(s))
             {
                 weights[tiles::of_pos(&b.pos)] =
-                    grid::weight(casting::terrain_at(room, &b.pos).weight);
+                    grid::weight(casting::terrain_at(Some(room), &b.pos).weight);
             }
         }
 
@@ -387,9 +387,9 @@ impl<'a> Scene<'a> {
         };
         let (mut set, outcome, _) = casting::price(
             Stance::Standoff,
-            &casting::side_in(room, ours.clone()),
+            &casting::side_in(Some(room), ours.clone()),
             &theirs,
-            casting::terrain_at(room, at),
+            casting::terrain_at(Some(room), at),
             &casting::walking(capacity),
             |body| worth / engine::body_cost(body),
             0,
@@ -609,23 +609,25 @@ impl<'a> Scene<'a> {
         declarations: &Declarations,
         (wait, fight): (Option<i32>, i32),
     ) -> Engagement {
-        let g = self
-            .by_id
-            .get(&e.group)
-            .filter(|_| !self.spent(e) && e.phase != Phase::Disengaging);
-        let Some((g, room)) = g.and_then(|g| Some((g.clone(), self.in_sight(g.room)?))) else {
+        if self.spent(e) || e.phase == Phase::Disengaging {
+            return e.clone();
+        }
+        let g = self.by_id.get(&e.group);
+        let at = g.map_or(e.room, |g| g.room);
+        let room = self.in_sight(at);
+        let home = room.is_some_and(|r| self.homes.contains(&r.name));
+        // A home's towers leave a body they cannot out-heal, armed or not, to its Defend.
+        let raid: Vec<Creep> = match (g, room) {
+            (Some(g), Some(room)) => (self.foes[&room.name].iter())
+                .filter(|h| self.armed.contains(&h.id) || home && g.members.contains(&h.id))
+                .cloned()
+                .collect(),
+            _ => self.remembered.get(&at).cloned().unwrap_or_default(),
+        };
+        let seen = g.filter(|_| room.is_some()).map(|g| g.centre);
+        let Some(centre) = seen.or_else(|| self.raid_at(e, at)) else {
             return e.clone();
         };
-
-        // A home's towers leave a body they cannot out-heal, armed or not, to its Defend.
-        let raid: Vec<Creep> = self.foes[&room.name]
-            .iter()
-            .filter(|h| {
-                self.armed.contains(&h.id)
-                    || self.homes.contains(&room.name) && g.members.contains(&h.id)
-            })
-            .cloned()
-            .collect();
 
         let theirs = Side {
             bodies: raid
@@ -678,16 +680,14 @@ impl<'a> Scene<'a> {
 
         let colonies = self.colonies_of(atlas, e);
         let capacity = self.capacity_of(atlas, e);
-        let terrain = casting::terrain_at(room, &g.centre);
+        let terrain = casting::terrain_at(room, &centre);
 
         // A home is a post the raid comes to where our ramparts stand on it;
         // with none, or no striker to come, a Hold stands still while the raid stands off.
-        let stance = if self.homes.contains(&e.room)
-            && g.room == e.room
+        let stance = if home
+            && room.is_some_and(|r| r.name == e.room)
             && theirs.bodies.iter().any(fighter::strikes)
-            && room
-                .structures
-                .iter()
+            && (room.iter().flat_map(|r| &r.structures))
                 .any(|s| s.kind == Kind::Rampart && s.owner.is_ours())
         {
             Stance::Hold
@@ -742,7 +742,7 @@ impl<'a> Scene<'a> {
         let mut ours_now: Vec<Fighter> = bodies.clone();
         ours_now.extend(asked_fighters.iter().cloned());
 
-        let blocks = if self.homes.contains(&room.name) {
+        let blocks = if home {
             casting::affordable(capacity)
         } else {
             casting::walking(capacity)

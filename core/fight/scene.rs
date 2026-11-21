@@ -49,6 +49,7 @@ pub(super) struct Hunting {
 pub(super) struct Scene<'a> {
     pub(super) world: &'a World<'a>,
     pub(super) sightings: &'a Sightings,
+    pub(super) remembered: BTreeMap<RoomName, Vec<Creep>>,
     pub(super) avoid: &'a BTreeSet<RoomName>,
     /// The operator's tactic rules (§6.3), filtered per engagement.
     pub(super) rules: &'a [TacticRule],
@@ -302,6 +303,12 @@ impl<'a> Scene<'a> {
         crossed.map(|n| engine::ROOM_SIDE * n)
     }
 
+    pub(super) fn raid_at(&self, e: &Engagement, room: RoomName) -> Option<Pos> {
+        let ours = self.members_of(e).into_iter().map(|c| c.pos);
+        let from: Vec<Pos> = ours.chain(self.homes.iter().map(|&r| middle(r))).collect();
+        sightings::raid_at(self.remembered.get(&room)?, &from)
+    }
+
     /// A home's Defend is the home's alone.
     pub(super) fn colonies_of(&self, atlas: &Atlas, e: &Engagement) -> Vec<&'a Room<'a>> {
         self.world
@@ -328,7 +335,6 @@ impl<'a> Scene<'a> {
         self.homes.contains(&e.room) && e.lost > e.budget
     }
 
-    /// Each body in a slot no member nor cast of the engagement holds.
     pub(super) fn ask(
         &self,
         atlas: &Atlas,
@@ -497,6 +503,7 @@ impl<'a> Scene<'a> {
             clear: self.in_sight(e.room).is_some()
                 || sightings::clear(self.sightings, self.world.time, e.room),
             raided: !sightings::unarmed(self.sightings, self.world.time, e.room),
+            remembered: self.remembered.contains_key(&e.room),
         }
     }
 

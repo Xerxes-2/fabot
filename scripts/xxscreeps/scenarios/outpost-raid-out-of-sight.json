@@ -1,0 +1,15 @@
+{
+  "why": "An outpost Defend whose raid went out of sight prices the raid `sightings` remembers and answers it. W2N1 is seen on the first ticks (a scout dying of age), then blind; the Defend body committed to it ages out at home on t9. main could not price blind: its Defend sat in Fighting with no body or cast until the group expired, then disengaged, and the Invader stood 1398 of 1500 ticks with W2N1 dug 0; the fix casts on t9, kills it by t91 (90 hostile ticks) and W2N1 digs 13116",
+  "modules": ["fight"],
+  "start": {
+    "world": "scripts/xxscreeps/worlds/outpost-raid-out-of-sight.json",
+    "seed": 1,
+    "memory": { "fight": {"groups":[{"room":"W2N1","x":25,"y":24,"id":1,"seen":1147793,"members":["b0902"]}],"engagements":[{"id":1,"group":1,"room":"W2N1","ours":["fight-1147700-1-0"],"tactic":"close","order":["b0902"],"phase":"fighting","opened":1147700,"since":1147750,"lost":0,"budget":0,"priority":1,"unanswered":false,"ignored":0,"capacity":5600,"predicted":null}],"casts":[],"due":[]} }
+  },
+  "ticks": 1500,
+  "assert": [
+    { "measure": "hostileTicks", "room": "W2N1", "max": 300 },
+    { "measure": "dug", "room": "W2N1", "min": 6000 },
+    { "measure": "idleMost", "max": 0 }
+  ]
+}

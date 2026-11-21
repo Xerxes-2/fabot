@@ -306,6 +306,8 @@ pub fn decide<'t>(
     let mut state = state;
     let refused = refuse(&mut declarations, &world.closed);
     let sightings = fabot_base::world::sightings::step(world, sightings);
+    let kept = !atlas.check || fabot_base::world::sightings::kept(world, &sightings);
+    assert!(kept, "a sighting differs from what stands now");
     intel::step(world, intel);
     phases.push(("world".to_string(), clock() - began));
 
