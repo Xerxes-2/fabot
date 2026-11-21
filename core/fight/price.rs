@@ -111,7 +111,7 @@ impl<'a> Scene<'a> {
 
         Some((
             plan.0.iter().flat_map(|(tile, _)| ids_at(*tile)).collect(),
-            Outcome::Win(plan.1, Losses { dead: 0, hits: 0 }),
+            Outcome::Win(plan.1, Losses::default()),
         ))
     }
 
@@ -390,8 +390,7 @@ impl<'a> Scene<'a> {
         let worth = ground.worth + ground.escort.iter().map(sweep::worth).sum::<i32>();
         let theirs = Side {
             bodies: ground.escort.iter().map(casting::fighter_of).collect(),
-            ramparts: BTreeMap::new(),
-            towers: Vec::new(),
+            ..Side::default()
         };
         let (mut set, outcome, _) = casting::price(
             Stance::Standoff,
@@ -642,8 +641,7 @@ impl<'a> Scene<'a> {
                 .filter(|h| !self.cores.contains(&h.id))
                 .map(casting::fighter_of)
                 .collect(),
-            ramparts: BTreeMap::new(),
-            towers: Vec::new(),
+            ..Side::default()
         };
 
         let asked_bodies: Vec<casting::Body> = (asked.casts.iter())
@@ -758,31 +756,22 @@ impl<'a> Scene<'a> {
             casting::walking(capacity)
         };
 
-        match casting::price(
-            stance,
-            &casting::side_in(room, ours_now),
-            &theirs,
-            terrain,
-            &blocks,
-            copies_of,
-            tick_worth,
-            self.boost,
-        ) {
-            Some((set, outcome, landed)) => {
-                // The set asked here holds the rest: priced again without a
-                // body that would not outlast it. Each pass drops one.
-                let after = wait.max(waiting(&[&asked_bodies[..], &set[..]].concat()));
-                let held = (Some(after), outcome.ticks());
-                if after > 0 && fielding.iter().any(|c| !outlives(c, after, held.1)) {
-                    return self.priced_after(atlas, asked, e, free, declarations, held);
-                }
-
-                let mut priced_bodies: Vec<Fighter> = bodies;
-                priced_bodies.extend(asked_fighters.iter().cloned());
-                priced_bodies.extend(set.iter().map(|b| fighter::cast(b)));
-
-                let mut set = set;
-                set.extend(casting::razer(capacity, core_hits, &priced_bodies));
+        let arms: Vec<Priced> = [false, true]
+            .into_iter()
+            .filter_map(|together| {
+                let side = Side {
+                    together,
+                    cast_walk: colony,
+                    ..casting::side_in(room, ours_now.clone())
+                };
+                let (mut set, outcome, landed) = casting::price(
+                    stance, &side, &theirs, terrain, &blocks, &copies_of, tick_worth, self.boost,
+                )?;
+                let cast = set.len();
+                let priced: Vec<Fighter> = (bodies.iter().chain(&asked_fighters).cloned())
+                    .chain(set.iter().map(|b| fighter::cast(b)))
+                    .collect();
+                set.extend(casting::razer(capacity, core_hits, &priced));
 
                 let price = Priced {
                     raid: theirs
@@ -790,22 +779,37 @@ impl<'a> Scene<'a> {
                         .iter()
                         .map(|f| engine::body_cost(&f.body))
                         .sum(),
+                    together,
                     ranged: landed.bodies.len() > 1 && landed.bodies.iter().all(|f| f.attack == 0),
                     holds: exchange::stance_against(stance, &landed, &theirs, terrain)
                         == Stance::Hold,
-                    won: outcome.is_win(),
-                    losses: outcome.losses(),
-                    ticks: outcome.ticks(),
+                    outcome,
                     set,
+                    cast,
                     tick_worth,
                 };
+                Some(price)
+            })
+            .collect();
 
-                let (candidates, pin) = self.ruled(e, defend::CANDIDATES);
-                let offers = price.offers(&candidates);
+        let (candidates, pin) = self.ruled(e, defend::CANDIDATES);
+        let offers: Vec<Offer> = arms.iter().flat_map(|p| p.offers(&candidates)).collect();
+        let chosen = (tactics::select(&offers, pin).map(|o| o.tactic))
+            .and_then(|t| Some((t, arms.iter().find(|p| p.offer(t).is_some())?)));
 
-                let Some(tactic) = tactics::select(&offers, pin).map(|o| o.tactic) else {
-                    return defend::give_up(self.homes.contains(&e.room), self.world.time, e);
-                };
+        let starved =
+            arms.is_empty() && (e.unanswered || e.ours.is_empty() && asked_fighters.is_empty());
+        match chosen {
+            Some((tactic, price)) => {
+                // The set asked here holds the rest: priced again without a
+                // body that would not outlast it. Each pass drops one.
+                let after = wait.max(waiting(
+                    &[&asked_bodies[..], &price.set[..price.cast]].concat(),
+                ));
+                let held = (Some(after), price.outcome.ticks());
+                if after > 0 && fielding.iter().any(|c| !outlives(c, after, held.1)) {
+                    return self.priced_after(atlas, asked, e, free, declarations, held);
+                }
 
                 free.retain(|n| !joining.contains(n));
                 self.ask(atlas, e, &price.set, asked);
@@ -817,7 +821,7 @@ impl<'a> Scene<'a> {
                     order: casting::kill_order(&raid),
                     offers,
                 };
-                next.budget = e.lost + outcome.losses().dead;
+                next.budget = e.lost + price.outcome.losses().dead;
                 next.unanswered = false;
                 next.capacity = capacity;
                 // A core alone is no fight Exchange predicts (§10.1).
@@ -826,7 +830,7 @@ impl<'a> Scene<'a> {
                 } else if theirs.bodies.is_empty() {
                     None
                 } else {
-                    Some(outcome)
+                    Some(price.outcome)
                 };
 
                 let standing: Vec<Fighter> = next
@@ -843,7 +847,7 @@ impl<'a> Scene<'a> {
                     next
                 }
             }
-            None if e.unanswered || e.ours.is_empty() && asked_fighters.is_empty() => Engagement {
+            None if starved => Engagement {
                 unanswered: true,
                 capacity,
                 ..e.clone()
@@ -907,14 +911,16 @@ pub(super) fn entries(
 pub(super) struct Priced {
     /// What the rival spent on the bodies the engagement fights.
     pub(super) raid: i32,
+    /// Its bodies land as one, as a blob walks them in.
+    pub(super) together: bool,
     /// The set swings nothing, so it fights as one body.
     pub(super) ranged: bool,
     /// A home's ramparts are a post the raid comes to.
     pub(super) holds: bool,
-    pub(super) won: bool,
-    pub(super) losses: Losses,
-    pub(super) ticks: i32,
+    pub(super) outcome: Outcome,
     pub(super) set: Vec<casting::Body>,
+    /// The first `cast` of `set` the outcome prices; the rest raze.
+    pub(super) cast: usize,
     pub(super) tick_worth: i32,
 }
 
@@ -926,17 +932,19 @@ impl Priced {
     /// One arm a candidate: what it wins against what it spends, and nothing
     /// where it cannot fight from here.
     pub(super) fn offer(&self, tactic: Tactic) -> Option<Offer> {
-        let (value, ticks) = match tactic {
+        let (won, ticks) = (self.outcome.is_win(), self.outcome.ticks());
+        let (value, ticks) = match (tactic, self.together) {
             // A post spends no ticks of the room: the raid comes to it.
-            Tactic::Hold if self.holds => (self.raid, 0),
-            Tactic::Close if self.won && !self.ranged => (self.raid, self.ticks),
-            Tactic::Kite if !self.won && !self.ranged => (0, self.ticks),
-            Tactic::BlobClose if self.won && self.ranged => (self.raid, self.ticks),
-            Tactic::BlobKite if !self.won && self.ranged => (0, self.ticks),
+            (Tactic::Hold, false) if self.holds => (self.raid, 0),
+            (Tactic::Close, false) if won && !self.ranged => (self.raid, ticks),
+            (Tactic::Kite, false) if !won && !self.ranged => (0, ticks),
+            (Tactic::BlobClose, true) if won => (self.raid, ticks),
+            (Tactic::BlobKite, true) if !won && self.ranged => (0, ticks),
             _ => return None,
         };
 
-        let cost = casting::spent(&self.set, self.losses, ticks, self.tick_worth);
+        let unpriced = &self.set[self.cast..];
+        let cost = casting::spent(unpriced, self.outcome.losses(), ticks, self.tick_worth);
 
         Some(offer(tactic, &self.set, value, cost))
     }
@@ -960,7 +968,7 @@ pub(super) fn sweep_offers(
     worth: i32,
     set: &[casting::Body],
 ) -> Vec<Offer> {
-    let cost = casting::spent(set, Losses { dead: 0, hits: 0 }, 0, 0);
+    let cost = casting::spent(set, Losses::default(), 0, 0);
 
     candidates
         .iter()

@@ -1,0 +1,10 @@
+{
+  "why": "An outpost Defend's pair lands together and wins the raid the Exchange priced it to win: W7N3's boosted melee and healer at t10384 draft a free body standing in W8N3 beside a new cast, priced Win, 1 dead. main walked them in 14 ticks apart, struck the healer first and closed each swinger on its own across a swamp, and lost both",
+  "modules": ["fight", "exchange"],
+  "start": { "room": "W8N3", "seed": 1, "late": 7 },
+  "ticks": 10560,
+  "assert": [
+    { "measure": "arrivedApart", "room": "W7N3", "from": 10300, "max": 4 },
+    { "measure": "predictedWinsLost", "room": "W7N3", "from": 10300, "max": 0 }
+  ]
+}

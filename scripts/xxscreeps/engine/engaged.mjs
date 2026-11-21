@@ -11,8 +11,11 @@ export function engagements(write, at) {
   // it targeted, which catch a death that closed it before it counted one.
   async function close(rec, t) {
     const graves = (await at([...rec.rooms])).filter((o) => o.type === "tombstone" && o.ours && o.ttl > 1 && rec.ours.has(o.name));
-    const { members, ours, rooms, swing, blind, ...rest } = rec;
+    const { members, ours, rooms, swing, blind, reached, ...rest } = rec;
     const swung = Object.fromEntries(Object.entries(swing).map(([n, { ticks, swings }]) => [n, { ticks, swings }]));
+    // `apart`: the ticks between the first and the last of its bodies coming within three of its raid.
+    const ticks = Object.values(reached);
+    rest.apart = ticks.length ? Math.max(...ticks) - Math.min(...ticks) : 0;
     const outlived = t === null || (await at()).some((o) => members.has(o.id));
     write({ ...rest, dead: Math.max(rest.dead, graves.length), swung, closed: t, outlived });
   }
@@ -38,7 +41,7 @@ export function engagements(write, at) {
       const asked = new Set((fight?.casts ?? []).map((c) => c.engagement));
       for (const e of fight?.engagements ?? []) {
         now.add(e.id);
-        const rec = open.get(e.id) ?? { id: e.id, kind: e.kind ?? "defend", room: e.room, opened: t, members: new Set(), ours: new Set(), rooms: new Set(), swing: {}, answered: false, gaveUp: false, disengaged: false, contact: null, seen: null, dead: 0, blind: 0, idle: 0 };
+        const rec = open.get(e.id) ?? { id: e.id, kind: e.kind ?? "defend", room: e.room, opened: t, members: new Set(), ours: new Set(), rooms: new Set(), swing: {}, reached: {}, answered: false, gaveUp: false, disengaged: false, contact: null, seen: null, dead: 0, blind: 0, idle: 0 };
         open.set(e.id, rec);
         for (const m of (fight.groups ?? []).find((g) => g.id === e.group)?.members ?? []) rec.members.add(m);
         rec.predicted = e.predicted;
@@ -57,6 +60,7 @@ export function engagements(write, at) {
         if (theirs.length) rec.seen = t;
         rec.core ||= theirs.some((o) => o.type === "invaderCore");
         const bodies = objects.filter((o) => o.type === "creep" && o.ours && e.ours.includes(o.name));
+        for (const o of bodies) if (theirs.some((h) => near(h, o, 3))) rec.reached[o.name] ??= t;
         const close = bodies.some((o) => theirs.some((h) => near(h, o, 3)));
         if (rec.contact === null && (close || theirs.some((h) => h.hits < h.hitsMax))) rec.contact = t;
         swinging(rec, bodies, t, struck);

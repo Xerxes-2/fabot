@@ -112,10 +112,16 @@ pub(super) fn act(
         .collect();
 
     for e in decided {
-        // A set that walks in as one holds its formation into the fight.
+        // A Defend's blob lands in reach as one, as its together arm was priced.
+        let mark = (matches!(e.plan.tactic, Tactic::BlobClose) && e.objective == Objective::Defend)
+            .then(|| {
+                (e.plan.order.iter())
+                    .find_map(|id| scene.foes.values().flatten().find(|h| h.id == *id))
+            })
+            .flatten();
         let formation = matches!(e.plan.tactic, Tactic::BlobClose | Tactic::BlobKite)
             && !e.unanswered
-            && e.phase == Phase::Approaching;
+            && (e.phase == Phase::Approaching || mark.is_some() && e.phase == Phase::Fighting);
         if !formation {
             continue;
         }
@@ -123,11 +129,12 @@ pub(super) fn act(
         let members: Vec<&Creep> = scene
             .members_of(e)
             .into_iter()
-            .filter(|c| raid::raids(e) || !swings(c))
+            .filter(|c| raid::raids(e) || mark.is_some() || !swings(c))
             .collect();
 
         if !members.is_empty() {
-            let (centre, range) = centre_of(e);
+            let (centre, range) =
+                mark.map_or_else(|| centre_of(e), |h| (h.pos, engine::MELEE_RANGE));
 
             for wish in tactics::blob(&mut sight, &centre, range, &members, &fortified) {
                 walking.insert(wish.creep.clone(), wish);
@@ -267,6 +274,7 @@ pub(super) fn act(
                 let tactic = &e.plan.tactic;
 
                 if matches!(tactic, Tactic::BlobClose)
+                    && !swings(c)
                     && tactics::exposed(sight, centre.room, &scene.members_of(e), c)
                 {
                     tactics::step_back(sight, centre.room, &scene.members_of(e), c)

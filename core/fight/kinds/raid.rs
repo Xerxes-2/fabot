@@ -110,8 +110,7 @@ pub fn target(room: &Room, members: &[&Creep]) -> Option<Id> {
     })
 }
 
-/// Where the blob goes and how near: a shot off his structure, and onto his
-/// site, whose `move` onto the tile stomps it.
+/// Where the blob goes and how near: a shot off his structure, onto his site to stomp it.
 pub fn mark(room: &Room, members: &[&Creep]) -> Option<(Pos, i32)> {
     if let Some(s) = next(room, members) {
         return Some((s.pos, engine::RANGED_RANGE));
@@ -185,10 +184,7 @@ pub fn plan(
         &tiles::within(engine::RANGED_RANGE, tiles::of_pos(goal)),
     )?;
 
-    Some((
-        Vec::new(),
-        Outcome::Win(plan.1, Losses { dead: 0, hits: 0 }),
-    ))
+    Some((Vec::new(), Outcome::Win(plan.1, Losses::default())))
 }
 
 /// Eight bodies heal one from beside it and eight more within three: the price

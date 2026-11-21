@@ -53,9 +53,11 @@ fn predict(sample: &Value) -> Value {
                 energy: int(t, "energy"),
             })
             .collect(),
+        // The duel walks each body in on its own, as the apart arm prices it.
+        ..Side::default()
     };
     let terrain = &sample["terrain"];
-    let none = Losses { dead: 0, hits: 0 };
+    let none = Losses::default();
     let (kind, ticks, losses) = match exchange::outcome(
         Stance::Standoff,
         &side(&sample["ours"]),

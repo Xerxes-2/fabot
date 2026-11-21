@@ -131,7 +131,8 @@ const samples = Array.from({ length: count }, (_, i) => {
   const invader = owner === "ours" && random() < 0.25;
   const kinds = invader ? INVADERS : Object.keys(KINDS);
   const theirs = Array.from({ length: between(1, 4) }, () => hostile(kinds)).map((b, k) => ({ ...b, invader, x: 21 + 2 * k, y: 15 }));
-  const ours = OURS[i % 2].map((parts, k) => ({ parts, boosts: parts.map(() => ""), hits: 100 * parts.length, x: 24 + 2 * k, y: ROW }));
+  const behind = i % 4 >= 2 ? (TERRAINS[terrain].pocket ? 6 : 14) : 0;
+  const ours = OURS[i % 2].map((parts, k) => ({ parts, boosts: parts.map(() => ""), hits: 100 * parts.length, x: 24 + 2 * k, y: ROW + k * behind }));
   return {
     id: `s${i}`,
     batch: Math.floor(i / batch),

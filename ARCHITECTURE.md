@@ -452,12 +452,25 @@ rotation declaring room minable), `PowerBank` (break → declare `Pickup`),
 ### 6.3 Composition and the exchange
 
 `Exchange` (`core/exchange/`) is pure combat arithmetic over narrow inputs:
-`Side { bodies, ramparts, towers }`, `Terrain { weight, run_off }`,
+`Side { bodies, ramparts, towers, cast_walk, together }`, `Terrain { weight, run_off }`,
 `Stance { Hold, Standoff }` → `Outcome { Win(ticks, losses), Kite(ticks), Lose }`
 and `cheapest_win` (adds only to already-standing `ours`).
 
 - **Stance:** under `Hold`, raids come to our post; raids out-ranging our
   strikers and outlasting towers price as `Standoff`.
+- **Arrival:** a body counts from the tick it lands (a cast's spawn time and
+  walk included), so a set fed in one at a time prices worse than one walked
+  in `together`, which pays the wait in ticks instead (a body already in the
+  raid's reach is struck alone through it). `Defend` prices both arms
+  (`Close`/`Kite`/`Hold` vs `Blob*`), rather than holding bodies back until
+  they gather (a hold-while, rejected). Its `BlobClose` walks the set as one
+  into melee of the kill order's first standing, through the fight.
+- **Focus:** the Exchange prices the kill our bodies strike: both rank the
+  raid by `fighter::kill_rank`.
+- **Losses:** a set's cost charges every body of ours the outcome loses,
+  standing or cast, once at its body cost (a survivor at the share of hits it
+  lost, never its cast: it fights the next raid), so a death never prices
+  below a few ticks saved.
 - **Consequence pricing:** every threat, structure, and seat is valued in
   **energy/tick** (razed, killed, healed, or denied) — never by body parts or
   creep kind. Feature-keyed rules leave exploitable gaps (Trepidimous's

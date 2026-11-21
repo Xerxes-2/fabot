@@ -1,3 +1,5 @@
+use std::cmp::Reverse;
+
 use fabot_base::engine;
 use fabot_base::grid::{FatigueFactor, step_ticks};
 use fabot_base::vocabulary::{Part, ResourceType, part_count_in, takes};
@@ -81,6 +83,18 @@ pub fn boosted_by(body: &[Part], boost: Option<(ResourceType, i32)>) -> Option<R
 /// Unlike `Hostiles.armed`, a healer or a dismantler beside a striker does not count: it deals no damage.
 pub fn strikes(f: &Fighter) -> bool {
     f.reach > 0
+}
+
+/// The kill order, least first, which the Exchange prices and our bodies strike alike.
+pub fn kill_rank(f: &Fighter) -> (u8, bool, Reverse<i32>, Option<Pos>) {
+    let band = match (strikes(f), f.work > 0) {
+        (true, _) => 0,
+        (false, true) => 1,
+        (false, false) => 2,
+    };
+    let damage = engine::ATTACK_POWER * f.attack + engine::RANGED_ATTACK_POWER * f.ranged;
+    let per_thousand_hits = 1000 * damage / f.hits.max(1);
+    (band, f.heal == 0, Reverse(per_thousand_hits), f.pos)
 }
 
 pub fn swings(f: &Fighter, range: i32) -> bool {

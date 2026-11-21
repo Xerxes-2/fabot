@@ -176,6 +176,7 @@ pub fn side_in(room: &Room, bodies: Vec<Fighter>) -> exchange::Side {
                 energy: s.store.amount_of(&Resource::Energy),
             })
             .collect(),
+        ..exchange::Side::default()
     }
 }
 
@@ -234,17 +235,11 @@ pub fn price(
     Some((set, outcome, landed))
 }
 
-/// The energy a set spends over `ticks`: its cast, the share of that cast the
-/// hits strike off, and the room's worth a tick it stands there.
-pub fn spent(set: &[Body], losses: exchange::Losses, ticks: i32, tick_worth: i32) -> i32 {
-    let cast: i32 = set.iter().map(|body| engine::body_cost(body)).sum();
-    let whole = set
-        .iter()
-        .map(|body| engine::PART_HITS * body.len() as i32)
-        .sum::<i32>()
-        .max(1);
-
-    cast + cast * losses.hits.min(whole) / whole + tick_worth * ticks
+/// A cast body the outcome prices costs only what it strikes off: one that
+/// lives is still ours for the next fight.
+pub fn spent(unpriced: &[Body], losses: exchange::Losses, ticks: i32, tick_worth: i32) -> i32 {
+    let cast: i32 = unpriced.iter().map(|body| engine::body_cost(body)).sum();
+    cast + losses.energy + tick_worth * ticks
 }
 
 /// No more medics heal one body from beside it than the tiles around it.
@@ -381,23 +376,9 @@ pub fn holds(set: &[Fighter], strike: i32) -> bool {
 }
 
 pub fn kill_order(hostiles: &[Creep]) -> Vec<Id> {
-    let mut ranked: Vec<(Id, (bool, f64))> = hostiles
-        .iter()
-        .map(|h| {
-            let f = fighter_of(h);
-            let damage = engine::ATTACK_POWER * f.attack + engine::RANGED_ATTACK_POWER * f.ranged;
-            (
-                h.id,
-                (f.heal == 0, -(f64::from(damage) / f64::from(h.hits.max(1)))),
-            )
-        })
-        .collect();
-    ranked.sort_by(|(a_id, a), (b_id, b)| {
-        a.0.cmp(&b.0)
-            .then(a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
-            .then(a_id.cmp(b_id))
-    });
-    ranked.into_iter().map(|(id, _)| id).collect()
+    let mut ranked: Vec<&Creep> = hostiles.iter().collect();
+    ranked.sort_by_cached_key(|h| fighter::kill_rank(&fighter_of(h)));
+    ranked.into_iter().map(|h| h.id).collect()
 }
 
 /// The colony that lands a body soonest of those whose bank buys it: its spawns'

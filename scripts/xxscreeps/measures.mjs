@@ -15,7 +15,7 @@ const rowsOf = (dir) =>
 export const engagementsOf = (dir) =>
   rowsOf(dir)
     .filter((e) => e.predicted)
-    .map((e) => ({ p: e.predicted, a: engagement(e) }));
+    .map((e) => ({ p: e.predicted, a: engagement(e), room: e.room, opened: e.opened }));
 const livesOf = (dir) =>
   readFileSync(join(dir, "bodies.jsonl"), "utf8")
     .split("\n")
@@ -39,6 +39,7 @@ const withCounts = (dir, a, f) => {
 };
 const at = (samples, t) => samples.find((s) => s.t >= t) ?? samples.at(-1);
 const sideOf = (a) => (s) => (a.who ? s.others[a.who] : s);
+const openedIn = (a) => (e) => (!a.room || e.room === a.room) && e.opened >= (a.from ?? 0) && e.opened < (a.to ?? Infinity);
 const within = (samples, a) => samples.filter((s) => s.t >= (a.from ?? 0) && s.t < (a.to ?? Infinity));
 const upgradedIn = (s, a) => (a.room ? (s.rooms[a.room]?.upgrade ?? 0) : s.ledger.upgrade);
 const builtIn = (s, a) => (a.room ? (s.rooms[a.room]?.build ?? 0) : s.ledger.build);
@@ -231,8 +232,8 @@ export const measures = {
     const room = a.room ?? Object.keys(last.rooms)[0];
     return (last.rooms[room]?.hostile ?? 0) - (first.rooms[room]?.hostile ?? 0);
   },
-  // Engagements whose predicted Win or Kite was lost (§10.1).
-  predictedWinsLost: (_, __, dir) => bugs(engagementsOf(dir)).length,
+  // Engagements opened in `room` from `from` to `to` whose predicted Win or Kite was lost (§10.1).
+  predictedWinsLost: (_, a, dir) => bugs(engagementsOf(dir).filter(openedIn(a))).length,
   // The tick `room`'s Defends first drew a body, less the first another
   // room's did: a home raided beside its outposts is drafted before every
   // one of them (§7.3). One never drafted: Infinity.
@@ -255,6 +256,9 @@ export const measures = {
   oscillation: (_, a, dir) =>
     Math.max(0, ...rowsOf(dir).filter((e) => !a.kind || e.kind === a.kind).flatMap((e) => Object.values(e.swung).map((s) => Math.round((100 * s.swings) / Math.max(1, s.ticks))))),
   bodiesLost: (_, __, dir) => rowsOf(dir).reduce((n, e) => n + (e.dead ?? 0), 0),
+  // The most ticks one engagement's bodies reached its raid apart (engaged.mjs), of those opened
+  // as `predictedWinsLost` reads: a set fed in one at a time.
+  arrivedApart: (_, a, dir) => Math.max(0, ...rowsOf(dir).filter(openedIn(a)).map((e) => e.apart ?? 0)),
   // Our bodies gone from the colony's rooms and their neighbours with life left: died, or walked
   // through a room the soak does not follow.
   bodiesOut: (_, __, dir) => {
