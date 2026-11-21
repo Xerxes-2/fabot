@@ -453,7 +453,7 @@ impl<'a> Scene<'a> {
     }
 
     pub(super) fn armed_seen(&self, g: &Group) -> bool {
-        let seen = self.sightings.get(&g.room);
+        let seen = self.sightings.get(&g.room());
         (g.members.iter()).any(|m| seen.and_then(|s| s.get(m)).is_some_and(|s| s.armed))
     }
 
@@ -506,7 +506,7 @@ impl<'a> Scene<'a> {
         let open = preyed
             .iter()
             .filter(|r| **r != e.room && !self.avoid.contains(*r))
-            .filter(|r| (self.by_id.values()).all(|g| g.room != **r || !self.armed_seen(g)));
+            .filter(|r| (self.by_id.values()).all(|g| g.room() != **r || !self.armed_seen(g)));
         atlas::onward(open.filter_map(|r| match age(*r)? {
             (_, true) => None,
             (age, false) => Some((*r, age, self.walk_of(atlas, e, *r)?)),
@@ -613,7 +613,7 @@ impl<'a> Scene<'a> {
             return e.clone();
         }
         let g = self.by_id.get(&e.group);
-        let at = g.map_or(e.room, |g| g.room);
+        let at = g.map_or(e.room, Group::room);
         let room = self.in_sight(at);
         let home = room.is_some_and(|r| self.homes.contains(&r.name));
         // A home's towers leave a body they cannot out-heal, armed or not, to its Defend.

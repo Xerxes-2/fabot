@@ -358,9 +358,8 @@ impl<'a> Scene<'a> {
         let free = (0..)
             .map(|i: i32| i.to_string())
             .filter(|i| !held.contains(i));
-        let slots: Vec<(String, casting::Body)> = free.zip(set.iter().cloned()).collect();
 
-        self.ask_slots(atlas, e, &slots, asked);
+        self.ask_slots(atlas, e, free.zip(set.iter().cloned()), asked);
     }
 
     /// How many of the drain's bodies the set already holds, standing or in
@@ -383,11 +382,10 @@ impl<'a> Scene<'a> {
         &self,
         atlas: &Atlas,
         e: &Engagement,
-        set: &[(String, casting::Body)],
+        set: impl IntoIterator<Item = (String, casting::Body)>,
         asked: &mut Asked,
     ) {
         let colonies = self.colonies_of(atlas, e);
-        let boost = self.boost;
 
         for (slot, body) in set {
             let colony = casting::colony_for(
@@ -396,13 +394,13 @@ impl<'a> Scene<'a> {
                 &asked.queued,
                 &asked.asked,
                 |from| self.walk_to(atlas, e, from),
-                body,
+                &body,
             );
 
             if let Some(colony) = colony {
-                asked.queue(colony, body);
-                let suffix =
-                    fighter::boosted_by(body, boost).map_or_else(String::new, |c| format!("-{c}"));
+                asked.queue(colony, &body);
+                let suffix = fighter::boosted_by(&body, self.boost)
+                    .map_or_else(String::new, |c| format!("-{c}"));
                 let name = format!(
                     "{}{}-{}-{slot}{suffix}",
                     declarations::FIGHT_PREFIX,
@@ -414,7 +412,7 @@ impl<'a> Scene<'a> {
                     engagement: e.id,
                     name,
                     room: colony,
-                    body: body.clone(),
+                    body,
                 });
             }
         }
@@ -460,8 +458,7 @@ impl<'a> Scene<'a> {
             .due
             .extend(members.iter().any(|c| !lasts(c, lead)).then_some(home));
 
-        let due: Vec<(String, casting::Body)> = due.into_iter().collect();
-        self.ask_slots(atlas, e, &due, asked);
+        self.ask_slots(atlas, e, due, asked);
     }
 
     pub(super) fn facts_of(
@@ -474,10 +471,9 @@ impl<'a> Scene<'a> {
 
         let near = |name: &str| -> bool {
             match (self.ours.get(name), &group) {
-                (Some(creep), Some(g)) => g.members.iter().any(|m| {
-                    self.hostile_at.contains_key(m)
-                        && creep.pos.within(engine::RANGED_RANGE, &self.hostile_at[m])
-                }),
+                (Some(creep), Some(g)) => (g.members.iter())
+                    .filter_map(|m| self.hostile_at.get(m))
+                    .any(|at| creep.pos.within(engine::RANGED_RANGE, at)),
                 _ => false,
             }
         };
@@ -485,7 +481,7 @@ impl<'a> Scene<'a> {
         let in_reach = e.ours.iter().any(|n| near(n));
         let on_our_ground = group
             .as_ref()
-            .is_some_and(|g| self.defended.contains(&g.room));
+            .is_some_and(|g| self.defended.contains(&g.room()));
 
         DefendFacts {
             time: self.world.time,
@@ -537,7 +533,9 @@ impl<'a> Scene<'a> {
             charged: !towers.is_empty(),
             drain: gate.is_some(),
             priced: siege::drainable(e.room, e.capacity, &towers),
-            worked: self.pair_worked(e),
+            // A drain with no pair standing, in an oven, or tripped holds nothing.
+            worked: e.ignored > 0
+                || self.paired(e, &self.spawning, &casting::drains(e.capacity)) > 0,
             bounced: gate.is_some_and(|g| self.bounced(e, g)),
             drawn: self.drawn(e),
             gave_up: siege::gave_up(e),
@@ -580,25 +578,12 @@ impl<'a> Scene<'a> {
             .any(|(by, at)| towers.contains(by) && (self.world.creeps).iter().any(|c| &c.id == at))
     }
 
-    /// The heal the set seats on one body beside it: what his towers' strike
-    /// is weighed against at the breach.
-    pub(super) fn seated(&self, e: &Engagement) -> i32 {
-        let set = self.fielded(e);
-
-        exchange::pooled_heal(set.len() as i32, &set)
-    }
-
-    /// His towers out-strike the heal the set seats at the breach, so the gate
-    /// is worth working.
+    /// His towers out-strike the heal the set seats on one body at the breach,
+    /// so the gate is worth working.
     pub(super) fn outstruck(&self, e: &Engagement, towers: &[Pos]) -> bool {
-        (self.next_struck(e))
-            .is_some_and(|b| exchange::tower_strike(towers, &b.pos) > self.seated(e))
-    }
-
-    /// A pair of the drain stands or is in an oven, or one has tripped: a drain
-    /// with none of those holds nothing.
-    pub(super) fn pair_worked(&self, e: &Engagement) -> bool {
-        e.ignored > 0 || self.paired(e, &self.spawning, &casting::drains(e.capacity)) > 0
+        let set = self.fielded(e);
+        let seated = exchange::pooled_heal(set.len() as i32, &set);
+        (self.next_struck(e)).is_some_and(|b| exchange::tower_strike(towers, &b.pos) > seated)
     }
 
     /// Whole, as cast: a part struck off is healed back, and only a body lost

@@ -102,7 +102,7 @@ pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
         };
     }
 
-    let left = facts.group.as_ref().is_some_and(|g| g.room != e.room);
+    let left = facts.group.as_ref().is_some_and(|g| g.room() != e.room);
 
     if e.phase == Phase::Forming && left && !facts.on_our_ground {
         return quit();
@@ -305,7 +305,7 @@ pub fn opens(
     let mut ranked: Vec<(Group, f64)> = groups
         .iter()
         .filter(|g| g.last_seen == time && g.members.iter().any(&armed))
-        .filter_map(|g| Some((g.clone(), priority(g.room)?)))
+        .filter_map(|g| Some((g.clone(), priority(g.room())?)))
         .collect();
     ranked.sort_by(|(a, a_priority), (b, b_priority)| {
         b_priority
@@ -318,12 +318,12 @@ pub fn opens(
     let mut opened: Vec<(Group, f64)> = Vec::new();
 
     for (g, priority) in ranked {
-        if targeted.contains(&g.room) {
+        if targeted.contains(&g.room()) {
             continue;
         }
 
         opened.push((g.clone(), priority));
-        targeted.insert(g.room);
+        targeted.insert(g.room());
     }
 
     opened
@@ -678,9 +678,8 @@ mod tests {
             let group = rng.flip().then(|| Group {
                 id: 1,
                 members: BTreeSet::from(["raider".into()]),
-                room: RoomName::named(room),
                 last_seen: 0,
-                centre: at(25, 25),
+                centre: Pos::new(RoomName::named(room), 25, 25),
             });
             let e = Engagement {
                 phase: phases[rng.below(phases.len() as u64) as usize],

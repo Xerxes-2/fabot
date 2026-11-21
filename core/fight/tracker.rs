@@ -224,7 +224,6 @@ pub fn step(
         groups.push(Group {
             id,
             members: cs[ci].iter().map(|m| m.id).collect(),
-            room: c.room,
             last_seen: tick,
             centre: c,
         });

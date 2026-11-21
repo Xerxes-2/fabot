@@ -16,13 +16,19 @@ pub struct FightState {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(from = "Seen", into = "Seen")]
 pub struct Group {
-    pub id: i32,
-    pub members: BTreeSet<Id>,
-    pub room: RoomName,
-    pub last_seen: i32,
+    #[serde(flatten)]
     pub centre: Pos,
+    pub id: i32,
+    #[serde(rename = "seen")]
+    pub last_seen: i32,
+    pub members: BTreeSet<Id>,
+}
+
+impl Group {
+    pub fn room(&self) -> RoomName {
+        self.centre.room
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -58,38 +64,6 @@ pub enum Objective {
     Siege(Id),
     /// A rival's remote, `room`, its economy bodies hunted.
     Sweep,
-}
-
-#[derive(Serialize, Deserialize)]
-struct Seen {
-    #[serde(flatten)]
-    centre: Pos,
-    id: i32,
-    seen: i32,
-    members: BTreeSet<Id>,
-}
-
-impl From<Seen> for Group {
-    fn from(s: Seen) -> Group {
-        Group {
-            id: s.id,
-            members: s.members,
-            room: s.centre.room,
-            last_seen: s.seen,
-            centre: s.centre,
-        }
-    }
-}
-
-impl From<Group> for Seen {
-    fn from(g: Group) -> Seen {
-        Seen {
-            centre: g.centre,
-            id: g.id,
-            seen: g.last_seen,
-            members: g.members,
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize)]

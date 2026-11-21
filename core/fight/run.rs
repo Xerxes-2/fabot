@@ -61,7 +61,7 @@ fn changed(e: &Engagement, events: &[tracker::Event], by_id: &BTreeMap<i32, Grou
         tracker::Event::Split { from, into } => *from == e.group || *into == e.group,
         tracker::Event::Merged { into, .. } => *into == e.group,
         tracker::Event::Left(id) => *id == e.group,
-        tracker::Event::Newcomer(id) => by_id.get(id).is_some_and(|g| g.room == e.room),
+        tracker::Event::Newcomer(id) => by_id.get(id).is_some_and(|g| g.room() == e.room),
     })
 }
 
@@ -69,7 +69,6 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
     let world = context.world;
     let declarations = context.declarations;
     let preyed: &[RoomName] = &declarations.rooms(OpKind::Sweep).collect::<Vec<_>>();
-    let context_trace = context.trace;
     let sightings = context.sightings;
     let intel = context.intel;
     let age = |room: RoomName| {
@@ -153,7 +152,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
         }
 
         let in_room =
-            |id| (by_id.get(&id)).is_some_and(|g| g.room == e.room && g.last_seen == world.time);
+            |id| (by_id.get(&id)).is_some_and(|g| g.room() == e.room && g.last_seen == world.time);
 
         let gone = if homes.contains(&e.room) {
             !in_room(e.group)
@@ -277,7 +276,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
             let was = state.groups.iter().find(|p| p.id == g.id);
             was.is_none_or(|p| p.last_seen < world.time - 1 || p.members != g.members)
         })
-        .map(|g| g.room)
+        .map(Group::room)
         .collect();
     let sweeps = || {
         engagements
@@ -379,7 +378,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
 
     let targeted: BTreeSet<RoomName> = stepped
         .iter()
-        .flat_map(|(e, _)| [Some(e.room), scene.by_id.get(&e.group).map(|g| g.room)])
+        .flat_map(|(e, _)| [Some(e.room), scene.by_id.get(&e.group).map(Group::room)])
         .flatten()
         .collect();
 
@@ -397,7 +396,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
     .enumerate()
     .map(|(i, (g, priority))| {
         let id = first_id + i as i32;
-        let mut e = fresh(id, Objective::Defend, g.room, world.time, Tactic::Close);
+        let mut e = fresh(id, Objective::Defend, g.room(), world.time, Tactic::Close);
         e.group = g.id;
         e.priority = priority;
         (e, true)
@@ -563,7 +562,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
     let mut out = super::act::act(
         &scene,
         atlas,
-        context_trace,
+        context.trace,
         &decided,
         &gates,
         &given_up,
