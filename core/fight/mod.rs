@@ -1,5 +1,5 @@
 mod act;
-pub mod casting;
+pub use price::casting;
 pub mod kinds;
 mod price;
 pub mod run;

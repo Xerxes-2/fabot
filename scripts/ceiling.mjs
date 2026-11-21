@@ -1,7 +1,8 @@
 // The line and comment-share ceilings in scripts/ceilings.json, checked, and
 // no issue or ADR citation in code. A directory's line count is every line of
-// every .rs beneath it, minus a `<dir>/kinds/*` entry's files, which are each
-// held to their own ceiling. A comment share is per directory of the bot's
+// every .rs beneath it, minus the files of any row beneath it: a `<dir>/*`
+// row holds each of its files to its own ceiling, a `<dir>` row its whole
+// tree. A comment share is per directory of the bot's
 // source (`src`, `core`, `sim`), over its own .rs files. Neither counts a `#[cfg(test)]` item nor
 // the shared suites under `core/tests`. Exits non-zero on any breach.
 //
@@ -52,9 +53,7 @@ const count = (files) =>
     [0, 0],
   );
 
-const perFile = Object.keys(ceilings)
-  .filter((key) => key.endsWith("/*"))
-  .map((key) => key.slice(0, -2));
+const owned = Object.keys(ceilings).map((key) => key.replace(/\/\*$/, ""));
 
 const rows = [];
 for (const [key, ceiling] of Object.entries(ceilings)) {
@@ -66,7 +65,8 @@ for (const [key, ceiling] of Object.entries(ceilings)) {
   } else {
     if (!existsSync(key)) continue;
     const files = shipped(key).filter(
-      (f) => !perFile.some((dir) => dir !== key && f.startsWith(dir + "/")),
+      (f) =>
+        !owned.some((dir) => dir.startsWith(key + "/") && f.startsWith(dir + "/")),
     );
     rows.push([key, count(files)[0], ceiling]);
   }

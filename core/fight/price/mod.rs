@@ -1,10 +1,9 @@
-/// What each engagement commits to: its set, its tactic and what it asks of the ovens (§6.3).
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::casting;
-use super::kinds::{defend, raid, siege, sweep};
-use super::scene::{Asked, Hunting, Scene, fresh, middle, picket};
-use super::shape::{Engagement, Group, Objective, Phase, Plan};
+pub mod casting;
+use crate::kinds::{defend, raid, siege, sweep};
+use crate::scene::{Asked, Hunting, Scene, fresh, middle, picket};
+use crate::shape::{Engagement, Group, Objective, Phase, Plan};
 use fabot_atlas::{self as atlas, Atlas, Mover, Target};
 use fabot_base::declarations::{self, Declarations};
 use fabot_base::grid::{self, Footprint};
@@ -14,7 +13,6 @@ use fabot_base::{engine, tiles};
 use fabot_exchange::{self as exchange, Fighter, Ground, Losses, Outcome, Side, Stance, fighter};
 use fabot_tactics::{self as tactics, Offer, Tactic};
 
-/// `Casting.price`'s say in how many copies of a block to ask for.
 type CopiesOf<'a> = Box<dyn Fn(&casting::Body) -> i32 + 'a>;
 
 impl<'a> Scene<'a> {
@@ -90,8 +88,7 @@ impl<'a> Scene<'a> {
             }
         };
 
-        // Every barrier on a tile, its rampart first: the tile stands
-        // in the plan until it is walkable.
+        // Rampart first: the tile stands in the plan until it is walkable.
         let ids_at = |tile: Tile| -> Vec<Id> {
             let mut at: Vec<&Structure> = barriers
                 .iter()
@@ -103,8 +100,7 @@ impl<'a> Scene<'a> {
             at.into_iter().map(|b| b.id).collect()
         };
 
-        // Seats follow the planned barrier: priced with every medic beside
-        // the struck body, then with those its seats hold.
+        // Seats follow the planned barrier, so the plan is priced twice.
         let first = attempt(set.len() as i32)?;
         let seats = seats_of(&first);
         let plan = attempt(seats).filter(|plan| seats_of(plan) >= seats)?;
@@ -225,8 +221,6 @@ impl<'a> Scene<'a> {
         } else if e.phase == Phase::Disengaging {
             Some(e.clone())
         } else if e.phase == Phase::Draining {
-            // The dance's own bodies, on top of the breach set: a bouncer and
-            // a medic a pair of the bank, and a lost one of the two is asked.
             if !siege::gave_up(e) {
                 let pairs = casting::pairs(e.capacity) as usize;
                 let missing: Vec<casting::Body> = (casting::pair().iter())
@@ -321,7 +315,6 @@ impl<'a> Scene<'a> {
                 if !reached {
                     return Some(siege::replanned(self.world.time, false, e));
                 }
-                // Topped up, not recast: the set fights on as its medics walk in.
                 self.ask(atlas, e, &added, asked);
             }
             let mut next = siege::replanned(self.world.time, reached, e);
@@ -470,7 +463,6 @@ impl<'a> Scene<'a> {
         self.walk_to(atlas, &onto, from)
     }
 
-    /// A move asks no cast.
     pub(super) fn elsewhere(
         &self,
         atlas: &Atlas,
@@ -907,7 +899,6 @@ pub(super) fn entries(
         .collect()
 }
 
-/// What a `Defend`'s price found, for its candidates to read (§6.3).
 pub(super) struct Priced {
     /// What the rival spent on the bodies the engagement fights.
     pub(super) raid: i32,
@@ -915,7 +906,6 @@ pub(super) struct Priced {
     pub(super) together: bool,
     /// The set swings nothing, so it fights as one body.
     pub(super) ranged: bool,
-    /// A home's ramparts are a post the raid comes to.
     pub(super) holds: bool,
     pub(super) outcome: Outcome,
     pub(super) set: Vec<casting::Body>,
@@ -929,8 +919,6 @@ impl Priced {
         candidates.iter().filter_map(|t| self.offer(*t)).collect()
     }
 
-    /// One arm a candidate: what it wins against what it spends, and nothing
-    /// where it cannot fight from here.
     pub(super) fn offer(&self, tactic: Tactic) -> Option<Offer> {
         let (won, ticks) = (self.outcome.is_win(), self.outcome.ticks());
         let (value, ticks) = match (tactic, self.together) {
@@ -960,8 +948,6 @@ pub(super) fn offer(tactic: Tactic, set: &[casting::Body], value: i32, cost: i32
     }
 }
 
-/// What a `Sweep`'s set wins — the harvest it denies and the prey it kills —
-/// against what it casts (§6.3).
 pub(super) fn sweep_offers(
     candidates: &[Tactic],
     together: bool,

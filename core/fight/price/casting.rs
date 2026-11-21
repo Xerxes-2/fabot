@@ -1,6 +1,3 @@
-/// What a fight casts and where (`ARCHITECTURE.md` §6.3, §6.5). From v1's
-/// Caster: a body goes to the spawn that lands it soonest, a home's own Defend
-/// to the home's.
 use std::collections::BTreeMap;
 
 use fabot_base::declarations::Declarations;
@@ -60,10 +57,9 @@ pub fn affordable(capacity: i32) -> Vec<Body> {
         .collect()
 }
 
-/// The bodies a set that walks into a rival room is priced from: every one
-/// carries a HEAL (owner), so shot up it heals the damage instead of losing
-/// its MOVE to it and crawling. A home's Defend keeps `affordable`'s bare
-/// DEFENDER: it stands beside its towers.
+/// Every body that walks into a rival room carries a HEAL (owner): shot up, it
+/// heals the damage instead of losing its MOVE to it and crawling. A home's
+/// Defend keeps `affordable`'s bare DEFENDER: it stands beside its towers.
 pub fn walking(capacity: i32) -> Vec<Body> {
     let mut out: Vec<Body> = affordable(capacity)
         .into_iter()
@@ -76,8 +72,6 @@ pub fn walking(capacity: i32) -> Vec<Body> {
     out
 }
 
-/// The body a set walks out with: one that heals what it is shot for, or its
-/// MOVE parts die to it one walk at a time (owner).
 fn with_heal(mut body: Body) -> Body {
     if !body.contains(&Part::Heal) {
         body.extend([Part::Heal, Part::Move]);
@@ -131,9 +125,8 @@ pub fn tapper(capacity: i32) -> Option<Body> {
     biggest(capacity, &[Part::Move, Part::Claim])
 }
 
-/// The most of `block` the bank buys, with the HEAL and MOVE a body that walks
-/// out of our rooms takes (owner): sized here, so it fits the colony the body
-/// is cast from.
+/// Sized with the HEAL and MOVE a body out of our rooms takes (owner), so it
+/// fits the colony the body is cast from.
 fn biggest(capacity: i32, block: &[Part]) -> Option<Body> {
     let legs = [Part::Heal, Part::Move];
     let most = ((capacity - engine::body_cost(&legs)) / engine::body_cost(block))
@@ -180,10 +173,7 @@ pub fn side_in(room: &Room, bodies: Vec<Fighter>) -> exchange::Side {
     }
 }
 
-/// The compound a body cast from the declared lab cluster carries, and the
-/// parts the cluster's colony holds for it; None while no cluster is declared
-/// or it holds under a part's worth. A body the stock does not all cover is
-/// cast unboosted rather than held.
+/// A body the lab stock does not all cover is cast unboosted rather than held.
 pub fn cluster_boost(world: &World, declarations: &Declarations) -> Option<(ResourceType, i32)> {
     let (home, _) = declarations.labs()?;
     let (compound, energy) = fabot_base::boost::home_holds(world, home, Compound::UtriumAcid);
@@ -202,10 +192,7 @@ pub fn wins(
     !exchange::outcome(stance, ours, theirs, terrain).is_lose()
 }
 
-/// The bodies to ask beside `ours`, the outcome they land and the side they
-/// land as; None: no body the spawns buy wins. Which tactic fights them is the
-/// kind's to price (§6.3); `boost` is the compound the cluster's labs cover
-/// (see `cluster_boost`), which a body's parts carry when the stock buys them.
+/// Which tactic fights the set is the kind's to price (§6.3).
 #[allow(clippy::too_many_arguments)]
 pub fn price(
     stance: exchange::Stance,
@@ -249,8 +236,6 @@ pub fn most(capacity: i32, block: &[Part]) -> Body {
     engine::with_move_last(block.repeat(blocks_fit(capacity, block)))
 }
 
-/// Two dismantlers of the most WORK the bank buys, then the fewest MOVE:HEAL
-/// medics `priced` breaks the way in with.
 pub fn siege<T>(
     capacity: i32,
     mut priced: impl FnMut(&[Body]) -> Option<T>,
@@ -268,9 +253,8 @@ pub fn siege<T>(
     })
 }
 
-/// The dismantlers the fielded set lacks of two, then the fewest medics, that
-/// `priced` breaks the way in with: a set re-planned onto a harder target or
-/// short of a body lost is topped up, not recast.
+/// A set re-planned onto a harder target or short of a body lost is topped up,
+/// not recast.
 pub fn reinforce<T>(
     capacity: i32,
     fielded: &[Body],
@@ -324,8 +308,7 @@ pub fn pairs(capacity: i32) -> i32 {
     (capacity / pair_price()).clamp(0, 3)
 }
 
-/// The heal the pairs' medics seat on the bouncer they work with a tick: what
-/// his towers' volley on the gate has to fall under to be worth drawing.
+/// What his towers' volley on the gate has to fall under to be worth drawing.
 pub fn pair_heal(pairs: i32) -> i32 {
     pairs * MEDIC_HEAL * engine::HEAL_POWER
 }
@@ -336,12 +319,10 @@ pub fn drains(capacity: i32) -> Vec<Body> {
 }
 
 /// The fewest bodies whose HEAL holds `strike`, each with the RANGED its share
-/// of `worth` buys: the kills pay for the cast (v1's `castBodiesPaid`). A
-/// siege's pickets and a sweep's set.
+/// of `worth` buys: the kills pay for the cast (v1's `castBodiesPaid`).
 pub fn squad(capacity: i32, strike: i32, worth: i32) -> Vec<Body> {
     // The towers' strike falls on one body; it and one body beside it heal it.
-    // A body under no strike still takes one (owner): shot up, it heals the
-    // damage instead of losing its MOVE to it and crawling.
+    // A body under no strike still takes one (owner).
     let heal = (((strike + 2 * engine::HEAL_POWER - 1) / (2 * engine::HEAL_POWER)) as usize).max(1);
     let n = if strike > 0 { 2 } else { 1 };
     let body = |ranged: usize| -> Body {
@@ -359,8 +340,6 @@ pub fn squad(capacity: i32, strike: i32, worth: i32) -> Vec<Body> {
         .map_or_else(Vec::new, |r| vec![body(r); n])
 }
 
-/// Whether `set` holds `strike` falling on any one body: that body's heal and
-/// the most another lends it from beside.
 pub fn holds(set: &[Fighter], strike: i32) -> bool {
     let lent = |i: usize| {
         (0..set.len())
@@ -381,9 +360,7 @@ pub fn kill_order(hostiles: &[Creep]) -> Vec<Id> {
     ranked.into_iter().map(|h| h.id).collect()
 }
 
-/// The colony that lands a body soonest of those whose bank buys it: its spawns'
-/// queue, spread over them (v1's Caster), the refill a bank short of the body
-/// waits for, then the walk. None: no colony pays for it.
+/// Soonest, not nearest (v1's Caster).
 pub fn colony_for(
     colonies: &[&Room],
     spawns: &[Spawn],
@@ -419,8 +396,7 @@ pub fn colony_for(
         .map(|(_, room)| room)
 }
 
-/// Each colony `colony_for` picks at rest (no queue, full banks) for some body
-/// a fight casts: those no nearer colony out-banks.
+/// Each colony `colony_for` picks at rest (no queue, full banks) for some body.
 pub fn homes(banks: &[(RoomName, i32)], walk: impl Fn(RoomName) -> Option<i32>) -> Vec<RoomName> {
     let mut reached: Vec<_> = (banks.iter())
         .filter_map(|&(r, c)| Some((walk(r)?, r, c)))

@@ -159,7 +159,9 @@ crates that do not depend on each other): `fabot-base`, `atlas ‖ exchange`,
 private module of `fabot-strategy`. Declarations flow down only.
 
 **Line, comment, and count ceilings** live in `scripts/ceilings.json` (checked
-by `npm run ceiling` and `npm run scenario`).
+by `npm run ceiling` and `npm run scenario`). `core/fight/price` (offers, set
+shapes, casting) holds its own ceiling apart from the rest of `core/fight`:
+fight kept hitting one ceiling, and pricing is the part that changes on its own.
 
 ## 4. State
 
@@ -511,7 +513,7 @@ conflicts never silently cancel an act.
 
 - **Queue (`Tick::queue`):** per-room priority `Floor → Fight → Economy`; an
   affordable fight ask waiting on energy holds economy asks behind it.
-- **Colony choice (`fight/casting.rs`):** picks the colony landing the body
+- **Colony choice (`fight/price/casting.rs`):** picks the colony landing the body
   soonest (hops + spawn queue + energy refill time); home `Defend` casts at
   home. Bodies end with one `MOVE` (`with_move_last`) and carry `HEAL` when
   leaving owned rooms (except siege dismantlers covered by medics).
