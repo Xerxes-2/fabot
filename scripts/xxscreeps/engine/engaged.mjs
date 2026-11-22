@@ -2,6 +2,8 @@
 // close: what `prediction.mjs` and `measures.mjs` read its outcome from. A
 // tick's objects are plain, whichever engine read them:
 // { id, name, room, x, y, hits, hitsMax, type, ours, ttl (a tombstone's life left) }.
+// An engagement's bodies by slot; a bundle older than slots lists the names.
+const namesOf = (ours) => (Array.isArray(ours) ? ours : Object.keys(ours));
 const near = (a, b, r) => a.room === b.room && Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) <= r;
 
 // `write` takes each row; `at(rooms)` resolves to the objects of `rooms`, of every room when none is named.
@@ -47,19 +49,20 @@ export function engagements(write, at) {
         rec.predicted = e.predicted;
         rec.dead = Math.max(rec.dead, e.lost);
         rec.rooms.add(e.room);
-        for (const n of e.ours) rec.ours.add(n);
+        const ours = namesOf(e.ours);
+        for (const n of ours) rec.ours.add(n);
         if (rec.ours.size) rec.drafted ??= t;
         rec.answered ||= !e.unanswered;
         rec.gaveUp ||= rec.answered && e.unanswered;
         rec.disengaged ||= e.phase === "disengaging";
         // `idle`: the most ticks on end a Defend neither acted (held a body, asked one, saw its group) nor stood down.
         const sighted = (fight.groups ?? []).some((g) => g.id === e.group && g.seen === t);
-        rec.blind = rec.kind !== "defend" || e.ours.length || asked.has(e.id) || sighted || e.phase === "disengaging" ? 0 : rec.blind + 1;
+        rec.blind = rec.kind !== "defend" || ours.length || asked.has(e.id) || sighted || e.phase === "disengaging" ? 0 : rec.blind + 1;
         rec.idle = Math.max(rec.idle, rec.blind);
         const theirs = objects.filter((o) => rec.members.has(o.id));
         if (theirs.length) rec.seen = t;
         rec.core ||= theirs.some((o) => o.type === "invaderCore");
-        const bodies = objects.filter((o) => o.type === "creep" && o.ours && e.ours.includes(o.name));
+        const bodies = objects.filter((o) => o.type === "creep" && o.ours && ours.includes(o.name));
         for (const o of bodies) if (theirs.some((h) => near(h, o, 3))) rec.reached[o.name] ??= t;
         const close = bodies.some((o) => theirs.some((h) => near(h, o, 3)));
         if (rec.contact === null && (close || theirs.some((h) => h.hits < h.hitsMax))) rec.contact = t;

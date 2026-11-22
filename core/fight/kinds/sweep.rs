@@ -75,10 +75,10 @@ pub fn onto(room: RoomName, time: i32, e: &Engagement) -> Engagement {
 }
 
 pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
-    let alive: BTreeSet<String> = e.ours.intersection(&facts.standing).cloned().collect();
     let mut next = e.clone();
-    next.lost = e.lost + e.ours.len() as i32 - alive.len() as i32;
-    next.ours = alive.difference(&facts.aging_out).cloned().collect();
+    next.ours.retain(|n, _| facts.standing.contains(n));
+    next.lost = e.lost + (e.ours.len() - next.ours.len()) as i32;
+    next.ours.retain(|n, _| !facts.aging_out.contains(n));
     let e = &next;
 
     let hollow = e.ours.is_empty() && !facts.asked;

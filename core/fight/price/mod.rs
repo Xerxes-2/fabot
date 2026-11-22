@@ -529,9 +529,7 @@ impl<'a> Scene<'a> {
         };
 
         let joining = self.joining(atlas, e, free);
-        let mut fielding: Vec<Fighter> = e
-            .ours
-            .iter()
+        let mut fielding: Vec<Fighter> = (e.ours.keys())
             .chain(&joining)
             .filter_map(|n| self.ours.get(n.as_str()))
             .map(|c| casting::fighter_of(c))
@@ -575,7 +573,7 @@ impl<'a> Scene<'a> {
         self.ask(atlas, e, &set, asked);
 
         let mut next = e.clone();
-        next.ours.extend(joining);
+        next.join(joining, &asked.casts);
         next.plan = Plan {
             tactic,
             order: casting::kill_order(escort),
@@ -669,7 +667,7 @@ impl<'a> Scene<'a> {
             .filter(|n| self.ours.get(n.as_str()).is_some_and(lasts))
             .collect();
 
-        let fielding: Vec<&Creep> = (e.ours.iter().chain(&joining))
+        let fielding: Vec<&Creep> = (e.ours.keys().chain(&joining))
             .filter_map(|n| self.ours.get(n.as_str()).copied())
             .filter(lasts)
             .collect();
@@ -818,7 +816,7 @@ impl<'a> Scene<'a> {
                 self.ask(atlas, e, &price.set, asked);
 
                 let mut next = e.clone();
-                next.ours.extend(joining.iter().cloned());
+                next.join(joining.iter().cloned(), &asked.casts);
                 next.plan = Plan {
                     tactic,
                     order: casting::kill_order(&raid),
@@ -836,9 +834,7 @@ impl<'a> Scene<'a> {
                     Some(price.outcome)
                 };
 
-                let standing: Vec<Fighter> = next
-                    .ours
-                    .iter()
+                let standing: Vec<Fighter> = (next.ours.keys())
                     .filter_map(|n| self.ours.get(n.as_str()))
                     .filter(|c| lasts(c))
                     .map(|c| casting::fighter_of(c))

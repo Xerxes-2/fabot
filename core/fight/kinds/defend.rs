@@ -62,10 +62,10 @@ pub fn stands_alone(time: i32, e: &Engagement) -> Engagement {
 const OUTPOST_LOSSES: i32 = 2;
 
 pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
-    let alive: BTreeSet<String> = e.ours.intersection(&facts.standing).cloned().collect();
     let mut next = e.clone();
-    next.lost = e.lost + e.ours.len() as i32 - alive.len() as i32;
-    next.ours = alive.difference(&facts.aging_out).cloned().collect();
+    next.ours.retain(|n, _| facts.standing.contains(n));
+    next.lost = e.lost + (e.ours.len() - next.ours.len()) as i32;
+    next.ours.retain(|n, _| !facts.aging_out.contains(n));
     let e = &next;
 
     let toward = |phase: Phase| Some(enter(phase, facts.time, e));
@@ -332,6 +332,7 @@ mod tests {
     use super::*;
     use crate::shape::Objective;
     use fabot_base::world::{BodyPart, Store};
+    use std::collections::BTreeMap;
 
     fn at(x: i32, y: i32) -> Pos {
         Pos::new(RoomName::W1N1, x, y)
@@ -722,14 +723,14 @@ mod tests {
         for _ in 0..DRAWS {
             let e = Engagement {
                 phase: phases[rng.below(phases.len() as u64) as usize],
-                ours: BTreeSet::from(["fight-1-1-0".to_string()]),
+                ours: BTreeMap::from([("fight-1-1-0".to_string(), 0)]),
                 lost: rng.between(0, OUTPOST_LOSSES),
                 budget: rng.between(0, 3),
                 unanswered: rng.flip(),
                 ..crate::scene::fresh(1, Objective::Defend, RoomName::W1N1, 0, Tactic::Close)
             };
             let standing: BTreeSet<String> =
-                e.ours.iter().filter(|_| rng.flip()).cloned().collect();
+                e.ours.keys().filter(|_| rng.flip()).cloned().collect();
             let facts = Facts {
                 time: 1,
                 group: None,

@@ -14,12 +14,12 @@ use fabot_base::world::{Creep, Id, Pos, RoomName, StructureType, hostiles, sight
 use fabot_tactics::{self as tactics, Tactic};
 
 /// A merge keeps the older group's id; two engagements on one group are one,
-/// the older surviving with both's bodies, losses and budget. Also each
-/// merged id's survivor.
+/// the older surviving with both's bodies, casts, losses and budget.
 fn merged(
     events: &[tracker::Event],
     engagements: &[Engagement],
-) -> (Vec<Engagement>, BTreeMap<i32, i32>) {
+    casts: &[Cast],
+) -> (Vec<Engagement>, Vec<Cast>) {
     let mut ranked = engagements.to_vec();
     for e in &mut ranked {
         for event in events {
@@ -33,7 +33,7 @@ fn merged(
     ranked.sort_by_key(|e| e.id);
 
     let mut kept: Vec<Engagement> = Vec::new();
-    let mut into: BTreeMap<i32, i32> = BTreeMap::new();
+    let mut casts = casts.to_vec();
 
     for e in ranked {
         let older = kept.iter().position(|k| {
@@ -44,16 +44,24 @@ fn merged(
 
         match older {
             Some(at) => {
-                kept[at].ours = kept[at].ours.union(&e.ours).cloned().collect();
-                kept[at].lost += e.lost;
-                kept[at].budget += e.budget;
-                into.insert(e.id, kept[at].id);
+                let mut free = kept[at].free(&casts);
+                let k = &mut kept[at];
+                for (c, s) in casts
+                    .iter_mut()
+                    .filter(|c| c.engagement == e.id)
+                    .zip(&mut free)
+                {
+                    (c.engagement, c.slot) = (k.id, s);
+                }
+                k.ours.extend(e.ours.into_keys().zip(free));
+                k.lost += e.lost;
+                k.budget += e.budget;
             }
             None => kept.push(e),
         }
     }
 
-    (kept, into)
+    (kept, casts)
 }
 
 fn changed(e: &Engagement, events: &[tracker::Event], by_id: &BTreeMap<i32, Group>) -> bool {
@@ -132,7 +140,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
         .map(|c| c.name.clone())
         .collect();
 
-    let (mut engagements, into) = merged(&events, &state.engagements);
+    let (mut engagements, casts) = merged(&events, &state.engagements, &state.casts);
 
     // An outpost has no towers to answer a body that works it (§7.2).
     let outpost = |r: &RoomName| worked.contains(r) && !homes.contains(r);
@@ -180,16 +188,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
 
     let alive: BTreeSet<i32> = engagements.iter().map(|e| e.id).collect();
 
-    let (landed, spawning): (Vec<Cast>, Vec<Cast>) = state
-        .casts
-        .iter()
-        .map(|c| match into.get(&c.engagement) {
-            Some(&survivor) => Cast {
-                engagement: survivor,
-                ..c.clone()
-            },
-            None => c.clone(),
-        })
+    let (landed, spawning): (Vec<Cast>, Vec<Cast>) = (casts.into_iter())
         .filter(|c| {
             alive.contains(&c.engagement)
                 && world
@@ -201,7 +200,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
 
     for c in &landed {
         if let Some(e) = engagements.iter_mut().find(|e| e.id == c.engagement) {
-            e.ours.insert(c.name.clone());
+            e.ours.insert(c.name.clone(), c.slot);
         }
     }
 
@@ -462,7 +461,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
             (Engagement { priority, ..e }, false)
         });
 
-    let committed: BTreeSet<&String> = stepped.iter().flat_map(|(e, _)| &e.ours).collect();
+    let committed: BTreeSet<&String> = stepped.iter().flat_map(|(e, _)| e.ours.keys()).collect();
 
     let mut free: Vec<String> = world
         .creeps
@@ -576,4 +575,38 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
     state.casts = casts;
     state.due = asked.due;
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fabot_base::vocabulary::Part;
+
+    #[test]
+    fn a_merged_defend_holds_each_body_and_cast_in_its_own_slot() {
+        let defend = |id: i32, ours: &[(&str, u16)]| Engagement {
+            group: id,
+            ours: ours.iter().map(|(n, s)| (n.to_string(), *s)).collect(),
+            ..fresh(id, Objective::Defend, RoomName::W1N1, 1, Tactic::Close)
+        };
+        let cast = |engagement: i32, name: &str, slot| Cast {
+            engagement,
+            name: name.into(),
+            slot,
+            room: RoomName::W1N1,
+            body: vec![Part::Attack, Part::Move],
+        };
+        let engagements = [defend(1, &[("a", 0)]), defend(2, &[("b", 0), ("c", 1)])];
+        let casts = [cast(1, "d", 1), cast(2, "e", 2), cast(2, "f", 0)];
+        let events = [tracker::Event::Merged { into: 1, from: 2 }];
+
+        let (kept, casts) = merged(&events, &engagements, &casts);
+
+        assert_eq!(kept.len(), 1);
+        let slots: Vec<u16> = (kept[0].ours.values().copied())
+            .chain(casts.iter().filter(|c| c.engagement == 1).map(|c| c.slot))
+            .collect();
+        assert_eq!(slots.len(), 6);
+        assert_eq!(slots.iter().collect::<BTreeSet<_>>().len(), 6);
+    }
 }

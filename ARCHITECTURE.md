@@ -185,9 +185,9 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
 | Store | Shape | Owner | Lives in | Why |
 |---|---|---|---|---|
 | `assignments` | creep → `Assignment` (slot, task; `slot\|task` text only in `memory.rs`) | Economy | Memory | sticky slot + task across ticks |
-| `fight.engagements` | list of `Engagement` (§6.2), with open tick (never moved) | Fight | Memory | active combat commitments (without heap-only `offers`); a home's deaths since open are its raid's |
+| `fight.engagements` | list of `Engagement` (§6.2), with open tick (never moved) and each body's slot | Fight | Memory | active combat commitments (without heap-only `offers`); a home's deaths since open are its raid's |
 | `fight.groups` | list of `Group` (§6.1) | Fight | Memory | hostile cluster identity across ticks |
-| `fight.casts` | pending casts by engagement | Fight | Memory | prevent double-casting while spawning |
+| `fight.casts` | pending casts by engagement and slot | Fight | Memory | prevent double-casting while spawning |
 | `fight.due` | colonies with imminent siege successor | Fight | Memory | feeds `ColonyPlan.owes` and `.fights` (§5) |
 | `declarations` | operator overrides + per-tick `Strategy` plans (`ColonyPlan`, outposts, claims, operations, allies, enemies, sieges, avoid, tactic rules) | Strategy | Memory (operator); plans rebuilt per tick | world configuration as data |
 | `expansion` | in-flight claim, failed rooms (100k fade), abandoned colonies | Strategy | Memory | outlives travel, stock dips, and raze ticks |

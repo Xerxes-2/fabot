@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -107,7 +107,7 @@ pub struct Engagement {
     pub id: i32,
     pub group: i32,
     pub room: RoomName,
-    pub ours: BTreeSet<String>,
+    pub ours: BTreeMap<String, Slot>,
     #[serde(flatten)]
     pub plan: Plan,
     pub phase: Phase,
@@ -132,6 +132,28 @@ pub struct Engagement {
     pub predicted: Option<fabot_exchange::Outcome>,
 }
 
+/// A body's place in its set, which its successor takes (§6.2's rotation).
+pub type Slot = u16;
+
+impl Engagement {
+    pub fn free(&self, casts: &[Cast]) -> impl Iterator<Item = Slot> + use<> {
+        let held: BTreeSet<Slot> = (self.ours.values().copied())
+            .chain(
+                casts
+                    .iter()
+                    .filter(|c| c.engagement == self.id)
+                    .map(|c| c.slot),
+            )
+            .collect();
+        (0..).filter(move |s| !held.contains(s))
+    }
+
+    pub fn join(&mut self, names: impl IntoIterator<Item = String>, casts: &[Cast]) {
+        let joined: Vec<(String, Slot)> = names.into_iter().zip(self.free(casts)).collect();
+        self.ours.extend(joined);
+    }
+}
+
 pub fn enter(phase: Phase, time: i32, e: &Engagement) -> Engagement {
     Engagement {
         phase,
@@ -145,6 +167,7 @@ pub fn enter(phase: Phase, time: i32, e: &Engagement) -> Engagement {
 pub struct Cast {
     pub engagement: i32,
     pub name: String,
+    pub slot: Slot,
     pub room: RoomName,
     #[serde(with = "fabot_base::wire::letters")]
     pub body: Vec<Part>,

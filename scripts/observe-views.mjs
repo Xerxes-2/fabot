@@ -244,7 +244,7 @@ export function views({ api, shard, url, token, memory, raw }) {
       const engagements = fight.engagements ?? [];
       if (engagements.length === 0) console.log("no open engagements");
       const casts = fight.casts ?? [];
-      const members = await ours(engagements.flatMap((e) => e.ours), engagements.map((e) => e.room));
+      const members = await ours(engagements.flatMap((e) => Object.keys(e.ours)), engagements.map((e) => e.room));
       const now = await time();
       for (const e of engagements) {
         const p = e.predicted;
@@ -253,7 +253,7 @@ export function views({ api, shard, url, token, memory, raw }) {
         if (offers.length) console.log(`  offers ${offers.join(" · ")}`);
         if (e.target) console.log(`  target ${await described(e.room, e.target)}`);
         for (const [i, id] of e.order.entries()) console.log(`  order ${i + 1} ${await described(e.room, id)}`);
-        for (const n of e.ours) {
+        for (const n of Object.keys(e.ours)) {
           const c = members.get(n);
           console.log(`  ${n} ${c ? `${c.room} ${at(c)}${hits(c)}` : "not found"}`);
         }

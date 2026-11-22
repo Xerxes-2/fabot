@@ -64,7 +64,7 @@ pub(super) fn act(
 
     let engaged_in: BTreeMap<&str, &Engagement> = decided
         .iter()
-        .flat_map(|e| e.ours.iter().map(move |n| (n.as_str(), e)))
+        .flat_map(|e| e.ours.keys().map(move |n| (n.as_str(), e)))
         .collect();
 
     let fighters: Vec<&Creep> = world
@@ -198,7 +198,7 @@ pub(super) fn act(
             && let Some(front) = fronts.get(&e.id)
             && !front.posts.is_empty()
         {
-            return (None, tactics::picket(sight, front, &scene.members_of(e), c));
+            return (None, tactics::picket(sight, front, &scene.slotted(e), c));
         }
 
         if e.phase == Phase::Fighting && fronts.contains_key(&e.id) && !raid::raids(e) {

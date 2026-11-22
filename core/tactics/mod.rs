@@ -531,20 +531,15 @@ pub fn claims(creep: &Creep) -> bool {
 }
 
 /// Seated beside its post, off the rival's line: there the rival harvests.
-pub fn picket(sight: &mut Sight, front: &Front, members: &[&Creep], creep: &Creep) -> Wish {
+pub fn picket(sight: &mut Sight, front: &Front, members: &[(u16, &Creep)], creep: &Creep) -> Wish {
     // By slot, which a successor keeps, so a landing never reshuffles posts.
-    let slot = |c: &Creep| {
-        c.name
-            .rsplit('-')
-            .next()
-            .and_then(|s| s.parse::<i32>().ok())
-    };
-    let mut pickets: Vec<&Creep> = members.iter().copied().filter(|c| picket_of(c)).collect();
-    pickets.sort_by_cached_key(|&c| (slot(c), c.name.as_str()));
+    let mut pickets: Vec<(u16, &Creep)> = members.to_vec();
+    pickets.retain(|(_, c)| picket_of(c));
+    pickets.sort_by_key(|&(slot, c)| (slot, c.name.as_str()));
 
     let at = pickets
         .iter()
-        .position(|c| c.name == creep.name)
+        .position(|(_, c)| c.name == creep.name)
         .unwrap_or(0);
     let mut before = 0;
     let Some((post, seat_at)) = front.posts.iter().find_map(|(post, n)| {
