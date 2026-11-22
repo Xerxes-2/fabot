@@ -160,7 +160,7 @@ for (const { name, start } of scenarios)
   if ((start.at === undefined) !== (start.bundle === undefined) || (start.at !== undefined && (start.node || !/^[0-9a-f]{8,40}$/.test(start.bundle))))
     fail(`${name}: a start "at" a tick names its "bundle" by commit id, and no node`);
 for (const { name, start } of scenarios)
-  if (start.world && Object.keys(start).some((k) => !["world", "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "follow", "ended", "memory", "gcl"].includes(k))) fail(`${name}: a "world" start takes a "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "follow", "ended", "memory", "gcl" and nothing else`);
+  if (start.world && Object.keys(start).some((k) => !["world", "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "follow", "ended", "memory", "gcl", "stock"].includes(k))) fail(`${name}: a "world" start takes a "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "follow", "ended", "memory", "gcl", "stock" and nothing else`);
 for (const { name, start } of scenarios)
   if (!start.world && (start.declarations || start.memory || start.gcl)) fail(`${name}: "declarations", "memory" and "gcl" take a "world" start`);
 
@@ -237,11 +237,17 @@ const preludes = [];
 // Two preludes of one world would save into one directory.
 const preluding = new Map();
 const play = async ({ name, start, ticks, engine }) => {
-  if (start.world && (start.declarations || start.memory || start.gcl)) {
+  if (start.world && (start.declarations || start.memory || start.gcl || start.stock)) {
     const world = join(REPO, "soak-runs", `world-${name}.json`);
     mkdirSync(dirname(world), { recursive: true });
     const crafted = JSON.parse(readFileSync(resolve(REPO, start.world), "utf8"));
     const v2 = { ...crafted.memory?.v2, ...start.memory };
+    // `stock`: amounts set in each named room's terminal.
+    for (const [room, add] of Object.entries(start.stock ?? {})) {
+      const terminal = crafted.rooms.find((r) => r.name === room)?.objects.find((o) => o.type === "terminal");
+      if (!terminal) fail(`${name}: "stock" names ${room}, which holds no terminal in ${start.world}`);
+      Object.assign(terminal.store, add);
+    }
     writeFileSync(world, JSON.stringify({ ...crafted, gcl: start.gcl ?? crafted.gcl, memory: { ...crafted.memory, v2 }, declarations: start.declarations ?? crafted.declarations }));
     start = { ...start, world };
   }

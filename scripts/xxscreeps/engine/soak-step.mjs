@@ -59,6 +59,8 @@ import { engagements } from "./engaged.mjs";
 const LETTER = { move: "m", work: "w", carry: "c", attack: "a", ranged_attack: "r", heal: "h", claim: "k", tough: "t" };
 const letters = (body) => body.map((p) => LETTER[p.type]).join("");
 const COMPOUNDS = [...new Set(Object.values(REACTIONS).flatMap(Object.values))];
+// Where a compound `made` counts stands.
+const MADE_IN = ["storage", "terminal", "lab"];
 
 const [ticksArg, everyArg, roomArg, username, out, wavesArg = "", opponentsPath, coresArg = "", waveArg = "melee,healer,ranged", watchArg = "0", followArg = ""] = process.argv.slice(2);
 const homes = roomArg.split(",");
@@ -453,13 +455,14 @@ function roomLines(rooms) {
     rooms.map((room) => {
       const line = lines[room.name];
       // `held`: what our storage, terminal, labs, factory and power spawn hold; `ores` the non-energy of it.
-      const now = { creeps: 0, hostiles: 0, roads: 0, containers: 0, cores: 0, held: 0, ores: 0 };
+      const now = { creeps: 0, hostiles: 0, roads: 0, containers: 0, cores: 0, held: 0, ores: 0, made: {} };
       for (const o of room["#objects"]) {
         if (o["#user"] === ours && o.store && ["storage", "terminal", "lab", "factory", "powerSpawn"].includes(o.structureType)) {
           // A lab's store answers no total.
           for (const r of Object.keys(o.store)) {
             now.held += o.store.getUsedCapacity(r) ?? 0;
             if (r !== "energy") now.ores += o.store.getUsedCapacity(r) ?? 0;
+            if (COMPOUNDS.includes(r) && MADE_IN.includes(o.structureType)) now.made[r] = (now.made[r] ?? 0) + (o.store.getUsedCapacity(r) ?? 0);
           }
         }
         if (o.body !== undefined) now[o["#user"] === ours ? "creeps" : "hostiles"]++;
@@ -769,7 +772,7 @@ for (let t = 0; t < ticks; t++) {
     // Each compound our storages, terminals and labs hold.
     row.made = {};
     for (const o of rooms.flatMap((r) => [...r["#objects"]]))
-      if (o["#user"] === ours && o.store && ["storage", "terminal", "lab"].includes(o.structureType))
+      if (o["#user"] === ours && o.store && MADE_IN.includes(o.structureType))
         for (const r of COMPOUNDS) row.made[r] = (row.made[r] ?? 0) + (o.store.getUsedCapacity(r) ?? 0);
     row.bounced = bounced;
     row.faults = seenFaults.size;

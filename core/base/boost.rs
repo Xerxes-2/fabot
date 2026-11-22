@@ -38,14 +38,16 @@ pub fn booster<'a>(
         .or_else(|| (labs_in(world, room)).min_by_key(|l| (reagent(l), other(l), l.id)))
 }
 
-/// Most labs, ties to the first by name: one still building never takes it.
-pub fn cluster(world: &World, declarations: &Declarations) -> Option<RoomName> {
-    (world::hostiles::owned(&world.rooms).into_iter())
-        .filter(|room| !declarations.abandoning(*room))
-        .map(|room| (labs_in(world, room).count(), std::cmp::Reverse(room)))
-        .filter(|(labs, _)| *labs > 0)
-        .max()
-        .map(|(_, room)| room.0)
+/// Most labs first, ties by name: one still building its labs picks a reaction last.
+pub fn clusters(world: &World, declarations: &Declarations) -> Vec<RoomName> {
+    let mut labs: Vec<(usize, std::cmp::Reverse<RoomName>)> =
+        (world::hostiles::owned(&world.rooms).into_iter())
+            .filter(|room| !declarations.abandoning(*room))
+            .map(|room| (labs_in(world, room).count(), std::cmp::Reverse(room)))
+            .filter(|(labs, _)| *labs > 0)
+            .collect();
+    labs.sort_by(|a, b| b.cmp(a));
+    labs.into_iter().map(|(_, room)| room.0).collect()
 }
 
 pub fn labs_in<'a>(world: &'a World, room: RoomName) -> impl Iterator<Item = &'a world::Structure> {

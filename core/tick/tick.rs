@@ -16,7 +16,6 @@ use fabot_base::intents::{
     Action, Ask, CreepAct, LabAct, ModuleOutput, Rank, Settled, SpawnAct, Telemetry,
 };
 use fabot_base::tiles::{self, Tile};
-use fabot_base::vocabulary::ResourceType;
 use fabot_base::wish::Wish;
 use fabot_base::world::{
     self, Id, Pos, Room, RoomName, Sightings, Structure, StructureType, World,
@@ -172,41 +171,27 @@ fn boost_stop(
     actions: &mut Vec<Action>,
     wishes: &[(RoomName, Wish)],
 ) -> Option<Vec<(RoomName, Wish)>> {
-    let home = context.derived.cluster?;
-    let mut stalls: Vec<(String, Pos, Id, ResourceType)> = Vec::new();
-
-    for creep in (context.world.creeps.iter()).filter(|c| c.owner.is_ours() && c.pos.room == home) {
-        if let Some(w) = boost::waiting(context.world, home, creep) {
-            stalls.push((creep.name.clone(), w.lab.pos, w.lab.id, w.compound));
-        }
-    }
+    let world = context.world;
+    let stalls: Vec<(&world::Creep, boost::Waiting)> = (world.creeps.iter())
+        .filter(|c| c.owner.is_ours() && context.derived.clusters.contains(&c.pos.room))
+        .filter_map(|c| Some((c, boost::waiting(world, c.pos.room, c)?)))
+        .collect();
 
     if stalls.is_empty() {
         return None;
     }
 
-    let stalling: BTreeSet<&str> = stalls.iter().map(|(name, _, _, _)| name.as_str()).collect();
+    let stalling: BTreeSet<&str> = stalls.iter().map(|(c, _)| c.name.as_str()).collect();
     actions.retain(|a| !matches!(a, Action::Creep(name, _) if stalling.contains(name.as_str())));
     let mut walks: Vec<(RoomName, Wish)> = (wishes.iter())
         .filter(|(_, w)| !stalling.contains(w.creep.as_str()))
         .cloned()
         .collect();
 
-    let mut boostable: BTreeSet<Id> = BTreeSet::new();
-    for lab in boost::labs_in(context.world, home) {
-        for compound in stalls.iter().map(|(_, _, _, c)| c) {
-            if boost::can_boost(lab, *compound) {
-                boostable.insert(lab.id);
-            }
-        }
-    }
-
-    for (name, at, lab, _) in &stalls {
-        let Some(creep) = context.world.creeps.iter().find(|c| &c.name == name) else {
-            continue;
-        };
-        if creep.pos.within(1, at) && boostable.contains(lab) {
-            actions.push(Action::Lab(*lab, LabAct::BoostCreep(creep.id)));
+    for (creep, w) in &stalls {
+        let at = &w.lab.pos;
+        if creep.pos.within(1, at) && boost::can_boost(w.lab, w.compound) {
+            actions.push(Action::Lab(w.lab.id, LabAct::BoostCreep(creep.id)));
             continue;
         }
         let mover = Mover {
@@ -336,7 +321,7 @@ pub fn decide<'t>(
     );
     let declarations = declarations.planned(plans);
     derived.worked = worked(world, &sightings, &declarations, &derived);
-    derived.cluster = boost::cluster(world, &declarations);
+    derived.clusters = boost::clusters(world, &declarations);
 
     let mut context = Context {
         world,

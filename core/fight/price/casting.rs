@@ -171,20 +171,25 @@ pub fn side_in(room: Option<&Room>, bodies: Vec<Fighter>) -> exchange::Side {
     }
 }
 
-/// Each ATTACK compound the cluster holds and the parts its stock covers.
-pub fn cluster_boosts(world: &World, cluster: Option<RoomName>) -> Vec<(ResourceType, i32)> {
-    (cluster.into_iter())
-        .flat_map(|home| {
-            (RESOURCES_ALL.iter().copied())
+pub type Boosts = BTreeMap<RoomName, Vec<(ResourceType, i32)>>;
+
+/// Each ATTACK compound a cluster holds and the parts its stock covers, by
+/// cluster: a body is boosted only from its own home's labs.
+pub fn cluster_boosts(world: &World, clusters: &[RoomName]) -> Boosts {
+    (clusters.iter())
+        .map(|home| {
+            let held = (RESOURCES_ALL.iter().copied())
                 .filter(|c| matches!(c.boost(), Some(Boost::Attack(_))))
-                .map(move |c| {
-                    let (compound, energy) = fabot_base::boost::home_holds(world, home, c);
+                .map(|c| {
+                    let (compound, energy) = fabot_base::boost::home_holds(world, *home, c);
                     let parts = (compound / engine::BOOST_MINERAL_PER_PART)
                         .min(energy / engine::BOOST_ENERGY_PER_PART);
                     (c, parts)
                 })
+                .filter(|(_, parts)| *parts > 0)
+                .collect();
+            (*home, held)
         })
-        .filter(|(_, parts)| *parts > 0)
         .collect()
 }
 

@@ -22,6 +22,9 @@ use crate::view::{
 use crate::world::Map as World;
 use krebs::room_name::RoomXY;
 
+/// Where a compound `made` counts stands.
+const MADE_IN: [&str; 3] = ["storage", "terminal", "lab"];
+
 const PAYING: [&str; 6] = [
     "spawn",
     "extension",
@@ -458,7 +461,7 @@ impl Sampler {
             made.insert(
                 r.clone(),
                 json!(
-                    ours_in(&["storage", "terminal", "lab"])
+                    ours_in(&MADE_IN)
                         .iter()
                         .map(|o| store(o, Atom::intern(&r)))
                         .sum::<f64>()
@@ -731,7 +734,7 @@ impl Sampler {
         for name in &self.rooms {
             let line = &self.lines[name];
             let (mut creeps, mut hostiles, mut roads, mut containers, mut cores) = (0, 0, 0, 0, 0);
-            let (mut held, mut ores) = (0.0, 0.0);
+            let (mut held, mut ores, mut made) = (0.0, 0.0, Map::new());
             for &(kind, o) in &v.room(name).objects {
                 match kind {
                     "creep" if ours(o) => creeps += 1,
@@ -746,6 +749,14 @@ impl Sampler {
                             if r.as_str() != "energy" {
                                 ores += amount;
                             }
+                            let compound = r.as_str().parse::<screeps::ResourceType>().ok();
+                            if MADE_IN.contains(&kind)
+                                && compound.is_some_and(|c| c.reaction_components().is_some())
+                            {
+                                let was =
+                                    made.get(r.as_str()).and_then(Value::as_f64).unwrap_or(0.0);
+                                made.insert(r.as_str().to_string(), json!(was + amount));
+                            }
                         }
                     }
                     _ => {}
@@ -756,7 +767,7 @@ impl Sampler {
                 "upgrade": line.upgrade, "repair": line.repair, "bodies": bodies, "reserved": line.reserved,
                 "hostile": line.hostile, "waves": 0, "carriedOut": line.carried_out, "leastDowngrade": line.least_downgrade,
                 "net": line.dug - line.decayed - line.repair - bodies, "creeps": creeps, "hostiles": hostiles,
-                "roads": roads, "containers": containers, "cores": cores, "held": held, "ores": ores }));
+                "roads": roads, "containers": containers, "cores": cores, "held": held, "ores": ores, "made": made }));
         }
         Value::Object(out)
     }

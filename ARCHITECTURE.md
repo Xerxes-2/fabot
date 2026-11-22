@@ -367,19 +367,23 @@ pricer cost ~2× CPU and 580 lines for no gain and was not merged).
   colony not given up, else the nearest whose bank casts a claimer; one rule
   on `Derived` facts that `outposts::busy` holds too), `Scout`, `Boost`, and future
   `Mine`/`Pickup` declarations without owning them.
-- **Labs (`economy/labs.rs`):** the cluster (`Derived.cluster`, read by
-  Economy, Fight, and `Tick`) is the colony not given up with the most labs,
-  at least one, ties to the first by name. One rule serves reacting (three
-  labs) and boosting (one): the colony with the most labs reacts if any can,
-  and fewer than three still boost. Its targets are derived, not declared: every
+- **Labs (`economy/labs.rs`):** the clusters (`Derived.clusters`, read by
+  Economy, Fight, and `Tick`) are the colonies not given up with a lab, most
+  labs first, ties by name: each with three labs reacts, each boosts its own
+  bodies. Targets are derived, not declared: every
   T3 combat boost whose ores the empire digs or holds, in the `BOOSTS` rank
   expansion scores minerals by, each to Hivemind's "high" stock, so the labs
   make what fights spend from what we dig with no operator in the loop.
-  `labs::plan_for` derives a stateless per-tick reaction plan toward them,
-  depth-first down the crate's `REACTIONS`, each target cut to whole
+  `labs::wanted` lists the reactions toward them from the stock that can
+  reach a cluster (its own, and what other colonies hold outside their reagent
+  labs), depth-first down the crate's `REACTIONS`, each target cut to whole
   reactions the stock carries through to it after the targets before it
-  (`labs::makeable`); the other colonies ship the ore those cut targets lack
-  from what they hold. Labs
+  (`labs::makeable`); `labs::assign` gives each cluster one, no two the same,
+  a cluster keeping the one its reagent labs already hold, so a moving stock
+  never swaps two clusters' reagents. Other colonies ship a cluster its
+  reagents up to what its reaction asks, never what their own reagent labs
+  hold, and a product another cluster asks for leaves the labs a send at a
+  time. Labs
   reserved for active boosts (§6.5) drop out of reactions and are filled by
   carriers via `Ground::boost_lab`. Layout places no lab below RCL8 (labs are
   worth little early).
@@ -546,8 +550,9 @@ conflicts never silently cancel an act.
   soonest (hops + spawn queue + energy refill time); home `Defend` casts at
   home. Bodies end with one `MOVE` (`with_move_last`) and carry `HEAL` when
   leaving owned rooms (except siege dismantlers covered by medics).
-- **Boosts (`core/base/boost.rs`):** a body takes the ATTACK compound the
-  cluster's stock covers for every part it boosts that multiplies it most
+- **Boosts (`core/base/boost.rs`):** a body takes the ATTACK compound its
+  home colony's stock covers (priced, and such a body cast, at the nearest
+  colony; unboosted where it cannot be) for every part it boosts that multiplies it most
   (`fighter::boosted_by`, which the Exchange prices too); the cast encodes it
   in the creep name (`fight-<tick>-<eng>-<slot>-<compound>`).
   `Tick` holds the creep at the boost lab while parts need it, stock covers it,
@@ -853,6 +858,6 @@ a live-sized world.
 - `Atlas` room graph ignores `Footprint` (2×2 Quad routing through 1-wide gaps);
   boosted `CARRY` priced unboosted.
 - `Economy` cross-room travel prices intermediate rooms at one room width;
-  single lab cluster and single-compound-per-creep boosts.
+  single-compound-per-creep boosts.
 - Planned fight kinds (`KeeperDuty`, `PowerBank`, `Stronghold`), live
   `engagements.log`, deploy canary, and remaining `sim/` features (§10.2).

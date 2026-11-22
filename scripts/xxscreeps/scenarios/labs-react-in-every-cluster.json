@@ -1,0 +1,10 @@
+{
+  "why": "every colony with labs reacts, no two the same reaction: given X, the stocked colonies' one T3, XUH2O, wants UH and OH first, so W3S8 (most labs) makes UH while W5S8 makes OH, where one cluster made both in turn and W5S8 none",
+  "modules": ["economy"],
+  "start": { "world": "scripts/xxscreeps/worlds/young-among-colonies.json", "seed": 1, "stock": { "W3S8": { "X": 3000 }, "W5S8": { "X": 3000 } } },
+  "ticks": 1500,
+  "assert": [
+    { "measure": "made", "room": "W3S8", "resource": "UH", "min": 200 },
+    { "measure": "made", "room": "W5S8", "resource": "OH", "min": 200 }
+  ]
+}

@@ -10,7 +10,7 @@ use fabot_base::grid::Footprint;
 use fabot_base::intel::{self, Intel, Scout};
 use fabot_base::tiles::{self, Tile};
 use fabot_base::vocabulary::ResourceType::{self, Energy};
-use fabot_base::vocabulary::{ORES, Part, part_count_in};
+use fabot_base::vocabulary::{Part, part_count_in};
 use fabot_base::world::{
     self, BodyPart, Built, Controller, Creep, Id, Owner, Pos, Room, RoomName, Source, Spawn, Store,
     Structure, StructureType, World, terrain,
@@ -258,7 +258,7 @@ pub struct Ground {
     /// What our storage and terminal hold besides energy: (store, its tile,
     /// resource, amount).
     pub ores: Vec<(Id, Pos, ResourceType, i32)>,
-    /// Only the declared cluster's home has one.
+    /// Only a cluster's home has one.
     pub lab_plan: Option<super::labs::Plan>,
     /// The lab a cast waiting at home is boosted from, and what its parts
     /// still ask of the compound and the energy to spend with it.
@@ -917,95 +917,153 @@ fn minerals_dug_or_held(world: &World, colonies: &[Ground]) -> Vec<ResourceType>
         .collect()
 }
 
-/// The lab cluster's plan and boost lab, and each other colony's ore
-/// shipped to it.
-fn stock_labs(
-    world: &World,
-    grounds: &mut [Ground],
-    colonies: usize,
-    (home, targets): (RoomName, &[(ResourceType, i32)]),
-    given_up: &dyn Fn(RoomName) -> bool,
-) {
-    let home = &home;
-    let ships = |g: &Ground| &g.room != home && g.terminal.is_some() && !given_up(g.room);
-    let shippable = ORES.map(|ore| {
-        (grounds.iter().take(colonies).filter(|g| ships(g)))
-            .flat_map(|g| g.ores.iter().filter(|o| o.2 == ore).map(|o| o.3))
+/// A load between a store and a lab is still the room's.
+fn held_in(world: &World, g: &Ground, r: ResourceType) -> i32 {
+    (g.ores.iter().filter(|o| o.2 == r).map(|o| o.3).sum::<i32>())
+        + (g.labs.iter())
+            .filter_map(|l| l.held.filter(|h| h.0 == r).map(|h| h.1))
             .sum::<i32>()
-    });
-    let Some(g) = grounds.iter_mut().find(|g| &g.room == home) else {
-        return;
-    };
+        + (world.creeps.iter())
+            .filter(|c| c.owner.is_ours() && c.pos.room == g.room)
+            .map(|c| c.store.amount_of(r))
+            .sum::<i32>()
+}
+
+/// `reagents_held` is `None` with too few labs to react.
+struct Cluster<'g> {
+    ground: &'g Ground,
+    labs: Vec<(Id, Pos)>,
+    kept: BTreeMap<Id, ResourceType>,
+    reagents_held: Option<Vec<ResourceType>>,
+}
+
+fn cluster_of<'g>(world: &World, g: &'g Ground) -> Cluster<'g> {
+    use fabot_base::boost;
     // The lab a body waiting at home is boosted from is the cast's and not
     // a reaction's: its compound is kept while the body still lacks it.
     let kept: BTreeMap<Id, ResourceType> = (world.creeps.iter())
-        .filter(|c| &c.pos.room == home)
+        .filter(|c| c.pos.room == g.room)
         .filter_map(|c| {
-            let compound = fabot_base::boost::of_name(&c.name)?;
-            let lab = fabot_base::boost::booster(world, *home, compound)?;
-            Some((lab.id, compound))
+            let compound = boost::of_name(&c.name)?;
+            Some((boost::booster(world, g.room, compound)?.id, compound))
         })
         .collect();
     let labs: Vec<(Id, Pos)> = (g.labs.iter())
         .filter(|l| !kept.contains_key(&l.id))
         .map(|l| (l.id, l.pos))
         .collect();
-    let held = |id: Id| g.labs.iter().find(|l| l.id == id).and_then(|l| l.held);
-    let stock = |r: ResourceType| -> i32 {
-        g.ores
+    let reagents_held = boost::roles_of(&labs).map(|roles| {
+        let (a, b) = roles.reagents;
+        [a, b]
             .iter()
-            .filter(|o| o.2 == r)
-            .map(|o| o.3)
-            .sum::<i32>()
-            + g.labs
-                .iter()
-                .filter_map(|l| l.held.filter(|h| h.0 == r).map(|h| h.1))
-                .sum::<i32>()
-            // A load between a store and a lab is still the home's.
-            + world
-                .creeps
-                .iter()
-                .filter(|c| &c.pos.room == home)
-                .map(|c| c.store.amount_of(r))
-                .sum::<i32>()
-    };
-    let mut plan = super::labs::plan_for(targets, &stock, &labs, &held);
-    let lab_at = |id: Id| {
-        (world.rooms.iter())
-            .filter(|r| &r.name == home)
-            .flat_map(|r| r.structures.iter())
-            .find(|s| s.id == id)
-    };
-    // A lab holds one mineral: whatever else a body's booster holds is
-    // drained, or the compound it waits on has nowhere to land. The
-    // booster's own drain, so a cluster too small to run a reaction
-    // still empties it.
-    for (id, compound) in &kept {
-        let Some(lab) = lab_at(*id) else {
-            continue;
-        };
-        for (r, n) in &lab.store.held {
+            .filter_map(|id| lab_held(g, *id).map(|h| h.0))
+            .collect()
+    });
+    Cluster {
+        ground: g,
+        labs,
+        kept,
+        reagents_held,
+    }
+}
+
+fn lab_held(g: &Ground, id: Id) -> Option<(ResourceType, i32)> {
+    g.labs.iter().find(|l| l.id == id).and_then(|l| l.held)
+}
+
+/// What a colony never ships: its reagent labs' minerals, idle or not.
+fn spent_by(c: &Cluster, reaction: Option<super::labs::Reaction>) -> Vec<ResourceType> {
+    let mut spent = c.reagents_held.clone().unwrap_or_default();
+    spent.extend(reaction.iter().flat_map(|r| r.1));
+    spent
+}
+
+struct Demand {
+    to: RoomName,
+    resource: ResourceType,
+    left: i32,
+    free: i32,
+}
+
+fn reagent_demand(
+    world: &World,
+    c: &Cluster,
+    reaction: Option<super::labs::Reaction>,
+    free: i32,
+) -> Vec<Demand> {
+    (reaction.iter())
+        .flat_map(|(_, reagents, want)| reagents.map(|r| (r, *want)))
+        .map(|(resource, want)| Demand {
+            to: c.ground.room,
+            resource,
+            left: want - held_in(world, c.ground, resource),
+            free,
+        })
+        .collect()
+}
+
+/// A lab holds one mineral: a waiting body's booster is drained of others.
+fn plan_cluster(
+    world: &World,
+    c: &Cluster,
+    reaction: Option<super::labs::Reaction>,
+) -> super::labs::Plan {
+    let mut plan = super::labs::plan_for(reaction, &c.labs, &|id| lab_held(c.ground, id));
+    for (id, compound) in &c.kept {
+        for (r, n) in lab_at(world, c.ground.room, *id)
+            .iter()
+            .flat_map(|l| &l.store.held)
+        {
             if *n > 0 && r != compound && fabot_base::vocabulary::is_mineral(*r) {
                 plan.drains.push((*id, *r));
             }
         }
     }
-    g.lab_plan = Some(plan);
-    // The lab a waiting cast is boosted from is stocked from the home's
-    // stores: the reaction refuses it as a lab of its own.
+    plan
+}
+
+/// Only a store ships: a product another cluster asks for leaves the labs as
+/// soon as it makes a send, not once they stand half full.
+fn drain_asked(
+    plan: &mut super::labs::Plan,
+    c: &Cluster,
+    demands: &[Demand],
+    spent: &[ResourceType],
+) {
+    for l in &c.ground.labs {
+        let Some((r, n)) = l.held else { continue };
+        let asked =
+            (demands.iter()).any(|d| d.to != c.ground.room && d.resource == r && d.left > 0);
+        let drained = plan.drains.iter().any(|d| d.0 == l.id);
+        if asked && n >= engine::TERMINAL_MIN_SEND && !spent.contains(&r) && !drained {
+            plan.drains.push((l.id, r));
+        }
+    }
+}
+
+fn lab_at<'a>(world: &'a World<'a>, home: RoomName, id: Id) -> Option<&'a world::Structure> {
+    (world.rooms.iter())
+        .filter(|r| r.name == home)
+        .flat_map(|r| r.structures.iter())
+        .find(|s| s.id == id)
+}
+
+/// The lab a waiting cast is boosted from is stocked from the home's stores:
+/// the reaction refuses it as a lab of its own.
+fn boost_lab(world: &World, home: RoomName) -> Option<BoostLab> {
     let mut waited: BTreeMap<Id, (ResourceType, i32, i32)> = BTreeMap::new();
-    for creep in (world.creeps.iter()).filter(|c| &c.pos.room == home) {
-        let Some(w) = fabot_base::boost::waiting(world, *home, creep) else {
+    for creep in (world.creeps.iter()).filter(|c| c.pos.room == home) {
+        let Some(w) = fabot_base::boost::waiting(world, home, creep) else {
             continue;
         };
         let at = waited.entry(w.lab.id).or_insert((w.compound, 0, 0));
         at.1 += w.mineral;
         at.2 += w.energy;
     }
-    g.boost_lab = waited
+    waited
         .into_iter()
         .find_map(|(id, (compound, mineral, energy))| {
-            let lab = lab_at(id)?;
+            let lab = lab_at(world, home, id)?;
             Some(BoostLab {
                 id,
                 pos: lab.pos,
@@ -1013,31 +1071,107 @@ fn stock_labs(
                 mineral: mineral - lab.store.amount_of(compound),
                 energy: energy - lab.store.amount_of(Energy),
             })
-        });
-    let with_shippable = |r: ResourceType| {
-        stock(r) + (ORES.iter().position(|o| *o == r)).map_or(0, |i| shippable[i])
-    };
-    let makeable = super::labs::makeable(targets, &with_shippable);
-    let mut short = super::labs::ore_short(&makeable, &stock);
-    let home_free = free_at(grounds, *home);
+        })
+}
 
-    // The colonies in their order, each the ore it holds up to what is left.
-    for g in grounds.iter_mut().take(colonies) {
-        if !ships(g) {
+/// A terminal sends to one colony a tick: a colony ships only toward the
+/// first cluster it serves.
+fn ship(
+    grounds: &mut [Ground],
+    demands: &mut [Demand],
+    spent: &BTreeMap<RoomName, Vec<ResourceType>>,
+    given_up: &dyn Fn(RoomName) -> bool,
+) {
+    for g in grounds.iter_mut() {
+        if g.terminal.is_none() || given_up(g.room) {
             continue;
         }
-        for (ore, left) in &mut short {
-            let held: i32 = g.ores.iter().filter(|o| o.2 == *ore).map(|o| o.3).sum();
-            let sent = held.min(*left);
+        let keeps = spent.get(&g.room).map_or(&[][..], Vec::as_slice);
+        for d in demands.iter_mut() {
+            let elsewhere = g.ship_to.is_some_and(|(to, _)| to != d.to);
+            if d.to == g.room || keeps.contains(&d.resource) || elsewhere {
+                continue;
+            }
+            let held: i32 = (g.ores.iter())
+                .filter(|o| o.2 == d.resource)
+                .map(|o| o.3)
+                .sum();
+            let sent = held.min(d.left);
             if sent > 0 {
-                g.shipment.push((*ore, sent));
-                *left -= sent;
+                g.shipment.push((d.resource, sent));
+                d.left -= sent;
+                g.ship_to = Some((d.to, d.free));
             }
         }
-        if !g.shipment.is_empty() {
-            g.ship_to = Some((*home, home_free));
+    }
+}
+
+fn assign_clusters(
+    world: &World,
+    ours: &[Ground],
+    cluster: &[Cluster],
+    targets: &[(ResourceType, i32)],
+    given_up: &dyn Fn(RoomName) -> bool,
+) -> Vec<Option<super::labs::Reaction>> {
+    let idle: BTreeMap<RoomName, Vec<ResourceType>> = (cluster.iter())
+        .map(|c| (c.ground.room, spent_by(c, None)))
+        .collect();
+    // What can reach a colony: its own, and what the others' stores and labs
+    // hold that their reagent labs do not, through both terminals.
+    let reach = |to: &Ground, r: ResourceType| -> i32 {
+        let others = (ours.iter())
+            .filter(|g| g.room != to.room && g.terminal.is_some() && to.terminal.is_some())
+            .filter(|g| !given_up(g.room) && !idle.get(&g.room).is_some_and(|s| s.contains(&r)))
+            .map(|g| held_in(world, g, r))
+            .sum::<i32>();
+        held_in(world, to, r) + others
+    };
+    let held: Vec<Option<Vec<ResourceType>>> =
+        cluster.iter().map(|c| c.reagents_held.clone()).collect();
+    let empire = |r: ResourceType| {
+        (ours.iter().filter(|g| !given_up(g.room)))
+            .map(|g| held_in(world, g, r))
+            .sum::<i32>()
+    };
+    super::labs::assign(targets, &empire, &held, &|i, r| reach(cluster[i].ground, r))
+}
+
+fn stock_labs(
+    world: &World,
+    grounds: &mut [Ground],
+    colonies: usize,
+    (clusters, targets): (&[RoomName], &[(ResourceType, i32)]),
+    given_up: &dyn Fn(RoomName) -> bool,
+) {
+    let ours = &grounds[..colonies];
+    let cluster: Vec<Cluster> = (clusters.iter())
+        .filter_map(|c| ours.iter().find(|g| g.room == *c))
+        .map(|g| cluster_of(world, g))
+        .collect();
+    let reactions = assign_clusters(world, ours, &cluster, targets, given_up);
+
+    let spent: BTreeMap<RoomName, Vec<ResourceType>> = (cluster.iter().zip(&reactions))
+        .map(|(c, r)| (c.ground.room, spent_by(c, *r)))
+        .collect();
+    let mut demands: Vec<Demand> = (cluster.iter().zip(&reactions))
+        .flat_map(|(c, r)| reagent_demand(world, c, *r, free_at(ours, c.ground.room)))
+        .collect();
+    let set: Vec<(RoomName, super::labs::Plan, Option<BoostLab>)> =
+        (cluster.iter().zip(&reactions))
+            .map(|(c, r)| {
+                let mut plan = plan_cluster(world, c, *r);
+                drain_asked(&mut plan, c, &demands, &spent[&c.ground.room]);
+                (c.ground.room, plan, boost_lab(world, c.ground.room))
+            })
+            .collect();
+
+    for (home, plan, boost_lab) in set {
+        if let Some(g) = grounds.iter_mut().find(|g| g.room == home) {
+            g.lab_plan = Some(plan);
+            g.boost_lab = boost_lab;
         }
     }
+    ship(&mut grounds[..colonies], &mut demands, &spent, given_up);
 }
 
 /// v1's `AidDonorMargin`: over a load and its fee.
@@ -1259,14 +1393,14 @@ pub fn of_world<'t>(
 
     let given_up = |room: RoomName| declarations.abandoning(room);
 
-    if let Some(home) = ours.cluster {
+    if !ours.clusters.is_empty() {
         let targets =
             super::labs::targets(&minerals_dug_or_held(world, &grounds[..colonies.len()]));
         stock_labs(
             world,
             &mut grounds,
             colonies.len(),
-            (home, &targets),
+            (&ours.clusters, &targets),
             &given_up,
         );
     }

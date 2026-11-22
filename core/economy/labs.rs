@@ -1,4 +1,4 @@
-/// The lab cluster's reaction plan, pure over stocks and labs: which compound
+/// Each lab cluster's reaction plan, pure over stocks and labs: which compound
 /// it makes next, which lab plays which part, what each lab is filled with or
 /// drained of. Derived whole every tick from what the stores hold, so a lost
 /// tick or a reset loses nothing.
@@ -28,37 +28,96 @@ pub fn targets(have: &[ResourceType]) -> Vec<(ResourceType, i32)> {
         .collect()
 }
 
-/// Toward the first target its stock stands short of. A reagent compound short
-/// of the shortfall is made first; once none can be, the compound itself from
-/// what stands, so a reagent run out leaves the cluster working on with the other.
-pub fn next_reaction(
+/// Its product, its reagents, and how much of the product its target asks.
+pub type Reaction = (ResourceType, [ResourceType; 2], i32);
+
+/// Every reaction toward a target its stock stands short of, depth-first: a
+/// reagent compound short of the shortfall comes before the compound itself,
+/// which is wanted once both reagents stand, so a reagent run out leaves the
+/// labs working on with the other.
+pub fn wanted(
     targets: &[(ResourceType, i32)],
     stock: &dyn Fn(ResourceType) -> i32,
-) -> Option<(ResourceType, [ResourceType; 2])> {
+) -> Vec<Reaction> {
     fn toward(
         compound: ResourceType,
         want: i32,
         stock: &dyn Fn(ResourceType) -> i32,
-    ) -> Option<(ResourceType, [ResourceType; 2])> {
-        let [first, second] = compound.reaction_components()?;
-        let deeper = [first, second].into_iter().find_map(|reagent| {
-            (stock(reagent) < want)
-                .then(|| toward(reagent, want - stock(reagent), stock))
-                .flatten()
-        });
-        deeper.or_else(|| {
-            (stock(first) >= engine::LAB_REACTION_AMOUNT
-                && stock(second) >= engine::LAB_REACTION_AMOUNT)
-                .then_some((compound, [first, second]))
-        })
+        out: &mut Vec<Reaction>,
+    ) {
+        let Some([first, second]) = compound.reaction_components() else {
+            return;
+        };
+        for reagent in [first, second].into_iter().filter(|r| stock(*r) < want) {
+            toward(reagent, want - stock(reagent), stock, out);
+        }
+        if stock(first) >= engine::LAB_REACTION_AMOUNT
+            && stock(second) >= engine::LAB_REACTION_AMOUNT
+            && out.iter().all(|(c, _, _)| *c != compound)
+        {
+            out.push((compound, [first, second], want));
+        }
     }
 
-    (makeable(targets, stock).into_iter()).find_map(|(compound, target)| {
+    let mut out = Vec::new();
+    for (compound, target) in makeable(targets, stock) {
         let short = target - stock(compound);
-        (short > 0)
-            .then(|| toward(compound, short, stock))
-            .flatten()
-    })
+        if short > 0 {
+            toward(compound, short, stock, &mut out);
+        }
+    }
+    out
+}
+
+/// What a cluster's reagent labs hold of a reaction's reagents, with nothing
+/// foreign in them.
+#[derive(Clone, Copy)]
+enum Holds {
+    Both,
+    One,
+    Any,
+}
+
+impl Holds {
+    fn of(self, held: &[ResourceType], (_, reagents, _): &Reaction) -> bool {
+        let covered = reagents.iter().filter(|r| held.contains(r)).count();
+        let clean = held.iter().all(|m| reagents.contains(m));
+        match self {
+            Holds::Both => clean && covered == 2,
+            Holds::One => clean && covered >= 1,
+            Holds::Any => true,
+        }
+    }
+}
+
+/// No two clusters run one reaction, nor one without reagent labs any, nor
+/// one whose reagents cannot reach it (`reach(cluster, resource)`). One keeps
+/// a wanted reaction its reagent labs (`held`) hold nothing foreign to, as it
+/// costs no drain, both reagents held before one; the rest take the first left.
+pub fn assign(
+    targets: &[(ResourceType, i32)],
+    stock: &dyn Fn(ResourceType) -> i32,
+    held: &[Option<Vec<ResourceType>>],
+    reach: &dyn Fn(usize, ResourceType) -> i32,
+) -> Vec<Option<Reaction>> {
+    let wanted = wanted(targets, stock);
+    let supplied = |i: usize, (_, reagents, _): &Reaction| {
+        (reagents.iter()).all(|r| reach(i, *r) >= engine::LAB_REACTION_AMOUNT)
+    };
+    let mut taken: Vec<Option<Reaction>> = vec![None; held.len()];
+    for holds in [Holds::Both, Holds::One, Holds::Any] {
+        for (i, labs) in held.iter().enumerate() {
+            if let Some(labs) = labs
+                && taken[i].is_none()
+            {
+                let free = |r: &Reaction| taken.iter().flatten().all(|t| t.0 != r.0);
+                taken[i] = (wanted.iter())
+                    .find(|r| holds.of(labs, r) && free(r) && supplied(i, r))
+                    .copied();
+            }
+        }
+    }
+    taken
 }
 
 /// A reagent made past its target spends its sibling's ore; a part reaction
@@ -92,7 +151,7 @@ pub fn makeable(
 /// The ore the cluster lacks to bring every target up: each shortfall broken
 /// down through its recipe, a compound or ore already in `stock` spent before
 /// the ore under it is counted. What the other colonies ship, and no more.
-pub fn ore_short(
+fn ore_short(
     targets: &[(ResourceType, i32)],
     stock: &dyn Fn(ResourceType) -> i32,
 ) -> Vec<(ResourceType, i32)> {
@@ -148,8 +207,7 @@ pub struct Plan {
 /// the product once it stands half full. A reagent goes to the lab that already
 /// holds it. With no reaction to run, the outputs are emptied.
 pub fn plan_for(
-    targets: &[(ResourceType, i32)],
-    stock: &dyn Fn(ResourceType) -> i32,
+    reaction: Option<Reaction>,
     labs: &[(Id, Pos)],
     held: &dyn Fn(Id) -> Option<(ResourceType, i32)>,
 ) -> Plan {
@@ -158,7 +216,7 @@ pub fn plan_for(
         return Plan::default();
     };
 
-    let Some((compound, [first, second])) = next_reaction(targets, stock) else {
+    let Some((compound, [first, second], _)) = reaction else {
         return Plan {
             drains: roles
                 .outputs
@@ -251,6 +309,59 @@ mod tests {
 
     fn stocked(pairs: &[(ResourceType, i32)]) -> impl Fn(ResourceType) -> i32 + '_ {
         move |r| pairs.iter().find(|(p, _)| *p == r).map_or(0, |(_, n)| *n)
+    }
+
+    fn next_reaction(
+        targets: &[(ResourceType, i32)],
+        stock: &dyn Fn(ResourceType) -> i32,
+    ) -> Option<(ResourceType, [ResourceType; 2])> {
+        (wanted(targets, stock).first()).map(|(c, reagents, _)| (*c, *reagents))
+    }
+
+    #[test]
+    fn a_cluster_holding_both_reagents_keeps_its_reaction_before_one_holding_one() {
+        let stock = [(Hydrogen, 10_000), (Oxygen, 10_000), (Utrium, 10_000)];
+        let held = [Some(vec![Oxygen]), Some(vec![Oxygen, Hydrogen]), None];
+        let now = assign(&[(UtriumAcid, 3000)], &stocked(&stock), &held, &|_, r| {
+            stocked(&stock)(r)
+        });
+        let made: Vec<_> = now.iter().map(|r| r.map(|r| r.0)).collect();
+        assert_eq!(made, [Some(UtriumHydride), Some(Hydroxide), None]);
+    }
+
+    #[test]
+    fn clusters_never_share_a_reaction_and_leave_one_only_once_unwanted() {
+        let targets = targets(&ORES);
+        let mut stock: Vec<(ResourceType, i32)> = ORES.map(|o| (o, 3000)).to_vec();
+        let mut held: Vec<Option<Vec<ResourceType>>> = vec![Some(Vec::new()); 3];
+        let mut kinds = Vec::new();
+        for _ in 0..10_000 {
+            let now = assign(&targets, &stocked(&stock), &held, &|_, r| {
+                stocked(&stock)(r)
+            });
+            let running: Vec<Reaction> = now.iter().flatten().copied().collect();
+            if running.is_empty() {
+                assert!(kinds.len() > 3);
+                return;
+            }
+            for (i, r) in running.iter().enumerate() {
+                assert!(running[..i].iter().all(|o| o.0 != r.0), "{running:?}");
+            }
+            let wanted = wanted(&targets, &stocked(&stock));
+            for (labs, reaction) in held.iter_mut().flatten().zip(&now) {
+                let was = wanted.iter().find(|r| r.1.iter().all(|m| labs.contains(m)));
+                assert!(
+                    was.is_none_or(|w| reaction.is_some_and(|r| r.0 == w.0)),
+                    "{was:?} left"
+                );
+                *labs = reaction.map_or_else(Vec::new, |r| r.1.to_vec());
+            }
+            for (next, reagents, _) in running {
+                kinds.extend((!kinds.contains(&next)).then_some(next));
+                react(&mut stock, (next, reagents));
+            }
+        }
+        panic!("the reactions never end");
     }
 
     #[test]

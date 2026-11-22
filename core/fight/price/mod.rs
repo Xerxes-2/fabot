@@ -8,6 +8,7 @@ use fabot_atlas::{self as atlas, Atlas, Mover, Target};
 use fabot_base::declarations::{self, Declarations};
 use fabot_base::grid::{self, Footprint};
 use fabot_base::tiles::Tile;
+use fabot_base::vocabulary::ResourceType;
 use fabot_base::world::{self, Creep, Id, Pos, Room, RoomName, Structure, StructureType};
 use fabot_base::{engine, tiles};
 use fabot_exchange::{self as exchange, Fighter, Ground, Losses, Outcome, Side, Stance, fighter};
@@ -376,6 +377,7 @@ impl<'a> Scene<'a> {
         room: &Room,
         ours: Vec<Fighter>,
         capacity: i32,
+        boosts: &[(ResourceType, i32)],
     ) -> Option<(Vec<casting::Body>, Outcome)> {
         let at = &ground.at;
         let worth = ground.worth + ground.escort.iter().map(sweep::worth).sum::<i32>();
@@ -391,7 +393,7 @@ impl<'a> Scene<'a> {
             &casting::walking(capacity),
             |body| worth / engine::body_cost(body),
             0,
-            &self.boosts,
+            boosts,
         )?;
 
         let seen = ours
@@ -444,7 +446,8 @@ impl<'a> Scene<'a> {
                     .filter_map(|r| self.walk_to(atlas, &e, r.name))
                     .min()?;
                 let capacity = self.capacity_of(atlas, &e);
-                let won = self.hunt(g, room, Vec::new(), capacity).is_some();
+                let boosts = self.boosts_for(atlas, &e);
+                let won = self.hunt(g, room, Vec::new(), capacity, boosts).is_some();
                 Some((*name, g.worth, walk, won))
             })
             .collect()
@@ -471,9 +474,10 @@ impl<'a> Scene<'a> {
         let ours: Vec<Fighter> = (self.members_of(e).into_iter())
             .map(casting::fighter_of)
             .collect();
+        let boosts = self.boosts_for(atlas, e);
         let beats = |room: RoomName| match (self.in_sight(room), grounds.get(&room)) {
             (Some(r), Some(g)) => {
-                (self.hunt(g, r, ours.clone(), 0)).is_some_and(|(set, _)| set.is_empty())
+                (self.hunt(g, r, ours.clone(), 0, boosts)).is_some_and(|(set, _)| set.is_empty())
             }
             _ => false,
         };
@@ -541,7 +545,9 @@ impl<'a> Scene<'a> {
         );
 
         let capacity = self.capacity_of(atlas, e);
-        let Some((set, outcome)) = self.hunt(ground, room, fielding.clone(), capacity) else {
+        let boosts = self.boosts_for(atlas, e);
+        let Some((set, outcome)) = self.hunt(ground, room, fielding.clone(), capacity, boosts)
+        else {
             if fielding.is_empty() {
                 return Some(Engagement {
                     unanswered: true,
@@ -762,7 +768,7 @@ impl<'a> Scene<'a> {
                     &blocks,
                     &copies_of,
                     tick_worth,
-                    &self.boosts,
+                    self.boosts_for(atlas, e),
                 )?;
                 let cast = set.len();
                 let priced: Vec<Fighter> = (bodies.iter().chain(&asked_fighters).cloned())

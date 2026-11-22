@@ -67,7 +67,7 @@ pub(super) struct Scene<'a> {
     pub(super) armed: BTreeSet<Id>,
     pub(super) landed: Vec<Cast>,
     pub(super) spawning: Vec<Cast>,
-    pub(super) boosts: Vec<(ResourceType, i32)>,
+    pub(super) boosts: casting::Boosts,
 }
 
 impl<'a> Scene<'a> {
@@ -298,6 +298,22 @@ impl<'a> Scene<'a> {
         (*rooms.get(rooms.len().checked_sub(2)?)?).into()
     }
 
+    /// The nearest colony: a set is priced as walked and boosted from it, and
+    /// a body its stock boosts is cast there.
+    fn boost_home(&self, atlas: &Atlas, e: &Engagement) -> Option<RoomName> {
+        (self.colonies_of(atlas, e).iter())
+            .filter_map(|r| Some((self.walk_to(atlas, e, r.name)?, r.name)))
+            .min()
+            .map(|(_, home)| home)
+    }
+
+    pub(super) fn boosts_for(&self, atlas: &Atlas, e: &Engagement) -> &[(ResourceType, i32)] {
+        (self
+            .boost_home(atlas, e)
+            .and_then(|home| self.boosts.get(&home)))
+        .map_or(&[], Vec::as_slice)
+    }
+
     pub(super) fn walk_to(&self, atlas: &Atlas, e: &Engagement, from: RoomName) -> Option<i32> {
         let hops = Scene::hops(e);
         let crossed = match self.walks.get(&(e.room, hops)) {
@@ -390,21 +406,35 @@ impl<'a> Scene<'a> {
         asked: &mut Asked,
     ) {
         let colonies = self.colonies_of(atlas, e);
+        let home = self.boost_home(atlas, e);
+        let at_home: Vec<&Room> = colonies
+            .iter()
+            .copied()
+            .filter(|r| Some(r.name) == home)
+            .collect();
+        let boosts = self.boosts_for(atlas, e);
 
         for (slot, body) in set {
-            let colony = casting::colony_for(
-                &colonies,
-                &self.world.spawns,
-                &asked.queued,
-                &asked.asked,
-                |from| self.walk_to(atlas, e, from),
-                &body,
-            );
+            let pick = |from: &[&Room]| {
+                casting::colony_for(
+                    from,
+                    &self.world.spawns,
+                    &asked.queued,
+                    &asked.asked,
+                    |from| self.walk_to(atlas, e, from),
+                    &body,
+                )
+            };
+            // A body the home cannot cast goes unboosted wherever it is cast.
+            let boost = fighter::boosted_by(&body, boosts);
+            let (colony, boost) = match (boost, boost.and_then(|_| pick(&at_home))) {
+                (Some(c), Some(home)) => (Some(home), Some(c)),
+                _ => (pick(&colonies), None),
+            };
 
             if let Some(colony) = colony {
                 asked.queue(colony, &body);
-                let suffix = fighter::boosted_by(&body, &self.boosts)
-                    .map_or_else(String::new, |c| format!("-{c}"));
+                let suffix = boost.map_or_else(String::new, |c| format!("-{c}"));
                 let name = format!(
                     "{}{}-{}-{slot}{suffix}",
                     declarations::FIGHT_PREFIX,
