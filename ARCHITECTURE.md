@@ -368,7 +368,8 @@ pricer cost ~2× CPU and 580 lines for no gain and was not merged).
   on `Derived` facts that `outposts::busy` holds too), `Scout`, `Boost`, and future
   `Mine`/`Pickup` declarations without owning them.
 - **Labs (`economy/labs.rs`):** `labs::plan_for` derives a stateless per-tick
-  reaction plan from `declarations.flows` toward target compound stocks; labs
+  reaction plan from `declarations.flows` toward target compound stocks, any
+  lab product walked down the crate's `REACTIONS` to base ores; labs
   reserved for active boosts (§6.5) drop out of reactions and are filled by
   carriers via `Ground::boost_lab`. Layout places no lab below RCL8 (labs are
   worth little early); below RCL8 a declared cluster in a new room is inert.

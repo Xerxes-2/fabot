@@ -51,6 +51,8 @@ export const NODES = {
   R8: { level: 8, built: 7, stored: 50000, without: ["rampart"], modern: true, bodies: LATE_BODIES, buried: true, alone: true },
   // N7 with every room in reach avoided.
   A7: { level: 8, stored: 500000, without: ["rampart"], modern: true, bodies: LATE_BODIES, alone: true },
+  // A T3 from base ores alone: the cluster walks the whole reaction tree.
+  L8: { level: 8, stored: "500000,H:3000,O:3000,U:3000,K:3000,L:3000,Z:3000,X:3000", without: ["rampart"], modern: true, bodies: LATE_BODIES, alone: true, labs: { XGHO2: 500 } },
 };
 
 export const near = (room, hops) => {

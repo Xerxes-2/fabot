@@ -8,8 +8,8 @@ use krebs::doc::{Atom, Obj, Val};
 use krebs::intents::RoomIntents;
 use screeps::{
     CONSTRUCTION_COST_ROAD_SWAMP_RATIO, CONSTRUCTION_COST_ROAD_WALL_RATIO, CREEP_CLAIM_LIFE_TIME,
-    CREEP_LIFE_TIME, ENERGY_DECAY, LINK_LOSS_RATIO, Part, REPAIR_COST, SPAWN_ENERGY_CAPACITY,
-    StructureType, TOWER_ENERGY_COST, controller_levels,
+    CREEP_LIFE_TIME, ENERGY_DECAY, LINK_LOSS_RATIO, Part, REPAIR_COST, RESOURCES_ALL,
+    SPAWN_ENERGY_CAPACITY, StructureType, TOWER_ENERGY_COST, controller_levels,
 };
 use serde_json::{Map, Value, json};
 
@@ -450,13 +450,17 @@ impl Sampler {
             .map(|o| used(o) - store(o, atom!("energy")))
             .sum();
         let mut made = Map::new();
-        for r in ["OH", "UH", "UH2O"] {
+        for r in RESOURCES_ALL
+            .iter()
+            .filter(|r| r.reaction_components().is_some())
+        {
+            let r = r.to_string();
             made.insert(
-                r.into(),
+                r.clone(),
                 json!(
                     ours_in(&["storage", "terminal", "lab"])
                         .iter()
-                        .map(|o| store(o, Atom::intern(r)))
+                        .map(|o| store(o, Atom::intern(&r)))
                         .sum::<f64>()
                 ),
             );

@@ -13,7 +13,7 @@ pub use run::{EconomyState, decide};
 pub(crate) mod dice {
     use fabot_base::declarations::{Declared, Outpost};
     use fabot_base::engine;
-    use fabot_base::vocabulary::{Compound, Ore, Part, Resource, part_count_in};
+    use fabot_base::vocabulary::{Compound, Ore, Part, Resource, ResourceType, part_count_in};
     use fabot_base::world::{
         BodyPart, Controller, Creep, Id, Kind, Mineral, Owner, Pile, Pos, Remains, Room, RoomName,
         Site, Source, Spawn, Store, Structure, World,
@@ -40,7 +40,7 @@ pub(crate) mod dice {
             Resource::Energy,
             Resource::Ore(Ore::Hydrogen),
             Resource::Ore(Ore::Catalyst),
-            Resource::Compound(Compound::UtriumAcid),
+            Resource::Compound(Compound::new(ResourceType::UtriumAcid)),
             Resource::Other("T".to_string()),
         ]
     }

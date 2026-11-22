@@ -1,7 +1,7 @@
 use std::{borrow::Cow, cmp::Ordering};
 
 use screeps::Boost;
-pub use screeps::{Part, ResourceType};
+pub use screeps::{Part, RESOURCES_ALL, ResourceType};
 use strum::{EnumString, IntoStaticStr};
 
 pub fn part_letter(part: Part) -> char {
@@ -59,8 +59,6 @@ pub fn part_count_in(body: &[Part], part: Part) -> i32 {
     body.iter().filter(|each| **each == part).count() as i32
 }
 
-/// Each union compares by a hand-written ordinal: Fable's generic union
-/// equality walks the case structure, and v1 measured it on hot paths.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString, IntoStaticStr)]
 pub enum Ore {
     #[strum(serialize = "H")]
@@ -85,25 +83,49 @@ impl Ore {
     }
 }
 
-/// The UH line alone; a compound joins the day a decision names it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString, IntoStaticStr)]
-pub enum Compound {
-    #[strum(serialize = "OH")]
-    Hydroxide,
-    #[strum(serialize = "UH")]
-    UtriumHydride,
-    #[strum(serialize = "UH2O")]
-    UtriumAcid,
-}
+/// A lab product: the engine's REACTIONS, read from the crate, name its reagents.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Compound(ResourceType, [ResourceType; 2]);
 
 impl Compound {
-    pub fn ordinal(self) -> i32 {
-        self as i32
+    pub const fn of(resource: ResourceType) -> Option<Compound> {
+        match resource.reaction_components() {
+            Some(reagents) => Some(Compound(resource, reagents)),
+            None => None,
+        }
+    }
+
+    /// For a compound the source names: in a `const`, a wrong name fails the build.
+    pub const fn new(resource: ResourceType) -> Compound {
+        match Compound::of(resource) {
+            Some(compound) => compound,
+            None => panic!("not a lab product"),
+        }
+    }
+
+    pub fn resource_type(self) -> ResourceType {
+        self.0
+    }
+
+    pub fn reagents(self) -> [Resource; 2] {
+        self.1.map(resource_of_type)
+    }
+}
+
+impl PartialOrd for Compound {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Compound {
+    fn cmp(&self, other: &Self) -> Ordering {
+        (self.0 as i32).cmp(&(other.0 as i32))
     }
 }
 
 /// A season's own resource stays `Season`'s and joins here only as `Other`.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Resource {
     Energy,
     Ore(Ore),
@@ -112,33 +134,9 @@ pub enum Resource {
 }
 
 impl Resource {
-    pub fn ordinal(&self) -> i32 {
-        match self {
-            Resource::Energy => 0,
-            Resource::Ore(ore) => 1 + ore.ordinal(),
-            Resource::Compound(compound) => 16 + compound.ordinal(),
-            Resource::Other(_) => 64,
-        }
-    }
-
     #[inline]
     pub fn is_energy(&self) -> bool {
         self == &Resource::Energy
-    }
-}
-
-impl PartialOrd for Resource {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for Resource {
-    fn cmp(&self, other: &Self) -> Ordering {
-        match (self, other) {
-            (Resource::Other(a), Resource::Other(b)) => a.cmp(b),
-            _ => self.ordinal().cmp(&other.ordinal()),
-        }
     }
 }
 
@@ -146,18 +144,32 @@ pub fn resource_name(resource: &Resource) -> Cow<'static, str> {
     match resource {
         Resource::Energy => "energy".into(),
         Resource::Ore(ore) => Cow::Borrowed(ore.into()),
-        Resource::Compound(compound) => Cow::Borrowed(compound.into()),
+        Resource::Compound(compound) => compound.0.to_string().into(),
         Resource::Other(name) => name.to_owned().into(),
     }
 }
 
 pub fn resource_of_name(name: &str) -> Resource {
-    match name {
-        "energy" => Resource::Energy,
-        name => (name.parse().map(Resource::Ore))
-            .or_else(|_| name.parse().map(Resource::Compound))
-            .unwrap_or_else(|_| Resource::Other(name.to_string())),
-    }
+    (name.parse()).map_or_else(|_| Resource::Other(name.to_string()), resource_of_type)
+}
+
+pub fn resource_of_type(resource: ResourceType) -> Resource {
+    use ResourceType as T;
+    let ore = match resource {
+        T::Energy => return Resource::Energy,
+        T::Hydrogen => Ore::Hydrogen,
+        T::Oxygen => Ore::Oxygen,
+        T::Utrium => Ore::Utrium,
+        T::Keanium => Ore::Keanium,
+        T::Lemergium => Ore::Lemergium,
+        T::Zynthium => Ore::Zynthium,
+        T::Catalyst => Ore::Catalyst,
+        _ => {
+            return Compound::of(resource)
+                .map_or_else(|| Resource::Other(resource.to_string()), Resource::Compound);
+        }
+    };
+    Resource::Ore(ore)
 }
 
 pub fn is_mineral(resource: &Resource) -> bool {

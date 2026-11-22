@@ -52,11 +52,13 @@ import { loadTransactionBlob, loadTransactionEntries } from "xxscreeps/mods/clas
 import { read as readTransaction } from "xxscreeps/mods/classic/brokerage/transaction.js";
 import { getProcessorChannel, pushIntentsForRoomNextTick, userToIntentRoomsSetKey } from "xxscreeps/engine/processor/model.js";
 import { kInvaderUserId } from "xxscreeps/mods/classic/invader/game.js";
+import { REACTIONS } from "xxscreeps/mods/classic/chemistry/constants.js";
 import { typedArrayToString } from "xxscreeps/utility/string.js";
 import { METRICS, windows } from "./metrics.mjs";
 import { engagements } from "./engaged.mjs";
 const LETTER = { move: "m", work: "w", carry: "c", attack: "a", ranged_attack: "r", heal: "h", claim: "k", tough: "t" };
 const letters = (body) => body.map((p) => LETTER[p.type]).join("");
+const COMPOUNDS = [...new Set(Object.values(REACTIONS).flatMap(Object.values))];
 
 const [ticksArg, everyArg, roomArg, username, out, wavesArg = "", opponentsPath, coresArg = "", waveArg = "melee,healer,ranged", watchArg = "0", followArg = ""] = process.argv.slice(2);
 const homes = roomArg.split(",");
@@ -768,7 +770,7 @@ for (let t = 0; t < ticks; t++) {
     row.made = {};
     for (const o of rooms.flatMap((r) => [...r["#objects"]]))
       if (o["#user"] === ours && o.store && ["storage", "terminal", "lab"].includes(o.structureType))
-        for (const r of ["OH", "UH", "UH2O"]) row.made[r] = (row.made[r] ?? 0) + (o.store.getUsedCapacity(r) ?? 0);
+        for (const r of COMPOUNDS) row.made[r] = (row.made[r] ?? 0) + (o.store.getUsedCapacity(r) ?? 0);
     row.bounced = bounced;
     row.faults = seenFaults.size;
     row.lost = lost.size;

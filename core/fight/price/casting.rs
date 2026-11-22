@@ -175,7 +175,8 @@ pub fn side_in(room: Option<&Room>, bodies: Vec<Fighter>) -> exchange::Side {
 /// A body the lab stock does not all cover is cast unboosted rather than held.
 pub fn cluster_boost(world: &World, declarations: &Declarations) -> Option<(ResourceType, i32)> {
     let (home, _) = declarations.labs()?;
-    let (compound, energy) = fabot_base::boost::home_holds(world, home, Compound::UtriumAcid);
+    let uh2o = const { Compound::new(ResourceType::UtriumAcid) };
+    let (compound, energy) = fabot_base::boost::home_holds(world, home, uh2o);
     let parts =
         (compound / engine::BOOST_MINERAL_PER_PART).min(energy / engine::BOOST_ENERGY_PER_PART);
 

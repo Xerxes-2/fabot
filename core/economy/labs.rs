@@ -18,7 +18,7 @@ pub fn next_reaction(
     stock: &dyn Fn(&Resource) -> i32,
 ) -> Option<Compound> {
     fn toward(compound: Compound, want: i32, stock: &dyn Fn(&Resource) -> i32) -> Option<Compound> {
-        let (first, second) = engine::reagents_of(compound);
+        let [first, second] = compound.reagents();
         let deeper = [&first, &second]
             .into_iter()
             .find_map(|reagent| match reagent {
@@ -65,7 +65,7 @@ pub fn ore_short(
         match resource {
             _ if rest <= 0 => (),
             Resource::Compound(c) => {
-                let (first, second) = engine::reagents_of(*c);
+                let [first, second] = c.reagents();
                 need(&first, rest, left, short, stock);
                 need(&second, rest, left, short, stock);
             }
@@ -124,7 +124,7 @@ pub fn plan_for(
         };
     };
 
-    let (first, second) = engine::reagents_of(compound);
+    let [first, second] = compound.reagents();
     let (one, other) = roles.reagents;
     let holds = |lab: Id, mineral: &Resource| held(lab).is_some_and(|(m, _)| &m == mineral);
     let (first_lab, second_lab) = if holds(one, &second) || holds(other, &first) {
@@ -177,7 +177,7 @@ pub fn ready_runs(
         return Vec::new();
     };
     let (one, other) = roles.reagents;
-    let (first, second) = engine::reagents_of(*compound);
+    let [first, second] = compound.reagents();
     let product = Resource::Compound(*compound);
     let stocked = |lab: Id, reagent: &Resource| {
         held(lab).is_some_and(|(m, amount)| &m == reagent && amount >= engine::LAB_REACTION_AMOUNT)
@@ -203,7 +203,7 @@ pub fn ready_runs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fabot_base::vocabulary::Ore;
+    use fabot_base::vocabulary::{Ore, RESOURCES_ALL, ResourceType};
     use fabot_base::world::RoomName;
 
     fn stocked(pairs: &[(Resource, i32)]) -> impl Fn(&Resource) -> i32 + '_ {
@@ -212,29 +212,41 @@ mod tests {
 
     #[test]
     fn a_short_compound_makes_its_short_reagent_first() {
-        let targets = BTreeMap::from([(Compound::UtriumAcid, 3000)]);
+        let targets = BTreeMap::from([(Compound::new(ResourceType::UtriumAcid), 3000)]);
         let ore = |o| (Resource::Ore(o), 10_000);
         let stock = [ore(Ore::Hydrogen), ore(Ore::Oxygen), ore(Ore::Utrium)];
         assert_eq!(
             next_reaction(&targets, &stocked(&stock)),
-            Some(Compound::Hydroxide)
+            Some(Compound::new(ResourceType::UtriumHydride))
         );
         let mut more = stock.to_vec();
-        more.push((Resource::Compound(Compound::Hydroxide), 3000));
-        more.push((Resource::Compound(Compound::UtriumHydride), 3000));
+        more.push((
+            Resource::Compound(Compound::new(ResourceType::Hydroxide)),
+            3000,
+        ));
+        more.push((
+            Resource::Compound(Compound::new(ResourceType::UtriumHydride)),
+            3000,
+        ));
         assert_eq!(
             next_reaction(&targets, &stocked(&more)),
-            Some(Compound::UtriumAcid)
+            Some(Compound::new(ResourceType::UtriumAcid))
         );
-        more.push((Resource::Compound(Compound::UtriumAcid), 3000));
+        more.push((
+            Resource::Compound(Compound::new(ResourceType::UtriumAcid)),
+            3000,
+        ));
         assert_eq!(next_reaction(&targets, &stocked(&more)), None);
     }
 
     #[test]
     fn the_ore_short_is_the_target_less_what_stands_through_its_recipe() {
-        let targets = BTreeMap::from([(Compound::UtriumAcid, 3000)]);
+        let targets = BTreeMap::from([(Compound::new(ResourceType::UtriumAcid), 3000)]);
         let stock = [
-            (Resource::Compound(Compound::Hydroxide), 1000),
+            (
+                Resource::Compound(Compound::new(ResourceType::Hydroxide)),
+                1000,
+            ),
             (Resource::Ore(Ore::Hydrogen), 2000),
         ];
         let short = ore_short(&targets, &stocked(&stock));
@@ -242,6 +254,56 @@ mod tests {
         assert_eq!(short.get(&Resource::Ore(Ore::Hydrogen)), Some(&3000));
         assert_eq!(short.get(&Resource::Ore(Ore::Oxygen)), Some(&2000));
         assert_eq!(short.get(&Resource::Ore(Ore::Utrium)), Some(&3000));
+    }
+
+    #[test]
+    fn every_compound_breaks_down_to_base_ores() {
+        fn bottoms_out(r: &Resource) -> bool {
+            match r {
+                Resource::Ore(_) => true,
+                Resource::Compound(c) => c.reagents().iter().all(bottoms_out),
+                _ => false,
+            }
+        }
+        let all: Vec<Compound> = RESOURCES_ALL
+            .iter()
+            .filter_map(|r| Compound::of(*r))
+            .collect();
+        assert!(!all.is_empty());
+        for c in all {
+            assert!(bottoms_out(&Resource::Compound(c)), "{c:?}");
+        }
+    }
+
+    #[test]
+    fn a_t3_from_base_ores_makes_each_intermediate_before_its_product() {
+        let xgho2 = Compound::new(ResourceType::CatalyzedGhodiumAlkalide);
+        let targets = BTreeMap::from([(xgho2, 3000)]);
+        let mut stock: Vec<(Resource, i32)> = [
+            Ore::Hydrogen,
+            Ore::Oxygen,
+            Ore::Utrium,
+            Ore::Keanium,
+            Ore::Lemergium,
+            Ore::Zynthium,
+            Ore::Catalyst,
+        ]
+        .map(|o| (Resource::Ore(o), 10_000))
+        .to_vec();
+        let mut made = Vec::new();
+        loop {
+            let next = next_reaction(&targets, &stocked(&stock));
+            let Some(next) = next else { break };
+            assert!(!made.contains(&next), "{next:?} made twice");
+            for reagent in next.reagents() {
+                if let Resource::Compound(c) = reagent {
+                    assert!(made.contains(&c), "{next:?} before its {c:?}");
+                }
+            }
+            made.push(next);
+            stock.push((Resource::Compound(next), 3000));
+        }
+        assert_eq!(made.last(), Some(&xgho2));
     }
 
     #[test]

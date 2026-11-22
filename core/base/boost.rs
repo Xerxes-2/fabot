@@ -1,5 +1,5 @@
 use super::engine;
-use super::vocabulary::{self, Compound, Resource, ResourceType};
+use super::vocabulary::{self, Compound, Resource};
 use super::world::{self, Id, Kind, Pos, RoomName, World};
 
 /// A cast name's last token names the compound its body walks to a lab for.
@@ -85,11 +85,8 @@ pub fn can_boost(lab: &world::Structure, compound: Compound) -> bool {
 }
 
 fn boost_need(creep: &world::Creep, compound: Compound) -> (i32, i32) {
-    let compound = vocabulary::resource_name(&Resource::Compound(compound))
-        .parse::<ResourceType>()
-        .ok();
     let parts = (creep.body.iter())
-        .filter(|p| p.boost.is_none() && compound.is_some_and(|c| vocabulary::takes(p.kind, c)))
+        .filter(|p| p.boost.is_none() && vocabulary::takes(p.kind, compound.resource_type()))
         .count() as i32;
 
     (

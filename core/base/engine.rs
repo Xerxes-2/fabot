@@ -1,6 +1,4 @@
-use super::vocabulary::{
-    Compound, Ore, Part, Resource, ResourceType, damage_ratio, multiple, part_count_in,
-};
+use super::vocabulary::{Part, ResourceType, damage_ratio, multiple, part_count_in};
 use screeps::StructureType;
 
 pub const MAX_BODY_PARTS: usize = screeps::MAX_CREEP_SIZE as usize;
@@ -129,17 +127,6 @@ pub fn lifetime(mut body: impl Iterator<Item = Part>) -> i32 {
 #[inline]
 pub fn body_cost(body: &[Part]) -> i32 {
     body.iter().map(|part| part_cost(*part)).sum()
-}
-
-pub fn reagents_of(compound: Compound) -> (Resource, Resource) {
-    match compound {
-        Compound::Hydroxide => (Resource::Ore(Ore::Hydrogen), Resource::Ore(Ore::Oxygen)),
-        Compound::UtriumHydride => (Resource::Ore(Ore::Utrium), Resource::Ore(Ore::Hydrogen)),
-        Compound::UtriumAcid => (
-            Resource::Compound(Compound::Hydroxide),
-            Resource::Compound(Compound::UtriumHydride),
-        ),
-    }
 }
 
 pub fn controller_downgrade(level: i32) -> i32 {

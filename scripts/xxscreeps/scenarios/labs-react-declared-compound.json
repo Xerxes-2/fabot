@@ -3,5 +3,5 @@
   "modules": ["atlas", "economy", "layout", "mv"],
   "start": { "room": "W8N3", "seed": 1, "node": "L5" },
   "ticks": 4000,
-  "assert": [{ "measure": "made", "resource": "OH", "min": 200 }]
+  "assert": [{ "measure": "made", "resource": "UH", "min": 200 }]
 }
