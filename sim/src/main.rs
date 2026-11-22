@@ -5,6 +5,7 @@
 
 mod act;
 mod driver;
+mod duel;
 mod engaged;
 mod lives;
 mod npc;
@@ -194,6 +195,9 @@ impl Engine {
 }
 
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("duel") {
+        return duel::main();
+    }
     let args = args();
     let map = world::read(&args.world);
     eprintln!("colony: {}; output {}", args.room, args.out);

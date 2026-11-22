@@ -46,7 +46,7 @@ import { node26Env } from "./node26.mjs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { check, engagementsOf, measures, samplesOf, withAlways } from "./measures.mjs";
-import { report } from "./prediction.mjs";
+import { report } from "../sim/prediction.mjs";
 import { sweep } from "./prune.mjs";
 import { unstood } from "../sim/node.mjs";
 import { SIM_MEASURES, SIM_START, buildPlan, exportTemplate, runSim, simBinary, unseated } from "../sim/run.mjs";

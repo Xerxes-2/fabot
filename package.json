@@ -21,7 +21,7 @@
     "build:sim": "node scripts/sim/build.mjs",
     "metrics:baseline": "node scripts/metrics-baseline.mjs",
     "scenario": "node scripts/xxscreeps/scenario.mjs",
-    "exchange": "node scripts/xxscreeps/exchange.mjs"
+    "exchange": "node scripts/sim/exchange.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",

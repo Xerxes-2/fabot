@@ -102,7 +102,7 @@ impl Stored {
         &mut objects[i].1
     }
 
-    fn put(&mut self, room: usize, object: &str, name: &str, value: Value) {
+    pub fn put(&mut self, room: usize, object: &str, name: &str, value: Value) {
         self.named(room, object).insert(name.to_string(), value);
     }
 

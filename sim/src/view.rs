@@ -50,7 +50,6 @@ pub fn ms(at: std::time::Instant) -> f64 {
     at.elapsed().as_secs_f64() * 1000.0
 }
 
-/// One event of a room's log: its kind, actor, target and amounts.
 pub struct Event<'a> {
     pub kind: u32,
     pub by: &'a str,

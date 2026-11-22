@@ -15,6 +15,7 @@ use serde_json::{Value, json};
 pub const US: &str = "u1";
 pub const USERNAME: &str = "fabot";
 pub const INVADER: &str = "2";
+pub const RIVAL: (&str, &str) = ("u2", "rival");
 pub const KEEPER: &str = "3";
 
 pub struct Map {
@@ -138,10 +139,6 @@ impl Map {
             "name": "Spawn1", "user": US, "store": { "energy": SPAWN_ENERGY_START }, "storeCapacityResource": { "energy": SPAWN_ENERGY_CAPACITY },
             "hits": SPAWN_HITS, "hitsMax": SPAWN_HITS, "spawning": null, "notifyWhenAttacked": true }));
         }
-        let user = |id: &str, name: &str| {
-            json!({ "_id": id, "username": name, "usernameLower": name.to_lowercase(),
-            "cpu": 100, "gcl": 0, "cpuAvailable": 10000, "active": 10000, "rooms": [], "money": 0, "power": 0 })
-        };
         let mut us = user(US, USERNAME);
         let homes = objects
             .iter()
@@ -159,40 +156,49 @@ impl Map {
             "users": users,
             "rooms.objects": objects,
         });
-        let scenario = json!({ "kind": "global", "worldSeed": format!("0x{seed:x}"),
+        krebs(db, seed, t)
+    }
+}
+
+pub fn user(id: &str, name: &str) -> Value {
+    json!({ "_id": id, "username": name, "usernameLower": name.to_lowercase(),
+    "cpu": 100, "gcl": 0, "cpuAvailable": 10000, "active": 10000, "rooms": [], "money": 0, "power": 0 })
+}
+
+pub fn krebs(db: Value, seed: u64, t: i64) -> World {
+    let scenario = json!({ "kind": "global", "worldSeed": format!("0x{seed:x}"),
             "clock": { "baseMs": 0, "baseTick": 0, "nominalTickMs": crate::TICK_MS }, "gameTime": t, "worldSize": 0,
             "compat": "private", "db": db });
-        let text = Json::parse(&scenario.to_string()).expect("krebs reads JSON");
-        let mut w = GlobalScenario::from_json(&text)
-            .and_then(|s| s.world())
-            .expect("krebs stands the world");
-        w.config = Arc::new(EngineConfig {
-            history: false,
-            ..(*w.config).clone()
-        });
-        // An import derives no presence: until a room is processed nobody sees it.
-        for r in 0..w.rooms.len() {
-            let s = &w.rooms[r];
-            let (info, objects, flags) = (s.info.clone(), s.objects.to_vec(), s.flags.clone());
-            let seen = RoomSnapshot::from_docs(
-                info,
-                objects,
-                flags,
-                s.event_log.clone(),
-                s.map_view.clone(),
-                s.processed_at,
-                &w.user_ids,
-            );
-            w.rooms[r] = Arc::new(seen);
-            w.active.insert(r as u32);
-        }
-        w
+    let text = Json::parse(&scenario.to_string()).expect("krebs reads JSON");
+    let mut w = GlobalScenario::from_json(&text)
+        .and_then(|s| s.world())
+        .expect("krebs stands the world");
+    w.config = Arc::new(EngineConfig {
+        history: false,
+        ..(*w.config).clone()
+    });
+    // An import derives no presence: until a room is processed nobody sees it.
+    for r in 0..w.rooms.len() {
+        let s = &w.rooms[r];
+        let (info, objects, flags) = (s.info.clone(), s.objects.to_vec(), s.flags.clone());
+        let seen = RoomSnapshot::from_docs(
+            info,
+            objects,
+            flags,
+            s.event_log.clone(),
+            s.map_view.clone(),
+            s.processed_at,
+            &w.user_ids,
+        );
+        w.rooms[r] = Arc::new(seen);
+        w.active.insert(r as u32);
     }
+    w
 }
 
 /// A `rooms` doc as the official world generator lays it out: a highway a
 /// bus with its sector's deposit type, a keeper room marked so.
-fn room_doc(name: &str, closed: bool) -> Value {
+pub fn room_doc(name: &str, closed: bool) -> Value {
     let status = if closed { "out of borders" } else { "normal" };
     let mut doc = json!({ "_id": name, "status": status });
     let Some(xy) = RoomXY::parse_engine(name) else {

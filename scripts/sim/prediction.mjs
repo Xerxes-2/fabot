@@ -9,7 +9,7 @@ export const outcome = (a) => (a.won === true ? "won" : a.won === false ? "lost"
 // (a home's turned unanswered after it was answered), whatever came after; one
 // that quit before contact, none of ours dead, tested no prediction. Unresolved:
 // still open and answered when the run ended. Ticks from first contact to
-// the group's last sighting, as `engine/duel-step.mjs` reads a duel.
+// the group's last sighting, as `sim duel` reads a duel.
 export function engagement(e) {
   const quit = e.disengaged || e.gaveUp;
   const won = quit ? (e.contact === null && e.dead === 0 ? null : false) : e.closed !== null && !e.outlived ? true : null;

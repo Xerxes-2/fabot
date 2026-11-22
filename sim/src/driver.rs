@@ -63,7 +63,6 @@ impl<W: Write> Driver<W> {
         }
     }
 
-    /// One tick of the bot: its intents by room.
     pub fn tick(
         &mut self,
         v: &View,

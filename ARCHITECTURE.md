@@ -739,7 +739,7 @@ arithmetic and invariants.
 
 Every engagement records `Predicted` at open and compares against actual
 outcome at close. Offline, `npm run exchange` and fight scenarios evaluate
-predictions via `scripts/xxscreeps/prediction.mjs`; `predictedWinsLost` fails a
+predictions via `scripts/sim/prediction.mjs`; `predictedWinsLost` fails a
 scenario as an `Exchange` bug. `❓` Live `engagements.log` segment and
 `observe exchange`.
 
@@ -756,6 +756,8 @@ Two engines complement each other:
   rooms) because `genInvaders` raids only a sector with a live core and
   `genStrongholds` stands one only from a centre room in the world. When `sim`
   and `xxscreeps` disagree, `@screeps/engine` / `@screeps/backend` settles it.
+  `npm run exchange` plays its duels on `sim` too (`sim duel`,
+  `sim/src/duel/`), so the prediction error is read over thousands of duels.
   - `❓` Still on `xxscreeps` (`SIM_START`/`SIM_MEASURES` in `scripts/sim/run.mjs`):
     active rival bots/raids, resumed worlds (`at`/`bundle`), capture intel
     segments, and unported measures (`decay.jsonl`, `waves`, `lost`).

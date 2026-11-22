@@ -2,7 +2,7 @@
 // these per scenario, and `npm run soak` and soak:many hold `invariants`.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { bugs, engagement } from "./prediction.mjs";
+import { bugs, engagement } from "../sim/prediction.mjs";
 
 // Ticks are counted from the bot's first, so a window means the same on every start.
 // Each engagement the run priced, as `prediction.mjs` reads a row; one never

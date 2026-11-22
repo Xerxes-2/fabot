@@ -629,7 +629,9 @@ dependencies = [
  "fabot-layout",
  "fabot-observe",
  "mimalloc",
+ "pathfinder",
  "screeps-game-api",
+ "serde",
  "serde_json",
  "util",
 ]
