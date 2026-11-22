@@ -105,6 +105,9 @@ where
     if misread > 0 {
         faults.push(("world", format!("{misread} objects' ids not hex: dropped")));
     }
+    for room in &decided.misfiled {
+        faults.push(("strategy", format!("{room}: kept pile is not its plan's")));
+    }
 
     let start = clock();
     let refusals = (seam.execute)(&decided.result.settled.actions);

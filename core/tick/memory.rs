@@ -67,6 +67,7 @@ impl Memory {
             },
             strategy: StrategyState {
                 expansion: Deserialize::deserialize(&v2["expansion"]).unwrap_or_default(),
+                piles: Deserialize::deserialize(&v2["piles"]).unwrap_or_default(),
                 ..StrategyState::default()
             },
             ..State::default()
@@ -92,6 +93,7 @@ impl Memory {
             "due": state.fight.due,
         });
         v2["expansion"] = json!(state.strategy.expansion);
+        v2["piles"] = json!(state.strategy.piles);
         // Unchanged, `RawMemory.set` would only copy the text across the seam.
         serde_json::to_string(&BTreeMap::from([("v2", &self.v2)]))
             .ok()

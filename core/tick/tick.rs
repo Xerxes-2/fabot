@@ -280,6 +280,7 @@ pub struct Decided {
     pub refused: Refused,
     pub sightings: Sightings,
     pub atlas: Atlas,
+    pub misfiled: fabot_strategy::Misfiled,
 }
 
 /// From the world read to the intents settled. `began` is when the `world`
@@ -312,7 +313,7 @@ pub fn decide<'t>(
     let start = clock();
     let mut derived = derive(world, &mut atlas);
     phases.push(("derive".to_string(), clock() - start));
-    let plans = strategy::plan(
+    let (plans, misfiled) = strategy::plan(
         (!state.off.contains(STRATEGY), world, &mut atlas),
         &derived,
         &declarations,
@@ -323,7 +324,7 @@ pub fn decide<'t>(
             &state.fight.due,
         ),
         (&state.layout, &state.economy.spare),
-        (terrain, &mut state.strategy.expansion),
+        (terrain, &mut state.strategy),
     );
     let declarations = declarations.planned(plans);
     derived.worked = worked(world, &sightings, &declarations, &derived);
@@ -349,6 +350,7 @@ pub fn decide<'t>(
         refused,
         sightings,
         atlas,
+        misfiled,
     }
 }
 

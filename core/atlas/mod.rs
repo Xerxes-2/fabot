@@ -10,7 +10,9 @@ use std::rc::Rc;
 mod derived;
 mod graph;
 
-pub use self::derived::{Context, Derived, derive, nearest, server, sponsor, target_at, worked};
+pub use self::derived::{
+    BANK_LEVEL, Context, Derived, Home, derive, nearest, server, sponsor, target_at, worked,
+};
 pub use self::graph::Tree;
 use self::graph::Way;
 

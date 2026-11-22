@@ -46,6 +46,9 @@ pub struct Standing {
     pub key: Vec<Tile>,
     pub plan: Option<Plan>,
     pub drawing: Option<super::plan::Drawing>,
+    /// Drawn on a heap that held no plan for the room (a reset, or a new
+    /// colony), not over a changed ground.
+    pub cold: bool,
 }
 
 /// The towers, planned beside the anchor, still fire at two thirds this far off.

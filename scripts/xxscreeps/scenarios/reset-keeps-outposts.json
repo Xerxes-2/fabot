@@ -1,0 +1,10 @@
+{
+  "why": "a global reset (heap lost; Memory, segments and world kept) never changes which outposts are picked",
+  "modules": ["strategy", "economy", "atlas"],
+  "start": { "room": "W9N8", "seed": 1, "resetEvery": 1000 },
+  "ticks": 2100,
+  "assert": [
+    { "measure": "outpostFlips", "from": 990, "to": 1100, "max": 0 },
+    { "measure": "outpostFlips", "from": 1990, "to": 2100, "max": 0 }
+  ]
+}

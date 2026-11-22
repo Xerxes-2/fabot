@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::expand;
-use fabot_atlas::{self as atlas, Atlas, Derived};
+use fabot_atlas::{self as atlas, Atlas, Derived, Home};
 use fabot_base::declarations::{
     ColonyPlan, Declarations, OpKind, Operation, Outpost, REACH_HOPS, SIEGE_HOPS, Stage,
 };
@@ -213,20 +213,13 @@ pub fn survey(
             || claimed == Some(*room)
     };
     for (home, tree) in &derived.trees {
-        let Some(room) = world.room(*home) else {
-            continue;
-        };
-        let Some(spawn) = world.spawns.iter().find(|s| s.pos.room == *home) else {
+        let Some(h @ Home { spawn, .. }) = derived.home(*home) else {
             continue;
         };
         // `ARCHITECTURE.md` §7.2.
-        let level = room.controller.as_ref().map_or(0, |c| c.level);
-        let banks = (room.structures.iter())
-            .any(|s| s.kind == StructureType::Storage && s.owner.is_ours())
-            || plans.iter().any(|p| p.room == *home && p.pile.is_some());
-        let picks = banks && level >= 2;
+        let banks = plans.iter().any(|p| p.room == *home && h.banks(p));
         let walk = |hops: i32, outpost: &Outpost| {
-            let to = |s: &fabot_base::declarations::Declared| tiles::seam_range(&spawn.pos, &s.pos);
+            let to = |s: &fabot_base::declarations::Declared| tiles::seam_range(spawn, &s.pos);
             let ranges: Vec<i32> = outpost.sources.iter().filter_map(to).collect();
             let mean = ranges.iter().sum::<i32>() / (ranges.len() as i32).max(1);
             mean.max(hops * engine::ROOM_SIDE)
@@ -249,7 +242,7 @@ pub fn survey(
                         declared: true,
                         stands: intel.get(&name).is_some_and(|r| r.contained),
                     },
-                    _ if taken(&name) || !picks => continue,
+                    _ if taken(&name) || !banks => continue,
                     (None, Some(row)) if row.sources.is_some() => {
                         let theirs = |user: &String| user != &world.me;
                         let lapsed =

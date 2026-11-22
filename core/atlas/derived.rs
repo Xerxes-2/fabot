@@ -93,7 +93,7 @@ pub fn sponsor(
 
 /// The colony that serves a worked room, for Economy's haul and Strategy's
 /// defence alike (§5): a claim its sponsor, an outpost the nearest on foot
-/// whose storage or pile banks the haul. `planned`: a colony's merged plan.
+/// that banks the haul. `planned`: a colony's merged plan.
 pub fn server<'p>(
     atlas: &mut Atlas,
     derived: &Derived,
@@ -105,9 +105,8 @@ pub fn server<'p>(
         return sponsor(atlas, derived, &given_up, at);
     }
     let banks = |i: usize| {
-        let room = derived.colonies[i];
-        let piled = planned(room).is_some_and(|p| p.pile.is_some());
-        !given_up(room) && (derived.homes[i].stocked || piled)
+        let (room, home) = (derived.colonies[i], &derived.homes[i]);
+        !given_up(room) && planned(room).is_some_and(|p| home.banks(p))
     };
     let spawns: Vec<Pos> = derived.homes.iter().map(|h| h.spawn).collect();
     nearest(atlas, &|room| derived.tree(room), &spawns, banks, at)
@@ -139,9 +138,22 @@ pub struct Derived {
     pub clusters: Vec<RoomName>,
 }
 
+/// A colony banks its haul from here (§5): on its storage, else on its hub's pile.
+pub const BANK_LEVEL: i32 = 2;
+
+impl Home {
+    pub fn banks(&self, plan: &ColonyPlan) -> bool {
+        plan.target >= BANK_LEVEL && (self.stocked || plan.pile.is_some())
+    }
+}
+
 impl Derived {
     pub fn danger(&self, room: RoomName) -> Option<&TileSet> {
         (self.danger.iter()).find_map(|(r, d)| (*r == room).then_some(d))
+    }
+
+    pub fn home(&self, room: RoomName) -> Option<&Home> {
+        (self.colonies.iter().zip(&self.homes)).find_map(|(c, h)| (*c == room).then_some(h))
     }
 
     #[inline]

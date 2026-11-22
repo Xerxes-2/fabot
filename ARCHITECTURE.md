@@ -143,7 +143,7 @@ segments over multiple ticks (economy first); a cold tick never spends more than
 | `Exchange` | `fabot-exchange` | Pure combat arithmetic (`outcome`, `cheapest_win`, breach planning) | fighters, terrain | — |
 | `Fight` | `fabot-fight` | Hostile `Tracker`, engagements (`kinds/`: defend, siege, sweep, raid), casting | `Derived`, `Atlas`, `Exchange`, `declarations` (its operations table), `intel`, `FightState` | fight actions, asks, wishes, casts, `FightState` |
 | `Tactics` | `fabot-tactics` | Per-creep combat actions, stepping, and the operator's tactic rules (`ruling`, `checked`) (no `Fight` import) | `Atlas`, `Move`, `Sight` + plan | creep actions, wishes |
-| `Strategy` | `fabot-strategy` | Intel, observers/scouts, `ColonyPlan` & outpost selection, expansion/abandon, operation opening & global force priority | `World`, `Derived`, `intel`, `Season`, `standing.layout`, `spare`, fight state | `declarations` (`ColonyPlan`, outposts, claims, operations), `intel`, `expansion` |
+| `Strategy` | `fabot-strategy` | Intel, observers/scouts, `ColonyPlan` & outpost selection, expansion/abandon, operation opening & global force priority | `World`, `Derived`, `intel`, `Season`, `standing.layout`, `spare`, fight state | `declarations` (`ColonyPlan`, outposts, claims, operations), `intel`, `expansion`, `piles` |
 | `Season` | `fabot-strategy` (private `season`) | Disposable seasonal rules (`worth`, `spent`, season structures/scoring) | `World` | declarations to `Strategy`, season actions |
 | `Move` | `fabot-mv` | Room-level movement arbitration (augmenting-path matching) and stepping (`plan`, `blob`) | wishes, `Atlas` | moves & held bodies (`Settled`) |
 | `Executor` | `fabot` | Turning settled actions into API calls | `Settled.actions` | `Game`, refusals |
@@ -192,6 +192,7 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
 | `fight.due` | colonies with imminent siege successor | Fight | Memory | feeds `ColonyPlan.owes` and `.fights` (§5) |
 | `declarations` | operator overrides + per-tick `Strategy` plans (`ColonyPlan`, outposts, claims, operations, allies, enemies, sieges, avoid, tactic rules) | Strategy | Memory (operator); plans rebuilt per tick | world configuration as data |
 | `expansion` | in-flight claim, failed rooms (100k fade), abandoned colonies | Strategy | Memory | outlives travel, stock dips, and raze ticks |
+| `piles` | colony → its hub: pile tile, or built over (`Plan::pile`) | Strategy | Memory | written from the plan whenever one stands, read only while none does (a reset redraws it over ticks), so a colony banks and picks outposts on the cold tick as warm; no `--check`: a heap's first plan apart from the hub kept before it is a live fault, a warm replan updates it; dropped with its colony |
 | `switches` | module name → bool (`false` disables; `recorder: true` opts in) | Main | Memory | live kill switches |
 | `observe.*` | health, faults, per-module CPU, counts, tactic offers, alerts | Observe | segment 1 | operator telemetry & benchmark calibration |
 | `intel.rooms` | per-room snapshot (seen tick, owner/level, reservation, worker (another player's WORK body, never an Invader), keeper posts, controller/sources/containers, mineral, stronghold; by username, never stance) | Strategy | heap + segment 2 (every 100 ticks) | serve out-of-sight rooms; price outposts & expansion |

@@ -48,7 +48,9 @@ pub fn colonies(
         // key leaves them out.
         let key = ground::obstacles(room);
 
-        let held = standing.remove(&room.name).filter(|s| s.key == key);
+        let held = standing.remove(&room.name);
+        let cold = held.is_none();
+        let held = held.filter(|s| s.key == key);
         let ground = (held.as_ref())
             .is_none_or(|s| s.drawing.is_some())
             .then(|| ground::of_room(room))
@@ -57,6 +59,7 @@ pub fn colonies(
             key,
             plan: None,
             drawing: ground.as_ref().map(plan::Drawing::of),
+            cold,
         });
         if let (Some(d), Some(g)) = (&mut kept.drawing, &ground)
             && let plan::Drawn::Done(done) = d.advance(&world.rules, g, &mut budget)

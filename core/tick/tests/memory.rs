@@ -16,7 +16,8 @@ const OURS: &str = concat!(
     r#""tactic":"kite","order":[],"phase":"pursuing","opened":1,"since":2,"lost":0,"budget":0,"#,
     r#""priority":-3.5,"unanswered":false,"ignored":0,"capacity":0,"predicted":{"kind":"kite","ticks":7}}],"#,
     r#""casts":[{"engagement":1,"name":"f-1","slot":1,"room":"W1N1","body":"TRMH"}],"due":["W1N1"]},"#,
-    r#""expansion":{"room":"W3N1","since":50,"failed":[{"room":"W4N1","since":10}],"abandoned":[]}}}"#
+    r#""expansion":{"room":"W3N1","since":50,"failed":[{"room":"W4N1","since":10}],"abandoned":[]},"#,
+    r#""piles":{"W2N1":"built","W1N1":{"pile":{"room":"W1N1","x":25,"y":30}}}}}"#
 );
 
 #[test]

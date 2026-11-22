@@ -8,7 +8,7 @@ use fabot_base::intents::ModuleOutput;
 use std::collections::{BTreeMap, BTreeSet};
 
 use expand::Expansions;
-use fabot_atlas::{self as atlas, Atlas, Context, Derived};
+use fabot_atlas::{self as atlas, Atlas, BANK_LEVEL, Context, Derived};
 use fabot_base::declarations::{
     ColonyPlan, Declarations, OpKind, Operation, Outpost, Planned, Stage,
 };
@@ -16,16 +16,43 @@ use fabot_base::engine;
 use fabot_base::intel::Intel;
 use fabot_base::tiles;
 use fabot_base::vocabulary::{Part, ResourceType, multiple};
-use fabot_base::world::{RoomName, Rules, StructureType, World, sightings};
+use fabot_base::world::{Pos, RoomName, Rules, StructureType, World, sightings};
 use fabot_fight::shape::{Cast, Engagement};
 use fabot_layout::{RING_LEVEL, Standing};
 use screeps::LocalRoomTerrain;
+
+/// `ARCHITECTURE.md` §4 `piles`: a colony's hub as its plan last drew it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Hub {
+    Pile(Pos),
+    /// A structure takes the hub's centre (`Plan::pile`).
+    Built,
+}
+
+impl Hub {
+    fn of(pile: Option<Pos>) -> Hub {
+        pile.map_or(Hub::Built, Hub::Pile)
+    }
+
+    fn pile(self) -> Option<Pos> {
+        match self {
+            Hub::Pile(at) => Some(at),
+            Hub::Built => None,
+        }
+    }
+}
+
+/// A heap's first plan apart from the hub kept before it: the cold ticks
+/// banked where no plan does.
+pub type Misfiled = Vec<RoomName>;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct StrategyState {
     /// `Scout room` declarations, rebuilt each tick before Economy reads them.
     pub scouts: Vec<Scout>,
     pub expansion: Expansions,
+    pub piles: BTreeMap<RoomName, Hub>,
 }
 
 pub fn decide(context: &mut Context, state: &mut StrategyState) -> ModuleOutput {
@@ -119,11 +146,15 @@ pub fn plan<'t>(
     intel: &Intel,
     (engagements, casts, due): (&[Engagement], &[Cast], &BTreeSet<RoomName>),
     (layout, spare): (&BTreeMap<RoomName, Standing>, &BTreeMap<RoomName, f64>),
-    (terrain, expansion): (
+    (terrain, state): (
         &dyn Fn(RoomName) -> Option<&'t LocalRoomTerrain>,
-        &mut Expansions,
+        &mut StrategyState,
     ),
-) -> Planned {
+) -> (Planned, Misfiled) {
+    let StrategyState {
+        expansion, piles, ..
+    } = state;
+    let mut misfiled = Vec::new();
     let rival = |name: &str| name != world.me && !declarations.allies.contains(name);
     let mut rivals: Vec<(RoomName, i32)> = Vec::new();
     let mut theirs: BTreeSet<RoomName> = BTreeSet::new();
@@ -168,8 +199,22 @@ pub fn plan<'t>(
                 wall(&world.rules, threat.unwrap_or(level), level, threatened);
             let stored = (room.structures.iter())
                 .any(|s| s.kind == StructureType::Storage && s.owner.is_ours());
-            let plan = layout.get(&room.name).and_then(|s| s.plan.as_ref());
-            let pile = (level >= 2 && !stored).then(|| plan?.pile()).flatten();
+            let standing = layout.get(&room.name);
+            let plan = standing.and_then(|s| s.plan.as_ref());
+            let hub = match (plan, standing) {
+                (Some(plan), Some(standing)) => {
+                    let now = Hub::of(plan.pile());
+                    let kept = piles.insert(room.name, now);
+                    if standing.cold && kept.is_some_and(|k| k != now) {
+                        misfiled.push(room.name);
+                    }
+                    Some(now)
+                }
+                _ => piles.get(&room.name).copied(),
+            };
+            let pile = hub
+                .filter(|_| level >= BANK_LEVEL && !stored)
+                .and_then(Hub::pile);
             let muster = plan.and_then(|p| p.muster);
             Some(ColonyPlan {
                 room: room.name,
@@ -189,11 +234,12 @@ pub fn plan<'t>(
             })
         })
         .collect();
+    piles.retain(|room, _| plans.iter().any(|p| p.room == *room));
     if !on {
         let mut operations = operations(derived, declarations, (&[], None), &[]);
         let planned = (declarations, &plans[..]);
         operations.extend(crossed((atlas, derived), planned, (&[], None), &theirs));
-        return (plans, Vec::new(), None, operations);
+        return ((plans, Vec::new(), None, operations), misfiled);
     }
     // An expansion declared this tick holds the outposts from the next.
     let claiming = expand::claim(intel, derived, expansion.in_flight.as_ref());
@@ -231,7 +277,7 @@ pub fn plan<'t>(
     let mut operations = operations(derived, declarations, (&chosen, claim.as_ref()), &preyed);
     let (planned, worked) = ((declarations, &plans[..]), (&chosen[..], claim.as_ref()));
     operations.extend(crossed((atlas, derived), planned, worked, &theirs));
-    (plans, chosen, claim, operations)
+    ((plans, chosen, claim, operations), misfiled)
 }
 
 /// A home's raid is answered before an outpost's; a siege or sweep takes
