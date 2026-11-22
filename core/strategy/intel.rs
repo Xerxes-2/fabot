@@ -132,7 +132,7 @@ pub fn sight(
     let mut free: Vec<_> = world
         .rooms
         .iter()
-        .flat_map(|r| r.structures.iter())
+        .flat_map(|r| world.rules.working(r))
         .filter(|s| s.kind == StructureType::Observer && s.owner.is_ours())
         .collect();
     let mut stale: Vec<(i32, &RoomName)> = intel

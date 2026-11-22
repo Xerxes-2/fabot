@@ -451,7 +451,8 @@ fn homes_of(scene: &Scene, decided: &[Engagement]) -> Vec<Home> {
 
             homes_lost.push(Home {
                 controller: controller.clone(),
-                towered: own.iter().any(|s| s.kind == StructureType::Tower),
+                towered: (scene.world.rules.working(room))
+                    .any(|s| s.kind == StructureType::Tower && s.owner.is_ours()),
                 raid: room
                     .hostiles()
                     .filter(|h| raid.contains(&h.id))

@@ -620,6 +620,48 @@ impl Rules {
         at.copied().unwrap_or(0)
     }
 
+    /// `room`'s structures the engine lets act (`utils.checkStructureAgainstController`),
+    /// in its order: equal ranges to the controller rank in the object order `find` reads.
+    pub fn working<'r>(&self, room: &'r Room) -> impl Iterator<Item = &'r Structure> + use<'r> {
+        let holder = (room.controller.as_ref()).filter(|c| c.level >= 1);
+        let range = move |s: &Structure| holder.and_then(|c| c.pos.range(&s.pos)).unwrap_or(0);
+        let capped: [bool; KIND_COUNT] =
+            std::array::from_fn(|k| self.structures.get(k).is_some_and(|row| !row.is_empty()));
+        // Per kind, the range nearer than which all act, and how many at it still do.
+        let mut cut = [(i32::MAX, usize::MAX); KIND_COUNT];
+        if let Some(c) = holder {
+            let held = || room.structures.iter().filter(|s| s.owner == c.owner);
+            let mut count = [0; KIND_COUNT];
+            held().for_each(|s| count[s.kind as usize] += 1);
+            for kind in enum_iterator::all::<StructureType>() {
+                let (k, allowed) = (kind as usize, self.allowed(kind, c.level).max(0) as usize);
+                if allowed == 0 {
+                    cut[k] = (-1, 0);
+                } else if count[k] > allowed && self.allowed(kind, 8) != 1 {
+                    let mut ranges: Vec<i32> =
+                        held().filter(|s| s.kind == kind).map(range).collect();
+                    let at = *ranges.select_nth_unstable(allowed - 1).1;
+                    cut[k] = (at, allowed - ranges.iter().filter(|r| **r < at).count());
+                }
+            }
+        }
+        room.structures.iter().filter(move |s| {
+            let player = s.owner.is_ours() || s.owner.user().is_some();
+            if !player || !capped[s.kind as usize] {
+                return true;
+            }
+            if !holder.is_some_and(|c| c.owner == s.owner) {
+                return false;
+            }
+            let ((at, left), r) = (&mut cut[s.kind as usize], range(s));
+            if r == *at && *left > 0 {
+                *left -= 1;
+                return true;
+            }
+            r < *at
+        })
+    }
+
     #[cfg(any(test, feature = "test-support", feature = "tools"))]
     pub fn vanilla() -> Rules {
         let row = |kind: StructureType| (0..=8).map(move |l| kind.controller_structures(l) as i32);
@@ -1360,6 +1402,14 @@ impl World<'_> {
         self.rooms.iter().find(|r| r.name == name)
     }
 
+    /// Ours the engine lets cast.
+    pub fn working_spawns(&self) -> impl Iterator<Item = &Spawn> {
+        self.spawns.iter().filter(|spawn| {
+            let room = self.room(spawn.pos.room);
+            room.is_some_and(|r| self.rules.working(r).any(|s| s.id == spawn.id))
+        })
+    }
+
     /// The objects whose id the engine wrote in no hex, dropped and counted:
     /// kept, two of them would share one id.
     pub fn drop_misread(&mut self) -> usize {
@@ -1492,6 +1542,83 @@ mod tests {
                 assert!(sightings::kept(&world, &kept));
             }
         }
+    }
+
+    #[test]
+    fn a_structure_past_its_level_is_inactive_the_farthest_first() {
+        use super::{Controller, Spawn, Structure, StructureType as K};
+        let at = |x: i32| Pos::new(RoomName::W1N1, x, 10);
+        let built = |id: &str, kind: K, owner: Owner, x: i32| Structure {
+            id: id.into(),
+            kind,
+            pos: at(x),
+            owner,
+            hits: 1,
+            hits_max: 1,
+            store: Store::empty(),
+            cooldown: 0,
+            collapse: 0,
+            level: 0,
+            spawn: None,
+            walkable: false,
+        };
+        let ally = Owner::Ally("a".to_string());
+        let structures = vec![
+            built("far", K::Spawn, Owner::Ours, 13),
+            built("near", K::Spawn, Owner::Ours, 11),
+            built("tied", K::Spawn, Owner::Ours, 12),
+            built("tied2", K::Spawn, Owner::Ours, 12),
+            built("observer", K::Observer, Owner::Ours, 20),
+            built("terminal", K::Terminal, Owner::Ours, 20),
+            built("allied", K::Extension, ally, 20),
+            built("invader", K::Tower, Owner::Invader, 20),
+            built("road", K::Road, Owner::Nobody, 20),
+        ];
+        let controller = Controller {
+            id: "c".into(),
+            pos: at(10),
+            owner: Owner::Ours,
+            level: 7,
+            progress: 0,
+            progress_total: 0,
+            ticks_to_downgrade: 0,
+            reservation: None,
+            safe_mode: 0,
+            safe_mode_available: 0,
+            safe_mode_cooldown: 0,
+            upgrade_blocked: 0,
+        };
+        let spawn = |id: &str, x: i32| Spawn {
+            id: id.into(),
+            name: String::new(),
+            pos: at(x),
+            spawning: None,
+        };
+        let world = World {
+            time: 0,
+            me: String::new(),
+            cpu_limit: 20.0,
+            bucket: 0,
+            rooms: vec![Room {
+                controller: Some(controller),
+                structures,
+                ..Room::empty(RoomName::W1N1)
+            }],
+            spawns: vec![spawn("far", 13), spawn("near", 11)],
+            creeps: Vec::new(),
+            our_sites: 0,
+            rooms_allowed: 1,
+            closed: Default::default(),
+            attacks: Vec::new(),
+            destroyed: Vec::new(),
+            rules: Rules::vanilla(),
+        };
+        let ids = |of: Vec<Id>| of.iter().map(Id::to_string).collect::<Vec<_>>();
+        let working = world.rules.working(&world.rooms[0]).map(|s| s.id).collect();
+        let near = ["near", "tied", "terminal", "invader", "road"].map(Id::from);
+        assert_eq!(ids(working), ids(near.to_vec()));
+        let spawns = world.working_spawns().map(|s| s.id).collect();
+        assert_eq!(ids(spawns), ids(vec![Id::from("near")]));
     }
 
     #[test]

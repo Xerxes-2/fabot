@@ -83,9 +83,7 @@ pub fn colonies(
             .cloned()
             .collect();
 
-        let mut towers: Vec<Structure> = room
-            .structures
-            .iter()
+        let mut towers: Vec<Structure> = (world.rules.working(room))
             .filter(|s| {
                 s.kind == StructureType::Tower
                     && s.owner.is_ours()

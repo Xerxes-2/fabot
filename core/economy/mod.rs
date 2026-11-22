@@ -169,7 +169,7 @@ pub(crate) mod dice {
             })
             .collect();
 
-        let structures: Vec<Structure> = (0..dice.between(0, 8))
+        let mut structures: Vec<Structure> = (0..dice.between(0, 8))
             .map(|k| structure(dice, name, owned, k as usize))
             .collect();
 
@@ -198,6 +198,20 @@ pub(crate) mod dice {
                         &[Part::Carry, Part::Carry, Part::Move],
                     )),
                 },
+            });
+            structures.push(Structure {
+                id: spawns[k as usize].id,
+                kind: StructureType::Spawn,
+                pos: spawns[k as usize].pos,
+                owner: Owner::Ours,
+                hits: 5000,
+                hits_max: 5000,
+                store: store(vec![], 300),
+                cooldown: 0,
+                collapse: 0,
+                spawn: None,
+                level: 0,
+                walkable: false,
             });
         }
 

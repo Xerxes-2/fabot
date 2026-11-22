@@ -3,7 +3,8 @@ use std::collections::BTreeMap;
 use fabot_base::engine;
 use fabot_base::vocabulary::{Boost, Part, RESOURCES_ALL, ResourceType};
 use fabot_base::world::{
-    Creep, Id, Owner, Pos, Room, RoomName, Spawn, Store, Structure, StructureType, World, terrain,
+    Creep, Id, Owner, Pos, Room, RoomName, Rules, Spawn, Store, Structure, StructureType, World,
+    terrain,
 };
 use fabot_exchange::{self as exchange, Fighter, fighter};
 
@@ -147,21 +148,17 @@ pub fn terrain_at(room: Option<&Room>, at: &Pos) -> exchange::Terrain {
     }
 }
 
-pub fn side_in(room: Option<&Room>, bodies: Vec<Fighter>) -> exchange::Side {
-    let ours = |kind: StructureType| -> Vec<&Structure> {
-        (room.iter().flat_map(|r| &r.structures))
-            .filter(|s| s.kind == kind && s.owner.is_ours())
-            .collect()
-    };
+pub fn side_in(rules: &Rules, room: Option<&Room>, bodies: Vec<Fighter>) -> exchange::Side {
+    let ours = |kind: StructureType| move |s: &&Structure| s.kind == kind && s.owner.is_ours();
 
     exchange::Side {
         bodies,
-        ramparts: ours(StructureType::Rampart)
-            .into_iter()
+        ramparts: (room.iter().flat_map(|r| &r.structures))
+            .filter(ours(StructureType::Rampart))
             .map(|s| (s.pos, s.hits))
             .collect::<BTreeMap<_, _>>(),
-        towers: ours(StructureType::Tower)
-            .into_iter()
+        towers: (room.iter().flat_map(|r| rules.working(r)))
+            .filter(ours(StructureType::Tower))
             .map(|s| exchange::Tower {
                 pos: s.pos,
                 energy: s.store.amount_of(ResourceType::Energy),
@@ -373,7 +370,7 @@ pub fn kill_order(hostiles: &[Creep]) -> Vec<Id> {
 /// Soonest, not nearest (v1's Caster).
 pub fn colony_for(
     colonies: &[&Room],
-    spawns: &[Spawn],
+    spawns: &[&Spawn],
     queued: &BTreeMap<RoomName, i32>,
     asked: &BTreeMap<RoomName, i32>,
     walk: impl Fn(RoomName) -> Option<i32>,
@@ -383,7 +380,7 @@ pub fn colony_for(
     let spawn_ticks = engine::SPAWN_TICKS_PER_PART * body.len() as i32;
 
     let wait = |room: &Room| -> i64 {
-        let of: Vec<&Spawn> = spawns.iter().filter(|s| s.pos.room == room.name).collect();
+        let of: Vec<&&Spawn> = spawns.iter().filter(|s| s.pos.room == room.name).collect();
         let count = (of.len() as i64).max(1);
         let busy: i64 = of
             .iter()
@@ -507,7 +504,7 @@ mod tests {
         assert_eq!(
             colony_for(
                 &[&near, &far],
-                &spawns,
+                &spawns.iter().collect::<Vec<_>>(),
                 &queued,
                 &BTreeMap::new(),
                 walk,
@@ -523,7 +520,7 @@ mod tests {
         assert_eq!(
             colony_for(
                 &[&broke, &far],
-                &spawns,
+                &spawns.iter().collect::<Vec<_>>(),
                 &BTreeMap::new(),
                 &BTreeMap::new(),
                 walk,

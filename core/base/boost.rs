@@ -53,7 +53,7 @@ pub fn clusters(world: &World, declarations: &Declarations) -> Vec<RoomName> {
 pub fn labs_in<'a>(world: &'a World, room: RoomName) -> impl Iterator<Item = &'a world::Structure> {
     (world.rooms.iter())
         .filter(move |r| r.name == room)
-        .flat_map(|r| r.structures.iter())
+        .flat_map(|r| world.rules.working(r))
         .filter(|s| s.kind == world::StructureType::Lab && s.owner.is_ours())
 }
 

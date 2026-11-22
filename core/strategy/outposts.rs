@@ -150,7 +150,10 @@ pub fn chosen(
     };
     let mut spawn_left: BTreeMap<RoomName, f64> = BTreeMap::new();
     for room in world.spawns.iter().map(|s| s.pos.room) {
-        let spawns = world.spawns.iter().filter(|s| s.pos.room == room).count() as f64;
+        let spawns = world
+            .working_spawns()
+            .filter(|s| s.pos.room == room)
+            .count() as f64;
         let half = f64::from(engine::CREEP_LIFETIME) * spawns / 2.0;
         let dug = world.room(room).map_or(0, |r| r.sources.len() as i32);
         let left = match spare.get(&room) {

@@ -387,7 +387,7 @@ impl<'a> Scene<'a> {
         };
         let (mut set, outcome, _) = casting::price(
             Stance::Standoff,
-            &casting::side_in(Some(room), ours.clone()),
+            &casting::side_in(&self.world.rules, Some(room), ours.clone()),
             &theirs,
             casting::terrain_at(Some(room), at),
             &casting::walking(capacity),
@@ -709,10 +709,7 @@ impl<'a> Scene<'a> {
                         .filter(|h| !self.cores.contains(&h.id))
                         .fold(0, |most, h| most.max(h.ticks_to_live));
 
-                    let spawns = self
-                        .world
-                        .spawns
-                        .iter()
+                    let spawns = (self.world.working_spawns())
                         .filter(|s| colonies.iter().any(|r| r.name == s.pos.room))
                         .count() as i32;
 
@@ -756,7 +753,7 @@ impl<'a> Scene<'a> {
                 let side = Side {
                     together,
                     cast_walk: colony,
-                    ..casting::side_in(room, ours_now.clone())
+                    ..casting::side_in(&self.world.rules, room, ours_now.clone())
                 };
                 let (mut set, outcome, landed) = casting::price(
                     stance,
@@ -840,7 +837,12 @@ impl<'a> Scene<'a> {
                     .map(|c| casting::fighter_of(c))
                     .collect();
 
-                if casting::wins(stance, &casting::side_in(room, standing), &theirs, terrain) {
+                if casting::wins(
+                    stance,
+                    &casting::side_in(&self.world.rules, room, standing),
+                    &theirs,
+                    terrain,
+                ) {
                     defend::stands_alone(self.world.time, &next)
                 } else {
                     next

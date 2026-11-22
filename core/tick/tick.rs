@@ -18,7 +18,7 @@ use fabot_base::intents::{
 use fabot_base::tiles::{self, Tile};
 use fabot_base::wish::Wish;
 use fabot_base::world::{
-    self, Id, Pos, Room, RoomName, Sightings, Structure, StructureType, World,
+    self, Id, Pos, Room, RoomName, Rules, Sightings, Structure, StructureType, World,
 };
 use fabot_mv as mv;
 use fabot_strategy::{self as strategy, intel};
@@ -59,10 +59,10 @@ fn by_room<T>(pairs: &[(RoomName, T)]) -> Vec<(RoomName, Vec<&T>)> {
 
 /// Hivemind's order: the bays, which their harvesters refill, first. None
 /// without a bay, so the engine keeps its own.
-fn drawn(r: &Room, spawn: &Pos) -> Vec<Id> {
+fn drawn(rules: &Rules, r: &Room, spawn: &Pos) -> Vec<Id> {
     let in_bay = Atlas::in_bay(r);
     let bay = |s: &&Structure| in_bay(s.kind, &s.pos);
-    let ours = (r.structures.iter()).filter(|s| s.owner.is_ours());
+    let ours = rules.working(r).filter(|s| s.owner.is_ours());
     let mut energy: Vec<&Structure> = ours
         .filter(|s| matches!(s.kind, StructureType::Spawn | StructureType::Extension))
         .collect();
@@ -84,7 +84,9 @@ pub fn queue(world: &World, asks: &[(RoomName, Ask)]) -> Vec<Action> {
         let Some(r) = world.room(room) else {
             continue;
         };
-        let mut idle = (world.spawns.iter()).filter(|s| s.pos.room == room && s.spawning.is_none());
+        let mut idle = world
+            .working_spawns()
+            .filter(|s| s.pos.room == room && s.spawning.is_none());
         let mut bank = r.energy_available;
         let mut held = false;
         for a in &asks {
@@ -101,7 +103,11 @@ pub fn queue(world: &World, asks: &[(RoomName, Ask)]) -> Vec<Action> {
             };
             out.push(Action::Spawn(
                 spawn.id,
-                SpawnAct::SpawnCreep(a.body.clone(), a.name.clone(), drawn(r, &spawn.pos)),
+                SpawnAct::SpawnCreep(
+                    a.body.clone(),
+                    a.name.clone(),
+                    drawn(&world.rules, r, &spawn.pos),
+                ),
             ));
             bank -= cost;
         }

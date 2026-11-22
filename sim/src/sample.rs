@@ -7,9 +7,9 @@ use krebs::constants::{CREEP_CORPSE_RATE, CREEP_PART_MAX_ENERGY};
 use krebs::doc::{Atom, Obj, Val};
 use krebs::intents::RoomIntents;
 use screeps::{
-    CONSTRUCTION_COST_ROAD_SWAMP_RATIO, CONSTRUCTION_COST_ROAD_WALL_RATIO, CREEP_CLAIM_LIFE_TIME,
-    CREEP_LIFE_TIME, ENERGY_DECAY, LINK_LOSS_RATIO, Part, REPAIR_COST, RESOURCES_ALL,
-    SPAWN_ENERGY_CAPACITY, StructureType, TOWER_ENERGY_COST, controller_levels,
+    CONSTRUCTION_COST_ROAD_SWAMP_RATIO, CONSTRUCTION_COST_ROAD_WALL_RATIO, CREEP_LIFE_TIME,
+    ENERGY_DECAY, LINK_LOSS_RATIO, Part, REPAIR_COST, RESOURCES_ALL, SPAWN_ENERGY_CAPACITY,
+    StructureType, TOWER_ENERGY_COST, controller_levels,
 };
 use serde_json::{Map, Value, json};
 
@@ -66,12 +66,9 @@ pub fn parts(o: &Obj) -> Vec<&str> {
 }
 
 fn life(body: &[&str]) -> f64 {
-    let claim = body.contains(&"claim");
-    f64::from(if claim {
-        CREEP_CLAIM_LIFE_TIME
-    } else {
-        CREEP_LIFE_TIME
-    })
+    f64::from(fabot_base::engine::lifetime(
+        body.iter().filter_map(|p| p.parse().ok()),
+    ))
 }
 
 fn chebyshev((x, y): (i64, i64), (a, b): (i64, i64)) -> i64 {

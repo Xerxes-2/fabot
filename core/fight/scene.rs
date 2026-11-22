@@ -405,7 +405,7 @@ impl<'a> Scene<'a> {
             let pick = |from: &[&Room]| {
                 casting::colony_for(
                     from,
-                    &self.world.spawns,
+                    &self.world.working_spawns().collect::<Vec<_>>(),
                     &asked.queued,
                     &asked.asked,
                     |from| self.walk_to(atlas, e, from),

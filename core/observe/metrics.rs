@@ -12,7 +12,9 @@ use fabot_base::declarations::{self, Declarations, Refused};
 use fabot_base::engine;
 use fabot_base::intents::{Action, CreepAct, Refusal, SpawnAct, TowerAct};
 use fabot_base::vocabulary::{Part, ResourceType::Energy};
-use fabot_base::world::{Creep, Id, Owner, Pos, Room, RoomName, StructureType, World, hostiles};
+use fabot_base::world::{
+    Creep, Id, Owner, Pos, Room, RoomName, Rules, StructureType, World, hostiles,
+};
 use fabot_economy::abandon;
 use fabot_economy::bodies::{self, Pattern};
 use fabot_economy::task::{Assignment, Task};
@@ -747,8 +749,8 @@ fn armed(r: &Room) -> bool {
     (r.hostiles()).any(|h| hostiles::foe(h) && hostiles::strikes(h))
 }
 
-fn towers(r: &Room) -> bool {
-    (r.structures.iter()).any(|s| {
+fn towers(rules: &Rules, r: &Room) -> bool {
+    rules.working(r).any(|s| {
         s.kind == StructureType::Tower
             && s.owner.is_ours()
             && s.store.amount_of(Energy) >= engine::TOWER_ENERGY_COST
@@ -759,7 +761,7 @@ fn dwell(sums: &mut Sums, seen: &Seen) {
     for r in &seen.world.rooms {
         let worked = r.controller.as_ref().is_some_and(|c| c.owner.is_ours())
             || (seen.declarations.outposts.iter()).any(|o| o.room == r.name);
-        let (armed, towers) = (armed(r), towers(r));
+        let (armed, towers) = (armed(r), towers(&seen.world.rules, r));
         let answered = seen.engagements.iter().any(|e| {
             e.room == r.name
                 && e.phase != Phase::Disengaging
@@ -789,7 +791,7 @@ fn exposure(sums: &mut Sums, seen: &Seen) {
             continue;
         };
         let safe = c.safe_mode > 0 || c.safe_mode_fireable();
-        if c.level >= 3 && towers(r) && safe {
+        if c.level >= 3 && towers(&seen.world.rules, r) && safe {
             continue;
         }
         let mut outposts = (seen.declarations.outposts.iter())
@@ -918,7 +920,7 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
         .retain(|name, _| task_of(seen.assignments, name).is_some());
     returned(sums, &mut m.drawn, &creeps, (seen.intents, world), &refused);
 
-    for s in &world.spawns {
+    for s in world.working_spawns() {
         let row = Some(s.pos.room);
         add(sums, row, SPAWN_TICKS, 1.0);
         // Below a full bank the spawn waits on energy, which the casts wait for.

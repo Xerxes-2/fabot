@@ -183,7 +183,7 @@ fn danger(world: &World, owned: &BTreeSet<RoomName>) -> Vec<(RoomName, TileSet)>
 
 pub fn derive(world: &World, atlas: &mut Atlas) -> Derived {
     let owned = hostiles::owned(&world.rooms);
-    let spawned = |room: RoomName| world.spawns.iter().any(|s| s.pos.room == room);
+    let spawned = |room: RoomName| world.working_spawns().any(|s| s.pos.room == room);
     let colonies: Vec<RoomName> = (world.rooms.iter())
         .map(|r| r.name)
         .filter(|room| owned.contains(room) && spawned(*room))

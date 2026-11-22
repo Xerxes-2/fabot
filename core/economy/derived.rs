@@ -12,8 +12,8 @@ use fabot_base::tiles::{self, Tile};
 use fabot_base::vocabulary::ResourceType::{self, Energy};
 use fabot_base::vocabulary::{Part, part_count_in};
 use fabot_base::world::{
-    self, BodyPart, Built, Controller, Creep, Id, Owner, Pos, Room, RoomName, Source, Spawn, Store,
-    Structure, StructureType, World, terrain,
+    self, BodyPart, Built, Controller, Creep, Id, Owner, Pos, Room, RoomName, Rules, Source, Spawn,
+    Store, Structure, StructureType, World, terrain,
 };
 
 use super::balance::{Holding, Level, Shipment, balance, want};
@@ -544,8 +544,11 @@ fn strikes_of(world: &World) -> BTreeMap<Id, i32> {
     strikes
 }
 
+/// The engine gates a link's send, never what it is sent: the controller's
+/// link stays a receiver past the allowance.
 fn links_of(
     room: &Room,
+    working: &[&Structure],
     is_buffer: &dyn Fn(Id) -> bool,
     storage: Option<&Structure>,
 ) -> Vec<LinkFact> {
@@ -565,7 +568,8 @@ fn links_of(
     (room.structures.iter())
         .filter_map(|s| {
             let role = role_of(s)?;
-            Some(LinkFact {
+            let sends = working.iter().any(|w| w.id == s.id);
+            (role.is_controller() || sends).then_some(LinkFact {
                 id: s.id,
                 pos: s.pos,
                 role,
@@ -577,10 +581,10 @@ fn links_of(
         .collect()
 }
 
-fn minerals_of(room: &Room) -> Vec<MineralFact> {
+fn minerals_of(room: &Room, working: &[&Structure]) -> Vec<MineralFact> {
     (room.minerals.iter())
         .filter_map(|m| {
-            let extractor = (room.structures.iter()).find(|s| {
+            let extractor = working.iter().find(|s| {
                 s.kind == StructureType::Extractor && s.owner.is_ours() && s.pos == m.pos
             })?;
             let resource = m.resource?;
@@ -669,8 +673,8 @@ fn stores_of(
     stores
 }
 
-fn labs_of(room: &Room) -> Vec<LabFact> {
-    room.structures
+fn labs_of(working: &[&Structure]) -> Vec<LabFact> {
+    working
         .iter()
         .filter(|s| s.kind == StructureType::Lab && s.owner.is_ours())
         .map(|s| LabFact {
@@ -722,7 +726,14 @@ fn raided(room: &Room, owned: bool) -> bool {
     (foes.iter()).any(|c| fabot_base::world::hostiles::armed(&ours, &foes, c))
 }
 
-fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) -> Ground {
+fn ground_of(
+    (atlas, rules): (&Atlas, &Rules),
+    capacity: i32,
+    rate: i32,
+    room: &Room,
+    wall: i32,
+) -> Ground {
+    let working: Vec<&Structure> = rules.working(room).collect();
     let owned_room = room.controller.as_ref().is_some_and(|c| c.owner.is_ours());
     let built = Atlas::buffer(room);
     let is_buffer = |id: Id| built.is_some_and(|b| b.id == id);
@@ -731,7 +742,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
         .iter()
         .find(|s| s.kind == StructureType::Storage && s.owner.is_ours());
 
-    let links = links_of(room, &is_buffer, storage);
+    let links = links_of(room, &working, &is_buffer, storage);
 
     let controller_link = links.iter().find(|l| l.role.is_controller()).cloned();
     let hub_link = links.iter().find(|l| l.role.is_hub()).cloned();
@@ -756,7 +767,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
                 .map(|l| l.id),
             seats,
             energy: s.energy,
-            bay: (room.structures.iter())
+            bay: (working.iter())
                 .filter(|x| x.kind == StructureType::Extension && x.owner.is_ours())
                 .filter(|x| post.as_ref().is_some_and(|(p, _)| p.within(1, &x.pos)))
                 .map(|x| x.store.capacity)
@@ -766,13 +777,13 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
     };
     let sources: Vec<SourceFact> = room.sources.iter().map(source_of).collect();
 
-    let minerals = minerals_of(room);
+    let minerals = minerals_of(room, &working);
 
     let dug_of =
         |by: &dyn Fn(&SourceFact) -> bool| sources.iter().filter(|s| by(s)).map(|s| s.dug).sum();
     let served_dug = |pos: &Pos| -> i32 { dug_of(&|s| s.pos.range(pos) == Some(1)) };
 
-    let (bays, refills): (Vec<RefillFact>, Vec<RefillFact>) = (room.structures.iter())
+    let (bays, refills): (Vec<RefillFact>, Vec<RefillFact>) = (working.iter())
         .filter(|s| {
             matches!(
                 s.kind,
@@ -871,13 +882,11 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
         feed: feed.or_else(|| buffer.clone()),
         links,
         receiver: controller_link.or(hub_link),
-        labs: labs_of(room),
+        labs: labs_of(&working),
         ores: ores_of(room),
         lab_plan: None,
         boost_lab: None,
-        terminal: room
-            .structures
-            .iter()
+        terminal: (working.iter())
             .find(|s| s.kind == StructureType::Terminal && s.owner.is_ours())
             .map(|s| TerminalFact {
                 id: s.id,
@@ -1277,12 +1286,22 @@ fn remote_of(
         Some(c) if !c.owner.is_ours() && !reservable(c) => {
             let mut bare = room.clone().into_owned();
             bare.sources = Vec::new();
-            ground_of(atlas, richest, 0, &bare, 0)
+            ground_of((atlas, &world.rules), richest, 0, &bare, 0)
         }
-        _ if richest >= engine::body_cost(bodies::block_of(Pattern::Claimer)) => {
-            ground_of(atlas, richest, engine::HELD_OUTPUT_PER_TICK, &room, 0)
-        }
-        _ => ground_of(atlas, richest, engine::NEUTRAL_OUTPUT_PER_TICK, &room, 0),
+        _ if richest >= engine::body_cost(bodies::block_of(Pattern::Claimer)) => ground_of(
+            (atlas, &world.rules),
+            richest,
+            engine::HELD_OUTPUT_PER_TICK,
+            &room,
+            0,
+        ),
+        _ => ground_of(
+            (atlas, &world.rules),
+            richest,
+            engine::NEUTRAL_OUTPUT_PER_TICK,
+            &room,
+            0,
+        ),
     }
 }
 
@@ -1329,7 +1348,7 @@ pub fn of_world<'t>(
                 reserve: plan.map_or(0, |p| p.reserve),
                 owes: plan.is_some_and(|p| p.owes),
                 controller,
-                spawns: (world.spawns.iter())
+                spawns: (world.working_spawns())
                     .filter(|s| s.pos.room == room.name)
                     .cloned()
                     .collect(),
@@ -1355,7 +1374,7 @@ pub fn of_world<'t>(
         .iter()
         .map(|room| {
             ground_of(
-                atlas,
+                (atlas, &world.rules),
                 room.energy_capacity,
                 engine::HELD_OUTPUT_PER_TICK,
                 room,

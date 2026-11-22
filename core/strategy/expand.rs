@@ -248,7 +248,7 @@ pub fn step<'t>(
             && world.room(e.room).is_some_and(|r| {
                 r.controller.as_ref().is_some_and(|c| {
                     c.safe_mode == 0 && c.safe_mode_available == 0 && c.safe_mode_cooldown > 0
-                }) && !(r.structures.iter())
+                }) && !(world.rules.working(r))
                     .any(|s| s.kind == StructureType::Tower && s.owner.is_ours())
             });
         match fate(world.time - e.since, owned, theirs || bare, stored) {
