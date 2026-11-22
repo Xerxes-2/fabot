@@ -470,7 +470,7 @@ fn homes_of(scene: &Scene, decided: &[Engagement]) -> Vec<Home> {
                 fallen: room
                     .remains
                     .iter()
-                    .filter_map(|r| r.fallen.clone())
+                    .filter_map(|r| Some((r.pos, r.fallen.clone()?)))
                     .collect(),
             });
         }

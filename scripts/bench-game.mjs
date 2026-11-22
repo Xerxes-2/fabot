@@ -66,7 +66,7 @@ const special = {
   reservation: (o) => (o.reservation ? { username: o.reservation.username, ticksToEnd: o.reservation.ticksToEnd } : undefined),
   spawning: (o) => (o.spawning && typeof o.spawning === "object" ? { name: o.spawning.name, remainingTime: o.spawning.remainingTime } : o.spawning),
   store: (o) => (o.store ? new Store(o) : undefined),
-  creep: (o) => (o.creep ? { ...o.creep, store: new Store(o.creep) } : undefined),
+  creep: (o) => o.creep && { ...o.creep, store: o.creep.store && new Store(o.creep) },
 };
 // The kinds the engine gives an `energy` and `energyCapacity` read off the data, not the Store.
 const ENERGY_ONLY = new Set(["s:spawn", "s:extension", "s:tower", "s:link"]);

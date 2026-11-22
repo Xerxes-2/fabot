@@ -1,5 +1,6 @@
 use screeps::LocalRoomTerrain;
 pub use screeps::StructureType;
+use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -487,6 +488,12 @@ pub struct BodyPart {
     pub boost: Option<ResourceType>,
 }
 
+impl Borrow<Part> for BodyPart {
+    fn borrow(&self) -> &Part {
+        &self.kind
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Creep {
     pub id: Id,
@@ -502,9 +509,11 @@ pub struct Creep {
     pub store: Store,
 }
 
+/// One of ours, as its tombstone keeps it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Fallen {
-    pub creep: Creep,
+    pub body: Vec<Part>,
+    pub ticks_to_live: i32,
     pub died: i32,
 }
 
@@ -981,8 +990,8 @@ pub fn live(body: &[BodyPart], kind: Part) -> i32 {
 }
 
 #[inline]
-pub fn cast(body: &[BodyPart], kind: Part) -> i32 {
-    (body.iter()).filter(|p| p.kind == kind).count() as i32
+pub fn cast(body: &[impl Borrow<Part>], kind: Part) -> i32 {
+    (body.iter()).filter(|p| *(*p).borrow() == kind).count() as i32
 }
 
 impl World<'_> {
@@ -1010,7 +1019,7 @@ impl World<'_> {
             r.structures.retain(|o| ok(&o.id));
             r.sites.retain(|o| ok(&o.id));
             r.piles.retain(|o| ok(&o.id));
-            (r.remains).retain(|o| ok(&o.id) && o.fallen.as_ref().is_none_or(|f| ok(&f.creep.id)));
+            r.remains.retain(|o| ok(&o.id));
             r.others.retain(|o| ok(&o.id));
         }
         self.spawns.retain(|o| ok(&o.id));

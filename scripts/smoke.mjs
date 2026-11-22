@@ -67,7 +67,7 @@ const found = {
   107: [spawn, road],
   111: [{ id: "a6", structureType: "extension", my: true, owner: { username: "me" }, pos: at(27, 27), progress: 0, progressTotal: 3000 }],
   106: [{ id: "a7", resourceType: "energy", pos: at(11, 11), amount: 50 }],
-  118: [],
+  118: [true, false].map((my, i) => ({ id: `b${i}`, pos: at(12, 12 + i), store: store({}, 0), deathTime: 99, creep: { id: `e${i}`, my, pos: at(12, 12 + i), body: [{ type: "carry", hits: 0 }], ticksToLive: 900 } })),
   123: [],
   103: [],
 };
@@ -146,6 +146,7 @@ const [recorded] = unpack(RECORDER.map((id) => segments[id]));
 if (recorded?.time !== 103) fail(`recorder wrote no tick 103: ${recorded?.time}`);
 if (!recorded.intel.startsWith("W1N1 103 ")) fail(`recorder's intel lost the room: ${recorded.intel}`);
 if (recorded.memory !== before) fail("recorder's Memory is not the tick's");
+if (!recorded.objects.b0.creep || recorded.objects.b1.creep) fail(`a tombstone's creep is read unless ours: ${JSON.stringify([recorded.objects.b0, recorded.objects.b1])}`);
 const stored = JSON.parse(memory);
 if (stored.fabot !== undefined) fail(`v1's Memory was kept: ${JSON.stringify(stored.fabot)}`);
 if (stored.creeps !== undefined) fail(`a dead creep's Memory was kept: ${JSON.stringify(stored.creeps)}`);

@@ -1,5 +1,6 @@
 /// `Defend` (`ARCHITECTURE.md` §6.2): a phase moves on an event, never a clock;
 /// `step` closes it with None.
+use std::borrow::Borrow;
 use std::collections::BTreeSet;
 
 use super::super::shape::{Engagement, Group, Phase, enter};
@@ -7,7 +8,7 @@ use fabot_base::engine;
 use fabot_base::tiles::{self};
 use fabot_base::vocabulary::Part;
 use fabot_base::world::{
-    self, Controller, Creep, Fallen, Id, Owner, Pos, RoomName, Structure, StructureType,
+    Controller, Creep, Fallen, Id, Owner, Pos, RoomName, Structure, StructureType, cast,
 };
 use fabot_tactics::Tactic;
 
@@ -145,7 +146,7 @@ pub struct Home {
     pub bodies: Vec<Creep>,
     pub time: i32,
     pub opened: i32,
-    pub fallen: Vec<Fallen>,
+    pub fallen: Vec<(Pos, Fallen)>,
 }
 
 /// A tap is range 1 from where the claimer stood at the tick's start and it
@@ -175,15 +176,11 @@ fn half(lost: i32, whole: i32) -> bool {
     whole > 0 && 2 * lost >= whole
 }
 
-fn carry(c: &Creep) -> i32 {
-    world::cast(&c.body, Part::Carry)
-}
-
 /// v1's refiller held a Refill, which is Economy's to know; a hauler's body stands in.
-fn hand(c: &Creep) -> bool {
-    carry(c) > 0
-        && !c.body.iter().any(|p| p.kind == Part::Work)
-        && !tiles::on_edge(tiles::of_pos(&c.pos))
+fn hand(body: &[impl Borrow<Part>], pos: &Pos) -> bool {
+    cast(body, Part::Carry) > 0
+        && cast(body, Part::Work) == 0
+        && !tiles::on_edge(tiles::of_pos(pos))
 }
 
 fn razed(home: &Home) -> bool {
@@ -211,42 +208,41 @@ fn razed(home: &Home) -> bool {
         (lost as i32, all.len() as i32)
     };
 
-    let hands: Vec<&Creep> = home.bodies.iter().filter(|c| hand(c)).collect();
+    let hands: Vec<&Creep> = (home.bodies.iter())
+        .filter(|c| hand(&c.body, &c.pos))
+        .collect();
 
     let struck = |c: &Creep| {
         c.hits < c.hits_max && !covered.contains(&c.pos) && reaches(false, 0, &raid, &c.pos)
     };
 
     // A raider steps a tile a tick from its kill; past a few it is not told from a stranger.
-    let fell = |f: &&Fallen| {
+    let fell = |(pos, f): &&(Pos, Fallen)| {
         f.died >= home.opened
-            && f.creep.owner.is_ours()
-            && f.creep.ticks_to_live > engine::AGED_OUT_TICKS_TO_LIVE
-            && reaches(
-                false,
-                KILL_DRIFT.min(home.time - f.died),
-                &raid,
-                &f.creep.pos,
-            )
+            && f.ticks_to_live > engine::AGED_OUT_TICKS_TO_LIVE
+            && reaches(false, KILL_DRIFT.min(home.time - f.died), &raid, pos)
     };
     // Two of the dig fallen within a tombstone's life: a raid camping a
     // source kills faster than the spawn regrows, and no hand ever falls.
-    let dug = |c: &Creep| c.body.iter().any(|p| p.kind == Part::Work);
-    let culled = home
-        .fallen
-        .iter()
-        .filter(fell)
-        .filter(|f| dug(&f.creep))
+    let culled = (home.fallen.iter().filter(fell))
+        .filter(|(_, f)| cast(&f.body, Part::Work) > 0)
         .count()
         >= 2;
-    let killed: Vec<&Creep> = (home.fallen.iter().filter(fell))
-        .filter(|f| hand(&f.creep))
-        .map(|f| &f.creep)
-        .collect();
+    let killed: i32 = (home.fallen.iter().filter(fell))
+        .filter(|(pos, f)| hand(&f.body, pos))
+        .map(|(_, f)| cast(&f.body, Part::Carry))
+        .sum();
 
-    let left: i32 = hands.iter().filter(|c| !struck(c)).map(|c| carry(c)).sum();
-    let whole: i32 =
-        hands.iter().map(|c| carry(c)).sum::<i32>() + killed.iter().map(|c| carry(c)).sum::<i32>();
+    let left: i32 = hands
+        .iter()
+        .filter(|c| !struck(c))
+        .map(|c| cast(&c.body, Part::Carry))
+        .sum();
+    let whole: i32 = hands
+        .iter()
+        .map(|c| cast(&c.body, Part::Carry))
+        .sum::<i32>()
+        + killed;
     let (spawn_lost, spawn_all) = share(StructureType::Spawn);
     let (bank_lost, bank_all) = share(StructureType::Extension);
 
@@ -391,19 +387,19 @@ mod tests {
             })
             .collect();
 
-        let fallen: Vec<Fallen> = fallen
+        let fallen: Vec<(Pos, Fallen)> = fallen
             .iter()
             .take(5)
             .enumerate()
             .map(|(i, dead)| {
-                let mut kinds = vec![Part::Carry; dead.carry as usize];
-                kinds.push(Part::Move);
-                let mut gone = creep(Owner::Ours, &kinds, at(26, 23 + i as i32), false);
-                gone.ticks_to_live = dead.ticks_left;
-                Fallen {
-                    creep: gone,
+                let mut body = vec![Part::Carry; dead.carry as usize];
+                body.push(Part::Move);
+                let fell = Fallen {
+                    body,
+                    ticks_to_live: dead.ticks_left,
                     died: dead.died,
-                }
+                };
+                (at(26, 23 + i as i32), fell)
             })
             .collect();
 
@@ -611,12 +607,8 @@ mod tests {
         for _ in 0..DRAWS {
             let n = 1 + rng.below(3) as usize;
             let mut h = rival(&[], &(0..n).map(|_| slain(1)).collect::<Vec<_>>());
-            for f in &mut h.fallen {
-                f.creep.body.push(BodyPart {
-                    kind: Part::Work,
-                    hits: 100,
-                    boost: None,
-                });
+            for (_, f) in &mut h.fallen {
+                f.body.push(Part::Work);
             }
 
             assert_eq!(safe_mode(false, &[h]).is_some(), n >= 2);

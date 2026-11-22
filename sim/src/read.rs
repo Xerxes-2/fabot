@@ -179,35 +179,17 @@ impl Reader<'_> {
         }
     }
 
-    /// A tombstone keeps its creep's name, body and life left; a ruin, none.
+    /// A tombstone keeps our creep's body and life left; a ruin, and theirs, none.
     fn remains(&self, room: RoomName, o: &Obj, tombstone: bool) -> Remains {
-        let fallen = tombstone.then(|| {
-            let types = match o.get(Atom::intern("creepBody")) {
-                Some(Val::Arr(parts)) => parts.iter().filter_map(Val::as_str).collect(),
+        let fallen = (tombstone && self.owner(o).is_ours()).then(|| Fallen {
+            body: match o.get(Atom::intern("creepBody")) {
+                Some(Val::Arr(parts)) => (parts.iter().filter_map(Val::as_str))
+                    .map(|t| t.parse().unwrap_or(Part::Tough))
+                    .collect(),
                 _ => Vec::new(),
-            };
-            let body = (types.into_iter())
-                .map(|t| BodyPart {
-                    kind: t.parse().unwrap_or(Part::Tough),
-                    hits: 0,
-                    boost: None,
-                })
-                .collect::<Vec<_>>();
-            Fallen {
-                creep: Creep {
-                    id: Id::of_engine(text(o, atom!("creepId"))),
-                    name: text(o, atom!("creepName")).to_string(),
-                    owner: self.owner(o),
-                    pos: self.pos(room, o),
-                    hits: 0,
-                    hits_max: body.len() as i32 * 100,
-                    body,
-                    ticks_to_live: num(o, atom!("creepTicksToLive")) as i32,
-                    fatigue: 0,
-                    store: Store::empty(),
-                },
-                died: num(o, atom!("deathTime")) as i32,
-            }
+            },
+            ticks_to_live: num(o, atom!("creepTicksToLive")) as i32,
+            died: num(o, atom!("deathTime")) as i32,
         });
         Remains {
             id: Id::of_engine(text(o, atom!("_id"))),

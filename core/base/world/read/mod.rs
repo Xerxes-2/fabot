@@ -215,21 +215,27 @@ impl<'a> Reader<'a> {
         })
     }
 
-    /// A tombstone's creep keeps no hits or fatigue.
+    /// Only our own fallen creep is written.
     fn remains(&mut self) -> Remains {
+        let (id, pos, store) = (self.id(), self.pos(), self.store());
+        let fallen = self.flag().then(|| {
+            let body: Vec<Part> = self.list(|r| r.word().parse().unwrap_or(Part::Tough));
+            let left = self.n();
+            Fallen {
+                ticks_to_live: if left > 0 {
+                    left
+                } else {
+                    engine::lifetime(body.iter().copied())
+                },
+                body,
+                died: self.n(),
+            }
+        });
         Remains {
-            id: self.id(),
-            pos: self.pos(),
-            store: self.store(),
-            fallen: self.flag().then(|| {
-                let mut creep = self.creep();
-                creep.hits = 0;
-                creep.fatigue = 0;
-                Fallen {
-                    creep,
-                    died: self.n(),
-                }
-            }),
+            id,
+            pos,
+            store,
+            fallen,
         }
     }
 
