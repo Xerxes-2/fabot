@@ -45,7 +45,6 @@ pub struct ColonyPlan {
     pub fights: bool,
     /// Where its haul is banked while no storage stands (`ARCHITECTURE.md` §5).
     pub pile: Option<Pos>,
-    /// Where its free fight bodies wait (`Plan::muster`).
     pub muster: Option<Pos>,
 }
 
@@ -72,12 +71,10 @@ pub struct Declarations {
     pub claims: Vec<Outpost>,
     pub allies: BTreeSet<String>,
     pub enemies: BTreeSet<String>,
-    /// The rival rooms whose towers and economy are razed.
     pub sieges: Vec<RoomName>,
     pub colonies: Vec<ColonyPlan>,
     /// Rooms no fight body walks through on its way: a rival's towers.
     pub avoid: BTreeSet<RoomName>,
-    /// The operator's tactic rules, per rival and room (§6.3).
     pub tactics: Vec<TacticRule>,
     /// Strategy's rows: the rooms each fight may open on, ranked (§7.3).
     pub operations: Vec<Operation>,
@@ -171,5 +168,4 @@ pub const REACH_HOPS: i32 = 3;
 /// A declared siege's room stands further off than any room worked.
 pub const SIEGE_HOPS: i32 = 10;
 
-/// A free fight body holds within this of its colony's muster.
 pub const MUSTER_RANGE: i32 = 2;

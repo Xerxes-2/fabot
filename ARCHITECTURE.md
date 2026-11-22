@@ -710,7 +710,7 @@ Pure at module boundaries, systems Rust inside (measurements override defaults):
 - **Single-pass JS→WASM seam:** ~90% of world-read cost was seam calls rather
   than work, so `src/app/read.js` packs the tick into one `Int32Array` +
   interned string buffer (interning cut `read.*` and `decode` by −17%), decoded by
-  `core/base/world.rs`; never add per-field JS calls.
+  `core/base/world/read`; never add per-field JS calls.
 - **Copy `world::Id`:** 96-bit left-aligned hex + length (`Copy`, lex-ordered as
   text), avoiding `String` allocations and pointer hashing.
 - **`#[inline]` across crates:** rustc inlines a function into another

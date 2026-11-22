@@ -57,7 +57,6 @@ impl<T> IndexMut<Tile> for Vec<T> {
     }
 }
 
-/// One value a tile, in tile order.
 pub type Table<T> = Box<[T; COUNT]>;
 
 /// A keeper's lair and the resource it guards.
@@ -71,7 +70,6 @@ pub fn table<T: Clone>(value: T) -> Table<T> {
         .unwrap_or_else(|_| unreachable!())
 }
 
-/// A room's tiles, a bit each.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TileSet([u64; COUNT.div_ceil(64)]);
 
@@ -82,7 +80,6 @@ impl Default for TileSet {
 }
 
 impl TileSet {
-    /// Whether `tile` was not in the set.
     #[inline]
     pub fn insert(&mut self, tile: Tile) -> bool {
         let (word, bit) = (tile.index() / 64, 1u64 << (tile.index() % 64));
@@ -282,7 +279,6 @@ fn exit_bands() -> &'static Vec<Vec<Tile>> {
     })
 }
 
-/// Shared: never written.
 #[inline]
 pub fn exit_tiles(exit: i32) -> &'static [Tile] {
     exit_bands().get(exit as usize).map_or(&[], Vec::as_slice)

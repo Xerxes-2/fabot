@@ -96,7 +96,6 @@ pub enum LinkAct {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LabAct {
     RunReaction(Id, Id),
-    /// The lab spends its compound and energy on the parts of the body with this id.
     BoostCreep(Id),
 }
 
@@ -180,7 +179,6 @@ pub struct Telemetry {
     pub counts: Vec<(&'static str, i32)>,
     /// A colony's open slots of a pattern, by its name, left uncast.
     pub short: Vec<(RoomName, &'static str, i32)>,
-    /// A body's scored tiles, for the harness's trace.
     pub traces: Vec<(String, Vec<(crate::world::Pos, i64)>)>,
 }
 

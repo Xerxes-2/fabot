@@ -10,7 +10,6 @@ pub fn js_number<S: Serializer>(n: &f64, s: S) -> Result<S::Ok, S::Error> {
     }
 }
 
-/// A body as Memory holds it, a part a letter.
 pub mod letters {
     use crate::vocabulary::{ALL_BODY_PARTS, Part, part_letter};
     use serde::{Deserialize, Deserializer, Serializer, de::Error};

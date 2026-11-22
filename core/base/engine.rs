@@ -27,7 +27,6 @@ pub const STORAGE_CAPACITY: i32 = screeps::STORAGE_CAPACITY as i32;
 pub const ENERGY_DECAY: i32 = screeps::ENERGY_DECAY as i32;
 pub const TERMINAL_MIN_SEND: i32 = screeps::TERMINAL_MIN_SEND as i32;
 
-/// The energy a terminal spends sending `amount` across `distance` rooms.
 pub fn send_cost(amount: i32, distance: i32) -> i32 {
     (f64::from(amount)
         * (1.0 - (-f64::from(distance) / f64::from(screeps::TERMINAL_SEND_COST_SCALE)).exp()))
@@ -77,7 +76,6 @@ pub fn topped_out(level: i32) -> bool {
     level >= CONTROLLER_MAX_LEVEL
 }
 
-/// The fatigue a weighted part makes stepping onto a road, plain and swamp.
 pub const ROAD_WEIGHT: i32 = screeps::MOVE_COST_ROAD as i32;
 pub const PLAIN_WEIGHT: i32 = screeps::MOVE_COST_PLAIN as i32;
 pub const SWAMP_WEIGHT: i32 = screeps::MOVE_COST_SWAMP as i32;
