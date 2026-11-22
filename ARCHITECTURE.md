@@ -392,8 +392,9 @@ pricer cost ~2× CPU and 580 lines for no gain and was not merged).
   `labs::wanted` lists the reactions toward them from the empire's stock,
   depth-first down the crate's `REACTIONS`, each target cut to whole
   reactions the stock carries through to it after the targets before it
-  (`labs::makeable`). `labs::assign` gives each, no two clusters the same,
-  to a cluster its reagents reach (its own, and what other colonies would
+  (`labs::makeable`), none drawing an earlier one's stock below its cap.
+  `labs::assign` gives each, no two clusters the same, to a cluster its
+  reagents reach (its own, and what other colonies would
   give through terminals with room), ranked: the reaction its reagent labs
   already run (both reagents held), so a running reaction stays put, unless
   it reacts under half as fast as the fastest cluster, so a slow one never
@@ -407,9 +408,6 @@ pricer cost ~2× CPU and 580 lines for no gain and was not merged).
   reserved for active boosts (§6.5) drop out of reactions and are filled by
   carriers via `Ground::boost_lab`. Layout places no lab below RCL8 (labs are
   worth little early).
-  `❓` `makeable` promises reactions that leftover reagents under one
-  reaction's worth cannot carry, and a target less than one reaction above its
-  stock can be drained by a later target and never refilled.
 - **Abandon (`economy/abandon.rs`):** declared colonies stop digging, building,
   and upgrading past deadline, ship storage/terminal/lab contents out (energy
   last), destroy own structures (`destroy()` requires our controller, and owned

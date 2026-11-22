@@ -6,7 +6,7 @@ use std::cmp::Reverse;
 
 use fabot_base::boost::Roles;
 use fabot_base::engine;
-use fabot_base::vocabulary::{BOOSTS, Boost, ORES, ResourceType, ores_in};
+use fabot_base::vocabulary::{BOOSTS, Boost, ResourceType, ores_in};
 use fabot_base::world::Id;
 
 /// Hivemind's "high": past it the first-ranked boost leaves the ore to the next.
@@ -36,7 +36,8 @@ pub type Reaction = (ResourceType, [ResourceType; 2], i32);
 /// Every reaction toward a target its stock stands short of, depth-first: a
 /// reagent compound short of the shortfall comes before the compound itself,
 /// which is wanted once both reagents stand, so a reagent run out leaves the
-/// labs working on with the other.
+/// labs working on with the other. One target drained short by less than a
+/// reaction could never be refilled.
 pub fn wanted(
     targets: &[(ResourceType, i32)],
     stock: &dyn Fn(ResourceType) -> i32,
@@ -50,8 +51,9 @@ pub fn wanted(
         let Some([first, second]) = compound.reaction_components() else {
             return;
         };
-        for reagent in [first, second].into_iter().filter(|r| stock(*r) < want) {
-            toward(reagent, want - stock(reagent), stock, out);
+        let asked = whole_reactions(want);
+        for reagent in [first, second].into_iter().filter(|r| stock(*r) < asked) {
+            toward(reagent, asked - stock(reagent), stock, out);
         }
         if stock(first) >= engine::LAB_REACTION_AMOUNT
             && stock(second) >= engine::LAB_REACTION_AMOUNT
@@ -62,10 +64,18 @@ pub fn wanted(
     }
 
     let mut out = Vec::new();
-    for (compound, target) in makeable(targets, stock) {
-        let short = target - stock(compound);
+    let capped = makeable(targets, stock);
+    for (i, (compound, target)) in capped.iter().enumerate() {
+        let free = |r| {
+            let kept: i32 = (capped[..i].iter())
+                .filter(|(c, _)| *c == r)
+                .map(|(_, n)| n)
+                .sum();
+            (stock(r) - kept).max(0)
+        };
+        let short = target - free(*compound);
         if short > 0 {
-            toward(compound, short, stock, &mut out);
+            toward(*compound, short, &free, &mut out);
         }
     }
     out
@@ -176,66 +186,54 @@ pub fn makeable(
     for (compound, target) in targets {
         let have = stock(*compound);
         let made = |n: i32| {
-            let asked = [capped.as_slice(), &[(*compound, have + n)]].concat();
-            ore_short(&asked, stock).is_empty()
+            let last = (*compound, have + n * engine::LAB_REACTION_AMOUNT);
+            carries(&[&capped[..], &[last]].concat(), stock)
         };
-        let (mut short, mut over) = (0, target - have + 1);
-        while over - short > 1 {
-            let mid = (short + over) / 2;
+        let (mut most, mut over) = (0, (target - have) / engine::LAB_REACTION_AMOUNT + 1);
+        while over - most > 1 {
+            let mid = (most + over) / 2;
             if made(mid) {
-                short = mid;
+                most = mid;
             } else {
                 over = mid;
             }
         }
-        let reactions = short / engine::LAB_REACTION_AMOUNT;
-        capped.push((*compound, have + reactions * engine::LAB_REACTION_AMOUNT));
+        capped.push((*compound, have + most * engine::LAB_REACTION_AMOUNT));
     }
     capped
 }
 
-/// The ore the cluster lacks to bring every target up: each shortfall broken
-/// down through its recipe, a compound or ore already in `stock` spent before
-/// the ore under it is counted. What the other colonies ship, and no more.
-fn ore_short(
-    targets: &[(ResourceType, i32)],
-    stock: &dyn Fn(ResourceType) -> i32,
-) -> Vec<(ResourceType, i32)> {
+/// Whether the stock brings every target up, each shortfall broken down
+/// through its recipe in whole reactions, a compound or ore in `stock` spent
+/// before what it is made of.
+fn carries(targets: &[(ResourceType, i32)], stock: &dyn Fn(ResourceType) -> i32) -> bool {
     fn need(
         resource: ResourceType,
         amount: i32,
         left: &mut Vec<(ResourceType, i32)>,
-        short: &mut [i32; ORES.len()],
         stock: &dyn Fn(ResourceType) -> i32,
-    ) {
+    ) -> bool {
         let at = (left.iter().position(|(r, _)| *r == resource)).unwrap_or_else(|| {
             left.push((resource, stock(resource)));
             left.len() - 1
         });
-        let spent = left[at].1.min(amount);
-        left[at].1 -= spent;
-        let rest = amount - spent;
-        if rest <= 0 {
-            return;
-        }
-        if let Some(reagents) = resource.reaction_components() {
-            for reagent in reagents {
-                need(reagent, rest, left, short, stock);
-            }
-        } else if let Some(ore) = ORES.iter().position(|o| *o == resource) {
-            short[ore] += rest;
-        }
+        let rest = amount - left[at].1.min(amount);
+        left[at].1 -= amount - rest;
+        let Some(reagents) = resource.reaction_components().filter(|_| rest > 0) else {
+            return rest <= 0;
+        };
+        let made = whole_reactions(rest);
+        left[at].1 += made - rest;
+        reagents.into_iter().all(|r| need(r, made, left, stock))
     }
 
     let mut left = Vec::new();
-    let mut short = [0; ORES.len()];
-    for (compound, target) in targets {
-        need(*compound, *target, &mut left, &mut short, stock);
-    }
-    ORES.into_iter()
-        .zip(short)
-        .filter(|(_, n)| *n > 0)
-        .collect()
+    (targets.iter()).all(|(compound, target)| need(*compound, *target, &mut left, stock))
+}
+
+fn whole_reactions(n: i32) -> i32 {
+    (n + engine::LAB_REACTION_AMOUNT - 1) / engine::LAB_REACTION_AMOUNT
+        * engine::LAB_REACTION_AMOUNT
 }
 
 /// One tick of the cluster: the reaction and the labs that run it, the fills
@@ -351,7 +349,7 @@ mod tests {
     use super::*;
     use ResourceType::*;
     use fabot_base::boost::roles_of;
-    use fabot_base::vocabulary::RESOURCES_ALL;
+    use fabot_base::vocabulary::{ORES, RESOURCES_ALL};
     use fabot_base::world::Pos;
     use fabot_base::world::RoomName;
 
@@ -467,14 +465,26 @@ mod tests {
     }
 
     #[test]
-    fn the_ore_short_is_the_target_less_what_stands_through_its_recipe() {
-        let targets = [(UtriumAcid, 3000)];
-        let stock = [(Hydroxide, 1000), (Hydrogen, 2000)];
-        // OH: 2000 to make, of H and O; UH: 3000, of U and H; H: 5000 less 2000.
-        assert_eq!(
-            ore_short(&targets, &stocked(&stock)),
-            vec![(Hydrogen, 3000), (Oxygen, 2000), (Utrium, 3000)]
-        );
+    fn a_target_carries_only_what_its_ore_makes_in_whole_reactions() {
+        let carries =
+            |stock: &[(ResourceType, i32)], n| carries(&[(UtriumAcid, n)], &stocked(stock));
+        // OH: 2000 to make, of H and O; UH: 3000, of U and H.
+        let stock = [
+            (Hydroxide, 1000),
+            (Hydrogen, 5000),
+            (Oxygen, 2000),
+            (Utrium, 3000),
+        ];
+        assert!(carries(&stock, 3000));
+        assert!(!carries(&stock[..3], 3000));
+        // UH 6 and H 4 make one reaction's worth of UH, not two.
+        let odd = [
+            (UtriumHydride, 6),
+            (Hydrogen, 4),
+            (Utrium, 10),
+            (Hydroxide, 10),
+        ];
+        assert!(carries(&odd, 5) && !carries(&odd, 6));
     }
 
     #[test]

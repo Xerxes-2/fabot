@@ -32,11 +32,12 @@ fn tree(c: ResourceType) -> Vec<ResourceType> {
 }
 
 /// Ore each leaf asks to bring `c` to `total`, each compound's stock standing in
-/// for its subtree; sound since no recipe holds a compound twice (checked below).
+/// for its subtree and the rest made in whole reactions; sound since no recipe
+/// holds a compound twice (checked below).
 fn ore_asked(c: ResourceType, total: i32, stock: &Stock, asked: &mut [i32; ORES.len()]) {
     match c.reaction_components() {
         Some(rs) => {
-            let make = (total - stock_of(stock, c)).max(0);
+            let make = ((total - stock_of(stock, c)).max(0) + BATCH - 1) / BATCH * BATCH;
             rs.into_iter()
                 .for_each(|r| ore_asked(r, make, stock, asked));
         }
@@ -82,31 +83,43 @@ type Case = (Vec<(ResourceType, i32)>, Stock);
 
 /// Targets, then a stock around what they ask: none, exactly, one short, one
 /// over, a reaction's worth, plenty; pinned, a T3 from base ores only, one
-/// past the ore it counts twice (O in both GO and OH), and a T2 whose reagents
-/// fall short, both standing a reaction's worth or one a unit under it.
+/// past the ore it counts twice (O in both GO and OH), a T2 whose reagents
+/// fall short, both standing a reaction's worth or one a unit under it, one
+/// whose reagent's odd units cannot join its ore's, a met target a later
+/// one's tree runs through, and a T2 two of whose levels hold odd units.
 fn targets_with_stock() -> impl Strategy<Value = Case> {
-    use ResourceType::{CatalyzedGhodiumAlkalide as Xgho2, Hydroxide, UtriumAcid, UtriumHydride};
+    use ResourceType::{
+        CatalyzedGhodiumAlkalide as Xgho2, Ghodium, GhodiumAcid, GhodiumHydride, Hydrogen,
+        Hydroxide, Keanium, KeaniumAlkalide, Oxygen, Utrium, UtriumAcid, UtriumHydride,
+    };
     let ores = |n: i32| ORES.map(|o| (o, n)).to_vec();
     let short_t2 = |uh: i32| [ores(10_000), vec![(UtriumHydride, uh), (Hydroxide, BATCH)]].concat();
+    let mut odd_t2: Stock = ORES[2..6].iter().map(|o| (*o, 413)).collect();
+    odd_t2.extend([
+        (Hydrogen, 827),
+        (Oxygen, 155),
+        (Ghodium, 4),
+        (GhodiumHydride, 4),
+    ]);
     prop_oneof![
         8 => generated(),
         1 => Just((vec![(Xgho2, 3000)], ores(10_000))),
         1 => Just((vec![(Xgho2, 7500)], ores(3000))),
         1 => Just((vec![(UtriumAcid, 3000)], short_t2(BATCH))),
         1 => Just((vec![(UtriumAcid, 3000)], short_t2(BATCH - 1))),
+        1 => Just((
+            vec![(UtriumAcid, 902)],
+            vec![(Hydrogen, 4), (Utrium, 901), (Hydroxide, 901), (UtriumHydride, 6)],
+        )),
+        1 => Just((
+            vec![(Hydroxide, 9), (KeaniumAlkalide, 863)],
+            vec![(Hydrogen, 871), (Oxygen, 20_000), (Keanium, 862), (Hydroxide, 10)],
+        )),
+        1 => Just((
+            vec![(GhodiumAcid, 414)],
+            odd_t2,
+        )),
     ]
-}
-
-/// Stock and targets cut to whole reactions: `ore_cap` (and `makeable`) pool a
-/// compound's odd units with its ore's, which no reaction can join.
-fn in_whole_reactions() -> impl Strategy<Value = Case> {
-    let whole = |(r, n): (ResourceType, i32)| (r, n / BATCH * BATCH);
-    targets_with_stock().prop_map(move |(targets, stock)| {
-        (
-            targets.into_iter().map(whole).collect(),
-            stock.into_iter().map(whole).collect(),
-        )
-    })
 }
 
 fn generated() -> impl Strategy<Value = Case> {
@@ -184,7 +197,7 @@ impl Labs {
         Some(self.bring(i, *a)? + self.bring(i, *b)?)
     }
 
-    /// ARCHITECTURE.md's labs rank (lines 397-402), best first: running, most
+    /// ARCHITECTURE.md's labs rank (lines 398-403), best first: running, most
     /// outputs, reagents held, nearest, first wanted.
     fn claim(&self, i: usize, at: usize) -> Option<impl Ord> {
         let bench = self.benches[i].as_ref()?;
@@ -298,9 +311,8 @@ proptest! {
         ..ProptestConfig::with_cases(CASES)
     })]
 
-    /// Whole reactions only: past them the cap over-promises (ARCHITECTURE.md labs `❓`).
     #[test]
-    fn the_first_target_is_cut_to_whole_reactions_its_ore_carries((targets, stock) in in_whole_reactions()) {
+    fn the_first_target_is_cut_to_whole_reactions_its_ore_carries((targets, stock) in targets_with_stock()) {
         let capped = makeable(&targets, &|r| stock_of(&stock, r));
         let (first, target) = targets[0];
         prop_assert_eq!(capped[0], (first, ore_cap(first, target, &stock)));
@@ -334,7 +346,7 @@ proptest! {
     }
 
     #[test]
-    fn played_out_the_first_target_reaches_all_its_ore_carries((targets, mut stock) in in_whole_reactions()) {
+    fn played_out_the_first_target_reaches_all_its_ore_carries((targets, mut stock) in targets_with_stock()) {
         let (first, target) = targets[0];
         let promised = ore_cap(first, target, &stock).min(target);
         while let Some(&(product, reagents, _)) = wanted(&targets, &|r| stock_of(&stock, r)).first() {
