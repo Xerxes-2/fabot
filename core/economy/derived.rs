@@ -1063,7 +1063,7 @@ fn boost_lab(world: &World, home: RoomName) -> Option<BoostLab> {
     }
     waited
         .into_iter()
-        .find_map(|(id, (compound, mineral, energy))| {
+        .filter_map(|(id, (compound, mineral, energy))| {
             let lab = lab_at(world, home, id)?;
             Some(BoostLab {
                 id,
@@ -1073,6 +1073,7 @@ fn boost_lab(world: &World, home: RoomName) -> Option<BoostLab> {
                 energy: energy - lab.store.amount_of(Energy),
             })
         })
+        .find(|b| b.mineral > 0 || b.energy > 0)
 }
 
 struct Running {
