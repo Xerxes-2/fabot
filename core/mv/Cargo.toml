@@ -9,8 +9,8 @@ path = "mod.rs"
 doctest = false
 
 [dependencies]
-fabot-base = { path = "../base" }
-fabot-atlas = { path = "../atlas" }
+fabot-base.workspace = true
+fabot-atlas.workspace = true
 
 [lints]
 workspace = true

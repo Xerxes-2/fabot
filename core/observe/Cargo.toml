@@ -9,14 +9,14 @@ path = "mod.rs"
 doctest = false
 
 [dependencies]
-fabot-base = { path = "../base" }
-fabot-atlas = { path = "../atlas" }
-fabot-economy = { path = "../economy" }
-fabot-fight = { path = "../fight" }
+fabot-base.workspace = true
+fabot-atlas.workspace = true
+fabot-economy.workspace = true
+fabot-fight.workspace = true
 strum.workspace = true
 
 [dev-dependencies]
-fabot-base = { path = "../base", features = ["test-support"] }
+fabot-base = { workspace = true, features = ["test-support"] }
 
 [lints]
 workspace = true

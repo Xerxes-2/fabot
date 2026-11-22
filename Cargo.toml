@@ -1,9 +1,20 @@
 [workspace]
-members = ["core/base", "core/atlas", "core/exchange", "core/mv", "core/layout", "core/tactics", "core/economy", "core/fight", "core/strategy", "core/observe", "core", "sim"]
+members = ["core/*", "sim"]
 # Old commits' trees build under .scratch/, an agent's workspace under .claude/: cargo must not claim them.
 exclude = [".scratch", ".claude"]
 
 [workspace.dependencies]
+fabot-base = { path = "core/base" }
+fabot-atlas = { path = "core/atlas" }
+fabot-exchange = { path = "core/exchange" }
+fabot-mv = { path = "core/mv" }
+fabot-layout = { path = "core/layout" }
+fabot-tactics = { path = "core/tactics" }
+fabot-economy = { path = "core/economy" }
+fabot-fight = { path = "core/fight" }
+fabot-strategy = { path = "core/strategy" }
+fabot-observe = { path = "core/observe" }
+fabot-core = { path = "core/tick" }
 screeps-game-api = "0.23.5"
 serde = { version = "1", features = ["derive"] }
 # Memory's keys keep their order, so its text is written back as the engine wrote it.
@@ -22,9 +33,9 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-fabot-base = { path = "core/base" }
-fabot-exchange = { path = "core/exchange", optional = true }
-fabot-layout = { path = "core/layout", optional = true }
+fabot-base.workspace = true
+fabot-exchange = { workspace = true, optional = true }
+fabot-layout = { workspace = true, optional = true }
 screeps-game-api.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -76,9 +87,9 @@ panic = "abort"
 
 [target.wasm32-unknown-unknown.dependencies]
 talc = "5.1.1"
-fabot-core = { path = "core" }
-fabot-tactics = { path = "core/tactics" }
-fabot-observe = { path = "core/observe" }
+fabot-core.workspace = true
+fabot-tactics.workspace = true
+fabot-observe.workspace = true
 js-sys = "0.3"
 wasm-bindgen = "0.2"
 miniz_oxide = { version = "0.9", default-features = false, features = ["with-alloc"] }

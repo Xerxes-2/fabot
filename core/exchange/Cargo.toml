@@ -9,11 +9,11 @@ path = "mod.rs"
 doctest = false
 
 [dependencies]
-fabot-base = { path = "../base" }
+fabot-base.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
-fabot-base = { path = "../base", features = ["test-support"] }
+fabot-base = { workspace = true, features = ["test-support"] }
 
 [lints]
 workspace = true

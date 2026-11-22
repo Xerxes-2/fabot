@@ -1,0 +1,30 @@
+[package]
+name = "fabot-core"
+version = "0.1.0"
+edition = "2024"
+publish = false
+# `tests/` is the unit suites, a module of the lib.
+autotests = false
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+fabot-base.workspace = true
+fabot-atlas.workspace = true
+fabot-mv.workspace = true
+fabot-layout.workspace = true
+fabot-tactics.workspace = true
+fabot-economy.workspace = true
+fabot-fight.workspace = true
+fabot-strategy.workspace = true
+fabot-observe.workspace = true
+screeps-game-api.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+fabot-base = { workspace = true, features = ["test-support"] }
+
+[lints]
+workspace = true

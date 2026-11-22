@@ -4,7 +4,7 @@
 // row holds each of its files to its own ceiling, a `<dir>` row its whole
 // tree. A comment share is per directory of the bot's
 // source (`src`, `core`, `sim`), over its own .rs files. Neither counts a `#[cfg(test)]` item nor
-// the shared suites under `core/tests`. Exits non-zero on any breach.
+// the shared suites under `core/tick/tests`. Exits non-zero on any breach.
 //
 // Usage: node scripts/ceiling.mjs
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -15,7 +15,7 @@ const { lines: ceilings, comments: commentPct } = JSON.parse(
 );
 
 const ROOTS = ["src", "core", "sim"];
-const SUITES = "core/tests";
+const SUITES = "core/tick/tests";
 
 const rsFiles = (dir) =>
   readdirSync(dir).flatMap((name) => {

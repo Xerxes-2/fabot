@@ -9,10 +9,10 @@ path = "mod.rs"
 doctest = false
 
 [dependencies]
-fabot-base = { path = "../base" }
-fabot-atlas = { path = "../atlas" }
-fabot-layout = { path = "../layout" }
-fabot-fight = { path = "../fight" }
+fabot-base.workspace = true
+fabot-atlas.workspace = true
+fabot-layout.workspace = true
+fabot-fight.workspace = true
 screeps-game-api.workspace = true
 serde.workspace = true
 

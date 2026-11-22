@@ -42,7 +42,7 @@ Game ──World.ofGame──▶ World ──decide──▶ Actions ──Execu
 ```
 
 - **Pure core (`core/` workspace crates, orchestrated by `fabot-core`):** `World::of_game` reads the JS API once
-  in `src/app/`; nothing in `core/` touches `Game`. `core/drive.rs` is the
+  in `src/app/`; nothing in `core/` touches `Game`. `core/tick/drive.rs` is the
   shared tick seam called by both the WASM driver (`src/app/driver.rs`) and the
   native simulator (`sim/`).
 - **Deterministic `decide`:** `decide(State, World) -> (Settled, Telemetry, State')` has no
@@ -152,7 +152,7 @@ segments over multiple ticks (economy first); a cold tick never spends more than
 `fabot-base` (`core/base`) also holds what every module shares (`tiles`, `grid`,
 `wish`, `intents`, `declarations`, intel rows, boost queries, `HashMap`) and
 imports no module above it: a crate, so the compiler holds that floor.
-`fabot-core` (`core/`) keeps only the tick (`state`, `memory`, `tick`,
+`fabot-core` (`core/tick`) keeps only the tick (`state`, `memory`, `tick`,
 `drive`) over the module crates.
 
 **Dependency direction:** top to bottom, enforced at compile time by the Cargo
@@ -175,7 +175,7 @@ one slice per owner (`EconomyState`, `LayoutState`, `FightState`,
 the compiler holds ownership. Adding a row is an architecture change, not a fix.
 
 **Storage tiers:**
-- **Memory (`RawMemory`):** parsed once per tick in `core/memory.rs` under
+- **Memory (`RawMemory`):** parsed once per tick in `core/tick/memory.rs` under
   `Memory.v2` (global `Memory` is never touched; v1 `fabot`/`creeps` keys are
   dropped on first read). Holds only per-tick essential state.
 - **Segments (`RawMemory.segments`):** `1` observe, `2` intel, `3` metrics,
@@ -780,7 +780,7 @@ attacking v2.
 ### 10.3 Unit tests, where the engine would obscure
 
 Under 1 minute in `npm test`:
-1. **Property invariants** (`core/tests/`): Memory round-trips, Tracker id
+1. **Property invariants** (`core/tick/tests/`): Memory round-trips, Tracker id
    permutation stability, `Ours` ∩ `assignments` = ∅, no overlapping moves, no
    idle spawn while a cast is affordable.
 2. **Table-driven pure arithmetic:** `Exchange`, `Atlas`, `Tracker`, bodies,

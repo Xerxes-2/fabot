@@ -7,10 +7,10 @@ publish = false
 # krebs (MIT): the official engine's processor ported to Rust, driven here
 # without its V8 server.
 [dependencies]
-fabot-base = { path = "../core/base", features = ["tools"] }
-fabot-core = { path = "../core" }
-fabot-layout = { path = "../core/layout", features = ["tools"] }
-fabot-observe = { path = "../core/observe" }
+fabot-base = { workspace = true, features = ["tools"] }
+fabot-core.workspace = true
+fabot-layout = { workspace = true, features = ["tools"] }
+fabot-observe.workspace = true
 krebs = { package = "engine", git = "https://github.com/DefaultO/krebs", rev = "04a5394d00b05bbff4e472e07e0bf07ac811c315" }
 krebs-util = { package = "util", git = "https://github.com/DefaultO/krebs", rev = "04a5394d00b05bbff4e472e07e0bf07ac811c315" }
 mimalloc = "0.1.52"
