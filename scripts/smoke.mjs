@@ -138,7 +138,7 @@ const observe = JSON.parse(segments[1] ?? fail("no observe segment written"));
 if (observe.tick !== 103) fail(`observe tick ${observe.tick}, not 103`);
 if (observe.faults.length !== 0) fail(`faults: ${JSON.stringify(observe.faults)}`);
 const phases = observe.phases.map(([name]) => name);
-for (const want of ["memory", "read.rooms", "read.structures", "read.others", "read.events", "read.own", "read.pack", "read.copy", "decode", "map", "world", "atlas", "economy", "execute", "write", "metrics", "record"])
+for (const want of ["memory", "read.rooms", "read.structures.find", "read.structures", "read.others", "read.events", "read.own", "read.pack", "read.copy", "decode", "map", "world", "atlas", "economy", "execute", "write", "metrics", "record"])
   if (!phases.includes(want)) fail(`phase ${want} not reported: ${phases}`);
 if (!observe.counts.some(([name, n]) => name === "read.structures" && n > 0)) fail(`read.structures walked nothing: ${JSON.stringify(observe.counts)}`);
 const pass = globalThis.__fabotRead().slice(0, 2).map((each) => (typeof each === "string" ? each : Array.from(each)));

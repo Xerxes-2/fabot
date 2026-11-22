@@ -138,9 +138,16 @@ globalThis.__fabotRead = (() => {
     if (absent(r.controller)) n(0);
     else n(1), controller(r.controller);
   };
+  const found = [];
+  let next = 0;
   const KINDS = [
     (r) => list(r.find(105), (x) => (s(x.id), pos(x.pos), n(x.energy), n(x.energyCapacity), n(x.ticksToRegeneration))) + list(r.find(116), (x) => (s(x.id), pos(x.pos), w(x.mineralType), n(x.mineralAmount))),
-    (r) => list(r.find(107), structure),
+    (r) => {
+      const xs = r.find(107);
+      found.push(xs);
+      return xs.length;
+    },
+    (r) => list(found[next++], structure),
     (r) => list(r.find(111), (x) => (w(x.structureType), s(x.id), n(x.pos.x), n(x.pos.y), owner(x), n(x.progress), n(x.progressTotal))),
     (r) => list(r.find(106), (x) => (s(x.id), pos(x.pos), w(x.resourceType), n(x.amount))),
     (r) => list([...r.find(118), ...r.find(123)], remains),
@@ -274,6 +281,8 @@ globalThis.__fabotRead = (() => {
   return (drain) => {
     m = 0;
     at = 0;
+    found.length = 0;
+    next = 0;
     parts = 0;
     strs = [];
     words = new Map();

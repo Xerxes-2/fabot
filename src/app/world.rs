@@ -87,9 +87,10 @@ pub struct Pass {
 }
 
 /// `read.js`'s sections in its order, each closed by its own clock.
-const SECTIONS: [&str; 10] = [
+const SECTIONS: [&str; 11] = [
     "read.rooms",
     "read.sources",
+    "read.structures.find",
     "read.structures",
     "read.sites",
     "read.piles",
