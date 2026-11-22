@@ -1,0 +1,10 @@
+{
+  "why": "Hold seats one body a rampart, as Exchange's Hold stance prices it: a ranger holding W1N1's one rampart keeps it while a second arrives behind it, rather than the two trading the tile every tick, each bare in turn",
+  "modules": ["fight", "tactics"],
+  "start": { "world": "scripts/xxscreeps/worlds/hold-mates-rampart.json", "seed": 1 },
+  "ticks": 300,
+  "assert": [
+    { "measure": "bodiesLost", "max": 0 },
+    { "measure": "predictedWinsLost", "max": 0 }
+  ]
+}

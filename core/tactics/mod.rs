@@ -739,8 +739,12 @@ pub fn siege(
     }
 }
 
-pub fn rampart(sight: &mut Sight, creep: &Creep) -> Wish {
+/// One body a rampart, as Exchange's Hold stance seats them: shoving a body off
+/// its rampart trades the tile with it every tick, each bare in turn.
+pub fn rampart(sight: &mut Sight, ours: &[&Creep], creep: &Creep) -> Wish {
+    let taken = |p: &Pos| *p != creep.pos && ours.iter().any(|m| m.pos == *p);
     let nearest = (sight.ramparts.get(&creep.pos.room).into_iter().flatten())
+        .filter(|p| !taken(p))
         .min_by_key(|p| (creep.pos.range(p).unwrap_or(99), p.x, p.y))
         .copied();
 

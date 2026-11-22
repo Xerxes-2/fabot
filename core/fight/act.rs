@@ -215,7 +215,7 @@ pub(super) fn act(
         let enter = e.objective == Objective::Defend;
 
         if e.unanswered {
-            return (None, tactics::rampart(sight, c));
+            return (None, tactics::rampart(sight, &fighters, c));
         }
 
         let wish = match e.phase {
@@ -285,7 +285,7 @@ pub(super) fn act(
                 } else if matches!(tactic, Tactic::Kite | Tactic::BlobKite) && !swings(c) {
                     tactics::kite(sight, order, &centre, enter, c)
                 } else if matches!(tactic, Tactic::Hold) {
-                    tactics::rampart(sight, c)
+                    tactics::rampart(sight, &fighters, c)
                 } else {
                     tactics::close(sight, order, &centre, enter, c)
                 }
