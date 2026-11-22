@@ -15,3 +15,7 @@ pub mod world;
 /// FxHash: on wasm it beat SipHash, foldhash and rapidhash (bench-live), whose
 /// 128-bit multiply wasm has no instruction for.
 pub type HashMap<K, V> = std::collections::HashMap<K, V, rustc_hash::FxBuildHasher>;
+#[cfg(test)]
+mod tests {
+    mod engine;
+}

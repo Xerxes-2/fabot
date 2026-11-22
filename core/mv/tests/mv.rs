@@ -3,6 +3,7 @@
 //! wishes `plan` builds over generated rooms.
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::{arbitrate::arbitrate, plan};
 use fabot_atlas::{Atlas, Mover, Target};
 use fabot_base::grid::{Footprint, factor_of};
 use fabot_base::testing::Dice;
@@ -10,7 +11,6 @@ use fabot_base::tiles::{self, Tile, TileSet};
 use fabot_base::vocabulary::Part;
 use fabot_base::wish::Wish;
 use fabot_base::world::{BodyPart, Creep, Owner, Room, RoomName, Store, World, terrain};
-use fabot_mv::{arbitrate::arbitrate, plan};
 
 const ROOM: RoomName = RoomName::W1N1;
 const CASES: u64 = 500;

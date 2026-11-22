@@ -38,7 +38,7 @@ changed=$(jj diff --name-only --from "$branch" --to "$rev")
 modules=() scenarios=() full=
 while read -r f; do
   case "$f" in
-    *.md | core/tick/tests/*) ;;
+    *.md | core/*/tests/*) ;;
     core/base/* | core/tick/*) full=${full:-$f} ;;
     core/*/*) m=${f#core/}; m=${m%%/*}; [ ! -d "core/$m" ] || modules+=("$m") ;;
     scripts/xxscreeps/scenarios/*.json) [ ! -e "$f" ] || { s=${f##*/}; scenarios+=("${s%.json}"); } ;;

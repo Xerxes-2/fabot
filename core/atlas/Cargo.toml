@@ -11,5 +11,9 @@ doctest = false
 [dependencies]
 fabot-base.workspace = true
 
+[dev-dependencies]
+fabot-base = { workspace = true, features = ["test-support"] }
+fabot-layout.workspace = true
+
 [lints]
 workspace = true

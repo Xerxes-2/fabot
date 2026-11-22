@@ -3,6 +3,8 @@ name = "fabot-mv"
 version = "0.1.0"
 edition = "2024"
 publish = false
+# `tests/` is the unit suites, modules of the lib.
+autotests = false
 
 [lib]
 path = "mod.rs"
@@ -11,6 +13,9 @@ doctest = false
 [dependencies]
 fabot-base.workspace = true
 fabot-atlas.workspace = true
+
+[dev-dependencies]
+fabot-base = { workspace = true, features = ["test-support"] }
 
 [lints]
 workspace = true

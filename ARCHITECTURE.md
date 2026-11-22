@@ -791,7 +791,7 @@ attacking v2.
 ### 10.3 Unit tests, where the engine would obscure
 
 Under 1 minute in `npm test`:
-1. **Property invariants** (`core/tick/tests/`): Memory round-trips, Tracker id
+1. **Property invariants** (each crate's `tests/`): Memory round-trips, Tracker id
    permutation stability, `Ours` ∩ `assignments` = ∅, no overlapping moves, no
    idle spawn while a cast is affordable.
 2. **Table-driven pure arithmetic:** `Exchange`, `Atlas`, `Tracker`, bodies,

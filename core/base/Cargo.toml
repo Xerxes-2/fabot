@@ -3,6 +3,8 @@ name = "fabot-base"
 version = "0.1.0"
 edition = "2024"
 publish = false
+# `tests/` is the unit suites, modules of the lib.
+autotests = false
 
 [lib]
 path = "lib.rs"

@@ -4,7 +4,7 @@
 // row holds each of its files to its own ceiling, a `<dir>` row its whole
 // tree. A comment share is per directory of the bot's
 // source (`src`, `core`, `sim`), over its own .rs files. Neither counts a `#[cfg(test)]` item nor
-// the shared suites under `core/tick/tests`. Exits non-zero on any breach.
+// a crate's suites under `core/<crate>/tests`. Exits non-zero on any breach.
 //
 // Usage: node scripts/ceiling.mjs
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -15,7 +15,7 @@ const { lines: ceilings, comments: commentPct } = JSON.parse(
 );
 
 const ROOTS = ["src", "core", "sim"];
-const SUITES = "core/tick/tests";
+const SUITES = /^core\/[^/]+\/tests\//;
 
 const rsFiles = (dir) =>
   readdirSync(dir).flatMap((name) => {
@@ -24,7 +24,7 @@ const rsFiles = (dir) =>
     return name.endsWith(".rs") ? [path] : [];
   });
 const shipped = (dir) =>
-  rsFiles(dir).filter((f) => !f.startsWith(SUITES + "/") && !f.startsWith("src/bin/"));
+  rsFiles(dir).filter((f) => !SUITES.test(f) && !f.startsWith("src/bin/"));
 
 // The lines the bot ships: a top-level `#[cfg(test)]` item is dropped, to the
 // `;` that ends a declaration or the `}` at column 0 that closes a block.
