@@ -609,14 +609,22 @@ function stoodLoaded(rooms, time) {
 }
 
 // Crossings a body of ours made back across the border the tick after it
-// landed.
+// landed, and the most consecutive ticks one carried a mineral it never
+// delivered: a carrier at all, any body while it took energy aboard.
 let bounced = 0;
+let mineralHeld = 0;
+let mineralAside = 0;
 const lastTwo = new Map();
 function wasted(rooms) {
   for (const o of rooms.flatMap((r) => [...r["#objects"]]))
     if (o.body !== undefined && o["#user"] === ours) {
-      const now = { room: o.pos.roomName, edge: onEdge(o.pos), energy: energyIn(o) };
       const [a, b] = lastTwo.get(o.name) ?? [];
+      const energy = energyIn(o);
+      const ore = (o.store?.getUsedCapacity() ?? 0) - energy;
+      const kept = b && ore > 0 && ore >= b.ore;
+      const now = { room: o.pos.roomName, edge: onEdge(o.pos), energy, ore, aside: kept ? b.aside + 1 : 0, took: kept && (b.took || energy > b.energy) };
+      if (!o.body.some((p) => p.type === "work")) mineralHeld = Math.max(mineralHeld, now.aside);
+      if (now.took) mineralAside = Math.max(mineralAside, now.aside);
       if (a && b && a.edge && b.edge && now.edge && a.room === now.room && b.room !== now.room) bounced++;
       if (b && b.room !== now.room && homes.includes(b.room)) lines[b.room].carriedOut += now.energy;
       lastTwo.set(o.name, [b, now]);
@@ -753,6 +761,8 @@ for (let t = 0; t < ticks; t++) {
     await sends();
     row.sent = { ...sent };
     row.stillLoaded = stillLoaded;
+    row.mineralAside = mineralAside;
+    row.mineralHeld = mineralHeld;
     // Ore held in our storages and terminals: what the mines brought home.
     row.ore = rooms.flatMap((r) => [...r["#objects"]])
       .filter((o) => o["#user"] === ours && o.store && (o.structureType === "storage" || o.structureType === "terminal"))

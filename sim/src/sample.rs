@@ -53,7 +53,7 @@ fn reserve(level: u32) -> f64 {
 }
 
 /// A creep's body, or a tombstone's.
-fn parts(o: &Obj) -> Vec<&str> {
+pub fn parts(o: &Obj) -> Vec<&str> {
     match o
         .get(Atom::intern("body"))
         .or(o.get(Atom::intern("creepBody")))
@@ -520,6 +520,8 @@ impl Sampler {
             ("claimed", Value::Object(claimed)),
             ("bounced", json!(self.lives.bounced)),
             ("stillLoaded", json!(self.lives.still_loaded)),
+            ("mineralAside", json!(self.lives.mineral_aside)),
+            ("mineralHeld", json!(self.lives.mineral_held)),
             ("sent", json!(self.sent)),
             ("others", json!({})),
         ] {

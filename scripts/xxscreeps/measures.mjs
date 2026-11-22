@@ -137,6 +137,8 @@ export const measures = {
   },
   roadsAtEnd: (samples, a) => at(samples, a.to ?? Infinity).rooms[a.room]?.roads ?? 0,
   stillLoaded: (samples, a) => at(samples, a.to ?? Infinity).stillLoaded,
+  mineralAside: (samples, a) => at(samples, a.to ?? Infinity).mineralAside,
+  mineralHeld: (samples, a) => at(samples, a.to ?? Infinity).mineralHeld,
   // The ticks from every claim at RCL2 to every one with a tower, whether a safe mode ran in one, and `room`'s level.
   rcl2ToTower: (samples) => firstClaimed(samples, (c) => c.towers > 0) - firstClaimed(samples, (c) => c.level >= 2),
   claimSafeMode: (samples, a) => (within(samples, a).some((s) => Object.values(s.claimed ?? {}).some((c) => c.safe)) ? 1 : 0),

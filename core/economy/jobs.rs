@@ -209,10 +209,9 @@ fn sinks_of(derived: &Derived, ci: usize) -> Vec<Spot> {
         && let Some(s) = g.bank()
     {
         add(s.id, s.pos, Energy, s.free, Of::Bank);
-        if s.owned {
-            for r in ores_aboard(derived) {
-                add(s.id, s.pos, r, s.free, Of::Bank);
-            }
+        // A pile takes a mineral too, so no carrier keeps one it cannot place.
+        for r in ores_aboard(derived) {
+            add(s.id, s.pos, r, s.free, Of::Bank);
         }
     }
     out
@@ -651,10 +650,15 @@ impl<'a> Jobs<'a> {
                 // them, so the ring never waits on a body gone to an outpost.
                 let home = self.derived.colonies[ci].room;
                 let far = slots::far(slot);
+                // Topped up from a store, a mineral would go back to the store
+                // it came from.
+                let aboard = |r: ResourceType| r != Energy && body.store.amount_of(r) > 0;
+                let ore = body.store.held.iter().any(|(r, _)| aboard(*r));
                 let fits = |s: &Spot| {
+                    let draws = |of: &dyn Fn(ResourceType) -> bool| matches!(&s.task, Task::Withdraw(_, r) | Task::Pickup(_, r) if of(*r));
                     (far || s.pos.room == home)
-                        && (room > 0
-                            || !matches!(&s.task, Task::Withdraw(_, r) | Task::Pickup(_, r) if *r == Energy))
+                        && (room > 0 || !draws(&|r| r == Energy))
+                        && (!ore || matches!(s.of, Of::Drain) && draws(&aboard))
                 };
                 let mut takes = std::mem::take(&mut self.takes[ci]);
                 let used = body.store.capacity - body.free;

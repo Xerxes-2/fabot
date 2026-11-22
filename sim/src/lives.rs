@@ -1,6 +1,6 @@
-//! `soak-step.mjs`'s `live`, `stoodLoaded` and `wasted`: each body's life over
-//! the followed rooms and their neighbours (`bodies.jsonl`), the longest a body
-//! of ours stood loaded and idle, and its crossings back over a border.
+//! `soak-step.mjs`'s `live`, `stoodLoaded` and `wasted`: each body's life over the followed
+//! rooms and their neighbours (`bodies.jsonl`), the longest a body of ours stood loaded and
+//! idle or kept a mineral (a carrier, or any body taking energy), and its border bounces.
 use std::collections::BTreeMap;
 
 use fabot_base::vocabulary;
@@ -8,7 +8,8 @@ use krebs::atom;
 use krebs::doc::{Atom, Obj, Val};
 use serde_json::{Value, json};
 
-use crate::view::{EVENT_ATTACK, Room, num, obj, ours, store, text};
+use crate::sample::parts;
+use crate::view::{EVENT_ATTACK, Room, num, obj, ours, store, text, used};
 
 #[derive(Default)]
 pub struct Lives {
@@ -18,15 +19,21 @@ pub struct Lives {
     pub closed: Vec<Value>,
     pub still_loaded: u64,
     stills: BTreeMap<String, (String, f64, u64)>,
+    pub mineral_aside: u64,
+    pub mineral_held: u64,
     pub bounced: u64,
     last_two: BTreeMap<String, [Option<Step>; 2]>,
 }
 
-/// Where a body of ours stood a tick: its room, whether on an edge, the energy it carried.
+/// Where a body of ours stood a tick: its room, whether on an edge, the energy and mineral it
+/// carried, the ticks that mineral has not fallen and whether energy came aboard in them.
 struct Step {
     room: String,
     edge: bool,
     energy: f64,
+    ore: f64,
+    aside: u64,
+    took: bool,
 }
 
 pub fn letters(body: &[&str]) -> String {
@@ -81,14 +88,7 @@ impl Lives {
             for o in room.of("creep") {
                 let name = text(o, atom!("name"));
                 let key = format!("{} {name}", text(o, atom!("user")));
-                let body: Vec<&str> = match o.get(atom!("body")) {
-                    Some(Val::Arr(b)) => b
-                        .iter()
-                        .filter_map(Val::as_obj)
-                        .map(|p| text(p, atom!("type")))
-                        .collect(),
-                    _ => Vec::new(),
-                };
+                let body = parts(o);
                 let cost: u32 = body
                     .iter()
                     .filter_map(|p| p.parse::<screeps::Part>().ok())
@@ -151,12 +151,23 @@ impl Lives {
                         .insert(name.to_string(), (at.clone(), energy, ticks));
                     self.still_loaded = self.still_loaded.max(ticks);
                 }
+                let [a, b] = self.last_two.remove(name).unwrap_or_default();
+                let ore = used(o) - energy;
+                let kept = b.as_ref().filter(|b| ore > 0.0 && ore >= b.ore);
                 let now = Step {
                     room: room.name.to_string(),
                     edge: edge(o),
                     energy,
+                    ore,
+                    aside: kept.map_or(0, |b| b.aside + 1),
+                    took: kept.is_some_and(|b| b.took || energy > b.energy),
                 };
-                let [a, b] = self.last_two.remove(name).unwrap_or_default();
+                if !body.contains(&"work") {
+                    self.mineral_held = self.mineral_held.max(now.aside);
+                }
+                if now.took {
+                    self.mineral_aside = self.mineral_aside.max(now.aside);
+                }
                 if let (Some(a), Some(b)) = (&a, &b)
                     && a.edge
                     && b.edge
