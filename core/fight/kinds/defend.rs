@@ -559,9 +559,9 @@ mod tests {
                 .collect();
 
             let fallen: Vec<Dead> = (0..2 + aged.len())
-                .map(|_| Dead {
+                .map(|i| Dead {
                     carry: 16,
-                    ticks_left: engine::AGED_OUT_TICKS_TO_LIVE,
+                    ticks_left: (i % 2) as i32 * engine::AGED_OUT_TICKS_TO_LIVE,
                     died: NOW - 1,
                 })
                 .collect();

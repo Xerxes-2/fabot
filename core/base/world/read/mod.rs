@@ -217,25 +217,15 @@ impl<'a> Reader<'a> {
 
     /// Only our own fallen creep is written.
     fn remains(&mut self) -> Remains {
-        let (id, pos, store) = (self.id(), self.pos(), self.store());
-        let fallen = self.flag().then(|| {
-            let body: Vec<Part> = self.list(|r| r.word().parse().unwrap_or(Part::Tough));
-            let left = self.n();
-            Fallen {
-                ticks_to_live: if left > 0 {
-                    left
-                } else {
-                    engine::lifetime(body.iter().copied())
-                },
-                body,
-                died: self.n(),
-            }
-        });
         Remains {
-            id,
-            pos,
-            store,
-            fallen,
+            id: self.id(),
+            pos: self.pos(),
+            store: self.store(),
+            fallen: self.flag().then(|| Fallen {
+                body: self.list(|r| r.word().parse().unwrap_or(Part::Tough)),
+                ticks_to_live: self.n(),
+                died: self.n(),
+            }),
         }
     }
 
