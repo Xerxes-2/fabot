@@ -200,6 +200,7 @@ name = "fabot-exchange"
 version = "0.1.0"
 dependencies = [
  "fabot-base",
+ "proptest",
  "serde",
 ]
 
@@ -211,6 +212,7 @@ dependencies = [
  "fabot-base",
  "fabot-exchange",
  "fabot-tactics",
+ "proptest",
  "serde",
 ]
 

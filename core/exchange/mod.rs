@@ -1622,67 +1622,29 @@ pub fn damage_map(room: RoomName, towers: &[Pos], foes: &[Fighter]) -> Table<i32
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+    use proptest::sample::select;
+    use proptest::test_runner::FileFailurePersistence;
 
     const ROOM: RoomName = RoomName::W1N1;
 
-    const CASES: usize = 1000;
+    const CASES: u32 = 1000;
 
-    struct Rng(u64);
-
-    impl Rng {
-        fn new(seed: u64) -> Rng {
-            Rng(seed | 1)
-        }
-
-        fn next(&mut self) -> u64 {
-            let mut x = self.0;
-            x ^= x >> 12;
-            x ^= x << 25;
-            x ^= x >> 27;
-            self.0 = x;
-            x.wrapping_mul(0x2545_f491_4f6c_dd1d)
-        }
-
-        fn between(&mut self, low: i32, high: i32) -> i32 {
-            low + (self.next() % (high - low + 1) as u64) as i32
-        }
-
-        fn element<T: Copy>(&mut self, items: &[T]) -> T {
-            items[(self.next() % items.len() as u64) as usize]
-        }
+    fn fighter() -> impl Strategy<Value = Fighter> {
+        use Part::{Attack, Heal, Move, RangedAttack, Tough, Work};
+        let part = select(vec![Attack, RangedAttack, Heal, Move, Tough, Work]);
+        let at = (1..=48, 1..=48).prop_map(|(x, y)| Some(Pos::new(ROOM, x, y)));
+        (vec(part, 1..=20), 0..=3usize, at).prop_map(|(body, tier, pos)| {
+            let boosts: Vec<_> = (body.iter())
+                .map(|p| fabot_base::testing::boosted(*p, tier))
+                .collect();
+            fighter::of_parts(&body, &boosts, 100 * body.len() as i32, pos)
+        })
     }
 
-    fn fighter(rng: &mut Rng) -> Fighter {
-        let n = rng.between(1, 20);
-        let body: Vec<Part> = (0..n)
-            .map(|_| {
-                rng.element(&[
-                    Part::Attack,
-                    Part::RangedAttack,
-                    Part::Heal,
-                    Part::Move,
-                    Part::Tough,
-                    Part::Work,
-                ])
-            })
-            .collect();
-        let tier = rng.element(&[0, 1, 2, 3]);
-        let boosts: Vec<_> = (body.iter())
-            .map(|p| fabot_base::testing::boosted(*p, tier))
-            .collect();
-        let x = rng.between(1, 48);
-        let y = rng.between(1, 48);
-        let pos = Some(Pos::new(ROOM, x, y));
-
-        fighter::of_parts(&body, &boosts, 100 * n, pos)
-    }
-
-    fn side(rng: &mut Rng) -> Side {
-        let n = rng.between(1, 4);
-        let bodies = (0..n).map(|_| fighter(rng)).collect();
-        let towers = rng.between(0, 2);
-
-        Side {
+    fn side() -> impl Strategy<Value = Side> {
+        (vec(fighter(), 1..=4), 0..=2).prop_map(|(bodies, towers)| Side {
             bodies,
             ramparts: BTreeMap::new(),
             towers: (0..towers)
@@ -1692,43 +1654,17 @@ mod tests {
                 })
                 .collect(),
             ..Side::default()
-        }
+        })
     }
 
-    fn terrain(rng: &mut Rng) -> Terrain {
-        let weight = rng.element(&[1, 2, 10]);
-        let run_off = rng.between(0, 40);
-
-        Terrain { weight, run_off }
+    fn terrain() -> impl Strategy<Value = Terrain> {
+        (select(vec![1, 2, 10]), 0..=40).prop_map(|(weight, run_off)| Terrain { weight, run_off })
     }
 
     fn bare(s: &Side) -> Side {
         Side {
             towers: Vec::new(),
             ..s.clone()
-        }
-    }
-
-    #[test]
-    fn a_fight_won_leaves_one_of_our_bodies_standing() {
-        let mut rng = Rng::new(0x5eed_1234);
-
-        for case in 0..CASES {
-            let ours = side(&mut rng);
-            let theirs = side(&mut rng);
-            let ground = terrain(&mut rng);
-
-            if let Outcome::Win(_, losses) =
-                outcome(Stance::Standoff, &ours, &bare(&theirs), ground)
-            {
-                assert!(
-                    losses.dead < ours.bodies.len() as i32,
-                    "case {}: {} of {} bodies dead",
-                    case,
-                    losses.dead,
-                    ours.bodies.len()
-                );
-            }
         }
     }
 
@@ -1747,16 +1683,38 @@ mod tests {
         assert!(crowded(&two, 2, 2, struck).is_some());
     }
 
-    #[test]
-    fn a_way_in_found_with_some_heal_is_found_with_more_and_no_slower() {
-        let mut rng = Rng::new(0xfeed_4321);
-        let tile = tiles::index;
+    proptest! {
+        // Beside this file: no `lib.rs` above it for the default to find.
+        #![proptest_config(ProptestConfig {
+            failure_persistence: Some(Box::new(FileFailurePersistence::WithSource("proptest-regressions"))),
+            ..ProptestConfig::with_cases(CASES)
+        })]
 
-        for case in 0..CASES {
-            let hits: Vec<i32> = (0..48).map(|_| rng.between(1, 300000)).collect();
-            let heal = rng.between(0, 50) as usize;
-            let (x, y, wide) = (rng.between(1, 48), rng.between(1, 48), rng.between(1, 8));
+        #[test]
+        fn a_fight_won_leaves_one_of_our_bodies_standing(
+            ours in side(),
+            theirs in side(),
+            ground in terrain(),
+        ) {
+            if let Outcome::Win(_, losses) =
+                outcome(Stance::Standoff, &ours, &bare(&theirs), ground)
+            {
+                prop_assert!(
+                    losses.dead < ours.bodies.len() as i32,
+                    "{} of {} bodies dead",
+                    losses.dead,
+                    ours.bodies.len()
+                );
+            }
+        }
 
+        #[test]
+        fn a_way_in_found_with_some_heal_is_found_with_more_and_no_slower(
+            hits in vec(prop_oneof![1 => Just(1), 1 => Just(300_000), 6 => 1..=300_000], 48),
+            heal in 0..=50usize,
+            (x, y, wide) in (1..=48, 1..=48, 1..=8),
+        ) {
+            let tile = tiles::index;
             let ground = Ground {
                 room: ROOM,
                 weights: tiles::table(grid::weight(2)),
@@ -1797,7 +1755,7 @@ mod tests {
                 _ => true,
             };
 
-            assert!(holds, "case {case}: heal {heal} from {x},{y}");
+            prop_assert!(holds, "heal {} from {},{}", heal, x, y);
         }
     }
 

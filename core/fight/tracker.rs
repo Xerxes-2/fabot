@@ -249,6 +249,11 @@ mod tests {
     use super::*;
     use fabot_base::vocabulary::Part;
     use fabot_base::world::{BodyPart, Owner, Store};
+    use proptest::bool::weighted;
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+    use proptest::sample::{Index, select};
+    use proptest::test_runner::FileFailurePersistence;
 
     const GRACE: i32 = 3;
 
@@ -279,101 +284,81 @@ mod tests {
         Pos::new(room, x, y)
     }
 
-    /// A seeded xorshift stands in for FsCheck's generator: same shapes, one history a draw.
-    struct Rng(u64);
+    type Arrival = (RoomName, i32, i32, bool);
 
-    impl Rng {
-        fn next(&mut self) -> u64 {
-            self.0 ^= self.0 << 13;
-            self.0 ^= self.0 >> 7;
-            self.0 ^= self.0 << 17;
-            self.0
-        }
-
-        fn below(&mut self, n: u64) -> u64 {
-            self.next() % n
-        }
-
-        /// A whole in `lo..=hi`.
-        fn between(&mut self, lo: i32, hi: i32) -> i32 {
-            lo + self.below((hi - lo + 1) as u64) as i32
-        }
-
-        fn pick<T: Clone>(&mut self, of: &[T]) -> T {
-            of[self.below(of.len() as u64) as usize].clone()
-        }
-
-        /// `Gen.frequency [(yes, true); (no, false)]`.
-        fn chance(&mut self, yes: u64, no: u64) -> bool {
-            self.below(yes + no) < yes
-        }
-
-        /// `Gen.subListOf`.
-        fn subset<T: Clone>(&mut self, of: &[T]) -> Vec<T> {
-            of.iter().filter(|_| self.chance(1, 1)).cloned().collect()
-        }
+    #[derive(Clone, Debug)]
+    struct Turn {
+        dx: i32,
+        dy: i32,
+        stays: bool,
+        arrives: bool,
+        arrival: Arrival,
     }
 
-    fn pool() -> Vec<String> {
-        (0..15).map(|i| format!("h{i}")).collect()
-    }
+    const POOL: usize = 15;
+    const CASES: u32 = 256;
 
     /// Two rooms sharing a seam, and tiles crowded near it so clusters touch.
-    fn arrival(rng: &mut Rng, id: &str) -> Creep {
-        let room = rng.pick(&[RoomName::W1N1, "W2N1".parse::<RoomName>().unwrap()]);
-        let x = rng.pick(&[0, 1, 3, 6, 9, 43, 46, 48, 49]);
-        let y = rng.between(0, 12);
-        let armed = rng.chance(4, 1);
-        creep(id, at(room, x, y), armed)
+    fn arrival() -> impl Strategy<Value = Arrival> {
+        let rooms = vec![RoomName::W1N1, "W2N1".parse::<RoomName>().unwrap()];
+        let x = select(vec![0, 1, 3, 6, 9, 43, 46, 48, 49]);
+        (select(rooms), x, 0..=12, weighted(0.8))
     }
 
-    /// A tick later: most step a few tiles, some vanish, absent ids may arrive.
-    fn next_gen(rng: &mut Rng, now: &[Creep]) -> Vec<Creep> {
-        let mut out: Vec<Creep> = Vec::new();
+    /// Who is there first, then one to six ticks of every pool id's turn.
+    fn turns() -> impl Strategy<Value = Vec<Vec<Turn>>> {
+        let turn = (
+            -3..=3,
+            -3..=3,
+            weighted(6.0 / 7.0),
+            any::<bool>(),
+            arrival(),
+        )
+            .prop_map(|(dx, dy, stays, arrives, arrival)| Turn {
+                dx,
+                dy,
+                stays,
+                arrives,
+                arrival,
+            });
+        vec(vec(turn, POOL), 2..=7)
+    }
 
-        for c in now {
-            let dx = rng.between(-3, 3);
-            let dy = rng.between(-3, 3);
-            let keep = rng.chance(6, 1);
+    fn arrive(i: usize, (room, x, y, armed): &Arrival) -> (usize, Creep) {
+        (i, creep(&format!("h{i}"), at(*room, *x, *y), *armed))
+    }
 
-            if keep {
+    /// A tick later: most step a few tiles, some vanish, up to three absent ids arrive.
+    fn next_gen(turn: &[Turn], now: &[(usize, Creep)]) -> Vec<(usize, Creep)> {
+        let mut out: Vec<(usize, Creep)> = (now.iter())
+            .filter(|(i, _)| turn[*i].stays)
+            .map(|(i, c)| {
                 let mut stepped = c.clone();
-                stepped.pos.x = (c.pos.x + dx).clamp(0, 49);
-                stepped.pos.y = (c.pos.y + dy).clamp(0, 49);
-                out.push(stepped);
-            }
-        }
-
-        let absent: Vec<String> = pool()
-            .into_iter()
-            .filter(|id| now.iter().all(|c| c.id != Id::from(id.as_str())))
+                stepped.pos.x = (c.pos.x + turn[*i].dx).clamp(0, 49);
+                stepped.pos.y = (c.pos.y + turn[*i].dy).clamp(0, 49);
+                (*i, stepped)
+            })
             .collect();
-        let mut arriving = rng.subset(&absent);
-        arriving.truncate(3);
-
-        for id in arriving {
-            out.push(arrival(rng, &id));
-        }
-
+        let absent = (0..POOL).filter(|i| now.iter().all(|(j, _)| i != j));
+        let arriving = absent.filter(|i| turn[*i].arrives).take(3);
+        out.extend(arriving.map(|i| arrive(i, &turn[i].arrival)));
         out
     }
 
     /// Groups after one to six ticks, the next tick's hostiles, and that tick.
-    fn history(rng: &mut Rng) -> (Vec<Group>, Vec<Creep>, i32) {
-        let n = rng.between(1, 6);
-        let ids = rng.subset(&pool());
-        let mut now: Vec<Creep> = ids.iter().map(|id| arrival(rng, id)).collect();
+    fn history(turns: &[Vec<Turn>]) -> (Vec<Group>, Vec<Creep>, i32) {
+        let first = (0..POOL).filter(|i| turns[0][*i].arrives);
+        let mut now: Vec<(usize, Creep)> = first.map(|i| arrive(i, &turns[0][i].arrival)).collect();
         let mut groups: Vec<Group> = Vec::new();
 
-        let mut t = 1;
-        while t <= n {
-            now = next_gen(rng, &now);
-            let (next, _) = step(GRACE, 0, &BTreeSet::new(), &groups, &now, t);
-            groups = next;
-            t += 1;
+        for (t, turn) in (1..).zip(&turns[1..]) {
+            let creeps: Vec<Creep> = now.iter().map(|(_, c)| c.clone()).collect();
+            groups = step(GRACE, 0, &BTreeSet::new(), &groups, &creeps, t).0;
+            now = next_gen(turn, &now);
         }
 
-        (groups, now, t)
+        let now = now.into_iter().map(|(_, c)| c).collect();
+        (groups, now, turns.len() as i32)
     }
 
     fn seen(tick: i32, groups: &[Group]) -> Vec<&Group> {
@@ -386,39 +371,42 @@ mod tests {
         (ax - bx).abs().max((ay - by).abs())
     }
 
-    const DRAWS: usize = 300;
-
-    #[test]
-    fn tiles_across_a_seam_link_only_when_adjacent() {
-        let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
-
-        for _ in 0..DRAWS {
-            let west = 49 - rng.between(0, 2);
-            let east = rng.between(0, 2);
-            let y = rng.between(1, 47);
-            let dy = rng.between(-1, 1);
-            let a = at("W2N1".parse::<RoomName>().unwrap(), west, y);
-            let b = at(RoomName::W1N1, east, y + dy);
-            assert_eq!(linked(&a, &b), (49 - west) + east < 1);
+    fn shuffled<T: Clone>(of: &[T], order: &[Index]) -> Vec<T> {
+        let mut out = of.to_vec();
+        for i in (1..out.len()).rev() {
+            out.swap(i, order[i % order.len()].index(i + 1));
         }
+        out
     }
 
-    #[test]
-    fn ids_are_stable_under_a_permutation_of_the_input() {
-        let mut rng = Rng(0x2545_f491_4f6c_dd1d);
+    proptest! {
+        // Beside this file: no `lib.rs` above it for the default to find.
+        #![proptest_config(ProptestConfig {
+            failure_persistence: Some(Box::new(FileFailurePersistence::WithSource("proptest-regressions"))),
+            ..ProptestConfig::with_cases(CASES)
+        })]
 
-        for _ in 0..DRAWS {
-            let (prev, now, tick) = history(&mut rng);
-            let mut shuffled_prev = prev.clone();
-            let mut shuffled_now = now.clone();
+        #[test]
+        fn tiles_across_a_seam_link_only_when_adjacent(
+            west in 47..=49,
+            east in 0..=2,
+            y in 1..=47,
+            dy in -1..=1,
+        ) {
+            let a = at("W2N1".parse::<RoomName>().unwrap(), west, y);
+            let b = at(RoomName::W1N1, east, y + dy);
+            prop_assert_eq!(linked(&a, &b), (49 - west) + east < 1);
+        }
 
-            for i in (1..shuffled_prev.len()).rev() {
-                shuffled_prev.swap(i, rng.below(i as u64 + 1) as usize);
-            }
-
-            for i in (1..shuffled_now.len()).rev() {
-                shuffled_now.swap(i, rng.below(i as u64 + 1) as usize);
-            }
+        #[test]
+        fn ids_are_stable_under_a_permutation_of_the_input(
+            turns in turns(),
+            prev_order in vec(any::<Index>(), 32),
+            now_order in vec(any::<Index>(), 32),
+        ) {
+            let (prev, now, tick) = history(&turns);
+            let shuffled_prev = shuffled(&prev, &prev_order);
+            let shuffled_now = shuffled(&now, &now_order);
 
             let (once, first) = step(GRACE, 0, &BTreeSet::new(), &prev, &now, tick);
             let (twice, second) = step(
@@ -430,17 +418,13 @@ mod tests {
                 tick,
             );
 
-            assert_eq!(once, twice);
-            assert_eq!(first, second);
+            prop_assert_eq!(once, twice);
+            prop_assert_eq!(first, second);
         }
-    }
 
-    #[test]
-    fn every_hostile_stands_in_exactly_one_group_and_no_id_twice() {
-        let mut rng = Rng(0x853c_49e6_748f_ea9b);
-
-        for _ in 0..DRAWS {
-            let (prev, now, tick) = history(&mut rng);
+        #[test]
+        fn every_hostile_stands_in_exactly_one_group_and_no_id_twice(turns in turns()) {
+            let (prev, now, tick) = history(&turns);
             let (groups, _) = step(GRACE, 0, &BTreeSet::new(), &prev, &now, tick);
             let ids: Vec<i32> = groups.iter().map(|g| g.id).collect();
             let mut members: Vec<Id> = seen(tick, &groups)
@@ -452,20 +436,16 @@ mod tests {
             let mut distinct = ids.clone();
             distinct.sort_unstable();
             distinct.dedup();
-            assert_eq!(distinct, ids);
+            prop_assert_eq!(distinct, ids);
 
             let mut hostiles: Vec<Id> = now.iter().map(|c| c.id).collect();
             hostiles.sort();
-            assert_eq!(members, hostiles);
+            prop_assert_eq!(members, hostiles);
         }
-    }
 
-    #[test]
-    fn a_group_is_one_cluster_reaching_no_other() {
-        let mut rng = Rng(0x1b03_7f4a_7c15_9e37);
-
-        for _ in 0..DRAWS {
-            let (prev, now, tick) = history(&mut rng);
+        #[test]
+        fn a_group_is_one_cluster_reaching_no_other(turns in turns()) {
+            let (prev, now, tick) = history(&turns);
             let (all, _) = step(GRACE, 0, &BTreeSet::new(), &prev, &now, tick);
             let groups = seen(tick, &all);
             let at: BTreeMap<Id, &Creep> = now.iter().map(|c| (c.id, c)).collect();
@@ -527,46 +507,37 @@ mod tests {
             };
 
             for g in &groups {
-                assert!(narrow(g) && connected(g));
+                prop_assert!(narrow(g) && connected(g));
 
                 for h in &groups {
-                    assert!(apart(g, h));
+                    prop_assert!(apart(g, h));
                 }
             }
         }
-    }
 
-    #[test]
-    fn a_new_id_is_past_every_id_held() {
-        let mut rng = Rng(0x94d0_49bb_1331_11eb);
-
-        for _ in 0..DRAWS {
-            let (prev, now, tick) = history(&mut rng);
-            let engaged = rng.between(0, 19);
+        #[test]
+        fn a_new_id_is_past_every_id_held(turns in turns(), engaged in 0..=19) {
+            let (prev, now, tick) = history(&turns);
             let held: BTreeSet<i32> = prev.iter().map(|g| g.id).collect();
             let (groups, events) = step(GRACE, engaged, &BTreeSet::new(), &prev, &now, tick);
 
             for e in &events {
                 if let Event::Newcomer(id) = e {
-                    assert!(*id > engaged);
-                    assert!(held.iter().all(|h| id > h));
+                    prop_assert!(*id > engaged);
+                    prop_assert!(held.iter().all(|h| id > h));
                 }
             }
 
-            assert!(
+            prop_assert!(
                 groups
                     .iter()
                     .all(|g| held.contains(&g.id) || g.last_seen == tick)
             );
         }
-    }
 
-    #[test]
-    fn a_split_keeps_the_id_on_the_largest_fragment() {
-        let mut rng = Rng(0xc0ff_ee00_1234_5678);
-
-        for _ in 0..DRAWS {
-            let (prev, now, tick) = history(&mut rng);
+        #[test]
+        fn a_split_keeps_the_id_on_the_largest_fragment(turns in turns()) {
+            let (prev, now, tick) = history(&turns);
             let (groups, events) = step(GRACE, 0, &BTreeSet::new(), &prev, &now, tick);
             let by_id: BTreeMap<i32, &Group> = groups.iter().map(|g| (g.id, g)).collect();
             let before: BTreeMap<i32, &BTreeSet<Id>> =
@@ -579,22 +550,18 @@ mod tests {
             for e in &events {
                 if let Event::Split { from, into } = e {
                     let fragment = share(by_id[into], before[from]);
-                    assert!(fragment > 0);
+                    prop_assert!(fragment > 0);
 
                     if let Some(kept) = by_id.get(from) {
-                        assert!(share(kept, before[from]) >= fragment);
+                        prop_assert!(share(kept, before[from]) >= fragment);
                     }
                 }
             }
         }
-    }
 
-    #[test]
-    fn a_group_that_loses_a_member_from_sight_says_so_once() {
-        let mut rng = Rng(0x0bad_c0de_dead_beef);
-
-        for _ in 0..DRAWS {
-            let (prev, now, tick) = history(&mut rng);
+        #[test]
+        fn a_group_that_loses_a_member_from_sight_says_so_once(turns in turns()) {
+            let (prev, now, tick) = history(&turns);
             let (_, events) = step(GRACE, 0, &BTreeSet::new(), &prev, &now, tick);
             let here: BTreeSet<&Id> = now.iter().map(|c| &c.id).collect();
 
@@ -602,42 +569,34 @@ mod tests {
                 let seen = g.members.iter().any(|m| here.contains(m));
                 let vanished = g.members.iter().any(|m| !here.contains(m));
                 let said = events.iter().filter(|e| **e == Event::Left(g.id)).count();
-                assert_eq!(said, usize::from(seen && vanished));
+                prop_assert_eq!(said, usize::from(seen && vanished));
             }
         }
-    }
 
-    #[test]
-    fn a_merge_keeps_the_older_id() {
-        let mut rng = Rng(0x1234_5678_9abc_def1);
-
-        for _ in 0..DRAWS {
-            let (prev, now, tick) = history(&mut rng);
+        #[test]
+        fn a_merge_keeps_the_older_id(turns in turns()) {
+            let (prev, now, tick) = history(&turns);
             let (groups, events) = step(GRACE, 0, &BTreeSet::new(), &prev, &now, tick);
             let ids: BTreeSet<i32> = groups.iter().map(|g| g.id).collect();
 
             for e in &events {
                 if let Event::Merged { into, from } = e {
-                    assert!(into < from);
-                    assert!(ids.contains(into));
-                    assert!(!ids.contains(from));
+                    prop_assert!(into < from);
+                    prop_assert!(ids.contains(into));
+                    prop_assert!(!ids.contains(from));
                 }
             }
         }
-    }
 
-    #[test]
-    fn an_unseen_group_is_kept_for_the_grace_then_dropped() {
-        let mut rng = Rng(0xfeed_face_cafe_0001);
-
-        for _ in 0..DRAWS {
-            let (prev, now, tick) = history(&mut rng);
+        #[test]
+        fn an_unseen_group_is_kept_for_the_grace_then_dropped(turns in turns()) {
+            let (prev, now, tick) = history(&turns);
             let (groups, _) = step(GRACE, 0, &BTreeSet::new(), &prev, &now, tick);
 
-            assert!(groups.iter().all(|g| tick - g.last_seen <= GRACE));
+            prop_assert!(groups.iter().all(|g| tick - g.last_seen <= GRACE));
 
             for g in &prev {
-                assert!(
+                prop_assert!(
                     tick - g.last_seen > GRACE
                         || now.iter().any(|c| g.members.contains(&c.id))
                         || groups.iter().any(|k| k.id == g.id)

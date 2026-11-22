@@ -328,6 +328,10 @@ mod tests {
     use super::*;
     use crate::shape::Objective;
     use fabot_base::world::{BodyPart, Store};
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+    use proptest::sample::select;
+    use proptest::test_runner::FileFailurePersistence;
     use std::collections::BTreeMap;
 
     fn at(x: i32, y: i32) -> Pos {
@@ -441,52 +445,21 @@ mod tests {
             .collect()
     }
 
-    struct Rng(u64);
-
-    impl Rng {
-        fn next(&mut self) -> u64 {
-            self.0 ^= self.0 << 13;
-            self.0 ^= self.0 >> 7;
-            self.0 ^= self.0 << 17;
-            self.0
-        }
-
-        fn below(&mut self, n: u64) -> u64 {
-            self.next() % n
-        }
-
-        fn between(&mut self, lo: i32, hi: i32) -> i32 {
-            lo + self.below((hi - lo + 1) as u64) as i32
-        }
-
-        fn flip(&mut self) -> bool {
-            self.below(2) == 0
-        }
-
-        fn spec(&mut self) -> Vec<(i32, i32, bool)> {
-            let n = self.below(5) as usize;
-            (0..n)
-                .map(|_| {
-                    (
-                        self.between(-100_000, 100_000),
-                        self.between(-100_000, 100_000),
-                        self.flip(),
-                    )
-                })
-                .collect()
-        }
-
-        fn flags(&mut self) -> Vec<bool> {
-            let n = self.below(6) as usize;
-            (0..n).map(|_| self.flip()).collect()
-        }
-
-        fn word(&mut self) -> u16 {
-            self.below(1 << 16) as u16
-        }
+    /// Arms at what `haulers` folds to the least and most carry and step.
+    fn spec() -> impl Strategy<Value = Vec<(i32, i32, bool)>> {
+        let wide =
+            || prop_oneof![1 => Just(0), 1 => Just(6), 1 => Just(24), 5 => -100_000..=100_000];
+        vec((wide(), wide(), any::<bool>()), 0..5)
     }
 
-    const DRAWS: usize = 100;
+    const CASES: u32 = 256;
+    const PHASES: [Phase; 5] = [
+        Phase::Forming,
+        Phase::Approaching,
+        Phase::Fighting,
+        Phase::Pursuing,
+        Phase::Disengaging,
+    ];
 
     /// The last prefix sum under the floor, and so how many haulers it takes.
     fn under(carry: &[i32]) -> usize {
@@ -501,25 +474,23 @@ mod tests {
         last
     }
 
-    #[test]
-    fn a_carrier_in_reach_that_is_not_struck_never_spends_the_safe_mode() {
-        let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
+    proptest! {
+        // Beside this file: no `lib.rs` above it for the default to find.
+        #![proptest_config(ProptestConfig {
+            failure_persistence: Some(Box::new(FileFailurePersistence::WithSource("proptest-regressions"))),
+            ..ProptestConfig::with_cases(CASES)
+        })]
 
-        for _ in 0..DRAWS {
-            let spec = rng.spec();
+        #[test]
+        fn a_carrier_in_reach_that_is_not_struck_never_spends_the_safe_mode(spec in spec()) {
             let mut unhurt: Vec<(i32, i32, bool)> = vec![(16, 0, false)];
             unhurt.extend(haulers(&spec).into_iter().map(|(c, dx, _)| (c, dx, false)));
 
-            assert_eq!(safe_mode(false, &[rival(&unhurt, &[])]), None);
+            prop_assert_eq!(safe_mode(false, &[rival(&unhurt, &[])]), None);
         }
-    }
 
-    #[test]
-    fn a_raid_striking_every_hauler_of_a_home_at_the_floor_spends_it() {
-        let mut rng = Rng(0x2545_f491_4f6c_dd1d);
-
-        for _ in 0..DRAWS {
-            let spec = rng.spec();
+        #[test]
+        fn a_raid_striking_every_hauler_of_a_home_at_the_floor_spends_it(spec in spec()) {
             let mut struck: Vec<(i32, i32, bool)> = vec![(16, 0, true), (16, 1, true)];
             struck.extend(haulers(&spec));
             let struck: Vec<(i32, i32, bool)> = struck
@@ -528,37 +499,27 @@ mod tests {
                 .map(|(c, dx, _)| (c, dx, true))
                 .collect();
 
-            assert!(safe_mode(false, &[rival(&struck, &[])]).is_some());
+            prop_assert!(safe_mode(false, &[rival(&struck, &[])]).is_some());
         }
-    }
 
-    #[test]
-    fn a_home_that_never_held_the_floor_never_spends_it_on_its_carriers() {
-        let mut rng = Rng(0x853c_49e6_748f_ea9b);
-
-        for _ in 0..DRAWS {
-            let all = haulers(&rng.spec());
+        #[test]
+        fn a_home_that_never_held_the_floor_never_spends_it_on_its_carriers(spec in spec()) {
+            let all = haulers(&spec);
             let carry: Vec<i32> = all.iter().map(|(c, _, _)| *c).collect();
             let keep = under(&carry);
             let under: Vec<(i32, i32, bool)> = all.into_iter().take(keep).collect();
 
-            assert_eq!(safe_mode(false, &[rival(&under, &[])]), None);
+            prop_assert_eq!(safe_mode(false, &[rival(&under, &[])]), None);
         }
-    }
 
-    #[test]
-    fn haulers_aged_out_beside_a_raid_never_spend_it() {
-        let mut rng = Rng(0x1b03_7f4a_7c15_9e37);
-
-        for _ in 0..DRAWS {
-            let spec = rng.spec();
-            let aged = rng.flags();
+        #[test]
+        fn haulers_aged_out_beside_a_raid_never_spend_it(spec in spec(), aged in 0..6usize) {
             let unhurt: Vec<(i32, i32, bool)> = haulers(&spec)
                 .into_iter()
                 .map(|(c, dx, _)| (c, dx, false))
                 .collect();
 
-            let fallen: Vec<Dead> = (0..2 + aged.len())
+            let fallen: Vec<Dead> = (0..2 + aged)
                 .map(|i| Dead {
                     carry: 16,
                     ticks_left: (i % 2) as i32 * engine::AGED_OUT_TICKS_TO_LIVE,
@@ -566,17 +527,14 @@ mod tests {
                 })
                 .collect();
 
-            assert_eq!(safe_mode(false, &[rival(&unhurt, &fallen)]), None);
+            prop_assert_eq!(safe_mode(false, &[rival(&unhurt, &fallen)]), None);
         }
-    }
 
-    #[test]
-    fn haulers_killed_and_standing_under_the_floor_together_never_spend_it() {
-        let mut rng = Rng(0x94d0_49bb_1331_11eb);
-
-        for _ in 0..DRAWS {
-            let spec = rng.spec();
-            let killed = rng.spec();
+        #[test]
+        fn haulers_killed_and_standing_under_the_floor_together_never_spend_it(
+            spec in spec(),
+            killed in spec(),
+        ) {
             let mut all: Vec<(bool, (i32, i32, bool))> =
                 haulers(&killed).into_iter().map(|h| (true, h)).collect();
             all.extend(haulers(&spec).into_iter().map(|h| (false, h)));
@@ -596,32 +554,21 @@ mod tests {
                 .map(|(_, (c, _, _))| slain(*c))
                 .collect();
 
-            assert_eq!(safe_mode(false, &[rival(&standing, &fallen)]), None);
+            prop_assert_eq!(safe_mode(false, &[rival(&standing, &fallen)]), None);
         }
-    }
 
-    #[test]
-    fn a_raid_killing_two_diggers_spends_it_and_one_never() {
-        let mut rng = Rng(0x5851_f42d_4c95_7f2d);
-
-        for _ in 0..DRAWS {
-            let n = 1 + rng.below(3) as usize;
+        #[test]
+        fn a_raid_killing_two_diggers_spends_it_and_one_never(n in 1..=3usize) {
             let mut h = rival(&[], &(0..n).map(|_| slain(1)).collect::<Vec<_>>());
             for (_, f) in &mut h.fallen {
                 f.body.push(Part::Work);
             }
 
-            assert_eq!(safe_mode(false, &[h]).is_some(), n >= 2);
+            prop_assert_eq!(safe_mode(false, &[h]).is_some(), n >= 2);
         }
-    }
 
-    #[test]
-    fn haulers_killed_beside_an_invader_raid_never_spend_it() {
-        let mut rng = Rng(0xc0ff_ee00_1234_5678);
-
-        for _ in 0..DRAWS {
-            let spec = rng.spec();
-            let killed = rng.spec();
+        #[test]
+        fn haulers_killed_beside_an_invader_raid_never_spend_it(spec in spec(), killed in spec()) {
             let fallen: Vec<Dead> = haulers(&killed)
                 .into_iter()
                 .map(|(c, _, _)| slain(c))
@@ -629,53 +576,45 @@ mod tests {
 
             let home = home(Owner::Invader, &haulers(&spec), &fallen);
 
-            assert_eq!(safe_mode(false, &[home]), None);
+            prop_assert_eq!(safe_mode(false, &[home]), None);
         }
-    }
 
-    #[test]
-    fn haulers_invaders_killed_before_a_player_raid_opened_never_spend_it() {
-        let mut rng = Rng(0x0bad_c0de_dead_beef);
-
-        for _ in 0..DRAWS {
-            let spec = rng.spec();
-            let earlier = i32::from(rng.word());
+        #[test]
+        fn haulers_invaders_killed_before_a_player_raid_opened_never_spend_it(
+            spec in spec(),
+            earlier in prop_oneof![1 => Just(0), 1 => Just(u16::MAX), 6 => any::<u16>()],
+        ) {
             let before = |carry: i32| Dead {
                 carry,
                 ticks_left: 1000,
-                died: OPENED - 1 - earlier,
+                died: OPENED - 1 - i32::from(earlier),
             };
 
             let mut fallen = vec![before(16), before(16)];
             fallen.extend(haulers(&spec).into_iter().map(|(c, _, _)| before(c)));
 
-            assert_eq!(safe_mode(false, &[rival(&[], &fallen)]), None);
+            prop_assert_eq!(safe_mode(false, &[rival(&[], &fallen)]), None);
         }
-    }
 
-    #[test]
-    fn an_outpost_defend_beaten_past_its_bound_holds_while_the_raid_stands() {
-        let mut rng = Rng(0x5eed_0854_0ff1_ce00);
-        let phases = [
-            Phase::Forming,
-            Phase::Approaching,
-            Phase::Fighting,
-            Phase::Pursuing,
-            Phase::Disengaging,
-        ];
-
-        for _ in 0..DRAWS {
-            let room = if rng.flip() { "W1N1" } else { "W2N1" };
-            let group = rng.flip().then(|| Group {
+        #[test]
+        fn an_outpost_defend_beaten_past_its_bound_holds_while_the_raid_stands(
+            phase in select(PHASES.to_vec()),
+            lost in OUTPOST_LOSSES..=OUTPOST_LOSSES + 2,
+            budget in 0..=3,
+            (west, grouped) in any::<(bool, bool)>(),
+            [in_reach, home, asked, on_our_ground, clear, remembered] in any::<[bool; 6]>(),
+        ) {
+            let room = if west { "W1N1" } else { "W2N1" };
+            let group = grouped.then(|| Group {
                 id: 1,
                 members: BTreeSet::from(["raider".into()]),
                 last_seen: 0,
                 centre: Pos::new(room.parse::<RoomName>().unwrap(), 25, 25),
             });
             let e = Engagement {
-                phase: phases[rng.below(phases.len() as u64) as usize],
-                lost: rng.between(OUTPOST_LOSSES, OUTPOST_LOSSES + 2),
-                budget: rng.between(0, 3),
+                phase,
+                lost,
+                budget,
                 unanswered: false,
                 ..crate::scene::fresh(1, Objective::Defend, RoomName::W1N1, 0, Tactic::Close)
             };
@@ -684,66 +623,61 @@ mod tests {
                 group,
                 standing: BTreeSet::new(),
                 aging_out: BTreeSet::new(),
-                in_reach: rng.flip(),
-                home: rng.flip(),
+                in_reach,
+                home,
                 held: false,
-                asked: rng.flip(),
-                on_our_ground: rng.flip(),
-                clear: rng.flip(),
+                asked,
+                on_our_ground,
+                clear,
                 raided: true,
-                remembered: rng.flip(),
+                remembered,
             };
 
             let beaten = facts.group.is_some() && e.lost > e.budget;
             if e.phase == Phase::Disengaging || beaten {
                 let next = step(&facts, &e).expect("a raid still standing keeps its room held");
-                assert_eq!(next.phase, Phase::Disengaging);
+                prop_assert_eq!(next.phase, Phase::Disengaging);
             }
         }
-    }
 
-    #[test]
-    fn a_blind_idle_outpost_defend_re_forms_while_its_raid_is_remembered() {
-        let mut rng = Rng(0x0b11_d0ef_e2d5_0000);
-        let phases = [
-            Phase::Forming,
-            Phase::Approaching,
-            Phase::Fighting,
-            Phase::Pursuing,
-        ];
-
-        for _ in 0..DRAWS {
+        #[test]
+        fn a_blind_idle_outpost_defend_re_forms_while_its_raid_is_remembered(
+            phase in select(PHASES[..4].to_vec()),
+            lost in 0..=OUTPOST_LOSSES,
+            budget in 0..=3,
+            (unanswered, stands) in any::<(bool, bool)>(),
+            [in_reach, home, asked, on_our_ground, raided, remembered] in any::<[bool; 6]>(),
+        ) {
             let e = Engagement {
-                phase: phases[rng.below(phases.len() as u64) as usize],
+                phase,
                 ours: BTreeMap::from([("fight-1-1-0".to_string(), 0)]),
-                lost: rng.between(0, OUTPOST_LOSSES),
-                budget: rng.between(0, 3),
-                unanswered: rng.flip(),
+                lost,
+                budget,
+                unanswered,
                 ..crate::scene::fresh(1, Objective::Defend, RoomName::W1N1, 0, Tactic::Close)
             };
-            let standing: BTreeSet<String> =
-                e.ours.keys().filter(|_| rng.flip()).cloned().collect();
+            let standing: BTreeSet<String> = e.ours.keys().filter(|_| stands).cloned().collect();
             let facts = Facts {
                 time: 1,
                 group: None,
                 standing: standing.clone(),
                 aging_out: BTreeSet::new(),
-                in_reach: rng.flip(),
-                home: rng.flip(),
+                in_reach,
+                home,
                 held: false,
-                asked: rng.flip(),
-                on_our_ground: rng.flip(),
+                asked,
+                on_our_ground,
                 clear: false,
-                raided: rng.flip(),
-                remembered: rng.flip(),
+                raided,
+                remembered,
             };
 
             let next = step(&facts, &e).expect("a blind outpost Defend keeps its budget");
             let idle = standing.is_empty() && !facts.asked;
             let again = facts.remembered && e.phase != Phase::Forming && next.lost < OUTPOST_LOSSES;
-            assert_eq!(next.phase == Phase::Disengaging, idle && !again);
+            prop_assert_eq!(next.phase == Phase::Disengaging, idle && !again);
             let formed = next.phase == Phase::Forming && next.since == 1;
-            assert_eq!(formed, idle && again);
+            prop_assert_eq!(formed, idle && again);
         }
     }
 }
