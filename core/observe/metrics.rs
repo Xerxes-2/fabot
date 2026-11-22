@@ -59,6 +59,7 @@ const IN_RANGE: &str = "shot.inRange";
 const MISSED: &str = "shot.missed";
 const REFUSED: &str = "refuse.";
 const CPU: &str = "cpu.";
+const COUNT: &str = "count.";
 const BUCKET: &str = "bucket";
 
 #[derive(Clone, Copy)]
@@ -234,6 +235,7 @@ const METRICS: &[Metric] = &[
         "the executor's refusals, by act and code",
     ),
     metric(CPU, Fold::Mean, "a phase's CPU per tick, in hundredths"),
+    metric(COUNT, Fold::Mean, "what a read section walked per tick"),
     metric(BUCKET, Fold::Last, "the CPU bucket"),
 ];
 
@@ -350,6 +352,7 @@ pub struct Metrics {
     /// Kept apart from `sums` as they are added every tick, merged at the close.
     paces: BTreeMap<Pattern, Pace>,
     cpu: Vec<(String, f64)>,
+    walked: Vec<(String, f64)>,
     pub ring: VecDeque<Window>,
     tasks: HashMap<String, Held>,
     sites: BTreeMap<Id, Stale>,
@@ -371,6 +374,7 @@ pub struct Seen<'a> {
     pub short: &'a [(RoomName, &'static str, i32)],
     pub refusals: &'a [Refusal],
     pub phases: &'a [(String, f64)],
+    pub walked: &'a [(String, i32)],
     pub declarations: &'a Declarations,
     pub derived: &'a Derived,
 }
@@ -961,17 +965,29 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
     for r in seen.refusals {
         add(sums, None, &format!("{REFUSED}{}.{}", r.act, r.code), 1.0);
     }
-    for (i, (phase, ms)) in seen.phases.iter().enumerate() {
-        let at = match m.cpu.get(i) {
-            Some((p, _)) if p == phase => Some(i),
-            _ => m.cpu.iter().position(|(p, _)| p == phase),
+    accrue(
+        &mut m.cpu,
+        seen.phases.iter().map(|(p, ms)| (p, 100.0 * ms)),
+    );
+    accrue(
+        &mut m.walked,
+        (seen.walked.iter()).map(|(name, n)| (name, f64::from(*n))),
+    );
+    m
+}
+
+/// Names come in the same order most ticks, so each is looked for at its last index first.
+fn accrue<'a>(sums: &mut Vec<(String, f64)>, rows: impl Iterator<Item = (&'a String, f64)>) {
+    for (i, (name, v)) in rows.enumerate() {
+        let at = match sums.get(i) {
+            Some((p, _)) if p == name => Some(i),
+            _ => sums.iter().position(|(p, _)| p == name),
         };
         match at {
-            Some(at) => m.cpu[at].1 += 100.0 * ms,
-            None => m.cpu.push((phase.clone(), 100.0 * ms)),
+            Some(at) => sums[at].1 += v,
+            None => sums.push((name.clone(), v)),
         }
     }
-    m
 }
 
 impl Metrics {
@@ -988,6 +1004,9 @@ impl Metrics {
         }
         for (phase, sum) in std::mem::take(&mut self.cpu) {
             add(&mut sums, None, &format!("{CPU}{phase}"), sum);
+        }
+        for (name, sum) in std::mem::take(&mut self.walked) {
+            add(&mut sums, None, &format!("{COUNT}{name}"), sum);
         }
 
         self.sites

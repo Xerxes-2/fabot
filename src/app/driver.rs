@@ -80,13 +80,13 @@ fn run_tick() {
     let mut recorded = None;
     let (read_maps, read_buffers) = (&mut maps, &mut buffers);
     let seam = drive::Seam {
-        read: move |declarations: &Declarations, drain, (start, phases): (f64, &mut _)| {
+        read: move |declarations: &Declarations, drain, (start, phases, walked): drive::Clocked| {
             let read_maps = read_maps;
             let (world, maps, read, mapped) = world::of_game(
                 read_maps,
                 read_buffers,
                 (declarations, drain),
-                (&clock, start, phases),
+                (&clock, start, phases, walked),
             );
             (world, maps as &dyn drive::Terrains, read, mapped)
         },

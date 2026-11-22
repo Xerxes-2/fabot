@@ -138,9 +138,10 @@ const observe = JSON.parse(segments[1] ?? fail("no observe segment written"));
 if (observe.tick !== 103) fail(`observe tick ${observe.tick}, not 103`);
 if (observe.faults.length !== 0) fail(`faults: ${JSON.stringify(observe.faults)}`);
 const phases = observe.phases.map(([name]) => name);
-for (const want of ["memory", "read", "decode", "map", "world", "atlas", "economy", "execute", "write", "metrics", "record"])
+for (const want of ["memory", "read.rooms", "read.structures", "read.others", "read.events", "read.own", "read.pack", "read.copy", "decode", "map", "world", "atlas", "economy", "execute", "write", "metrics", "record"])
   if (!phases.includes(want)) fail(`phase ${want} not reported: ${phases}`);
-const pass = globalThis.__fabotRead().map((each) => (typeof each === "string" ? each : Array.from(each)));
+if (!observe.counts.some(([name, n]) => name === "read.structures" && n > 0)) fail(`read.structures walked nothing: ${JSON.stringify(observe.counts)}`);
+const pass = globalThis.__fabotRead().slice(0, 2).map((each) => (typeof each === "string" ? each : Array.from(each)));
 const [recorded] = unpack(RECORDER.map((id) => segments[id]));
 if (recorded?.time !== 103) fail(`recorder wrote no tick 103: ${recorded?.time}`);
 if (!recorded.intel.startsWith("W1N1 103 ")) fail(`recorder's intel lost the room: ${recorded.intel}`);
@@ -251,7 +252,7 @@ if (direct.join() !== "0,-5,1,1,-8,0") fail(`a tower whose lookup threw and a re
 
 // What the recorder kept, stood as the bench's Game, reads as the tick did.
 stand(recorded, [], getHeapStatistics, () => 0);
-const again = globalThis.__fabotRead().map((each) => (typeof each === "string" ? each : Array.from(each)));
+const again = globalThis.__fabotRead().slice(0, 2).map((each) => (typeof each === "string" ? each : Array.from(each)));
 if (JSON.stringify(again) !== JSON.stringify(pass)) fail(`the recorded tick reads otherwise: ${JSON.stringify(again).slice(0, 200)}`);
 
 const version = readFileSync(new URL(bundle, import.meta.url), "utf8").split("\n")[0];

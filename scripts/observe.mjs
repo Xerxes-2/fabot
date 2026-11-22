@@ -98,7 +98,12 @@ switch (cmd) {
   }
   case "cpu": {
     const o = await observed();
-    for (const [name, spent] of o.phases) console.log(`${ms(spent)}  ${name}`);
+    const walked = Object.fromEntries(o.counts);
+    const units = { "read.rooms": "rooms", "read.events": "logs", "read.pack": "ints" };
+    const each = (name, spent) =>
+      walked[name] > 0 ? `  ${walked[name]} ${units[name] ?? "objects"}, ${((1000 * spent) / walked[name]).toFixed(2)} us each` : "";
+    const parts = (name) => (walked[`${name}.parts`] > 0 ? `, ${walked[`${name}.parts`]} body parts` : "");
+    for (const [name, spent] of o.phases) console.log(`${ms(spent)}  ${name}${each(name, spent)}${parts(name)}`);
     console.log(`${ms(o.cpu)}  total (tick ${o.tick})`);
     break;
   }

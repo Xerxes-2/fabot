@@ -9,7 +9,7 @@ use fabot_base::intel::Intel;
 use fabot_base::intents::Action;
 use fabot_base::tiles;
 use fabot_base::world::{RoomName, World};
-use fabot_core::drive::{self, Phases, Terrains};
+use fabot_core::drive::{self, Terrains};
 use fabot_core::memory::Memory;
 use fabot_observe::metrics::{self, Metrics};
 use krebs::intents::RoomIntents;
@@ -77,7 +77,7 @@ impl<W: Write> Driver<W> {
         let mut stored = None;
         let maps = &self.maps;
         let seam = drive::Seam {
-            read: |declarations: &Declarations, _drain, (start, phases): (f64, &mut Phases)| {
+            read: |declarations: &Declarations, _drain, (start, phases, _): drive::Clocked| {
                 let mut world = read::world(v, declarations);
                 let mapping = clock();
                 phases.push(("decode".to_string(), mapping - start));

@@ -3,7 +3,8 @@
 // repeats (a kind, a part, a room) once at its end and by index, so a tick crosses
 // the wasm–JS seam a handful of times, not once a field. The write order is
 // read order of both decoders, `world.rs` and `__fabotUnread` below; a change
-// to one is a change to all three.
+// to one is a change to all three. Rooms are written a kind at a time, so one
+// clock a kind times it (`world.rs` `SECTIONS`, in this file's order).
 globalThis.__fabotRead = (() => {
   let ints = new Int32Array(1 << 16);
   let at = 0;
@@ -41,10 +42,11 @@ globalThis.__fabotRead = (() => {
     for (const k of keys) w(k), n(st[k]);
     n(st.getCapacity() || st.getCapacity("energy") || 0);
   };
-  const body = (parts) => {
-    if (!Array.isArray(parts)) return n(0);
-    n(parts.length);
-    for (const p of parts) w(p.type), n(p.hits), w(p.boost);
+  let parts = 0;
+  const body = (xs) => {
+    if (!Array.isArray(xs)) return n(0);
+    n(xs.length), (parts += xs.length);
+    for (const p of xs) w(p.type), n(p.hits), w(p.boost);
   };
   const creep = (c) => {
     s(c.id), s(c.name), owner(c), pos(c.pos), body(c.body);
@@ -53,6 +55,7 @@ globalThis.__fabotRead = (() => {
   const list = (xs, each) => {
     n(xs.length);
     for (const x of xs) each(x);
+    return xs.length;
   };
   // Parsed only when it holds a strike or a destruction: most ticks a room logs
   // harvests and transfers alone, and on a colony's 22 KB log the search costs
@@ -134,15 +137,15 @@ globalThis.__fabotRead = (() => {
     w(r.name), n(r.energyAvailable), n(r.energyCapacityAvailable);
     if (absent(r.controller)) n(0);
     else n(1), controller(r.controller);
-    list(r.find(105), (x) => (s(x.id), pos(x.pos), n(x.energy), n(x.energyCapacity), n(x.ticksToRegeneration)));
-    list(r.find(116), (x) => (s(x.id), pos(x.pos), w(x.mineralType), n(x.mineralAmount)));
-    list(r.find(107), structure);
-    list(r.find(111), (x) => (w(x.structureType), s(x.id), n(x.pos.x), n(x.pos.y), owner(x), n(x.progress), n(x.progressTotal)));
-    list(r.find(106), (x) => (s(x.id), pos(x.pos), w(x.resourceType), n(x.amount)));
-    const left = [...r.find(118), ...r.find(123)];
-    list(left, remains);
-    list(r.find(103), creep);
   };
+  const KINDS = [
+    (r) => list(r.find(105), (x) => (s(x.id), pos(x.pos), n(x.energy), n(x.energyCapacity), n(x.ticksToRegeneration))) + list(r.find(116), (x) => (s(x.id), pos(x.pos), w(x.mineralType), n(x.mineralAmount))),
+    (r) => list(r.find(107), structure),
+    (r) => list(r.find(111), (x) => (w(x.structureType), s(x.id), n(x.pos.x), n(x.pos.y), owner(x), n(x.progress), n(x.progressTotal))),
+    (r) => list(r.find(106), (x) => (s(x.id), pos(x.pos), w(x.resourceType), n(x.amount))),
+    (r) => list([...r.find(118), ...r.find(123)], remains),
+    (r) => list(r.find(103), creep),
+  ];
 
   // A recorded pass back into `scripts/bench-game.mjs`'s capture, terrain,
   // Memory and intel aside: the same pass reads from it again.
@@ -204,35 +207,40 @@ globalThis.__fabotRead = (() => {
       return o.id;
     };
     const room = () => {
-      const r = { name: w(), energyAvailable: n(), energyCapacityAvailable: n() };
+      const r = { name: w(), energyAvailable: n(), energyCapacityAvailable: n(), find: {} };
       if (n()) {
         r.controller = object(s()).id;
         controller(objects[r.controller]);
       }
-      const find = (each) => list(() => each(object(s())));
-      r.find = {
-        105: find((o) => (pos(o), Object.assign(o, { energy: n(), energyCapacity: n(), ticksToRegeneration: n() })).id),
-        116: find((o) => (pos(o), Object.assign(o, { mineralType: w(), mineralAmount: n() })).id),
-        107: list(() => structure(r.name)),
-      };
-      r.find[111] = list(() => {
-        const type = w();
-        const o = object(s());
-        pos(o, r.name), owner(o);
-        return Object.assign(o, { structureType: type, progress: n(), progressTotal: n() }).id;
-      });
-      r.find[106] = find((o) => (pos(o), Object.assign(o, { resourceType: w(), amount: n() })).id);
-      r.find[118] = find((o) => {
-        pos(o), store(o);
-        if (n()) (o.creep = { id: s() }), creep(o.creep), (o.deathTime = n());
-        return o.id;
-      });
-      r.find[103] = find(creep);
       return r;
     };
+    const find = (each) => list(() => each(object(s())));
+    const kinds = [
+      (r) => {
+        r.find[105] = find((o) => (pos(o), Object.assign(o, { energy: n(), energyCapacity: n(), ticksToRegeneration: n() })).id);
+        r.find[116] = find((o) => (pos(o), Object.assign(o, { mineralType: w(), mineralAmount: n() })).id);
+      },
+      (r) => (r.find[107] = list(() => structure(r.name))),
+      (r) =>
+        (r.find[111] = list(() => {
+          const type = w();
+          const o = object(s());
+          pos(o, r.name), owner(o);
+          return Object.assign(o, { structureType: type, progress: n(), progressTotal: n() }).id;
+        })),
+      (r) => (r.find[106] = find((o) => (pos(o), Object.assign(o, { resourceType: w(), amount: n() })).id)),
+      (r) =>
+        (r.find[118] = find((o) => {
+          pos(o), store(o);
+          if (n()) (o.creep = { id: s() }), creep(o.creep), (o.deathTime = n());
+          return o.id;
+        })),
+      (r) => (r.find[103] = find(creep)),
+    ];
 
     const [time, bucket] = [n(), n()];
     const rooms = list(room);
+    for (const kind of kinds) rooms.forEach(kind);
     // The event log is read live only: its strikes and destructions consumed, not stood.
     const strikes = list(() => [s(), s()]);
     const destroyed = list(() => [w(), s(), n()]);
@@ -258,8 +266,15 @@ globalThis.__fabotRead = (() => {
     return { time, cpu: { bucket }, gcl, rooms, creeps, spawns, constructionSites, objects, controllerStructures };
   };
 
+  // Each section's closing clock, what it walked and the body parts it read:
+  // the room heads, the kinds, events, our own, packing.
+  const marks = new Float64Array(3 * (KINDS.length + 4));
+  let m = 0;
+  const mark = (count) => ((marks[m++] = Game.cpu.getUsed()), (marks[m++] = count), (marks[m++] = parts), (parts = 0));
   return (drain) => {
+    m = 0;
     at = 0;
+    parts = 0;
     strs = [];
     words = new Map();
     checking = globalThis.__fabotCheck === true;
@@ -272,13 +287,20 @@ globalThis.__fabotRead = (() => {
     const mine = rooms.find((r) => r.controller && r.controller.my === true);
     const user = spawns.length ? spawns[0].owner?.username : creeps.length ? creeps[0].owner.username : mine?.controller.owner?.username;
     s(user);
-    list(rooms, room);
+    mark(list(rooms, room));
+    for (const each of KINDS) {
+      let walked = 0;
+      for (const r of rooms) walked += each(r);
+      mark(walked);
+    }
     const stood = new Set(creeps.map((c) => c.pos.roomName));
     const shots = [];
     const destroyed = [];
+    let logs = 0;
     for (const r of rooms) {
       const c = r.controller;
       if (r.name !== drain && !stood.has(r.name) && c?.my !== true && c?.reservation?.username !== user) continue;
+      logs++;
       for (const e of eventsOf(r)) {
         const kind = e.event ?? e._$Variant;
         if (kind === EVENT_ATTACK) shots.push(e);
@@ -291,13 +313,14 @@ globalThis.__fabotRead = (() => {
     }
     list(shots, (e) => (s(e.objectId), s(e.data?.targetId)));
     list(destroyed, ([name, id, cost]) => (w(name), s(id), n(cost)));
-    list(spawns, (sp) => {
+    mark(logs);
+    const ovens = list(spawns, (sp) => {
       s(sp.id), s(sp.name), pos(sp.pos);
       if (absent(sp.spawning)) return n(0);
       const oven = game.creeps[sp.spawning.name];
       n(1), s(sp.spawning.name), n(sp.spawning.remainingTime), body(oven && oven.body);
     });
-    list(
+    const own = list(
       creeps.filter((c) => !c.spawning),
       creep,
     );
@@ -306,7 +329,10 @@ globalThis.__fabotRead = (() => {
     // official server's rows are objects by level, missing the levels at 0.
     const levels = (row) => Array.from({ length: 9 }, (_, l) => row[l] ?? 0);
     list(sorted(CONTROLLER_STRUCTURES), (kind) => (w(kind), list(levels(CONTROLLER_STRUCTURES[kind]), n)));
+    mark(ovens + own);
     n(words.size);
-    return [ints.subarray(0, at), [...strs, ...words.keys()].join("\0")];
+    const text = [...strs, ...words.keys()].join("\0");
+    mark(at);
+    return [ints.subarray(0, at), text, marks];
   };
 })();

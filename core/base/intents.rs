@@ -8,7 +8,6 @@ use super::world::{Id, RoomName, StructureType};
 #[derive(Clone, Debug, PartialEq, Eq, IntoStaticStr)]
 #[strum(serialize_all = "camelCase")]
 pub enum CreepAct {
-    /// TOP = 1, clockwise to TOP_LEFT = 8.
     Move(i32),
     Say(String),
     Harvest(Id),

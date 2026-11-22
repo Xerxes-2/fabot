@@ -100,7 +100,6 @@ pub const RAMPART_DECAY_AMOUNT: i32 = screeps::RAMPART_DECAY_AMOUNT as i32;
 pub const RAMPART_DECAY_TIME: i32 = screeps::RAMPART_DECAY_TIME as i32;
 /// REPAIR_COST: 0.01 energy a hit.
 pub const REPAIR_HITS_PER_ENERGY: i32 = 100;
-/// Across every room.
 pub const MAX_CONSTRUCTION_SITES: i32 = screeps::MAX_CONSTRUCTION_SITES as i32;
 pub const ROOM_SIDE: i32 = screeps::ROOM_SIZE as i32;
 

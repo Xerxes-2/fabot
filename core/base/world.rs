@@ -909,29 +909,42 @@ pub mod read {
 
         fn room(&mut self, buffers: &mut Buffers) -> Room<'static> {
             let name = self.room_name();
-            let lists = buffers.rooms.pop().unwrap_or_default();
-            let mut blocked = Vec::new();
+            let kept = buffers.rooms.pop().unwrap_or_else(|| Room::empty(name));
             Room {
-                terrain: None,
+                name,
                 energy_available: self.n(),
                 energy_capacity: self.n(),
                 controller: self.flag().then(|| self.controller()),
-                sources: self.list_into(lists.sources, |r| Source {
+                ..kept
+            }
+        }
+
+        /// Every room's objects a kind at a time, as `read.js` times them.
+        fn kinds(&mut self, rooms: &mut [Room<'static>]) {
+            use std::mem::take;
+            for room in rooms.iter_mut() {
+                room.sources = self.list_into(take(&mut room.sources), |r| Source {
                     id: r.id(),
                     pos: r.pos(),
                     energy: r.n(),
                     energy_capacity: r.n(),
                     ticks_to_regeneration: r.n(),
-                }),
-                minerals: self.list_into(lists.minerals, |r| Mineral {
+                });
+                room.minerals = self.list_into(take(&mut room.minerals), |r| Mineral {
                     id: r.id(),
                     pos: r.pos(),
                     resource: r.word().parse().ok(),
                     amount: r.n(),
-                }),
-                structures: self.list_some(lists.structures, |r| r.structure(name, &mut blocked)),
-                blocked,
-                sites: self.list_some(lists.sites, |r| {
+                });
+            }
+            for room in rooms.iter_mut() {
+                let (name, blocked) = (room.name, &mut room.blocked);
+                room.structures =
+                    self.list_some(take(&mut room.structures), |r| r.structure(name, blocked));
+            }
+            for room in rooms.iter_mut() {
+                let name = room.name;
+                room.sites = self.list_some(take(&mut room.sites), |r| {
                     let kind = r.word().parse().ok();
                     let (id, pos, owner) = (r.id(), r.pos_in(name), r.owner());
                     let (progress, progress_total) = (r.n(), r.n());
@@ -943,8 +956,10 @@ pub mod read {
                         progress,
                         progress_total,
                     })
-                }),
-                piles: self.list_some(lists.piles, |r| {
+                });
+            }
+            for room in rooms.iter_mut() {
+                room.piles = self.list_some(take(&mut room.piles), |r| {
                     let (id, pos) = (r.id(), r.pos());
                     let resource = r.word().parse().ok();
                     let amount = r.n();
@@ -954,10 +969,13 @@ pub mod read {
                         resource: resource?,
                         amount,
                     })
-                }),
-                remains: self.list_into(lists.remains, Reader::remains),
-                others: self.list_into(lists.others, Reader::creep),
-                name,
+                });
+            }
+            for room in rooms.iter_mut() {
+                room.remains = self.list_into(take(&mut room.remains), Reader::remains);
+            }
+            for room in rooms.iter_mut() {
+                room.others = self.list_into(take(&mut room.others), Reader::creep);
             }
         }
 
@@ -977,22 +995,11 @@ pub mod read {
 
     #[derive(Default)]
     pub struct Buffers {
-        rooms: Vec<Lists>,
+        rooms: Vec<Room<'static>>,
         spawns: Vec<Spawn>,
         creeps: Vec<Creep>,
         attacks: Vec<(Id, Id)>,
         destroyed: Vec<(RoomName, Id, i32)>,
-    }
-
-    #[derive(Default)]
-    struct Lists {
-        sources: Vec<Source>,
-        minerals: Vec<Mineral>,
-        structures: Vec<Structure>,
-        sites: Vec<Site>,
-        piles: Vec<Pile>,
-        remains: Vec<Remains>,
-        others: Vec<Creep>,
     }
 
     fn emptied<T>(mut list: Vec<T>) -> Vec<T> {
@@ -1003,14 +1010,16 @@ pub mod read {
     impl Buffers {
         pub fn keep(&mut self, world: World) {
             for room in world.rooms {
-                self.rooms.push(Lists {
+                self.rooms.push(Room {
                     sources: emptied(room.sources),
                     minerals: emptied(room.minerals),
                     structures: emptied(room.structures),
+                    blocked: emptied(room.blocked),
                     sites: emptied(room.sites),
                     piles: emptied(room.piles),
                     remains: emptied(room.remains),
                     others: emptied(room.others),
+                    ..Room::empty(room.name)
                 });
             }
             (self.spawns, self.creeps) = (emptied(world.spawns), emptied(world.creeps));
@@ -1038,7 +1047,8 @@ pub mod read {
         r.me = r.s();
         let time = r.n();
         let bucket = r.n();
-        let rooms = r.list(|r| r.room(buffers));
+        let mut rooms = r.list(|r| r.room(buffers));
+        r.kinds(&mut rooms);
         let attacks = r.list_into(std::mem::take(&mut buffers.attacks), |r| (r.id(), r.id()));
         let destroyed = r.list_into(std::mem::take(&mut buffers.destroyed), |r| {
             (r.room_name(), r.id(), r.n())
@@ -1108,10 +1118,7 @@ pub mod terrain {
     }
 
     pub fn is_swamp(terrain: Option<&LocalRoomTerrain>, x: i32, y: i32) -> bool {
-        terrain.is_some_and(|t| {
-            let t = t.get_bits()[(y * 50 + x) as usize];
-            t & WALL == 0 && t & SWAMP != 0
-        })
+        terrain.is_some_and(|t| t.get_bits()[(y * 50 + x) as usize] & (WALL | SWAMP) == SWAMP)
     }
 }
 

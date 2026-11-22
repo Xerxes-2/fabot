@@ -50,6 +50,10 @@ pub trait Terrains {
 /// Memory's text (when it changed) written with the world, that read and
 /// intel beside it, each pushing its own phases.
 pub type Phases = Vec<(String, f64)>;
+/// Named per-tick counts (`ARCHITECTURE.md` §9.3).
+pub type Counts = Vec<(String, i32)>;
+/// When the read began, and where it adds its phases and counts.
+pub type Clocked<'a> = (f64, &'a mut Phases, &'a mut Counts);
 
 pub struct Seam<R, E, W> {
     pub read: R,
@@ -76,7 +80,7 @@ where
     R: FnOnce(
         &Declarations,
         Option<RoomName>,
-        (f64, &mut Phases),
+        Clocked<'_>,
     ) -> (World<'t>, &'t dyn Terrains, P, f64),
     E: FnOnce(&[Action]) -> Vec<Refusal>,
     W: FnOnce(&World, &P, &Intel, Option<String>, &mut Vec<(String, f64)>),
@@ -91,7 +95,9 @@ where
     let read = clock();
     phases.push(("hydrate".to_string(), read - start));
 
-    let (mut world, maps, pass, start) = (seam.read)(&declarations, drain, (read, phases));
+    let mut walked = Counts::new();
+    let (mut world, maps, pass, start) =
+        (seam.read)(&declarations, drain, (read, phases, &mut walked));
     (world.rooms.iter_mut()).for_each(|r| r.terrain = maps.terrain(r.name));
     let misread = world.drop_misread();
     let sightings = std::mem::take(&mut heap.sightings);
@@ -122,7 +128,7 @@ where
     phases.push(("serialize".to_string(), clock() - start));
     (seam.write)(&world, &pass, intel, text, phases);
 
-    let counts = metrics::counts(
+    let mut counts = metrics::counts(
         &world,
         &decided.atlas,
         &decided.declarations,
@@ -142,6 +148,7 @@ where
             short: &decided.result.telemetry.short,
             refusals: &refusals,
             phases,
+            walked: &walked,
             declarations: &decided.declarations,
             derived: &decided.derived,
         };
@@ -149,6 +156,7 @@ where
         phases.push(("metrics".to_string(), clock() - start));
     }
 
+    counts.extend(walked);
     let tick::Decided {
         mut result,
         sightings,

@@ -6,7 +6,7 @@
 use fabot_base::HashMap;
 use std::collections::BTreeSet;
 
-use js_sys::{Array, Int32Array};
+use js_sys::{Array, Float64Array, Int32Array};
 use screeps::LocalRoomTerrain;
 use screeps::game::{
     self,
@@ -19,6 +19,7 @@ use fabot_base::declarations::Declarations;
 use fabot_base::tiles;
 use fabot_base::world::RoomName;
 use fabot_base::world::*;
+use fabot_core::drive::{Counts, Phases};
 
 #[wasm_bindgen]
 extern "C" {
@@ -85,17 +86,41 @@ pub struct Pass {
     pub strs: String,
 }
 
+/// `read.js`'s sections in its order, each closed by its own clock.
+const SECTIONS: [&str; 10] = [
+    "read.rooms",
+    "read.sources",
+    "read.structures",
+    "read.sites",
+    "read.piles",
+    "read.remains",
+    "read.others",
+    "read.events",
+    "read.own",
+    "read.pack",
+];
+
 pub fn of_game<'t>(
     maps: &'t mut Maps,
     buffers: &mut read::Buffers,
     (declarations, drain): (&Declarations, Option<RoomName>),
-    (clock, start, phases): (&dyn Fn() -> f64, f64, &mut fabot_core::drive::Phases),
+    (clock, start, phases, walked): (&dyn Fn() -> f64, f64, &mut Phases, &mut Counts),
 ) -> (World<'t>, &'t Maps, Pass, f64) {
     let packed = read(drain.map(|room| room.to_string()));
     let ints = packed.get(0).unchecked_into::<Int32Array>().to_vec();
     let text = packed.get(1).as_string().unwrap_or_default();
+    let marks = (packed.get(2).dyn_into::<Float64Array>()).map_or_default(|m| m.to_vec());
     let decoding = clock();
-    phases.push(("read".to_string(), decoding - start));
+    let mut last = start;
+    for (name, &[at, count, parts]) in SECTIONS.iter().zip(marks.as_chunks::<3>().0) {
+        phases.push((name.to_string(), at - last));
+        walked.push((name.to_string(), count as i32));
+        if parts > 0.0 {
+            walked.push((format!("{name}.parts"), parts as i32));
+        }
+        last = at;
+    }
+    phases.push(("read.copy".to_string(), decoding - last));
     let mut world = read::world(&ints, &text, declarations, buffers);
     world.cpu_limit = f64::from(game::cpu::limit());
     let mapping = clock();

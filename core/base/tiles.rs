@@ -147,7 +147,6 @@ pub fn range(a: Tile, b: Tile) -> i32 {
     (x_of(a) - x_of(b)).abs().max((y_of(a) - y_of(b)).abs())
 }
 
-/// The engine's directions, TOP = 1 clockwise to TOP_LEFT = 8.
 pub const TOP: i32 = 1;
 pub const TOP_RIGHT: i32 = 2;
 pub const RIGHT: i32 = 3;
