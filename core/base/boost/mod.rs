@@ -116,7 +116,6 @@ pub struct Wait {
     pub load: Load,
     pub stands: bool,
     pub carried: bool,
-    /// The lab wait its visits still price.
     pub left: i32,
 }
 
@@ -285,8 +284,6 @@ pub struct Roles {
     pub outputs: Vec<Id>,
 }
 
-/// Off the labs' tiles alone, so they hold from tick to tick: the pair the
-/// most others stand within reach of both of, ties to the lower ids.
 pub fn roles_of(labs: &[(Id, Pos)]) -> Option<Roles> {
     let mut sorted: Vec<&(Id, Pos)> = labs.iter().collect();
     sorted.sort_by_key(|a| a.0);

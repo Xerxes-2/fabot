@@ -577,7 +577,7 @@ conflicts never silently cancel an act.
   soonest (hops + spawn queue + energy refill time); home `Defend` casts at
   home. Bodies end with one `MOVE` (`with_move_last`) and carry `HEAL` when
   leaving owned rooms (except siege dismantlers covered by medics).
-- **Boosts (`core/base/boost.rs`):** `boost::boosted_by` gives each part type
+- **Boosts (`core/base/boost/mod.rs`):** `boost::boosted_by` gives each part type
   of a body, by its compound's `BOOSTS` rank, the strongest compound a
   colony's `Stock` covers for all its parts of that type, spending stock and
   energy as it goes and counting the lab fills it waits on (`lab_wait`, 85
