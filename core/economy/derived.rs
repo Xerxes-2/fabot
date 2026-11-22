@@ -17,7 +17,7 @@ use fabot_base::world::{
     Store, Structure, StructureType, World, terrain,
 };
 
-use super::balance::{Holding, Level, Shipment, balance, want};
+use super::balance::{Holding, Level, Shipment, balance, takes, want};
 use super::bodies::{self, Pattern};
 use super::task::Target;
 
@@ -942,12 +942,12 @@ fn held_in(world: &World, g: &Ground, r: ResourceType) -> i32 {
             .sum::<i32>()
 }
 
-/// `reagents_held` is `None` with too few labs to react.
+/// `roles` and `bench` are `None` with too few labs to react.
 struct Cluster<'g> {
     ground: &'g Ground,
-    labs: Vec<(Id, Pos)>,
     kept: BTreeMap<Id, ResourceType>,
-    reagents_held: Option<Vec<ResourceType>>,
+    roles: Option<fabot_base::boost::Roles>,
+    bench: Option<super::labs::Bench>,
 }
 
 fn cluster_of<'g>(world: &World, g: &'g Ground) -> Cluster<'g> {
@@ -961,22 +961,32 @@ fn cluster_of<'g>(world: &World, g: &'g Ground) -> Cluster<'g> {
             Some((boost::booster(world, g.room, compound)?.id, compound))
         })
         .collect();
-    let labs: Vec<(Id, Pos)> = (g.labs.iter())
-        .filter(|l| !kept.contains_key(&l.id))
-        .map(|l| (l.id, l.pos))
-        .collect();
-    let reagents_held = boost::roles_of(&labs).map(|roles| {
+    // Roles and rank off every lab, a kept one only leaving the outputs: else
+    // a boost lent a lab moved the pair and stopped or unranked a running reaction.
+    let labs: Vec<(Id, Pos)> = g.labs.iter().map(|l| (l.id, l.pos)).collect();
+    let all = boost::roles_of(&labs);
+    let outputs = all.as_ref().map_or(0, |r| r.outputs.len());
+    let roles = all
+        .filter(|r| !kept.contains_key(&r.reagents.0) && !kept.contains_key(&r.reagents.1))
+        .map(|mut r| {
+            r.outputs.retain(|o| !kept.contains_key(o));
+            r
+        });
+    let bench = roles.as_ref().map(|roles| {
         let (a, b) = roles.reagents;
-        [a, b]
-            .iter()
-            .filter_map(|id| lab_held(g, *id).map(|h| h.0))
-            .collect()
+        super::labs::Bench {
+            reagents_held: [a, b]
+                .iter()
+                .filter_map(|id| lab_held(g, *id).map(|h| h.0))
+                .collect(),
+            outputs,
+        }
     });
     Cluster {
         ground: g,
-        labs,
         kept,
-        reagents_held,
+        roles,
+        bench,
     }
 }
 
@@ -994,19 +1004,13 @@ pub fn once(rs: impl IntoIterator<Item = ResourceType>) -> Vec<ResourceType> {
     out
 }
 
-/// A cluster's reagents: its reaction's, and what its reagent labs hold idle
-/// too, else an idle tick would ship them away.
-fn spent_by(c: &Cluster, reaction: Option<super::labs::Reaction>) -> Vec<ResourceType> {
-    once((c.reagents_held.iter().flatten().copied()).chain(reaction.iter().flat_map(|r| r.1)))
-}
-
 /// A lab holds one mineral: a waiting body's booster is drained of others.
 fn plan_cluster(
     world: &World,
     c: &Cluster,
     reaction: Option<super::labs::Reaction>,
 ) -> super::labs::Plan {
-    let mut plan = super::labs::plan_for(reaction, &c.labs, &|id| lab_held(c.ground, id));
+    let mut plan = super::labs::plan_for(reaction, c.roles.as_ref(), &|id| lab_held(c.ground, id));
     for (id, compound) in &c.kept {
         for (r, n) in lab_at(world, c.ground.room, *id)
             .iter()
@@ -1071,73 +1075,136 @@ fn boost_lab(world: &World, home: RoomName) -> Option<BoostLab> {
         })
 }
 
-type Wants<'a> = (
-    &'a BTreeMap<RoomName, Vec<ResourceType>>,
-    &'a [ResourceType],
-);
+struct Running {
+    room: RoomName,
+    labs: [Id; 2],
+    reagents: [ResourceType; 2],
+    /// What its product reacts with next, as much as it makes: it stays, so
+    /// the step after runs here and it never goes out and back.
+    partner: Option<(ResourceType, i32)>,
+}
 
-fn holdings_of(
-    world: &World,
-    ours: &[Ground],
-    (spent, boosts): Wants,
-    (given_up, fights): (&dyn Fn(RoomName) -> bool, &dyn Fn(RoomName) -> bool),
-) -> Vec<Holding> {
-    let wanted = once(spent.values().flatten().chain(boosts).copied());
+struct Ours<'a> {
+    world: &'a World<'a>,
+    grounds: &'a [Ground],
+    given_up: &'a dyn Fn(RoomName) -> bool,
+}
+
+impl<'a> Ours<'a> {
+    fn iter(&self) -> impl Iterator<Item = &'a Ground> + '_ {
+        self.grounds.iter().filter(|g| !(self.given_up)(g.room))
+    }
+
+    fn held(&self, g: &Ground, r: ResourceType) -> i32 {
+        held_in(self.world, g, r)
+    }
+
+    fn empire(&self, r: ResourceType) -> i32 {
+        self.iter().map(|g| self.held(g, r)).sum()
+    }
+}
+
+/// What our colonies hold and give, one reading for lab assignment and balance.
+struct Stocks<'a> {
+    ours: Ours<'a>,
+    boosts: &'a [ResourceType],
+    fights: &'a dyn Fn(RoomName) -> bool,
+    running: Vec<Running>,
+}
+
+impl Stocks<'_> {
+    /// A running reaction spends what its reagent labs hold, and keeps its
+    /// partner; a product leaves its outputs once asked, so it counts.
+    fn sendable(&self, g: &Ground, r: ResourceType) -> i32 {
+        let held = self.ours.held(g, r);
+        let here = self.running.iter().filter(|c| c.room == g.room);
+        let in_labs: i32 = (here.clone().flat_map(|c| c.labs))
+            .filter_map(|id| lab_held(g, id).filter(|h| h.0 == r))
+            .map(|h| h.1)
+            .sum();
+        let partner: i32 = (here.filter_map(|c| c.partner))
+            .filter(|(m, _)| *m == r)
+            .map(|(_, n)| held.min(n))
+            .sum();
+        let through = (g.terminal.as_ref()).map_or(0, |t| t.store.amount_of(r) + t.store.free());
+        (held - in_labs - partner).min(through)
+    }
+
+    fn level(&self, g: &Ground, r: ResourceType, reagents: &[ResourceType]) -> Level {
+        Level {
+            want: want(r, reagents, self.boosts, (self.fights)(g.room)),
+            held: self.ours.held(g, r),
+            shippable: self.sendable(g, r),
+            boost: self.boosts.contains(&r),
+        }
+    }
+
+    /// What `g` gives of `r` before assignment: what balance would ship were
+    /// each cluster to keep the reaction its labs run.
+    fn spare(&self, g: &Ground, r: ResourceType) -> i32 {
+        let running = self.running.iter().find(|c| c.room == g.room);
+        self.level(g, r, running.map_or(&[][..], |c| &c.reagents[..]))
+            .spare()
+    }
+}
+
+fn running_of(
+    cluster: &[Cluster],
+    wanted: &[super::labs::Reaction],
+    targets: &[(ResourceType, i32)],
+) -> Vec<Running> {
+    let benches: Vec<_> = cluster.iter().map(|c| c.bench.as_ref()).collect();
+    (cluster.iter().zip(super::labs::running(&benches, wanted)))
+        .filter_map(|(c, running)| {
+            let (product, reagents, amount) = running?;
+            let roles = c.roles.as_ref()?;
+            Some(Running {
+                room: c.ground.room,
+                labs: [roles.reagents.0, roles.reagents.1],
+                reagents: *reagents,
+                partner: super::labs::sibling(targets, *product).map(|s| (s, *amount)),
+            })
+        })
+        .collect()
+}
+
+fn holdings_of(stocks: &Stocks, spent: &BTreeMap<RoomName, Vec<ResourceType>>) -> Vec<Holding> {
+    let wanted = once(spent.values().flatten().chain(stocks.boosts).copied());
     let holding = |g: &Ground| {
         let t = g.terminal.as_ref()?;
         let reagents = spent.get(&g.room).map_or(&[][..], Vec::as_slice);
-        let level = |r: ResourceType| {
-            let held = held_in(world, g, r);
-            let in_labs: i32 = (g.labs.iter().filter_map(|l| l.held.filter(|h| h.0 == r)))
-                .map(|h| h.1)
-                .sum();
-            Level {
-                want: want(r, reagents, boosts, fights(g.room)),
-                held,
-                shippable: held - in_labs,
-                boost: boosts.contains(&r),
-            }
-        };
         Some(Holding {
             room: g.room,
-            levels: wanted.iter().map(|r| (*r, level(*r))).collect(),
+            levels: wanted
+                .iter()
+                .map(|r| (*r, stocks.level(g, *r, reagents)))
+                .collect(),
             energy: g.stock().unwrap_or(0) + t.store.amount_of(Energy),
             free: t.store.free(),
         })
     };
-    (ours.iter().filter(|g| !given_up(g.room)))
-        .filter_map(holding)
-        .collect()
+    stocks.ours.iter().filter_map(holding).collect()
 }
 
 fn assign_clusters(
-    world: &World,
-    ours: &[Ground],
+    stocks: &Stocks,
     cluster: &[Cluster],
-    targets: &[(ResourceType, i32)],
-    given_up: &dyn Fn(RoomName) -> bool,
+    wanted: &[super::labs::Reaction],
 ) -> Vec<Option<super::labs::Reaction>> {
-    let idle: BTreeMap<RoomName, Vec<ResourceType>> = (cluster.iter())
-        .map(|c| (c.ground.room, spent_by(c, None)))
-        .collect();
-    // What can reach a colony: its own, and what the others' stores and labs
-    // hold that their reagent labs do not, through both terminals.
-    let reach = |to: &Ground, r: ResourceType| -> i32 {
-        let others = (ours.iter())
-            .filter(|g| g.room != to.room && g.terminal.is_some() && to.terminal.is_some())
-            .filter(|g| !given_up(g.room) && !idle.get(&g.room).is_some_and(|s| s.contains(&r)))
-            .map(|g| held_in(world, g, r))
-            .sum::<i32>();
-        held_in(world, to, r) + others
+    let bring = |i: usize, r: ResourceType| {
+        let to = cluster[i].ground;
+        let open = (to.terminal.as_ref()).is_some_and(|t| takes(t.store.free()));
+        (stocks.ours.iter())
+            .filter(|g| open && g.room != to.room)
+            .map(|g| (stocks.spare(g, r), tiles::rooms_apart(g.room, to.room)))
+            .chain([(stocks.ours.held(to, r), 0)])
+            .filter(|(n, _)| *n >= engine::LAB_REACTION_AMOUNT)
+            .map(|(_, apart)| apart)
+            .min()
     };
-    let held: Vec<Option<Vec<ResourceType>>> =
-        cluster.iter().map(|c| c.reagents_held.clone()).collect();
-    let empire = |r: ResourceType| {
-        (ours.iter().filter(|g| !given_up(g.room)))
-            .map(|g| held_in(world, g, r))
-            .sum::<i32>()
-    };
-    super::labs::assign(targets, &empire, &held, &|i, r| reach(cluster[i].ground, r))
+    let benches: Vec<Option<&super::labs::Bench>> =
+        cluster.iter().map(|c| c.bench.as_ref()).collect();
+    super::labs::assign(wanted, &benches, &bring)
 }
 
 fn stock_labs(
@@ -1147,19 +1214,29 @@ fn stock_labs(
     (clusters, targets): (&[RoomName], &[(ResourceType, i32)]),
     (given_up, fights): (&dyn Fn(RoomName) -> bool, &dyn Fn(RoomName) -> bool),
 ) -> Vec<Shipment> {
-    let ours = &grounds[..colonies];
+    let ours = Ours {
+        world,
+        grounds: &grounds[..colonies],
+        given_up,
+    };
     let cluster: Vec<Cluster> = (clusters.iter())
-        .filter_map(|c| ours.iter().find(|g| g.room == *c))
+        .filter_map(|c| ours.grounds.iter().find(|g| g.room == *c))
         .map(|g| cluster_of(world, g))
         .collect();
-    let reactions = assign_clusters(world, ours, &cluster, targets, given_up);
+    let boosts: Vec<ResourceType> = targets.iter().map(|(b, _)| *b).collect();
+    let wanted = super::labs::wanted(targets, &|r| ours.empire(r));
+    let stocks = Stocks {
+        ours,
+        boosts: &boosts,
+        fights,
+        running: running_of(&cluster, &wanted, targets),
+    };
+    let reactions = assign_clusters(&stocks, &cluster, &wanted);
 
     let spent: BTreeMap<RoomName, Vec<ResourceType>> = (cluster.iter().zip(&reactions))
-        .map(|(c, r)| (c.ground.room, spent_by(c, *r)))
+        .map(|(c, r)| (c.ground.room, r.map_or_else(Vec::new, |r| r.1.to_vec())))
         .collect();
-    let boosts: Vec<ResourceType> = targets.iter().map(|(b, _)| *b).collect();
-    let wants = (&spent, &boosts[..]);
-    let mut holdings = holdings_of(world, ours, wants, (given_up, fights));
+    let mut holdings = holdings_of(&stocks, &spent);
     let set: Vec<(RoomName, super::labs::Plan, Option<BoostLab>)> =
         (cluster.iter().zip(&reactions))
             .map(|(c, r)| {
@@ -1180,6 +1257,8 @@ fn stock_labs(
 
 /// v1's `AidDonorMargin`: over a load and its fee.
 const AID_MARGIN: i32 = 20_000;
+/// Terminal room aid leaves a taker: energy filling it blocked every mineral send.
+const MINERAL_ROOM: i32 = super::balance::BATCH;
 
 struct Taker {
     room: RoomName,
@@ -1232,7 +1311,7 @@ fn give_aid(
             continue;
         };
         let to = &takers[ti];
-        let sent = spare.min(to.free).min(to.short().unwrap_or(i32::MAX));
+        let sent = (spare.min(to.free - MINERAL_ROOM)).min(to.short().unwrap_or(i32::MAX));
         if sent < engine::TERMINAL_MIN_SEND {
             continue;
         }

@@ -8,8 +8,13 @@ use fabot_base::world::RoomName;
 pub const REAGENT: i32 = 10_000;
 /// Hivemind's "low" cutoff for a combat boost in a room under attack.
 pub const BOOST: i32 = 2_500;
-/// A send's most, and the band past want that keeps a filled taker from giving.
-const BATCH: i32 = 5_000;
+/// One load: the most a reagent taker asks a send, the band past want that
+/// keeps a filled taker from giving, and the room aid leaves for a load.
+pub const BATCH: i32 = 5_000;
+
+pub fn takes(free: i32) -> bool {
+    free >= engine::TERMINAL_MIN_SEND
+}
 
 /// A cluster's reagents, and the target boosts while the colony fights.
 pub fn want(
@@ -26,7 +31,7 @@ pub fn want(
 pub struct Level {
     pub want: i32,
     pub held: i32,
-    /// Not its labs': a load from its storage to its terminal still ships.
+    /// Not its labs', nor past its terminal's room: a load from storage ships.
     pub shippable: i32,
     /// A boost sent to a fight stays once the fight ends.
     pub boost: bool,
@@ -34,7 +39,7 @@ pub struct Level {
 
 impl Level {
     /// Hivemind's "high": what a colony wants none of is spare whole.
-    fn spare(&self) -> i32 {
+    pub fn spare(&self) -> i32 {
         let kept = if self.want > 0 || self.boost {
             self.want + BATCH
         } else {
@@ -45,6 +50,18 @@ impl Level {
 
     pub fn short(&self) -> i32 {
         self.want - self.held
+    }
+
+    /// Up to a batch, to the giving band, so a draining lab is topped up a
+    /// batch at a time, not per hundred.
+    fn load(&self) -> i32 {
+        if self.short() <= 0 {
+            0
+        } else if self.want >= BATCH {
+            BATCH.min(self.want + BATCH - self.held)
+        } else {
+            self.short()
+        }
     }
 }
 
@@ -87,7 +104,7 @@ pub fn balance(holdings: &mut [Holding]) -> Vec<Shipment> {
         let apart = |ti: usize| tiles::rooms_apart(giver.room, holdings[ti].room);
         // Short for its want, so a fight's boosts wait behind no reagent.
         let Some(ti) = (0..holdings.len())
-            .filter(|ti| *ti != gi)
+            .filter(|ti| *ti != gi && takes(holdings[*ti].free))
             .flat_map(|ti| holdings[ti].levels.iter().map(move |(r, l)| (ti, *r, *l)))
             .filter(|(_, r, l)| {
                 l.short() >= engine::TERMINAL_MIN_SEND
@@ -102,7 +119,7 @@ pub fn balance(holdings: &mut [Holding]) -> Vec<Shipment> {
         let (mut load, mut fee) = (Vec::new(), 0);
         for (r, l) in holdings[ti].levels.clone() {
             let room = holdings[ti].free - load.iter().map(|(_, n)| n).sum::<i32>();
-            let n = (BATCH.min(l.short()).min(holdings[gi].level(r).spare())).min(room);
+            let n = (l.load().min(holdings[gi].level(r).spare())).min(room);
             let cost = engine::send_cost(n, apart);
             if n < engine::TERMINAL_MIN_SEND || fee + cost > holdings[gi].energy {
                 continue;
@@ -192,13 +209,24 @@ mod tests {
     }
 
     #[test]
-    fn a_send_tops_a_taker_up_to_its_want() {
+    fn a_reagent_taker_below_want_gets_a_batch_and_gives_none_back() {
         let mut holdings = [
             holding("W1N1", &[(Oxygen, 0, 20_000)]),
-            holding("W2N1", &[(Oxygen, REAGENT, REAGENT - 1_000)]),
+            holding("W2N1", &[(Oxygen, REAGENT, REAGENT - 100)]),
         ];
-        assert_eq!(balance(&mut holdings), one("W1N1", "W2N1", Oxygen, 1_000));
+        assert_eq!(balance(&mut holdings), one("W1N1", "W2N1", Oxygen, BATCH));
         assert_eq!(balance(&mut holdings), vec![]);
+    }
+
+    #[test]
+    fn a_taker_whose_terminal_is_full_never_holds_up_a_giver() {
+        let mut holdings = [
+            holding("W1N1", &[(Oxygen, 0, 20_000), (Hydrogen, 0, 20_000)]),
+            holding("W2N1", &[(Oxygen, REAGENT, 0)]),
+            holding("W3N1", &[(Hydrogen, REAGENT, REAGENT - 1_000)]),
+        ];
+        holdings[1].free = 0;
+        assert_eq!(balance(&mut holdings), one("W1N1", "W3N1", Hydrogen, BATCH));
     }
 
     #[test]

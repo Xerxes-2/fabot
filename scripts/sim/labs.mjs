@@ -84,7 +84,7 @@ function report(dir) {
   const sent = Object.fromEntries(Object.entries(last.sentOf ?? {}).map(([r, to]) => [r, sum(to)]));
   const { worth: w, score: s, ledger } = last;
   const economy = { ticks: last.t + 1, worth: w.controller + w.structures + w.sites + w.fortification + w.stock, score: s.controller + s.structures + s.fortification + s.stock, ...w, dug: ledger.dug, upgrade: ledger.upgrade, build: ledger.build, spawn: ledger.spawn, ...exposureOf(dir, last) };
-  return { rooms, ore, stock, sent, fees: last.feeOf ?? {}, economy, broken: invariants(dir) };
+  return { rooms, ore, stock, sent, fees: last.feeOf ?? {}, sends: last.sendsOf ?? {}, reversed: last.reversedOf ?? {}, economy, broken: invariants(dir) };
 }
 
 const seeds = flags["--seed"].split(",").map(Number);
@@ -115,6 +115,7 @@ for (const [i, seed] of seeds.entries()) {
   for (const [o, f] of Object.entries(r.ore)) console.log(`  ore ${o}: held ${f.held0} + dug ${f.dug} = held ${f.held} + away ${f.away} + boosted ${f.boosted} + residual ${f.residual}`);
   console.log(`  stock ${JSON.stringify(Object.fromEntries(Object.entries(r.stock).filter(([, n]) => n > 0)))}`);
   console.log(`  sent ${JSON.stringify(r.sent)}; fees ${JSON.stringify(r.fees)}`);
+  console.log(`  mineral sends ${sum(r.sends, (x) => x !== "energy")} ${JSON.stringify(r.sends)}; out and back ${sum(r.reversed, (x) => x !== "energy")} ${JSON.stringify(r.reversed)}`);
   for (const b of r.broken) console.log(`  invariant broken: ${b}`);
 }
 if (codes.some((c) => c !== 0)) process.exit(1);

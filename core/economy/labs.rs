@@ -2,10 +2,12 @@
 /// it makes next, which lab plays which part, what each lab is filled with or
 /// drained of. Derived whole every tick from what the stores hold, so a lost
 /// tick or a reset loses nothing.
-use fabot_base::boost::{Roles, roles_of};
+use std::cmp::Reverse;
+
+use fabot_base::boost::Roles;
 use fabot_base::engine;
 use fabot_base::vocabulary::{BOOSTS, Boost, ORES, ResourceType, ores_in};
-use fabot_base::world::{Id, Pos};
+use fabot_base::world::Id;
 
 /// Hivemind's "high": past it the first-ranked boost leaves the ore to the next.
 const BOOST_STOCK: i32 = 7_500;
@@ -69,55 +71,99 @@ pub fn wanted(
     out
 }
 
-/// What a cluster's reagent labs hold of a reaction's reagents, with nothing
-/// foreign in them.
-#[derive(Clone, Copy)]
-enum Holds {
-    Both,
-    One,
-    Any,
+/// Rooms to the nearest colony (0 for its own) holding a reaction's worth of a
+/// reagent; `None` when none can reach the cluster.
+pub type Bring<'a> = &'a dyn Fn(usize, ResourceType) -> Option<i32>;
+
+#[derive(Clone, Debug, Default)]
+pub struct Bench {
+    pub reagents_held: Vec<ResourceType>,
+    pub outputs: usize,
 }
 
-impl Holds {
-    fn of(self, held: &[ResourceType], (_, reagents, _): &Reaction) -> bool {
-        let covered = reagents.iter().filter(|r| held.contains(r)).count();
-        let clean = held.iter().all(|m| reagents.contains(m));
-        match self {
-            Holds::Both => clean && covered == 2,
-            Holds::One => clean && covered >= 1,
-            Holds::Any => true,
-        }
+impl Bench {
+    fn holds(&self, reagents: &[ResourceType; 2]) -> usize {
+        let clean = self.reagents_held.iter().all(|m| reagents.contains(m));
+        let held = reagents.iter().filter(|r| self.reagents_held.contains(r));
+        usize::from(clean) * held.count()
     }
 }
 
-/// No two clusters run one reaction, nor one without reagent labs any, nor
-/// one whose reagents cannot reach it (`reach(cluster, resource)`). One keeps
-/// a wanted reaction its reagent labs (`held`) hold nothing foreign to, as it
-/// costs no drain, both reagents held before one; the rest take the first left.
-pub fn assign(
-    targets: &[(ResourceType, i32)],
-    stock: &dyn Fn(ResourceType) -> i32,
-    held: &[Option<Vec<ResourceType>>],
-    reach: &dyn Fn(usize, ResourceType) -> i32,
-) -> Vec<Option<Reaction>> {
-    let wanted = wanted(targets, stock);
-    let supplied = |i: usize, (_, reagents, _): &Reaction| {
-        (reagents.iter()).all(|r| reach(i, *r) >= engine::LAB_REACTION_AMOUNT)
+/// Output labs set the rate: under 1/SLOW_SHARE of the fastest keeps nothing (owner: half).
+const SLOW_SHARE: usize = 2;
+
+/// The wanted reaction each cluster's reagent labs run and it keeps (ARCHITECTURE.md, labs).
+pub fn running<'w>(
+    benches: &[Option<&Bench>],
+    wanted: &'w [Reaction],
+) -> Vec<Option<&'w Reaction>> {
+    let fastest = benches
+        .iter()
+        .flatten()
+        .map(|b| b.outputs)
+        .max()
+        .unwrap_or(0);
+    let runs = |b: &Bench| {
+        wanted
+            .iter()
+            .find(|(_, reagents, _)| b.holds(reagents) == 2)
     };
-    let mut taken: Vec<Option<Reaction>> = vec![None; held.len()];
-    for holds in [Holds::Both, Holds::One, Holds::Any] {
-        for (i, labs) in held.iter().enumerate() {
-            if let Some(labs) = labs
-                && taken[i].is_none()
-            {
-                let free = |r: &Reaction| taken.iter().flatten().all(|t| t.0 != r.0);
-                taken[i] = (wanted.iter())
-                    .find(|r| holds.of(labs, r) && free(r) && supplied(i, r))
-                    .copied();
+    (benches.iter())
+        .map(|b| {
+            b.filter(|b| SLOW_SHARE * b.outputs >= fastest)
+                .and_then(runs)
+        })
+        .collect()
+}
+
+/// No two clusters run one reaction, nor one whose reagents cannot reach it;
+/// ranked as ARCHITECTURE.md's labs paragraph says.
+pub fn assign(
+    wanted: &[Reaction],
+    benches: &[Option<&Bench>],
+    bring: Bring,
+) -> Vec<Option<Reaction>> {
+    let running = running(benches, wanted);
+    let mut offers = Vec::new();
+    for (i, bench) in benches.iter().enumerate() {
+        let Some(bench) = bench else { continue };
+        for (rank, (product, reagents, _)) in wanted.iter().enumerate() {
+            let held = bench.holds(reagents);
+            let runs = running[i].is_some_and(|r| r.0 == *product);
+            if let [Some(a), Some(b)] = reagents.map(|r| bring(i, r)) {
+                let key = (
+                    Reverse(runs),
+                    Reverse(bench.outputs),
+                    Reverse(held),
+                    a + b,
+                    rank,
+                );
+                offers.push((key, i));
             }
         }
     }
+    offers.sort_unstable();
+    let mut taken: Vec<Option<Reaction>> = vec![None; benches.len()];
+    for ((.., rank), i) in offers {
+        let free = taken.iter().flatten().all(|t| t.0 != wanted[rank].0);
+        if taken[i].is_none() && free {
+            taken[i] = Some(wanted[rank]);
+        }
+    }
     taken
+}
+
+/// The other reagent of the first reaction toward a target that takes `product`.
+pub fn sibling(targets: &[(ResourceType, i32)], product: ResourceType) -> Option<ResourceType> {
+    fn within(compound: ResourceType, product: ResourceType) -> Option<ResourceType> {
+        let [a, b] = compound.reaction_components()?;
+        match product {
+            p if p == a => Some(b),
+            p if p == b => Some(a),
+            _ => within(a, product).or_else(|| within(b, product)),
+        }
+    }
+    targets.iter().find_map(|(t, _)| within(*t, product))
 }
 
 /// A reagent made past its target spends its sibling's ore; a part reaction
@@ -208,11 +254,11 @@ pub struct Plan {
 /// holds it. With no reaction to run, the outputs are emptied.
 pub fn plan_for(
     reaction: Option<Reaction>,
-    labs: &[(Id, Pos)],
+    roles: Option<&Roles>,
     held: &dyn Fn(Id) -> Option<(ResourceType, i32)>,
 ) -> Plan {
     let half = engine::LAB_MINERAL_CAPACITY / 2;
-    let Some(roles) = roles_of(labs) else {
+    let Some(roles) = roles else {
         return Plan::default();
     };
 
@@ -261,7 +307,7 @@ pub fn plan_for(
         [first, second],
         Roles {
             reagents: (first_lab, second_lab),
-            outputs: roles.outputs,
+            outputs: roles.outputs.clone(),
         },
     ));
     plan
@@ -304,11 +350,31 @@ pub fn ready_runs(
 mod tests {
     use super::*;
     use ResourceType::*;
+    use fabot_base::boost::roles_of;
     use fabot_base::vocabulary::RESOURCES_ALL;
+    use fabot_base::world::Pos;
     use fabot_base::world::RoomName;
 
     fn stocked(pairs: &[(ResourceType, i32)]) -> impl Fn(ResourceType) -> i32 + '_ {
         move |r| pairs.iter().find(|(p, _)| *p == r).map_or(0, |(_, n)| *n)
+    }
+
+    fn placed(
+        stock: &[(ResourceType, i32)],
+        held: &[Option<Vec<ResourceType>>],
+        i: usize,
+        r: ResourceType,
+    ) -> Option<i32> {
+        let here = held[i].as_ref().is_some_and(|h| h.contains(&r));
+        (stocked(stock)(r) >= engine::LAB_REACTION_AMOUNT).then_some(i32::from(!here))
+    }
+
+    fn benches(held: &[Option<Vec<ResourceType>>]) -> Vec<Option<Bench>> {
+        let bench = |h: &Vec<ResourceType>| Bench {
+            reagents_held: h.clone(),
+            outputs: 1,
+        };
+        held.iter().map(|h| h.as_ref().map(bench)).collect()
     }
 
     fn next_reaction(
@@ -322,9 +388,14 @@ mod tests {
     fn a_cluster_holding_both_reagents_keeps_its_reaction_before_one_holding_one() {
         let stock = [(Hydrogen, 10_000), (Oxygen, 10_000), (Utrium, 10_000)];
         let held = [Some(vec![Oxygen]), Some(vec![Oxygen, Hydrogen]), None];
-        let now = assign(&[(UtriumAcid, 3000)], &stocked(&stock), &held, &|_, r| {
-            stocked(&stock)(r)
-        });
+        let now = assign(
+            &wanted(&[(UtriumAcid, 3000)], &stocked(&stock)),
+            &benches(&held)
+                .iter()
+                .map(Option::as_ref)
+                .collect::<Vec<_>>(),
+            &|i, r| placed(&stock, &held, i, r),
+        );
         let made: Vec<_> = now.iter().map(|r| r.map(|r| r.0)).collect();
         assert_eq!(made, [Some(UtriumHydride), Some(Hydroxide), None]);
     }
@@ -336,9 +407,15 @@ mod tests {
         let mut held: Vec<Option<Vec<ResourceType>>> = vec![Some(Vec::new()); 3];
         let mut kinds = Vec::new();
         for _ in 0..10_000 {
-            let now = assign(&targets, &stocked(&stock), &held, &|_, r| {
-                stocked(&stock)(r)
-            });
+            let wanted = wanted(&targets, &stocked(&stock));
+            let now = assign(
+                &wanted,
+                &benches(&held)
+                    .iter()
+                    .map(Option::as_ref)
+                    .collect::<Vec<_>>(),
+                &|i, r| placed(&stock, &held, i, r),
+            );
             let running: Vec<Reaction> = now.iter().flatten().copied().collect();
             if running.is_empty() {
                 assert!(kinds.len() > 3);
@@ -347,7 +424,6 @@ mod tests {
             for (i, r) in running.iter().enumerate() {
                 assert!(running[..i].iter().all(|o| o.0 != r.0), "{running:?}");
             }
-            let wanted = wanted(&targets, &stocked(&stock));
             for (labs, reaction) in held.iter_mut().flatten().zip(&now) {
                 let was = wanted.iter().find(|r| r.1.iter().all(|m| labs.contains(m)));
                 assert!(
@@ -362,6 +438,14 @@ mod tests {
             }
         }
         panic!("the reactions never end");
+    }
+
+    #[test]
+    fn a_product_s_sibling_is_the_other_reagent_of_the_step_after_it() {
+        let targets = [(CatalyzedKeaniumAlkalide, 7500)];
+        assert_eq!(sibling(&targets, KeaniumAlkalide), Some(Catalyst));
+        assert_eq!(sibling(&targets, KeaniumOxide), Some(Hydroxide));
+        assert_eq!(sibling(&targets, CatalyzedKeaniumAlkalide), None);
     }
 
     #[test]

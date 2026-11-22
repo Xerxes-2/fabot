@@ -36,6 +36,9 @@ pub struct Labs {
     boosts: BTreeMap<String, Tally>,
     clusters: BTreeMap<String, Cluster>,
     fee_of: Tally,
+    sends: Tally,
+    /// Per route, so churn (a resource out and back) shows apart from a chain's one-way flow.
+    routes: BTreeMap<(String, String, String), f64>,
     /// By ore: what our extractors dug, and what our terminals sent to rooms not ours, in ore.
     dug: Tally,
     away: Tally,
@@ -227,6 +230,11 @@ impl Labs {
         let range = calc_rooms_distance(from, to, false, 0.0);
         *self.fee_of.entry(resource.into()).or_default() +=
             calc_terminal_energy_cost(amount, range);
+        *self.sends.entry(resource.into()).or_default() += 1.0;
+        *self
+            .routes
+            .entry((resource.into(), from.into(), to.into()))
+            .or_default() += amount;
         if !v
             .index(to)
             .is_some_and(|i| v.rooms[i].of("controller").any(ours))
@@ -264,7 +272,7 @@ impl Labs {
     }
 
     /// The fees by resource, and by ore what was dug, held, sent away and boosted with.
-    pub fn totals(&self, v: &View, rooms: &[String]) -> [(&'static str, Value); 5] {
+    pub fn totals(&self, v: &View, rooms: &[String]) -> [(&'static str, Value); 7] {
         let (mut held, mut boosted) = (Tally::new(), Tally::new());
         for name in rooms {
             for (r, n) in stock_of(v.room(name)) {
@@ -274,8 +282,16 @@ impl Labs {
         for (r, n) in self.clusters.values().flat_map(|c| &c.boosted) {
             add_ores(&mut boosted, r, *n);
         }
+        // The lesser way of each pair: a chain's one-way flow counts nothing.
+        let mut back = Tally::new();
+        for ((r, from, to), n) in self.routes.iter().filter(|((_, f, t), _)| f < t) {
+            let other = self.routes.get(&(r.clone(), to.clone(), from.clone()));
+            *back.entry(r.clone()).or_default() += n.min(other.copied().unwrap_or(0.0));
+        }
         [
             ("feeOf", json!(self.fee_of)),
+            ("sendsOf", json!(self.sends)),
+            ("reversedOf", json!(back)),
             ("oreDug", json!(self.dug)),
             ("oreHeld", json!(held)),
             ("oreAway", json!(self.away)),

@@ -307,14 +307,16 @@ pricer cost ~2× CPU and 580 lines for no gain and was not merged).
   (`derived::give_aid`): stock past reserve, a 20k margin, and its sites' cost
   ships to the lowest-RCL colony below RCL8, nearest first (first, from any
   colony, to one under half its reserve, furthest short) — flowing only to a
-  colony holding less so it never flows back. It sends only from a terminal
+  colony holding less so it never flows back, and never past a mineral
+  batch of the taker's terminal room. It sends only from a terminal
   `economy/balance.rs` leaves idle: our colonies take below 10k of each reagent
   their cluster uses and 2.5k of each target boost while they cast or owe a
   cast for any fight (`ColonyPlan.fights`), and give above want + 5k (all of
   a reagent or product they want none of, Hivemind's cutoffs; a boost only
-  past 5k, so one sent to a fight stays) in batches up to the taker's
-  shortfall, furthest short for its want first, so a boost stays where it was
-  made until a fighting colony asks.
+  past 5k, so one sent to a fight stays); a reagent taker asks up to a 5k
+  batch (to the giving band), so a reacting lab is not topped up per hundred,
+  and a boost its shortfall; furthest short for its want first, so a boost
+  stays where it was made until a fighting colony asks.
 - **Repairs:** structures decaying within a creep lifetime are repaired ahead of
   building, and any lost within ten rampart decay periods (to decay, haul wear,
   or last tick's strikes) ahead of upgrading too. Soonest lost first, kind
@@ -385,15 +387,21 @@ pricer cost ~2× CPU and 580 lines for no gain and was not merged).
   T3 combat boost whose ores the empire digs or holds, in the `BOOSTS` rank
   expansion scores minerals by, each to Hivemind's "high" stock, so the labs
   make what fights spend from what we dig with no operator in the loop.
-  `labs::wanted` lists the reactions toward them from the stock that can
-  reach a cluster (its own, and what other colonies hold outside their reagent
-  labs), depth-first down the crate's `REACTIONS`, each target cut to whole
+  `labs::wanted` lists the reactions toward them from the empire's stock,
+  depth-first down the crate's `REACTIONS`, each target cut to whole
   reactions the stock carries through to it after the targets before it
-  (`labs::makeable`); `labs::assign` gives each cluster one, no two the same,
-  a cluster keeping the one its reagent labs already hold, so a moving stock
-  never swaps two clusters' reagents. Terminals balance reagents and boosts
-  (§5 terminal aid), and a product another colony is short of leaves the labs
-  a send at a time. Labs
+  (`labs::makeable`). `labs::assign` gives each, no two clusters the same,
+  to a cluster its reagents reach (its own, and what other colonies would
+  give through terminals with room), ranked: the reaction its reagent labs
+  already run (both reagents held), so a running reaction stays put, unless
+  it reacts under half as fast as the fastest cluster, so a slow one never
+  holds a step a fast one is free for; then most output labs; then labs
+  holding one reagent; then the nearest colony holding the reagents; then
+  the first wanted. Nothing in the rank moves as a send lands, so each tick
+  ranks afresh with no memory. A running cluster keeps its reagents and
+  what its product reacts with next; an idle one keeps none. Terminals
+  balance reagents and boosts (§5 terminal aid), and a product another
+  colony is short of leaves the labs a send at a time. Labs
   reserved for active boosts (§6.5) drop out of reactions and are filled by
   carriers via `Ground::boost_lab`. Layout places no lab below RCL8 (labs are
   worth little early).
