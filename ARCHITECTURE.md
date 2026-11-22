@@ -176,8 +176,9 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
 
 **Storage tiers:**
 - **Memory (`RawMemory`):** parsed once per tick in `core/tick/memory.rs` under
-  `Memory.v2` (global `Memory` is never touched; v1 `fabot`/`creeps` keys are
-  dropped on first read). Holds only per-tick essential state.
+  `Memory.v2` (the JS global `Memory` object is never touched; the `RawMemory`
+  text is written back as `{"v2":…}` alone, so any other top-level key is
+  gone after our first write). Holds only per-tick essential state.
 - **Segments (`RawMemory.segments`):** `1` observe, `2` intel, `3` metrics,
   `10–14` recorder ring. Used for infrequent, large, or operator-facing data.
 - **Heap:** rebuildable caches only (§1 cold start).

@@ -1,5 +1,3 @@
-//! `Memory`'s text and what it holds: `v2` is ours, keys of others are carried
-//! through in place, and v1's and the engine's `creeps` are dropped.
 use std::collections::BTreeMap;
 
 use serde::Deserialize;
@@ -26,7 +24,7 @@ pub struct Memory {
     /// As the tick found it: the recorder reads it, and `written` skips a text
     /// equal to it.
     pub text: String,
-    root: Map<String, Value>,
+    v2: Value,
     /// Text `JSON.parse` may take but serde refuses is never written over.
     unread: bool,
 }
@@ -37,25 +35,17 @@ impl Memory {
             Ok(Value::Object(root)) => (root, false),
             _ => (Map::new(), !text.is_empty()),
         };
-        for theirs in ["fabot", "creeps"] {
-            root.shift_remove(theirs);
-        }
-        let v2 = root.entry("v2").or_insert(Value::Null);
-        if !v2.is_object() {
-            *v2 = json!({});
-        }
+        let mut v2 = (root.shift_remove("v2"))
+            .filter(Value::is_object)
+            .unwrap_or_else(|| json!({}));
         if !v2["switches"].is_object() {
             v2["switches"] = json!({});
         }
-        Memory { text, root, unread }
-    }
-
-    fn v2(&self) -> &Value {
-        &self.root["v2"]
+        Memory { text, v2, unread }
     }
 
     pub fn state(&self) -> State {
-        let v2 = self.v2();
+        let v2 = &self.v2;
         let fight = &v2["fight"];
         let entries = |key| v2[key].as_object().into_iter().flatten();
         State {
@@ -88,7 +78,7 @@ impl Memory {
         if self.unread {
             return None;
         }
-        let v2 = &mut self.root["v2"];
+        let v2 = &mut self.v2;
         let held = |a: &Assignment| a.slot.clone() + "|" + &a.task.as_ref().map_or_default(task_id);
         v2["assignments"] = json!(
             (state.economy.assignments.iter())
@@ -103,17 +93,17 @@ impl Memory {
         });
         v2["expansion"] = json!(state.strategy.expansion);
         // Unchanged, `RawMemory.set` would only copy the text across the seam.
-        serde_json::to_string(&self.root)
+        serde_json::to_string(&BTreeMap::from([("v2", &self.v2)]))
             .ok()
             .filter(|text| *text != self.text)
     }
 
     pub fn recording(&self) -> bool {
-        self.v2()["switches"]["recorder"].as_bool() == Some(true)
+        self.v2["switches"]["recorder"].as_bool() == Some(true)
     }
 
     pub fn declarations(&self) -> Declarations {
-        let declared = &self.v2()["declarations"];
+        let declared = &self.v2["declarations"];
         let abandon: Vec<RoomName> = list(declared, "abandon");
         Declarations {
             reserve_lifetimes: match declared["reserve"].as_f64() {

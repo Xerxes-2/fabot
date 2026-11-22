@@ -1,9 +1,7 @@
-//! Memory round-trips: what the tick reads, written back unchanged, is the
-//! text it read, byte for byte, but for the keys of others it drops.
 use crate::memory::Memory;
 
 const OURS: &str = concat!(
-    r#"{"other":{"b":1,"a":[1.5,"x",null]},"v2":{"declarations":{"reserve":1.5,"#,
+    r#"{"v2":{"declarations":{"reserve":1.5,"#,
     r#""outposts":[{"room":"W2N1","controller":{"id":"c1","x":3,"y":4},"sources":[{"id":"a1","x":5,"y":6}]}],"#,
     r#""allies":["A"],"tactics":[{"rival":"R","forbid":["kite"]}]},"#,
     r#""switches":{"economy":false,"recorder":true},"assignments":{"a":"d1|w:a1:energy","b":"u1|"},"#,
@@ -22,12 +20,12 @@ const OURS: &str = concat!(
 );
 
 #[test]
-fn state_written_back_is_the_text_read() {
-    let theirs = OURS.replacen(r#""v2":"#, r#""fabot":{"v1":1},"v2":"#, 1);
+fn written_back_is_v2_alone_as_read() {
+    let theirs = OURS.replacen(r#""v2":"#, r#""sos":{"b":1,"a":[1.5,"x",null]},"v2":"#, 1);
     let theirs = format!(
         "{}{}",
         &theirs[..theirs.len() - 1],
-        r#","creeps":{"dead":{}}}"#
+        r#","creeps":{"dead":{}},"profiler":7}"#
     );
     let mut memory = Memory::of_text(theirs);
     let state = memory.state();
