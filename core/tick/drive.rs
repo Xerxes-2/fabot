@@ -76,11 +76,13 @@ where
     E: FnOnce(&[Action]) -> Vec<Refusal>,
     W: FnOnce(&World, &P, &Intel, Option<String>, &mut Vec<(String, f64)>),
 {
+    let start = clock();
     let mut state = memory.state();
+    let declarations: Declarations = besieging(memory.declarations(), intel);
+    phases.push(("hydrate".to_string(), clock() - start));
     state.layout = std::mem::take(&mut heap.standing);
     state.economy.spare = std::mem::take(&mut heap.spare);
 
-    let declarations: Declarations = besieging(memory.declarations(), intel);
     let start = clock();
     let drain = (state.fight.engagements.iter())
         .find(|e| e.phase == Phase::Draining)
@@ -107,13 +109,10 @@ where
     let start = clock();
     let refusals = (seam.execute)(&decided.result.settled.actions);
     phases.push(("execute".to_string(), clock() - start));
-    (seam.write)(
-        &world,
-        &pass,
-        intel,
-        memory.written(&decided.result.state),
-        phases,
-    );
+    let start = clock();
+    let text = memory.written(&decided.result.state);
+    phases.push(("serialize".to_string(), clock() - start));
+    (seam.write)(&world, &pass, intel, text, phases);
 
     let counts = metrics::counts(
         &world,
