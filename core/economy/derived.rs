@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use fabot_atlas::{self as atlas, Atlas, Tree};
 use fabot_base::HashMap;
-use fabot_base::boost;
+use fabot_base::boost::{Boosting, Load};
 use fabot_base::declarations::{self, Declarations, Outpost};
 use fabot_base::engine;
 use fabot_base::grid::Footprint;
@@ -333,9 +333,7 @@ pub fn drawn_for(kind: StructureType) -> bool {
 pub struct BoostLab {
     pub id: Id,
     pub pos: Pos,
-    pub compound: ResourceType,
-    pub mineral: i32,
-    pub energy: i32,
+    pub short: Load,
 }
 
 pub struct LinkNet {
@@ -945,21 +943,18 @@ fn held_in(world: &World, g: &Ground, r: ResourceType) -> i32 {
 /// `roles` and `bench` are `None` with too few labs to react.
 struct Cluster<'g> {
     ground: &'g Ground,
+    boosting: &'g Boosting,
     kept: BTreeMap<Id, ResourceType>,
     roles: Option<fabot_base::boost::Roles>,
     bench: Option<super::labs::Bench>,
 }
 
-fn cluster_of<'g>(world: &World, g: &'g Ground) -> Cluster<'g> {
+fn cluster_of<'g>(g: &'g Ground, boosting: &'g Boosting) -> Cluster<'g> {
     use fabot_base::boost;
     // The lab a body waiting at home is boosted from is the cast's and not
     // a reaction's: its compound is kept while the body still lacks it.
-    let kept: BTreeMap<Id, ResourceType> = (world.creeps.iter())
-        .filter(|c| c.pos.room == g.room)
-        .filter_map(|c| {
-            let compound = boost::of_name(&c.name)?;
-            Some((boost::booster(world, g.room, compound)?.id, compound))
-        })
+    let kept: BTreeMap<Id, ResourceType> = (boosting.waits.iter())
+        .map(|w| (w.lab, w.load.compound))
         .collect();
     // Roles and rank off every lab, a kept one only leaving the outputs: else
     // a boost lent a lab moved the pair and stopped or unranked a running reaction.
@@ -984,6 +979,7 @@ fn cluster_of<'g>(world: &World, g: &'g Ground) -> Cluster<'g> {
     });
     Cluster {
         ground: g,
+        boosting,
         kept,
         roles,
         bench,
@@ -1051,29 +1047,33 @@ fn lab_at<'a>(world: &'a World<'a>, home: RoomName, id: Id) -> Option<&'a world:
 
 /// The lab a waiting cast is boosted from is stocked from the home's stores:
 /// the reaction refuses it as a lab of its own.
-fn boost_lab(world: &World, home: RoomName) -> Option<BoostLab> {
-    let mut waited: BTreeMap<Id, (ResourceType, i32, i32)> = BTreeMap::new();
-    for creep in (world.creeps.iter()).filter(|c| c.pos.room == home) {
-        let Some(w) = fabot_base::boost::waiting(world, home, creep) else {
-            continue;
-        };
-        let at = waited.entry(w.lab.id).or_insert((w.compound, 0, 0));
-        at.1 += w.mineral;
-        at.2 += w.energy;
+fn boost_lab(world: &World, home: RoomName, boosting: &Boosting) -> Option<BoostLab> {
+    let mut waited: BTreeMap<Id, Load> = BTreeMap::new();
+    for w in boosting.waits.iter().filter(|w| w.stands) {
+        let at = waited.entry(w.lab).or_insert(Load {
+            mineral: 0,
+            energy: 0,
+            ..w.load
+        });
+        at.mineral += w.load.mineral;
+        at.energy += w.load.energy;
     }
     waited
         .into_iter()
-        .filter_map(|(id, (compound, mineral, energy))| {
+        .filter_map(|(id, load)| {
             let lab = lab_at(world, home, id)?;
+            let short = Load {
+                mineral: load.mineral - lab.store.amount_of(load.compound),
+                energy: load.energy - lab.store.amount_of(Energy),
+                ..load
+            };
             Some(BoostLab {
                 id,
                 pos: lab.pos,
-                compound,
-                mineral: mineral - lab.store.amount_of(compound),
-                energy: energy - lab.store.amount_of(Energy),
+                short,
             })
         })
-        .find(|b| b.mineral > 0 || b.energy > 0)
+        .find(|b| b.short.mineral > 0 || b.short.energy > 0)
 }
 
 struct Running {
@@ -1212,7 +1212,7 @@ fn stock_labs(
     world: &World,
     grounds: &mut [Ground],
     colonies: usize,
-    (clusters, targets): (&[RoomName], &[(ResourceType, i32)]),
+    (derived, targets): (&atlas::Derived, &[(ResourceType, i32)]),
     (given_up, fights): (&dyn Fn(RoomName) -> bool, &dyn Fn(RoomName) -> bool),
 ) -> Vec<Shipment> {
     let ours = Ours {
@@ -1220,9 +1220,8 @@ fn stock_labs(
         grounds: &grounds[..colonies],
         given_up,
     };
-    let cluster: Vec<Cluster> = (clusters.iter())
-        .filter_map(|c| ours.grounds.iter().find(|g| g.room == *c))
-        .map(|g| cluster_of(world, g))
+    let cluster: Vec<Cluster> = (derived.boosts.iter())
+        .filter_map(|(c, b)| Some(cluster_of(ours.grounds.iter().find(|g| g.room == *c)?, b)))
         .collect();
     let boosts: Vec<ResourceType> = targets.iter().map(|(b, _)| *b).collect();
     let wanted = super::labs::wanted(targets, &|r| ours.empire(r));
@@ -1243,7 +1242,11 @@ fn stock_labs(
             .map(|(c, r)| {
                 let mut plan = plan_cluster(world, c, *r);
                 drain_asked(&mut plan, c, &holdings, &spent[&c.ground.room]);
-                (c.ground.room, plan, boost_lab(world, c.ground.room))
+                (
+                    c.ground.room,
+                    plan,
+                    boost_lab(world, c.ground.room, c.boosting),
+                )
             })
             .collect();
 
@@ -1482,15 +1485,14 @@ pub fn homes(
     }
 
     let given_up = |room: RoomName| declarations.abandoning(room);
-    let clusters = boost::clusters(world, declarations);
     let mut minerals = Vec::new();
-    if !clusters.is_empty() {
+    if !ours.boosts.is_empty() {
         let targets = super::labs::targets(&minerals_dug_or_held(world, &grounds));
         minerals = stock_labs(
             world,
             &mut grounds,
             colonies.len(),
-            (&clusters, &targets),
+            (ours, &targets),
             (&given_up, &|room| plan_of(room).is_some_and(|p| p.fights)),
         );
     }

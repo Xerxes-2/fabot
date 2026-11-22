@@ -169,18 +169,18 @@ pub fn arbitrate(context: &Context, wishes: &[(RoomName, Wish)]) -> (Vec<Action>
     (out, stood)
 }
 
-/// A body whose cast asked for a compound and whose parts do not carry it yet
-/// is held at the lab and boosted there: its module's acts and wish are
-/// dropped for the walk, or the boost itself when it stands beside it.
+/// A body `boost::boosting` stands at a lab is held there and boosted: its
+/// module's acts and wish are dropped for the walk, or the boost itself when it
+/// stands beside it.
 fn boost_stop(
     context: &mut Context,
     actions: &mut Vec<Action>,
     wishes: &[(RoomName, Wish)],
 ) -> Option<Vec<(RoomName, Wish)>> {
     let world = context.world;
-    let stalls: Vec<(&world::Creep, boost::Waiting)> = (world.creeps.iter())
-        .filter(|c| c.owner.is_ours() && context.derived.clusters.contains(&c.pos.room))
-        .filter_map(|c| Some((c, boost::waiting(world, c.pos.room, c)?)))
+    let stalls: Vec<(&world::Creep, &boost::Wait)> = (context.derived.boosts.iter())
+        .flat_map(|(_, b)| b.waits.iter().filter(|w| w.stands))
+        .filter_map(|w| Some((world.creeps.iter().find(|c| c.id == w.creep)?, w)))
         .collect();
 
     if stalls.is_empty() {
@@ -195,9 +195,12 @@ fn boost_stop(
         .collect();
 
     for (creep, w) in &stalls {
-        let at = &w.lab.pos;
-        if creep.pos.within(1, at) && boost::can_boost(w.lab, w.compound) {
-            actions.push(Action::Lab(w.lab.id, LabAct::BoostCreep(creep.id)));
+        let at = &w.at;
+        let lab = (world.rooms.iter())
+            .flat_map(|r| &r.structures)
+            .find(|s| s.id == w.lab);
+        if creep.pos.within(1, at) && lab.is_some_and(|l| boost::can_boost(l, w.load.compound)) {
+            actions.push(Action::Lab(w.lab, LabAct::BoostCreep(creep.id)));
             continue;
         }
         let mover = Mover {
@@ -313,6 +316,17 @@ pub fn decide<'t>(
     let start = clock();
     let mut derived = derive(world, &mut atlas);
     phases.push(("derive".to_string(), clock() - start));
+    // Before Strategy: Economy's home pass stocks the labs these waits keep.
+    let boosted: Vec<_> = fabot_fight::boosted(&state.fight.engagements).collect();
+    derived.boosts = (boost::clusters(world, &declarations).into_iter())
+        .map(|r| {
+            let here: Vec<&str> = (boosted.iter())
+                .filter(|b| b.colony == r)
+                .map(|b| b.name.as_str())
+                .collect();
+            (r, boost::boosting(world, r, &here))
+        })
+        .collect();
     let (plans, misfiled) = strategy::plan(
         (!state.off.contains(STRATEGY), world, &mut atlas),
         &derived,
@@ -328,7 +342,6 @@ pub fn decide<'t>(
     );
     let declarations = declarations.planned(plans);
     derived.worked = worked(world, &sightings, &declarations, &derived);
-    derived.clusters = boost::clusters(world, &declarations);
 
     let mut context = Context {
         world,

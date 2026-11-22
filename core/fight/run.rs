@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::kinds::{defend, raid, siege, sweep};
-use super::scene::{Asked, Hunting, Scene, fresh};
+use super::scene::{Hunting, Scene, fresh};
 use super::shape::{Cast, Engagement, FightState, Group, Objective, Phase};
 use super::{casting, tracker};
 use fabot_atlas::{self as atlas, Atlas, Context};
@@ -235,9 +235,10 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
         hostile_at,
         ours,
         armed,
+        boosts: casting::cluster_boosts(&context.derived.boosts, &spawning, &engagements),
+        boosting: &context.derived.boosts,
         landed,
         spawning,
-        boosts: casting::cluster_boosts(world, &context.derived.clusters),
     };
 
     // A planned barrier fallen advances the plan, never re-prices it; a
@@ -474,14 +475,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
         .map(|c| c.name.clone())
         .collect();
 
-    let mut asked = Asked {
-        casts: scene.spawning.clone(),
-        ..Asked::default()
-    };
-
-    for c in &scene.spawning {
-        asked.queue(c.room, &c.body);
-    }
+    let mut asked = scene.asked();
 
     let mut ranked: Vec<(Engagement, bool)> = stepped;
     ranked.extend(opened);
@@ -531,6 +525,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
         }
     }
 
+    scene.boost_hold(&engagements, &mut decided);
     let kept: BTreeSet<i32> = decided
         .iter()
         .filter(|e| !(e.phase == Phase::Disengaging || scene.spent(e)))

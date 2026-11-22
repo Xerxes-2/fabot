@@ -166,6 +166,8 @@ private module of `fabot-strategy`. Declarations flow down only.
 by `npm run ceiling` and `npm run scenario`). `core/fight/price` (offers, set
 shapes, casting) holds its own ceiling apart from the rest of `core/fight`:
 fight kept hitting one ceiling, and pricing is the part that changes on its own.
+`core/fight/scene` (the per-tick read and casting) was split the same way
+when boosts were priced (owner).
 
 ## 4. State
 
@@ -186,7 +188,7 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
 | Store | Shape | Owner | Lives in | Why |
 |---|---|---|---|---|
 | `assignments` | creep → `Assignment` (slot, task; `slot\|task` text only in `memory.rs`) | Economy | Memory | sticky slot + task across ticks |
-| `fight.engagements` | list of `Engagement` (§6.2), with open tick (never moved) and each body's slot | Fight | Memory | active combat commitments (without heap-only `offers`); a home's deaths since open are its raid's |
+| `fight.engagements` | list of `Engagement` (§6.2), with open tick (never moved), each body's slot, and the plan's boosted slots with the colony each is cast and boosted at (`Plan.boosts`, written when the set is priced and cast) | Fight | Memory | active combat commitments (without heap-only `offers`); a home's deaths since open are its raid's; a body is boosted only as its price chose, at the colony that cast it, which no tick can re-derive (owner; old Memory without it reads as no boosts) |
 | `fight.groups` | list of `Group` (§6.1) | Fight | Memory | hostile cluster identity across ticks |
 | `fight.casts` | pending casts by engagement and slot | Fight | Memory | prevent double-casting while spawning |
 | `fight.due` | colonies with imminent siege successor | Fight | Memory | feeds `ColonyPlan.owes` and `.fights` (§5) |
@@ -380,8 +382,8 @@ pricer cost ~2× CPU and 580 lines for no gain and was not merged).
   colony not given up, else the nearest whose bank casts a claimer; one rule
   on `Derived` facts that `outposts::busy` holds too), `Scout`, `Boost`, and future
   `Mine`/`Pickup` declarations without owning them.
-- **Labs (`economy/labs.rs`):** the clusters (`Derived.clusters`, read by
-  Economy, Fight, and `Tick`) are the colonies not given up with a lab, most
+- **Labs (`economy/labs.rs`):** the clusters (`boost::clusters`, each with
+  its `Derived.boosts` read by Economy, Fight, and `Tick`) are the colonies not given up with a lab, most
   labs first, ties by name: each with three labs reacts, each boosts its own
   bodies. Targets are derived, not declared: every
   T3 combat boost whose ores the empire digs or holds, in the `BOOSTS` rank
@@ -568,13 +570,23 @@ conflicts never silently cancel an act.
   soonest (hops + spawn queue + energy refill time); home `Defend` casts at
   home. Bodies end with one `MOVE` (`with_move_last`) and carry `HEAL` when
   leaving owned rooms (except siege dismantlers covered by medics).
-- **Boosts (`core/base/boost.rs`):** a body takes the ATTACK compound its
-  home colony's stock covers (priced, and such a body cast, at the nearest
-  colony; unboosted where it cannot be) for every part it boosts that multiplies it most
-  (`fighter::boosted_by`, which the Exchange prices too); the cast encodes it
-  in the creep name (`fight-<tick>-<eng>-<slot>-<compound>`).
-  `Tick` holds the creep at the boost lab while parts need it, stock covers it,
-  and a carrier exists — a stateless tick fact, never a timer.
+- **Boosts (`core/base/boost.rs`):** `boost::boosted_by` gives each part type
+  of a body, by its compound's `BOOSTS` rank, the strongest compound a
+  colony's `Stock` covers for all its parts of that type, spending stock and
+  energy as it goes and counting the lab fills it waits on (`lab_wait`, 85
+  ticks a fill; a compound already in a lab costs none). Boosting is priced
+  (owner): `cheapest_win` takes the boosted cast, landing later by its lab
+  wait, only where it wins cheaper than the bare one, and the boosted slots
+  and their colony go into `Plan.boosts`. A body priced boosted and cast
+  elsewhere walks straight out. Each tick `boost::boosting` (`Derived.boosts`,
+  per cluster) shares a colony's stock, oldest first, among the bodies a
+  forming set's plan boosts there that no fight has touched, and names each
+  one's next lab; what they leave, less the casts still to spawn, prices new
+  casts. A Defend priced boosted stays Forming while its bodies stand at their
+  labs, so no body is held once its set fights. Owner-approved bound: a body
+  waits only while its age is within the `lab_wait` of its compounds; past
+  that it leaves with what it has. `Tick` holds a body at its lab while the
+  lab has room and a carrier exists.
 
 ## 7. Strategy
 
@@ -880,7 +892,6 @@ a live-sized world.
 **Remaining known gaps:**
 - `Atlas` room graph ignores `Footprint` (2×2 Quad routing through 1-wide gaps);
   boosted `CARRY` priced unboosted.
-- `Economy` cross-room travel prices intermediate rooms at one room width;
-  single-compound-per-creep boosts.
+- `Economy` cross-room travel prices intermediate rooms at one room width.
 - Planned fight kinds (`KeeperDuty`, `PowerBank`, `Stronghold`), live
   `engagements.log`, deploy canary, and remaining `sim/` features (§10.2).

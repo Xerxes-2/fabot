@@ -2,7 +2,6 @@ use std::collections::BTreeSet;
 
 use super::{Atlas, Mover, Target, Tree};
 use fabot_base::declarations::{ColonyPlan, Declarations, Outpost, REACH_HOPS, Stage};
-use fabot_base::engine;
 use fabot_base::grid::{self, Footprint};
 use fabot_base::intel::Intel;
 use fabot_base::tiles::{self, TileSet};
@@ -10,6 +9,7 @@ use fabot_base::vocabulary::{Part, ResourceType};
 use fabot_base::world::{
     Creep, Owner, Pos, Room, RoomName, Sightings, StructureType, World, hostiles,
 };
+use fabot_base::{boost, engine};
 
 pub struct Context<'a> {
     pub world: &'a World<'a>,
@@ -134,8 +134,9 @@ pub struct Derived {
     pub danger: Vec<(RoomName, TileSet)>,
     pub trees: Vec<(RoomName, Tree)>,
     pub homes: Vec<Home>,
-    /// The colonies whose labs react and boost (`boost::clusters`).
-    pub clusters: Vec<RoomName>,
+    /// The colonies whose labs react and boost (`boost::clusters`), their
+    /// boosting read before Strategy plans, as Economy's labs are.
+    pub boosts: Vec<(RoomName, boost::Boosting)>,
 }
 
 /// A colony banks its haul from here (§5): on its storage, else on its hub's pile.
@@ -223,7 +224,7 @@ pub fn derive(world: &World, atlas: &mut Atlas) -> Derived {
         colonies,
         worked: Vec::new(),
         trees,
-        clusters: Vec::new(),
+        boosts: Vec::new(),
     }
 }
 

@@ -774,6 +774,9 @@ for (let t = 0; t < ticks; t++) {
     row.boosted = rooms.flatMap((r) => [...r["#objects"]])
       .filter((o) => o.body !== undefined && o["#user"] === ours)
       .reduce((n, o) => n + o.body.filter((p) => p.boost !== undefined).length, 0);
+    row.boostedWith = Math.max(0, ...rooms.flatMap((r) => [...r["#objects"]])
+      .filter((o) => o.body !== undefined && o["#user"] === ours)
+      .map((o) => new Set(o.body.flatMap((p) => p.boost ?? [])).size));
     // A declared claim's, or a room Strategy claimed, level, spawns, towers, the energy they hold and whether its safe mode runs: 0 until it is ours.
     const raised = roomNames.filter((name, i) => !homes.includes(name) && rooms[i]?.["#user"] === ours && rooms[i]["#level"] > 0);
     row.claimed = Object.fromEntries([...new Set([...claimed, ...raised])].map((name) => {

@@ -17,5 +17,6 @@ pub mod world;
 pub type HashMap<K, V> = std::collections::HashMap<K, V, rustc_hash::FxBuildHasher>;
 #[cfg(test)]
 mod tests {
+    mod boost;
     mod engine;
 }

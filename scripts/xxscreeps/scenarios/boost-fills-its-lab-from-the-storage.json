@@ -1,7 +1,7 @@
 {
-  "why": "a colony holding a compound in its storage fills the lab a waiting cast walks to: the body is boosted there before it fights, and the storage's stock is what it spends",
+  "why": "a colony holding a compound in its storage fills the lab a waiting cast walks to: the body is boosted there before it fights, and the storage's stock is what it spends: a big ranged Invader raid with its healer on an outpost, which a bare set cannot beat for what it costs, so the price takes the boosted rangers lab fill and all",
   "modules": ["atlas", "economy", "exchange", "fight", "layout", "mv", "strategy", "tactics"],
-  "start": { "room": "W8N3", "seed": 1, "node": "W7", "invaders": "W8N3:1000:2000" },
+  "start": { "room": "W8N3", "seed": 1, "node": "W7", "invaders": "W8N2:1000:2000", "wave": "ranged:big,healer:big" },
   "ticks": 4000,
   "assert": [
     { "measure": "boosted", "min": 1 }

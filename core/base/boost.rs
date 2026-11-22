@@ -1,22 +1,201 @@
-use super::declarations::Declarations;
+use super::declarations::{self, Declarations};
 use super::engine;
-use super::vocabulary::{self, ResourceType};
+use super::vocabulary::{self, Part, RESOURCES_ALL, ResourceType, takes};
 use super::world::{self, Id, Pos, RoomName, StructureType, World};
 
-/// A cast name's last token names the compound its body walks to a lab for.
-pub fn of_name(name: &str) -> Option<ResourceType> {
-    let compound: ResourceType = name.rsplit('-').next()?.parse().ok()?;
-    compound.reaction_components().map(|_| compound)
+/// A lab a carrier fills from the storage takes 85 ticks, measured; a
+/// compound already in a lab costs a tick or two, taken as none.
+const LAB_FILL: i32 = 85;
+
+/// The lab wait the Exchange prices a cast for, and the age past which a body
+/// waits no longer (owner): it leaves with what it has.
+pub fn lab_wait(fills: usize) -> i32 {
+    LAB_FILL * fills as i32
+}
+
+/// A colony fills one boost lab at a time: the fills queued before a body's own.
+#[derive(Clone, Copy, Default)]
+pub struct LabQueue(pub usize);
+
+impl LabQueue {
+    pub fn wait_with(self, fills: usize) -> i32 {
+        lab_wait(self.0 + fills)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Held {
+    pub compound: ResourceType,
+    pub parts: i32,
+    pub in_labs: i32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Stock {
+    pub held: Vec<Held>,
+    pub energy: i32,
+}
+
+impl Stock {
+    pub fn of(world: &World, home: RoomName) -> Stock {
+        let held = (RESOURCES_ALL.iter().copied())
+            .filter(|c| vocabulary::ALL_BODY_PARTS.iter().any(|p| takes(*p, *c)))
+            .map(|c| Held {
+                compound: c,
+                parts: home_holds(world, home, c) / engine::BOOST_MINERAL_PER_PART,
+                in_labs: labs_in(world, home)
+                    .map(|l| l.store.amount_of(c))
+                    .sum::<i32>()
+                    / engine::BOOST_MINERAL_PER_PART,
+            })
+            .filter(|h| h.parts > 0)
+            .collect();
+        Stock {
+            held,
+            energy: home_holds(world, home, ResourceType::Energy) / engine::BOOST_ENERGY_PER_PART,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Visits {
+    pub compounds: Vec<ResourceType>,
+    pub fills: usize,
+}
+
+/// Spent from `stock` as the body's visits spend it, so neither pricing nor
+/// the cast counts one stock or one energy twice. Part types go by
+/// `vocabulary::BOOSTS` rank: a colony short of stock runs short of the
+/// lowest-ranked.
+pub fn boosted_by(body: &[Part], stock: &mut Stock) -> Visits {
+    let strength = |p: Part, c: ResourceType| {
+        (100.0 * f64::from(vocabulary::multiple(p, Some(c))) / vocabulary::damage_ratio(p, Some(c)))
+            as i32
+    };
+    let rank = |p: Part| {
+        (vocabulary::BOOSTS.iter())
+            .filter(|(c, _)| takes(p, *c))
+            .map(|(_, r)| *r)
+            .max()
+    };
+    let mut order: Vec<Part> = (vocabulary::ALL_BODY_PARTS.iter().copied())
+        .filter(|p| body.contains(p) && stock.held.iter().any(|h| takes(*p, h.compound)))
+        .collect();
+    order.sort_by_key(|p| std::cmp::Reverse(rank(*p)));
+
+    let mut visits = Visits::default();
+    for p in order {
+        let n = vocabulary::part_count_in(body, p);
+        let fuel = stock.energy;
+        let best = (stock.held.iter_mut())
+            .filter(|h| n <= fuel && takes(p, h.compound) && n <= h.parts)
+            .max_by_key(|h| strength(p, h.compound));
+        if let Some(h) = best {
+            h.parts -= n;
+            stock.energy -= n;
+            visits.fills += usize::from(h.in_labs < n);
+            h.in_labs = (h.in_labs - n).max(0);
+            visits.compounds.push(h.compound);
+        }
+    }
+    visits
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Load {
+    pub compound: ResourceType,
+    pub mineral: i32,
+    pub energy: i32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Wait {
+    pub creep: Id,
+    pub lab: Id,
+    pub at: Pos,
+    pub load: Load,
+    pub stands: bool,
+    pub carried: bool,
+    /// The lab wait its visits still price.
+    pub left: i32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Boosting {
+    pub waits: Vec<Wait>,
+    pub left: Stock,
+}
+
+/// Read afresh each tick, nothing kept: of the bodies a forming set's plan
+/// boosts here and no fight has touched, oldest first, as pricing spends a
+/// set in cast order, each still within its lab wait takes its share.
+pub fn boosting(world: &World, room: RoomName, boosted: &[&str]) -> Boosting {
+    let ours = |c: &&world::Creep| c.owner.is_ours() && c.pos.room == room;
+    let carrier = (world.creeps.iter())
+        .filter(ours)
+        .any(|c| !declarations::fights(&c.name) && c.store.capacity > 0);
+    let mut bodies: Vec<&world::Creep> = (world.creeps.iter())
+        .filter(ours)
+        .filter(|c| c.hits == c.hits_max && boosted.contains(&c.name.as_str()))
+        .collect();
+    bodies.sort_by(|a, b| (a.ticks_to_live, &a.name).cmp(&(b.ticks_to_live, &b.name)));
+    let mut left = Stock::of(world, room);
+    let mut waits: Vec<Wait> = Vec::new();
+    let mut queue = LabQueue::default();
+
+    for c in bodies {
+        let bare: Vec<Part> = (c.body.iter())
+            .filter(|p| p.boost.is_none())
+            .map(|p| p.kind)
+            .collect();
+        let on: Vec<ResourceType> = c.body.iter().filter_map(|p| p.boost).collect();
+        let had = (0..on.len())
+            .filter(|i| !on[..*i].contains(&on[*i]))
+            .count();
+        let mut share = left.clone();
+        let by = boosted_by(&bare, &mut share);
+        let age = engine::lifetime(c.body.iter().map(|p| p.kind)) - c.ticks_to_live;
+        // A fill for each compound it took and for its next, one come early too.
+        let own = had + by.fills.max(usize::from(!by.compounds.is_empty()));
+        let bound = queue.wait_with(own);
+        let Some(&compound) = by.compounds.first().filter(|_| age <= bound) else {
+            continue;
+        };
+        let taken: Vec<(Id, ResourceType)> =
+            waits.iter().map(|w| (w.lab, w.load.compound)).collect();
+        let Some(lab) = booster(world, room, compound, &taken) else {
+            continue;
+        };
+        left = share;
+        queue.0 += by.fills;
+        let (mineral, energy) = boost_need(c, compound);
+        waits.push(Wait {
+            creep: c.id,
+            lab: lab.id,
+            at: lab.pos,
+            load: Load {
+                compound,
+                mineral,
+                energy,
+            },
+            // No carrier: the body fights unboosted rather than stand at a lab nothing fills.
+            stands: holds_room_for(lab, compound) && (can_boost(lab, compound) || carrier),
+            carried: can_boost(lab, compound) || carrier,
+            left: queue.wait_with(0).min(bound - age),
+        });
+    }
+    Boosting { waits, left }
 }
 
 /// The lab a body asking for `compound` is boosted from: one with room for it
 /// holding the most of it, ties to the lower id; when none has room, Hivemind's
 /// (`boost-manager.ts`): no reagent lab, the one holding least of another
 /// mineral, so its drain is the shortest.
-pub fn booster<'a>(
+fn booster<'a>(
     world: &'a World,
     room: RoomName,
     compound: ResourceType,
+    taken: &[(Id, ResourceType)],
 ) -> Option<&'a world::Structure> {
     let held = |s: &world::Structure| s.store.amount_of(compound);
     let most = |a: &&'a world::Structure, b: &&'a world::Structure| {
@@ -32,10 +211,11 @@ pub fn booster<'a>(
             .sum::<i32>()
     };
 
-    (labs_in(world, room))
-        .filter(|l| holds_room_for(l, compound))
-        .max_by(most)
-        .or_else(|| (labs_in(world, room)).min_by_key(|l| (reagent(l), other(l), l.id)))
+    let free =
+        || labs_in(world, room).filter(|l| !taken.iter().any(|t| t.0 == l.id && t.1 != compound));
+
+    (free().filter(|l| holds_room_for(l, compound)).max_by(most))
+        .or_else(|| free().min_by_key(|l| (reagent(l), other(l), l.id)))
 }
 
 /// Most labs first, ties by name: one still building its labs picks a reaction last.
@@ -57,8 +237,7 @@ pub fn labs_in<'a>(world: &'a World, room: RoomName) -> impl Iterator<Item = &'a
         .filter(|s| s.kind == world::StructureType::Lab && s.owner.is_ours())
 }
 
-pub fn home_holds(world: &World, room: RoomName, compound: ResourceType) -> (i32, i32) {
-    let held = |s: &world::Store| (s.amount_of(compound), s.amount_of(ResourceType::Energy));
+fn home_holds(world: &World, room: RoomName, compound: ResourceType) -> i32 {
     let stores = (world.rooms.iter())
         .filter(|r| r.name == room)
         .flat_map(|r| r.structures.iter())
@@ -69,16 +248,14 @@ pub fn home_holds(world: &World, room: RoomName, compound: ResourceType) -> (i32
                     StructureType::Lab | StructureType::Terminal | StructureType::Storage
                 )
         })
-        .map(|s| held(&s.store))
+        .map(|s| s.store.amount_of(compound))
         .chain(
             (world.creeps.iter())
                 .filter(move |c| c.pos.room == room)
-                .map(|c| held(&c.store)),
+                .map(|c| c.store.amount_of(compound)),
         );
 
-    stores.fold((0, 0), |(compound_, energy), (m, e)| {
-        (compound_ + m, energy + e)
-    })
+    stores.sum()
 }
 
 /// A lab holds one mineral: another in it leaves the compound nowhere to land.
@@ -100,48 +277,6 @@ fn boost_need(creep: &world::Creep, compound: ResourceType) -> (i32, i32) {
         parts * engine::BOOST_MINERAL_PER_PART,
         parts * engine::BOOST_ENERGY_PER_PART,
     )
-}
-
-pub struct Waiting<'a> {
-    pub lab: &'a world::Structure,
-    pub compound: ResourceType,
-    pub mineral: i32,
-    pub energy: i32,
-}
-
-/// The lab a body waits at this tick, and what its parts still ask of it: one
-/// that has room for the compound, while the home holds what the parts ask and
-/// can carry it there. Read afresh every tick, so a colony that cannot serve the
-/// body costs it the compound and never its raid.
-pub fn waiting<'a>(world: &'a World, home: RoomName, creep: &world::Creep) -> Option<Waiting<'a>> {
-    let compound = of_name(&creep.name)?;
-    let (mineral, energy) = boost_need(creep, compound);
-    let (held, fuel) = home_holds(world, home, compound);
-
-    if mineral == 0 || held < mineral || fuel < energy {
-        return None;
-    }
-    let lab = booster(world, home, compound)?;
-    // A colony with no body to carry the load fights the body unboosted
-    // rather than stand it at a lab nothing will fill, even while loaded.
-    let carried = can_boost(lab, compound)
-        || (world.creeps.iter()).any(|c| {
-            c.owner.is_ours()
-                && c.pos.room == home
-                && c.name != creep.name
-                && of_name(&c.name).is_none()
-                && c.store.capacity > 0
-        });
-    if !holds_room_for(lab, compound) || !carried {
-        return None;
-    }
-
-    Some(Waiting {
-        lab,
-        compound,
-        mineral,
-        energy,
-    })
 }
 
 /// The two reagent labs, and every lab within reach of both as an output.

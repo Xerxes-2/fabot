@@ -12,7 +12,61 @@
    "rival"
   ]
  },
- "memory": {},
+ "memory": {
+  "v2": {
+   "fight": {
+    "groups": [
+     {
+      "room": "W1N1",
+      "x": 45,
+      "y": 40,
+      "id": 1,
+      "seen": 99999,
+      "members": [
+       "b00090"
+      ]
+     }
+    ],
+    "engagements": [
+     {
+      "id": 1,
+      "group": 1,
+      "room": "W1N1",
+      "ours": {
+       "fight-99000-1-0-UH2O": 0
+      },
+      "tactic": "close",
+      "order": [
+       "b00090"
+      ],
+      "boosts": [
+       {
+        "name": "fight-99000-1-0-UH2O",
+        "colony": "W1N1"
+       }
+      ],
+      "phase": "forming",
+      "opened": 99999,
+      "since": 99999,
+      "lost": 0,
+      "budget": 0,
+      "priority": 2,
+      "unanswered": false,
+      "ignored": 0,
+      "capacity": 300,
+      "predicted": {
+       "kind": "win",
+       "ticks": 2,
+       "dead": 0,
+       "hits": 67
+      }
+     }
+    ],
+    "casts": [],
+    "due": []
+   }
+  }
+ },
  "rooms": [
   {
    "name": "W1N1",
@@ -271,6 +325,30 @@
      "ageTime": 101500,
      "store": {},
      "fatigue": 0
+    },
+    {
+     "_id": "b00090",
+     "type": "creep",
+     "x": 45,
+     "y": 40,
+     "room": "W1N1",
+     "user": "f00000000000000000000002",
+     "name": "raider-1",
+     "body": [
+      {
+       "type": "attack",
+       "hits": 100
+      },
+      {
+       "type": "move",
+       "hits": 100
+      }
+     ],
+     "hits": 200,
+     "ageTime": 101500,
+     "store": {},
+     "fatigue": 0,
+     "stands": true
     }
    ]
   }

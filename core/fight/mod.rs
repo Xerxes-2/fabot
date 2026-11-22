@@ -8,3 +8,4 @@ pub mod shape;
 pub mod tracker;
 
 pub use run::decide;
+pub use scene::boosted;

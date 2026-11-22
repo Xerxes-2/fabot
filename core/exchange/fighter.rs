@@ -1,9 +1,9 @@
 use std::cmp::Reverse;
 
-use fabot_base::engine;
 use fabot_base::grid::{FatigueFactor, step_ticks};
-use fabot_base::vocabulary::{Part, ResourceType, multiple, part_count_in, takes};
+use fabot_base::vocabulary::{Part, ResourceType, part_count_in, takes};
 use fabot_base::world::Pos;
+use fabot_base::{boost, engine};
 
 /// A body as the exchange reads it, on either side.
 #[derive(Clone, Debug, PartialEq)]
@@ -24,6 +24,8 @@ pub struct Fighter {
     /// Zero on a rampart, where a swing at it lands on the rampart.
     pub strikes_back: i32,
     pub invader: bool,
+    /// The ticks it still stands at its home's labs before it walks.
+    pub lab_wait: i32,
 }
 
 pub fn of_parts(
@@ -53,6 +55,7 @@ pub fn of_parts(
         },
         strikes_back: engine::ATTACK_POWER * attack,
         invader: false,
+        lab_wait: 0,
     }
 }
 
@@ -60,27 +63,29 @@ pub fn cast(body: &[Part]) -> Fighter {
     of_parts(body, &[], engine::PART_HITS * body.len() as i32, None)
 }
 
-/// A not-yet-cast body carrying its `boosted_by` compound on every part it takes.
-pub fn cast_boosted(body: &[Part], held: &[(ResourceType, i32)]) -> Fighter {
-    let boosts: Vec<Option<ResourceType>> = match boosted_by(body, held) {
-        Some(compound) => body
-            .iter()
-            .map(|p| takes(*p, compound).then_some(compound))
-            .collect(),
-        None => Vec::new(),
-    };
-    of_parts(body, &boosts, engine::PART_HITS * body.len() as i32, None)
-}
-
-/// Of the compounds `held` (each with the parts its stock covers), the one
-/// that multiplies `body` most among those covering every part they take.
-pub fn boosted_by(body: &[Part], held: &[(ResourceType, i32)]) -> Option<ResourceType> {
-    let parts = |c: ResourceType| (body.iter()).filter(|p| takes(**p, c)).count() as i32;
-    let gain = |c: ResourceType| body.iter().map(|p| multiple(*p, Some(c))).sum::<i32>();
-    (held.iter())
-        .filter(|(c, covered)| (1..=*covered).contains(&parts(*c)))
-        .max_by_key(|(c, _)| gain(*c))
-        .map(|(c, _)| *c)
+/// Not-yet-cast bodies, each boosted from what the ones before it left.
+pub fn cast_boosted<'a>(
+    bodies: impl IntoIterator<Item = &'a [Part]>,
+    stock: &boost::Stock,
+) -> Vec<Fighter> {
+    let mut left = stock.clone();
+    let mut queue = boost::LabQueue::default();
+    (bodies.into_iter())
+        .map(|body| {
+            let by = boost::boosted_by(body, &mut left);
+            if by.compounds.is_empty() {
+                return cast(body);
+            }
+            queue.0 += by.fills;
+            let boosts: Vec<Option<ResourceType>> = (body.iter())
+                .map(|p| by.compounds.iter().copied().find(|c| takes(*p, *c)))
+                .collect();
+            Fighter {
+                lab_wait: queue.wait_with(0),
+                ..of_parts(body, &boosts, engine::PART_HITS * body.len() as i32, None)
+            }
+        })
+        .collect()
 }
 
 /// Unlike `Hostiles.armed`, a healer or a dismantler beside a striker does not count: it deals no damage.

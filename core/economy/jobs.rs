@@ -164,8 +164,14 @@ fn sinks_of(derived: &Derived, ci: usize) -> Vec<Spot> {
         add(r.id.into(), r.pos, Energy, r.free, Of::Tower);
     }
     if let Some(b) = &g.boost_lab {
-        add(b.id.into(), b.pos, Energy, b.energy, Of::Lab);
-        add(b.id.into(), b.pos, b.compound, b.mineral, Of::Lab);
+        add(b.id.into(), b.pos, Energy, b.short.energy, Of::Lab);
+        add(
+            b.id.into(),
+            b.pos,
+            b.short.compound,
+            b.short.mineral,
+            Of::Lab,
+        );
     }
     if let Some(t) = &g.terminal {
         let fee = Of::Terminal { fee: true };

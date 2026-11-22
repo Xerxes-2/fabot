@@ -27,16 +27,18 @@ export const NODES = {
   Y2: { level: 6, stored: 20000, without: ["rampart"], spare: 1 },
   // N5 with its labs and the ore for XKHO2 alone stocked.
   L5: { level: 6, stored: "100000,H:6000,O:6000,K:6000,X:6000", without: ["rampart"], labs: true },
-  // L5 without its tower, its first lab holding what a body is boosted with:
-  // the raid must be answered by a cast, and the lab can boost one at once.
-  B5: { level: 6, stored: "100000,H:6000,O:6000,U:6000", without: ["rampart", "tower"], labs: true, labStock: "energy:2000,UH2O:900" },
+  // L5 without its tower, its first lab holding what an outpost's ranger is
+  // boosted with: the raid must be answered by a cast, and the lab can boost one at once.
+  B5: { level: 6, stored: "100000,H:6000,O:6000,U:6000", without: ["rampart", "tower"], labs: true, labStock: "energy:2000,XKHO2:900" },
   // B5's lab with no compound: the cast is not held waiting for one.
   S5: { level: 6, stored: "100000,H:6000,O:6000", without: ["rampart", "tower"], labs: true, labStock: "energy:2000" },
   // B5 with the compound in the storage and its labs empty: a hauler fills the
   // lab the waiting body walks to, as the minerals rest in the terminal first.
   W5: { level: 6, stored: "100000,H:6000,O:6000,U:6000,UH2O:900", without: ["rampart", "tower"], labs: true },
   // W5 at RCL7, six labs.
-  W7: { level: 7, stored: "100000,H:6000,O:6000,U:6000,UH2O:900", without: ["rampart", "tower", "link", "factory"], labs: true },
+  W7: { level: 7, stored: "100000,H:6000,O:6000,U:6000,XKHO2:900", without: ["rampart", "tower", "link", "factory"], labs: true },
+  // W7 holding each T3 combat boost.
+  M7: { level: 7, stored: "100000,H:6000,O:6000,U:6000,XGHO2:900,XLHO2:900,XKHO2:900,XZHO2:900,XUH2O:900", without: ["rampart", "tower", "link", "factory"], labs: true },
   // An RCL7 node as another bot left it: its roads and containers worn to
   // half, its links and ramparts sites to build.
   T7: { level: 7, stored: 100000, without: ["link", "rampart", "factory"], worn: 0.5 },

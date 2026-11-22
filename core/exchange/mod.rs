@@ -6,11 +6,11 @@ pub use fighter::Fighter;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use fabot_base::engine;
 use fabot_base::grid::{self, FatigueFactor, Weight, step_ticks};
 use fabot_base::tiles::{self, Table, Tile};
-use fabot_base::vocabulary::{Part, ResourceType};
+use fabot_base::vocabulary::Part;
 use fabot_base::world::{Pos, RoomName};
+use fabot_base::{boost, engine};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Tower {
@@ -975,18 +975,20 @@ fn broken_by(terrain: Terrain, horizon: i32, price: &Price, ramparts: &[(Pos, i3
 
 fn walk_in(terrain: Terrain, cast_walk: Option<i32>, f: &Fighter, raid: &[Fighter]) -> i32 {
     let step = |weight| step_ticks(f.gait, weight).unwrap_or(CAST_WALK);
-    match (&f.pos, cast_walk) {
-        (None, None) => CAST_WALK,
-        (None, Some(tiles)) => {
-            engine::SPAWN_TICKS_PER_PART * f.body.len() as i32 + tiles * step(engine::PLAIN_WEIGHT)
+    f.lab_wait
+        + match (&f.pos, cast_walk) {
+            (None, None) => CAST_WALK,
+            (None, Some(tiles)) => {
+                engine::SPAWN_TICKS_PER_PART * f.body.len() as i32
+                    + tiles * step(engine::PLAIN_WEIGHT)
+            }
+            (Some(at), _) => (raid.iter())
+                .filter_map(|h| Some(at.crow_flies(h.pos.as_ref()?)))
+                .min()
+                .map_or(0, |nearest| {
+                    (nearest - f.reach).max(0) * step(terrain.weight)
+                }),
         }
-        (Some(at), _) => (raid.iter())
-            .filter_map(|h| Some(at.crow_flies(h.pos.as_ref()?)))
-            .min()
-            .map_or(0, |nearest| {
-                (nearest - f.reach).max(0) * step(terrain.weight)
-            }),
-    }
 }
 
 /// Our towers strike the raid until a weapon of either side reaches: the
@@ -1475,7 +1477,9 @@ pub fn breach_plan(
 /// and ticks are priced too. A win is monotone in one body's count, so its
 /// fewest is bisected, then grown while one more saves what it costs.
 ///
-/// The bodies to cast, not one: `n` whole copies of the cheapest.
+/// The bodies to cast, not one: `n` whole copies of the cheapest, and whether
+/// they are boosted from `boosts`: a boosted cast lands later by its lab wait,
+/// so it is taken only where it wins cheaper than the bare one (owner).
 #[allow(clippy::too_many_arguments)]
 pub fn cheapest_win(
     stance: Stance,
@@ -1485,33 +1489,42 @@ pub fn cheapest_win(
     tick_worth: i32,
     theirs: &Side,
     terrain: Terrain,
-    boosts: &[(ResourceType, i32)],
-) -> Option<Vec<Body>> {
-    let cost = |body: &Body, n: i32| -> Option<i32> {
+    boosts: &boost::Stock,
+) -> Option<(Vec<Body>, bool)> {
+    let cost_from = |body: &Body, n: i32, boosts: &boost::Stock| -> Option<i32> {
         let side = Side {
             bodies: ours
                 .bodies
                 .iter()
                 .cloned()
-                .chain(std::iter::repeat_n(
-                    fighter::cast_boosted(body, boosts),
-                    n.max(0) as usize,
+                .chain(fighter::cast_boosted(
+                    std::iter::repeat_n(&body[..], n.max(0) as usize),
+                    boosts,
                 ))
                 .collect(),
             ..ours.clone()
         };
 
+        // An outcome's ticks run from the first landing; the objective is lost
+        // the ticks before it too, a boosted set's lab wait among them.
+        let lands = (side.bodies.iter())
+            .map(|f| walk_in(terrain, side.cast_walk, f, &theirs.bodies))
+            .min()
+            .unwrap_or(0);
         match outcome(stance, &side, theirs, terrain) {
             Outcome::Win(ticks, losses) => {
-                Some(engine::body_cost(body) * n + losses.energy + tick_worth * ticks)
+                Some(engine::body_cost(body) * n + losses.energy + tick_worth * (lands + ticks))
             }
-            Outcome::Kite(ticks) => Some(engine::body_cost(body) * n + tick_worth * ticks),
+            Outcome::Kite(ticks) => {
+                Some(engine::body_cost(body) * n + tick_worth * (lands + ticks))
+            }
             Outcome::Lose => None,
         }
     };
 
-    let cheapest = |body: &Body| -> Option<(Vec<Body>, i32)> {
+    let cheapest = |body: &Body, stock: &boost::Stock| -> Option<(Vec<Body>, i32)> {
         let most = copies_of(body);
+        let cost = |body: &Body, n: i32| cost_from(body, n, stock);
 
         let between = |mut loses: i32, mut won: i32| -> i32 {
             while won - loses > 1 {
@@ -1557,12 +1570,23 @@ pub fn cheapest_win(
         }
     };
 
-    let priced: Vec<(Vec<Body>, i32)> = bodies.iter().filter_map(cheapest).collect();
+    let bare = boost::Stock::default();
+    let priced = [(&bare, false), (boosts, true)]
+        .into_iter()
+        .flat_map(|(stock, boosted)| {
+            (bodies.iter()).filter_map(move |body| Some((cheapest(body, stock)?, boosted)))
+        });
 
     priced
-        .into_iter()
-        .min_by_key(|(set, spent)| (*spent, set.iter().map(Vec::len).sum::<usize>(), set.len()))
-        .map(|(set, _)| set)
+        .min_by_key(|((set, spent), boosted)| {
+            (
+                *spent,
+                set.iter().map(Vec::len).sum::<usize>(),
+                set.len(),
+                *boosted,
+            )
+        })
+        .map(|((set, _), boosted)| (set, boosted))
 }
 
 /// What a body standing on each tile takes next tick: the charged towers'
@@ -1819,12 +1843,23 @@ mod tests {
     }
 
     #[test]
-    fn a_body_takes_the_strongest_compound_covering_it() {
-        use ResourceType::{CatalyzedUtriumAcid as T3, UtriumAcid as T2, UtriumHydride as T1};
+    fn copies_of_a_cast_spend_one_stock_in_turn() {
+        use fabot_base::vocabulary::ResourceType::{
+            CatalyzedUtriumAcid as T3, UtriumHydride as T1, ZynthiumOxide as Move1,
+        };
         let body = [[Part::Attack; 10], [Part::Move; 10]].concat();
-        let held = [(T1, 50), (T2, 10), (T3, 9)];
-        assert_eq!(fighter::boosted_by(&body, &held), Some(T2));
-        assert_eq!(fighter::boosted_by(&body, &held[..1]), Some(T1));
-        assert_eq!(fighter::boosted_by(&body[10..], &held), None);
+        let held = [(T1, 50), (T3, 10), (Move1, 10)].map(|(compound, parts)| boost::Held {
+            compound,
+            parts,
+            in_labs: 0,
+        });
+        let stock = boost::Stock {
+            held: held.to_vec(),
+            energy: 40,
+        };
+        let cast = fighter::cast_boosted([&body[..], &body[..]], &stock);
+        assert_eq!((cast[0].attack, cast[0].gait.moves), (40, 20));
+        assert_eq!((cast[1].attack, cast[1].gait.moves), (20, 10));
+        assert_eq!((cast[0].lab_wait, cast[1].lab_wait), (2 * 85, 3 * 85));
     }
 }

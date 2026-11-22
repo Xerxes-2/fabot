@@ -1,10 +1,11 @@
 use std::collections::BTreeMap;
 
+use crate::shape::{Cast, Engagement};
+use fabot_base::boost::{self, Boosting, Stock};
 use fabot_base::engine;
-use fabot_base::vocabulary::{Boost, Part, RESOURCES_ALL, ResourceType};
+use fabot_base::vocabulary::{Part, ResourceType};
 use fabot_base::world::{
-    Creep, Id, Owner, Pos, Room, RoomName, Rules, Spawn, Store, Structure, StructureType, World,
-    terrain,
+    Creep, Id, Owner, Pos, Room, RoomName, Rules, Spawn, Store, Structure, StructureType, terrain,
 };
 use fabot_exchange::{self as exchange, Fighter, fighter};
 
@@ -168,26 +169,25 @@ pub fn side_in(rules: &Rules, room: Option<&Room>, bodies: Vec<Fighter>) -> exch
     }
 }
 
-pub type Boosts = BTreeMap<RoomName, Vec<(ResourceType, i32)>>;
+pub type Boosts = BTreeMap<RoomName, Stock>;
 
-/// Each ATTACK compound a cluster holds and the parts its stock covers, by
-/// cluster: a body is boosted only from its own home's labs.
-pub fn cluster_boosts(world: &World, clusters: &[RoomName]) -> Boosts {
-    (clusters.iter())
-        .map(|home| {
-            let held = (RESOURCES_ALL.iter().copied())
-                .filter(|c| matches!(c.boost(), Some(Boost::Attack(_))))
-                .map(|c| {
-                    let (compound, energy) = fabot_base::boost::home_holds(world, *home, c);
-                    let parts = (compound / engine::BOOST_MINERAL_PER_PART)
-                        .min(energy / engine::BOOST_ENERGY_PER_PART);
-                    (c, parts)
-                })
-                .filter(|(_, parts)| *parts > 0)
-                .collect();
-            (*home, held)
-        })
-        .collect()
+/// By cluster, what its waiting bodies and its casts priced boosted still to
+/// spawn leave: a body is boosted only from its own home's labs.
+pub fn cluster_boosts(
+    boosting: &[(RoomName, Boosting)],
+    spawning: &[Cast],
+    engagements: &[Engagement],
+) -> Boosts {
+    let mut left: Boosts = (boosting.iter())
+        .map(|(r, b)| (*r, b.left.clone()))
+        .collect();
+    let priced = |c: &&Cast| crate::scene::boosted(engagements).any(|b| b.name == c.name);
+    for c in spawning.iter().filter(priced) {
+        if let Some(stock) = left.get_mut(&c.room) {
+            boost::boosted_by(&c.body, stock);
+        }
+    }
+    left
 }
 
 pub fn wins(
@@ -209,24 +209,51 @@ pub fn price(
     bodies: &[Body],
     copies_of: impl Fn(&Body) -> i32,
     tick_worth: i32,
-    boosts: &[(ResourceType, i32)],
-) -> Option<(Vec<Body>, exchange::Outcome, exchange::Side)> {
-    let set: Vec<Body> = if wins(stance, ours, theirs, terrain) {
-        Vec::new()
+    boosts: &Stock,
+) -> Option<Pricing> {
+    let (set, boosted) = if wins(stance, ours, theirs, terrain) {
+        (Vec::new(), false)
     } else {
         exchange::cheapest_win(
             stance, ours, bodies, copies_of, tick_worth, theirs, terrain, boosts,
         )?
     };
+    let bare = Stock::default();
+    let stock = if boosted { boosts } else { &bare };
 
     let mut landed = ours.clone();
     landed
         .bodies
-        .extend(set.iter().map(|body| fighter::cast_boosted(body, boosts)));
+        .extend(fighter::cast_boosted(set.iter().map(|b| &b[..]), stock));
 
     let outcome = exchange::outcome(stance, &landed, theirs, terrain);
 
-    Some((set, outcome, landed))
+    Some(Pricing {
+        set,
+        outcome,
+        landed,
+        boosted,
+    })
+}
+
+pub struct Pricing {
+    pub set: Vec<Body>,
+    pub outcome: exchange::Outcome,
+    pub landed: exchange::Side,
+    pub boosted: bool,
+}
+
+/// The bodies to cast, and whether their price boosts them.
+pub struct Asking<'a> {
+    pub bodies: &'a [Body],
+    pub boosted: bool,
+}
+
+pub fn bare(bodies: &[Body]) -> Asking<'_> {
+    Asking {
+        bodies,
+        boosted: false,
+    }
 }
 
 /// A cast body the outcome prices costs only what it strikes off: one that

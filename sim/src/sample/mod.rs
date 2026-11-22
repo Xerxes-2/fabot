@@ -453,33 +453,29 @@ impl Sampler {
             .iter()
             .map(|o| used(o) - store(o, atom!("energy")))
             .sum();
-        let mut made = Map::new();
-        for r in RESOURCES_ALL
-            .iter()
+        let made_in = ours_in(&MADE_IN);
+        let made: Map<String, Value> = (RESOURCES_ALL.iter())
             .filter(|r| r.reaction_components().is_some())
-        {
-            let r = r.to_string();
-            made.insert(
-                r.clone(),
-                json!(
-                    ours_in(&MADE_IN)
-                        .iter()
-                        .map(|o| store(o, Atom::intern(&r)))
-                        .sum::<f64>()
-                ),
-            );
-        }
-        let boosted = (ours_in(&["creep"]).iter())
-            .flat_map(|o| match o.get(atom!("body")) {
-                Some(Val::Arr(b)) => b.to_vec(),
+            .map(|r| {
+                let r = Atom::intern(&r.to_string());
+                let held: f64 = made_in.iter().map(|o| store(o, r)).sum();
+                (r.to_string(), json!(held))
+            })
+            .collect();
+        let creeps = ours_in(&["creep"]);
+        let boosts: Vec<Vec<&str>> = (creeps.iter())
+            .map(|o| match o.get(atom!("body")) {
+                Some(Val::Arr(b)) => (b.iter())
+                    .filter_map(|p| p.as_obj()?.get(Atom::intern("boost"))?.as_str())
+                    .collect(),
                 _ => Vec::new(),
             })
-            .filter(|p| {
-                p.as_obj().is_some_and(|p| {
-                    !matches!(p.get(Atom::intern("boost")), None | Some(Val::Null))
-                })
-            })
-            .count();
+            .collect();
+        let boosted: usize = boosts.iter().map(Vec::len).sum();
+        let boosted_with = (boosts.iter())
+            .map(|b| b.iter().collect::<BTreeSet<_>>().len())
+            .max()
+            .unwrap_or(0);
         let read = self.sent_seq;
         for d in v.k.market.transactions.iter().filter(|d| d.seq > read) {
             self.sent_seq = d.seq;
@@ -529,6 +525,7 @@ impl Sampler {
             ("ore", json!(ore)),
             ("made", Value::Object(made)),
             ("boosted", json!(boosted)),
+            ("boostedWith", json!(boosted_with)),
             ("claimed", Value::Object(claimed)),
             ("bounced", json!(self.lives.bounced)),
             ("stillLoaded", json!(self.lives.still_loaded)),

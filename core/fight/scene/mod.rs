@@ -5,17 +5,17 @@ use super::casting;
 use super::kinds::defend::Facts as DefendFacts;
 use super::kinds::siege::{self, Facts as SiegeFacts};
 use super::kinds::{raid, sweep};
-use super::shape::{Cast, Engagement, Group, Objective, Phase, Plan, Slot};
+use super::shape::{Boosted, Cast, Engagement, Group, Objective, Phase, Plan, Slot};
 use fabot_atlas::{Atlas, Mover, Target, Tree};
 use fabot_base::declarations::{self, TacticRule};
 use fabot_base::grid::{self, Footprint};
 use fabot_base::tiles::Tile;
-use fabot_base::vocabulary::{Part, ResourceType};
+use fabot_base::vocabulary::Part;
 use fabot_base::world::{
     Creep, Id, Owner, Pos, Room, RoomName, Sightings, Structure, StructureType, World, hostiles,
     sightings,
 };
-use fabot_base::{engine, tiles};
+use fabot_base::{boost, engine, tiles};
 use fabot_exchange::{self as exchange, Fighter, fighter};
 use fabot_tactics::{self as tactics, Tactic};
 
@@ -26,6 +26,7 @@ pub(super) struct Asked {
     pub(super) asked: BTreeMap<RoomName, i32>,
     pub(super) casts: Vec<Cast>,
     pub(super) due: BTreeSet<RoomName>,
+    pub(super) boosts: casting::Boosts,
 }
 
 impl Asked {
@@ -68,9 +69,57 @@ pub(super) struct Scene<'a> {
     pub(super) landed: Vec<Cast>,
     pub(super) spawning: Vec<Cast>,
     pub(super) boosts: casting::Boosts,
+    pub(super) boosting: &'a [(RoomName, boost::Boosting)],
+}
+
+/// A set fighting never stands at a lab.
+pub fn boosted(engagements: &[Engagement]) -> impl Iterator<Item = &Boosted> {
+    (engagements.iter())
+        .filter(|e| e.phase == Phase::Forming)
+        .flat_map(|e| &e.plan.boosts)
+}
+
+/// A body to cast in `slot`, and the colony its price boosts it at.
+pub(super) struct Wanted {
+    slot: Slot,
+    body: casting::Body,
+    boost_at: Option<RoomName>,
 }
 
 impl<'a> Scene<'a> {
+    fn at_labs(&self, c: &Creep) -> Option<&boost::Wait> {
+        (self.boosting.iter())
+            .find_map(|(_, b)| b.waits.iter().find(|w| w.carried && w.creep == c.id))
+    }
+
+    /// A set leaves Forming for its fight only once no body its plan boosts
+    /// stands at its labs, whatever its kind, and leaving clears the plan's
+    /// boosts: no fallback to Forming holds a body that has gone out.
+    pub(super) fn boost_hold(&self, before: &[Engagement], decided: &mut [Engagement]) {
+        for next in decided {
+            let forming = (before.iter()).find(|e| e.id == next.id && e.phase == Phase::Forming);
+            let at_labs = (self.members_of(next).iter()).any(|c| self.at_labs(c).is_some());
+            let onward = matches!(
+                next.phase,
+                Phase::Approaching | Phase::Draining | Phase::Fighting
+            );
+            if let Some(was) = forming.filter(|_| at_labs && onward) {
+                (next.phase, next.since) = (Phase::Forming, was.since);
+            }
+            if next.phase != Phase::Forming {
+                next.plan.boosts.clear();
+            }
+        }
+    }
+
+    /// A body still at its labs walks once the wait its price allowed is out.
+    pub(super) fn fighter(&self, c: &Creep) -> Fighter {
+        Fighter {
+            lab_wait: self.at_labs(c).map_or(0, |w| w.left),
+            ..casting::fighter_of(c)
+        }
+    }
+
     /// The reflex's stance (§7.2): a stranger where it threatens or works our room.
     pub(super) fn struck(&self, h: &Creep) -> bool {
         let ours = self.homes.contains(&h.pos.room) || self.worked.contains(&h.pos.room);
@@ -310,11 +359,18 @@ impl<'a> Scene<'a> {
             .map(|(_, home)| home)
     }
 
-    pub(super) fn boosts_for(&self, atlas: &Atlas, e: &Engagement) -> &[(ResourceType, i32)] {
+    pub(super) fn boosts_for(
+        &self,
+        atlas: &Atlas,
+        e: &Engagement,
+        left: &casting::Boosts,
+    ) -> boost::Stock {
         (self
             .boost_home(atlas, e)
-            .and_then(|home| self.boosts.get(&home)))
-        .map_or(&[], Vec::as_slice)
+            .filter(|_| e.phase == Phase::Forming))
+        .and_then(|home| left.get(&home))
+        .cloned()
+        .unwrap_or_default()
     }
 
     pub(super) fn walk_to(&self, atlas: &Atlas, e: &Engagement, from: RoomName) -> Option<i32> {
@@ -358,15 +414,44 @@ impl<'a> Scene<'a> {
         self.homes.contains(&e.room) && e.lost > e.budget
     }
 
+    pub(super) fn asked(&self) -> Asked {
+        let mut asked = Asked {
+            casts: self.spawning.clone(),
+            boosts: self.boosts.clone(),
+            ..Asked::default()
+        };
+        for c in &self.spawning {
+            asked.queue(c.room, &c.body);
+        }
+        asked
+    }
+
+    /// The plan's boosts after these casts: a set priced boosted while it
+    /// forms is cast and boosted at the boost home.
     pub(super) fn ask(
         &self,
         atlas: &Atlas,
         e: &Engagement,
-        set: &[casting::Body],
+        set: casting::Asking,
         asked: &mut Asked,
-    ) {
-        let free = e.free(&asked.casts);
-        self.ask_slots(atlas, e, free.zip(set.iter().cloned()), asked);
+    ) -> Vec<Boosted> {
+        let boost_at =
+            (self.boost_home(atlas, e)).filter(|_| set.boosted && e.phase == Phase::Forming);
+        let asks: Vec<Wanted> = (e.free(&asked.casts).zip(set.bodies))
+            .map(|(slot, body)| Wanted {
+                slot,
+                body: body.clone(),
+                boost_at,
+            })
+            .collect();
+        let cast = self.ask_slots(atlas, e, asks, asked);
+        let held =
+            |name: &str| e.ours.contains_key(name) || asked.casts.iter().any(|c| c.name == name);
+        (e.plan.boosts.iter())
+            .filter(|b| held(&b.name))
+            .cloned()
+            .chain(cast)
+            .collect()
     }
 
     /// How many of the drain's bodies the set already holds, standing or in
@@ -389,19 +474,18 @@ impl<'a> Scene<'a> {
         &self,
         atlas: &Atlas,
         e: &Engagement,
-        set: impl IntoIterator<Item = (Slot, casting::Body)>,
+        set: impl IntoIterator<Item = Wanted>,
         asked: &mut Asked,
-    ) {
+    ) -> Vec<Boosted> {
         let colonies = self.colonies_of(atlas, e);
-        let home = self.boost_home(atlas, e);
-        let at_home: Vec<&Room> = colonies
-            .iter()
-            .copied()
-            .filter(|r| Some(r.name) == home)
-            .collect();
-        let boosts = self.boosts_for(atlas, e);
+        let mut boosts = Vec::new();
 
-        for (slot, body) in set {
+        for Wanted {
+            slot,
+            body,
+            boost_at: at,
+        } in set
+        {
             let pick = |from: &[&Room]| {
                 casting::colony_for(
                     from,
@@ -412,22 +496,29 @@ impl<'a> Scene<'a> {
                     &body,
                 )
             };
-            // A body the home cannot cast goes unboosted wherever it is cast.
-            let boost = fighter::boosted_by(&body, boosts);
-            let (colony, boost) = match (boost, boost.and_then(|_| pick(&at_home))) {
-                (Some(c), Some(home)) => (Some(home), Some(c)),
-                _ => (pick(&colonies), None),
-            };
+            let home: Vec<&Room> = colonies
+                .iter()
+                .copied()
+                .filter(|r| Some(r.name) == at)
+                .collect();
+            let colony = at.and_then(|_| pick(&home)).or_else(|| pick(&colonies));
 
             if let Some(colony) = colony {
                 asked.queue(colony, &body);
-                let suffix = boost.map_or_else(String::new, |c| format!("-{c}"));
                 let name = format!(
-                    "{}{}-{}-{slot}{suffix}",
+                    "{}{}-{}-{slot}",
                     declarations::FIGHT_PREFIX,
                     self.world.time,
                     e.id
                 );
+                // A body priced boosted and cast elsewhere walks straight out.
+                let stock = asked.boosts.get_mut(&colony).filter(|_| Some(colony) == at);
+                if stock.is_some_and(|s| !boost::boosted_by(&body, s).compounds.is_empty()) {
+                    boosts.push(Boosted {
+                        name: name.clone(),
+                        colony,
+                    });
+                }
 
                 asked.casts.push(Cast {
                     engagement: e.id,
@@ -438,6 +529,7 @@ impl<'a> Scene<'a> {
                 });
             }
         }
+        boosts
     }
 
     /// A body that dies before a successor asked now could stand is
@@ -466,9 +558,14 @@ impl<'a> Scene<'a> {
             )
             .collect();
 
-        let due: BTreeMap<Slot, casting::Body> = (members.iter())
+        // A successor is cast bare: only a forming set's price boosts.
+        let due: Vec<Wanted> = (members.iter())
             .filter(|(s, _)| !held.contains(s))
-            .map(|(s, c)| (*s, fabot_base::world::body_kinds(c)))
+            .map(|(s, c)| Wanted {
+                slot: *s,
+                body: fabot_base::world::body_kinds(c),
+                boost_at: None,
+            })
             .collect();
 
         let lead = engine::SPAWN_TICKS_PER_PART * engine::MAX_BODY_PARTS as i32;
@@ -686,6 +783,7 @@ pub(super) fn fresh(
         room,
         ours: BTreeMap::new(),
         plan: Plan {
+            boosts: Vec::new(),
             tactic,
             order: Vec::new(),
             offers: Vec::new(),
@@ -779,6 +877,7 @@ mod tests {
                 landed: Vec::new(),
                 spawning: vec![oven],
                 boosts: BTreeMap::new(),
+                boosting: &[],
             };
             assert_eq!(scene.fielded_bodies(&e).len(), n + 1);
         }

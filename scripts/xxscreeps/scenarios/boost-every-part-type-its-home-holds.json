@@ -1,0 +1,11 @@
+{
+  "why": "a colony holding a boost for each fighting part boosts every part type of a body it casts, each from its lab in turn: a big ranged Invader raid with its healer on an outpost is one a bare set cannot beat for what it costs, so the price takes the boosted rangers, lab waits and all, and they carry three compounds or more",
+  "modules": ["atlas", "economy", "exchange", "fight", "layout", "mv", "strategy", "tactics"],
+  "start": { "room": "W8N3", "seed": 1, "node": "M7", "invaders": "W8N2:1000:2000", "wave": "ranged:big,healer:big" },
+  "ticks": 4000,
+  "assert": [
+    { "measure": "boostedWith", "min": 3 },
+    { "measure": "predictedWinsLost", "room": "W8N2", "max": 0 },
+    { "measure": "bodiesLost", "max": 0 }
+  ]
+}

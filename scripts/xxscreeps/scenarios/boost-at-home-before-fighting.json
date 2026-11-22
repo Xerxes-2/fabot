@@ -1,7 +1,7 @@
 {
-  "why": "a fight body cast from a colony whose lab holds a compound is boosted there before it walks to its raid: the Invader raid on a towerless home meets it with its ATTACK parts boosted",
+  "why": "a fight body cast from a colony whose lab holds a compound is boosted there before it walks to its raid: the Invader raid on an outpost meets its rangers with their RANGED_ATTACK boosted: the walk out leaves time for the lab, and a boosted ranger out-shoots the raid with fewer bodies, so the price takes it",
   "modules": ["atlas", "economy", "exchange", "fight", "layout", "mv", "strategy", "tactics"],
-  "start": { "room": "W8N3", "seed": 1, "node": "B5", "invaders": "W8N3:1000:2000" },
+  "start": { "room": "W8N3", "seed": 1, "node": "B5", "invaders": "W8N2:1000:2000" },
   "ticks": 4000,
   "assert": [
     { "measure": "boosted", "min": 1 }

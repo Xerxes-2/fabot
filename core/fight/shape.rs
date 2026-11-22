@@ -51,8 +51,16 @@ pub enum Phase {
 pub struct Plan {
     pub tactic: Tactic,
     pub order: Vec<Id>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub boosts: Vec<Boosted>,
     #[serde(skip)]
     pub offers: Vec<Offer>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Boosted {
+    pub name: String,
+    pub colony: RoomName,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
