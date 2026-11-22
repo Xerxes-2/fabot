@@ -188,7 +188,7 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
 | `fight.engagements` | list of `Engagement` (§6.2), with open tick (never moved) | Fight | Memory | active combat commitments (without heap-only `offers`); a home's deaths since open are its raid's |
 | `fight.groups` | list of `Group` (§6.1) | Fight | Memory | hostile cluster identity across ticks |
 | `fight.casts` | pending casts by engagement | Fight | Memory | prevent double-casting while spawning |
-| `fight.due` | colonies with imminent siege successor | Fight | Memory | feeds `ColonyPlan.owes` (§5) |
+| `fight.due` | colonies with imminent siege successor | Fight | Memory | feeds `ColonyPlan.owes` and `.fights` (§5) |
 | `declarations` | operator overrides + per-tick `Strategy` plans (`ColonyPlan`, outposts, claims, operations, allies, enemies, sieges, avoid, tactic rules) | Strategy | Memory (operator); plans rebuilt per tick | world configuration as data |
 | `expansion` | in-flight claim, failed rooms (100k fade), abandoned colonies | Strategy | Memory | outlives travel, stock dips, and raze ticks |
 | `switches` | module name → bool (`false` disables; `recorder: true` opts in) | Main | Memory | live kill switches |
@@ -303,7 +303,14 @@ pricer cost ~2× CPU and 580 lines for no gain and was not merged).
   (`derived::give_aid`): stock past reserve, a 20k margin, and its sites' cost
   ships to the lowest-RCL colony below RCL8, nearest first (first, from any
   colony, to one under half its reserve, furthest short) — flowing only to a
-  colony holding less so it never flows back.
+  colony holding less so it never flows back. It sends only from a terminal
+  `economy/balance.rs` leaves idle: our colonies take below 10k of each reagent
+  their cluster uses and 2.5k of each target boost while they cast or owe a
+  cast for any fight (`ColonyPlan.fights`), and give above want + 5k (all of
+  a reagent or product they want none of, Hivemind's cutoffs; a boost only
+  past 5k, so one sent to a fight stays) in batches up to the taker's
+  shortfall, furthest short for its want first, so a boost stays where it was
+  made until a fighting colony asks.
 - **Repairs:** structures decaying within a creep lifetime are repaired ahead of
   building, and any lost within ten rampart decay periods (to decay, haul wear,
   or last tick's strikes) ahead of upgrading too. Soonest lost first, kind
@@ -380,10 +387,9 @@ pricer cost ~2× CPU and 580 lines for no gain and was not merged).
   reactions the stock carries through to it after the targets before it
   (`labs::makeable`); `labs::assign` gives each cluster one, no two the same,
   a cluster keeping the one its reagent labs already hold, so a moving stock
-  never swaps two clusters' reagents. Other colonies ship a cluster its
-  reagents up to what its reaction asks, never what their own reagent labs
-  hold, and a product another cluster asks for leaves the labs a send at a
-  time. Labs
+  never swaps two clusters' reagents. Terminals balance reagents and boosts
+  (§5 terminal aid), and a product another colony is short of leaves the labs
+  a send at a time. Labs
   reserved for active boosts (§6.5) drop out of reactions and are filled by
   carriers via `Ground::boost_lab`. Layout places no lab below RCL8 (labs are
   worth little early).

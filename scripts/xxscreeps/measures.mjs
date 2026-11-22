@@ -185,7 +185,11 @@ export const measures = {
     return built ? (samples.find((s) => s.t > built.t && s.ore > built.ore)?.t ?? Infinity) - built.t : Infinity;
   },
   bounced: (samples, a) => at(samples, a.to ?? Infinity).bounced - at(samples, a.from ?? 0).bounced,
-  sentTo: (samples, a) => (at(samples, a.to ?? Infinity).sent?.[a.room] ?? 0) - (at(samples, a.from ?? 0).sent?.[a.room] ?? 0),
+  // Sent to `room`: energy, or `resource` if one is named.
+  sentTo: (samples, a) => {
+    const of = (s) => (a.resource ? s.sentOf?.[a.resource] : s.sent)?.[a.room] ?? 0;
+    return of(at(samples, a.to ?? Infinity)) - of(at(samples, a.from ?? 0));
+  },
   // Energy spent on construction (`room`: in that room alone).
   build: (samples, a) => builtIn(at(samples, a.to ?? Infinity), a) - builtIn(at(samples, a.from ?? 0), a),
   upgradeWhileQueued: (samples, a) => {

@@ -42,6 +42,7 @@ pub struct ColonyPlan {
     pub rampart_hits: i32,
     pub ring: bool,
     pub owes: bool,
+    pub fights: bool,
     /// Where its haul is banked while no storage stands (`ARCHITECTURE.md` §5).
     pub pile: Option<Pos>,
     /// Where its free fight bodies wait (`Plan::muster`).

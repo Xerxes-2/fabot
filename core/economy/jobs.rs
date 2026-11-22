@@ -218,13 +218,8 @@ fn sinks_of(derived: &Derived, ci: usize) -> Vec<Spot> {
 }
 
 fn ores_aboard(derived: &Derived) -> Vec<ResourceType> {
-    let mut out: Vec<ResourceType> = Vec::new();
-    for (r, _) in derived.bodies.iter().flat_map(|b| &b.store.held) {
-        if *r != Energy && !out.contains(r) {
-            out.push(*r);
-        }
-    }
-    out
+    let held = derived.bodies.iter().flat_map(|b| &b.store.held);
+    super::derived::once(held.map(|(r, _)| *r).filter(|r| *r != Energy))
 }
 
 /// What a source's container keeps for the bay its harvester refills (main's):

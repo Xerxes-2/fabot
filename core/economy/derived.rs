@@ -16,6 +16,7 @@ use fabot_base::world::{
     Structure, StructureType, World, terrain,
 };
 
+use super::balance::{Holding, Level, Shipment, balance, want};
 use super::bodies::{self, Pattern};
 use super::task::Target;
 
@@ -971,35 +972,20 @@ fn lab_held(g: &Ground, id: Id) -> Option<(ResourceType, i32)> {
     g.labs.iter().find(|l| l.id == id).and_then(|l| l.held)
 }
 
-/// What a colony never ships: its reagent labs' minerals, idle or not.
+pub fn once(rs: impl IntoIterator<Item = ResourceType>) -> Vec<ResourceType> {
+    let mut out = Vec::new();
+    for r in rs {
+        if !out.contains(&r) {
+            out.push(r);
+        }
+    }
+    out
+}
+
+/// A cluster's reagents: its reaction's, and what its reagent labs hold idle
+/// too, else an idle tick would ship them away.
 fn spent_by(c: &Cluster, reaction: Option<super::labs::Reaction>) -> Vec<ResourceType> {
-    let mut spent = c.reagents_held.clone().unwrap_or_default();
-    spent.extend(reaction.iter().flat_map(|r| r.1));
-    spent
-}
-
-struct Demand {
-    to: RoomName,
-    resource: ResourceType,
-    left: i32,
-    free: i32,
-}
-
-fn reagent_demand(
-    world: &World,
-    c: &Cluster,
-    reaction: Option<super::labs::Reaction>,
-    free: i32,
-) -> Vec<Demand> {
-    (reaction.iter())
-        .flat_map(|(_, reagents, want)| reagents.map(|r| (r, *want)))
-        .map(|(resource, want)| Demand {
-            to: c.ground.room,
-            resource,
-            left: want - held_in(world, c.ground, resource),
-            free,
-        })
-        .collect()
+    once((c.reagents_held.iter().flatten().copied()).chain(reaction.iter().flat_map(|r| r.1)))
 }
 
 /// A lab holds one mineral: a waiting body's booster is drained of others.
@@ -1022,18 +1008,17 @@ fn plan_cluster(
     plan
 }
 
-/// Only a store ships: a product another cluster asks for leaves the labs as
-/// soon as it makes a send, not once they stand half full.
+/// Only a store ships: a product another colony is short of leaves the labs
+/// as soon as it makes a send, not once they stand half full.
 fn drain_asked(
     plan: &mut super::labs::Plan,
     c: &Cluster,
-    demands: &[Demand],
+    holdings: &[Holding],
     spent: &[ResourceType],
 ) {
     for l in &c.ground.labs {
         let Some((r, n)) = l.held else { continue };
-        let asked =
-            (demands.iter()).any(|d| d.to != c.ground.room && d.resource == r && d.left > 0);
+        let asked = (holdings.iter()).any(|h| h.room != c.ground.room && h.level(r).short() > 0);
         let drained = plan.drains.iter().any(|d| d.0 == l.id);
         if asked && n >= engine::TERMINAL_MIN_SEND && !spent.contains(&r) && !drained {
             plan.drains.push((l.id, r));
@@ -1074,36 +1059,43 @@ fn boost_lab(world: &World, home: RoomName) -> Option<BoostLab> {
         })
 }
 
-/// A terminal sends to one colony a tick: a colony ships only toward the
-/// first cluster it serves.
-fn ship(
-    grounds: &mut [Ground],
-    demands: &mut [Demand],
-    spent: &BTreeMap<RoomName, Vec<ResourceType>>,
-    given_up: &dyn Fn(RoomName) -> bool,
-) {
-    for g in grounds.iter_mut() {
-        if g.terminal.is_none() || given_up(g.room) {
-            continue;
-        }
-        let keeps = spent.get(&g.room).map_or(&[][..], Vec::as_slice);
-        for d in demands.iter_mut() {
-            let elsewhere = g.ship_to.is_some_and(|(to, _)| to != d.to);
-            if d.to == g.room || keeps.contains(&d.resource) || elsewhere {
-                continue;
-            }
-            let held: i32 = (g.ores.iter())
-                .filter(|o| o.2 == d.resource)
-                .map(|o| o.3)
+type Wants<'a> = (
+    &'a BTreeMap<RoomName, Vec<ResourceType>>,
+    &'a [ResourceType],
+);
+
+fn holdings_of(
+    world: &World,
+    ours: &[Ground],
+    (spent, boosts): Wants,
+    (given_up, fights): (&dyn Fn(RoomName) -> bool, &dyn Fn(RoomName) -> bool),
+) -> Vec<Holding> {
+    let wanted = once(spent.values().flatten().chain(boosts).copied());
+    let holding = |g: &Ground| {
+        let t = g.terminal.as_ref()?;
+        let reagents = spent.get(&g.room).map_or(&[][..], Vec::as_slice);
+        let level = |r: ResourceType| {
+            let held = held_in(world, g, r);
+            let in_labs: i32 = (g.labs.iter().filter_map(|l| l.held.filter(|h| h.0 == r)))
+                .map(|h| h.1)
                 .sum();
-            let sent = held.min(d.left);
-            if sent > 0 {
-                g.shipment.push((d.resource, sent));
-                d.left -= sent;
-                g.ship_to = Some((d.to, d.free));
+            Level {
+                want: want(r, reagents, boosts, fights(g.room)),
+                held,
+                shippable: held - in_labs,
+                boost: boosts.contains(&r),
             }
-        }
-    }
+        };
+        Some(Holding {
+            room: g.room,
+            levels: wanted.iter().map(|r| (*r, level(*r))).collect(),
+            energy: g.stock().unwrap_or(0) + t.store.amount_of(Energy),
+            free: t.store.free(),
+        })
+    };
+    (ours.iter().filter(|g| !given_up(g.room)))
+        .filter_map(holding)
+        .collect()
 }
 
 fn assign_clusters(
@@ -1141,8 +1133,8 @@ fn stock_labs(
     grounds: &mut [Ground],
     colonies: usize,
     (clusters, targets): (&[RoomName], &[(ResourceType, i32)]),
-    given_up: &dyn Fn(RoomName) -> bool,
-) {
+    (given_up, fights): (&dyn Fn(RoomName) -> bool, &dyn Fn(RoomName) -> bool),
+) -> Vec<Shipment> {
     let ours = &grounds[..colonies];
     let cluster: Vec<Cluster> = (clusters.iter())
         .filter_map(|c| ours.iter().find(|g| g.room == *c))
@@ -1153,14 +1145,14 @@ fn stock_labs(
     let spent: BTreeMap<RoomName, Vec<ResourceType>> = (cluster.iter().zip(&reactions))
         .map(|(c, r)| (c.ground.room, spent_by(c, *r)))
         .collect();
-    let mut demands: Vec<Demand> = (cluster.iter().zip(&reactions))
-        .flat_map(|(c, r)| reagent_demand(world, c, *r, free_at(ours, c.ground.room)))
-        .collect();
+    let boosts: Vec<ResourceType> = targets.iter().map(|(b, _)| *b).collect();
+    let wants = (&spent, &boosts[..]);
+    let mut holdings = holdings_of(world, ours, wants, (given_up, fights));
     let set: Vec<(RoomName, super::labs::Plan, Option<BoostLab>)> =
         (cluster.iter().zip(&reactions))
             .map(|(c, r)| {
                 let mut plan = plan_cluster(world, c, *r);
-                drain_asked(&mut plan, c, &demands, &spent[&c.ground.room]);
+                drain_asked(&mut plan, c, &holdings, &spent[&c.ground.room]);
                 (c.ground.room, plan, boost_lab(world, c.ground.room))
             })
             .collect();
@@ -1171,7 +1163,7 @@ fn stock_labs(
             g.boost_lab = boost_lab;
         }
     }
-    ship(&mut grounds[..colonies], &mut demands, &spent, given_up);
+    balance(&mut holdings)
 }
 
 /// v1's `AidDonorMargin`: over a load and its fee.
@@ -1194,7 +1186,12 @@ impl Taker {
 
 /// v1's energy aid. Held counts the terminal's, so stocking it never moves
 /// the line; each send is booked on its taker, so givers never pile on one.
-fn give_aid(colonies: &[Colony], grounds: &mut [Ground], given_up: &dyn Fn(RoomName) -> bool) {
+fn give_aid(
+    colonies: &[Colony],
+    grounds: &[Ground],
+    given_up: &dyn Fn(RoomName) -> bool,
+    shipping: &[Shipment],
+) -> Vec<Shipment> {
     let mut takers: Vec<Taker> = (colonies.iter().zip(grounds.iter()))
         .filter(|(c, _)| !given_up(c.room))
         .filter_map(|(c, g)| {
@@ -1209,13 +1206,14 @@ fn give_aid(colonies: &[Colony], grounds: &mut [Ground], given_up: &dyn Fn(RoomN
             })
         })
         .collect();
-    for g in grounds.iter_mut().take(colonies.len()) {
+    let mut out = Vec::new();
+    for g in grounds.iter().take(colonies.len()) {
         let Some(gi) = takers.iter().position(|t| t.room == g.room) else {
             continue;
         };
         let owed: i32 = g.sites.iter().map(|s| s.left).sum();
         let spare = takers[gi].held - takers[gi].reserve - AID_MARGIN - owed;
-        if g.ship_to.is_some() {
+        if shipping.iter().any(|s| s.from == g.room) {
             continue;
         }
         let Some(ti) = recipient(&takers[gi], &takers) else {
@@ -1226,12 +1224,17 @@ fn give_aid(colonies: &[Colony], grounds: &mut [Ground], given_up: &dyn Fn(RoomN
         if sent < engine::TERMINAL_MIN_SEND {
             continue;
         }
-        g.shipment = vec![(Energy, sent)];
-        g.ship_to = Some((to.room, to.free));
+        out.push(Shipment {
+            from: g.room,
+            to: to.room,
+            taker_free: to.free,
+            load: vec![(Energy, sent)],
+        });
         takers[gi].held -= sent;
         takers[ti].held += sent;
         takers[ti].free -= sent;
     }
+    out
 }
 
 /// Never to a colony holding more, so energy never flows back up. The nearest
@@ -1393,15 +1396,16 @@ pub fn of_world<'t>(
 
     let given_up = |room: RoomName| declarations.abandoning(room);
 
+    let mut minerals = Vec::new();
     if !ours.clusters.is_empty() {
         let targets =
             super::labs::targets(&minerals_dug_or_held(world, &grounds[..colonies.len()]));
-        stock_labs(
+        minerals = stock_labs(
             world,
             &mut grounds,
             colonies.len(),
             (&ours.clusters, &targets),
-            &given_up,
+            (&given_up, &|room| plan_of(room).is_some_and(|p| p.fights)),
         );
     }
 
@@ -1417,7 +1421,15 @@ pub fn of_world<'t>(
         }
     }
 
-    give_aid(&colonies, &mut grounds, &given_up);
+    // A terminal sends to one colony a tick: minerals first, as aid can wait
+    // in the stock while a lab cannot.
+    let aid = give_aid(&colonies, &grounds, &given_up, &minerals);
+    for s in minerals.into_iter().chain(aid) {
+        if let Some(g) = grounds.iter_mut().find(|g| g.room == s.from) {
+            g.shipment = s.load;
+            g.ship_to = Some((s.to, s.taker_free));
+        }
+    }
 
     let bodies: Vec<Body> = creeps
         .iter()

@@ -140,6 +140,9 @@ pub fn plan<'t>(
         }
     }
     let fought = |room: RoomName| engagements.iter().any(|e| e.room == room);
+    let fighting: BTreeSet<RoomName> = (engagements.iter())
+        .flat_map(|e| outposts::casters(atlas, derived, &declarations.avoid, e.room))
+        .collect();
     let mut plans: Vec<ColonyPlan> = (derived.owned.iter().filter_map(|r| world.room(*r)))
         .filter_map(|room| {
             let level = room.controller.as_ref()?.level;
@@ -154,6 +157,7 @@ pub fn plan<'t>(
                 .map(|c| engine::body_cost(&c.body))
                 .sum();
             let threatened = near || fought(room.name) || asked > 0;
+            let owes = asked > 0 || due.contains(&room.name);
             let kept = reserve(
                 &world.rules,
                 declarations.reserve_lifetimes,
@@ -178,7 +182,8 @@ pub fn plan<'t>(
                 reserve: kept + asked,
                 rampart_hits,
                 ring: level >= RING_LEVEL || (near && outheals),
-                owes: asked > 0 || due.contains(&room.name),
+                owes,
+                fights: owes || fighting.contains(&room.name),
                 pile,
                 muster,
             })

@@ -105,17 +105,31 @@ pub fn busy(
                 .map(|e| e.room),
         )
         .collect();
-    let colonies: Vec<(RoomName, i32)> = (derived.colonies.iter().zip(&derived.homes))
-        .map(|(r, h)| (*r, h.capacity))
-        .collect();
     for room in fights {
-        let tree = atlas.tree(&declarations.avoid, SIEGE_HOPS, room);
-        serving.extend(casting::homes(&colonies, |from| tree.crossings(from, room)));
+        serving.extend(casters(atlas, derived, &declarations.avoid, room));
     }
     (plans.iter())
         .filter(|p| serving.contains(&p.room) || p.owes)
         .map(|p| p.room)
         .collect()
+}
+
+/// The colonies Fight casts a fight in `room` from at rest; a home's own
+/// fight only from it (`Scene::colonies_of`).
+pub fn casters(
+    atlas: &Atlas,
+    derived: &Derived,
+    avoid: &BTreeSet<RoomName>,
+    room: RoomName,
+) -> Vec<RoomName> {
+    if derived.colonies.contains(&room) {
+        return vec![room];
+    }
+    let colonies: Vec<(RoomName, i32)> = (derived.colonies.iter().zip(&derived.homes))
+        .map(|(r, h)| (*r, h.capacity))
+        .collect();
+    let tree = atlas.tree(avoid, SIEGE_HOPS, room);
+    casting::homes(&colonies, |from| tree.crossings(from, room))
 }
 
 pub fn chosen(

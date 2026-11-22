@@ -134,6 +134,7 @@ impl Memory {
                     rampart_hits: 0,
                     ring: false,
                     owes: false,
+                    fights: false,
                     pile: None,
                     muster: None,
                 })

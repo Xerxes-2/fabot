@@ -130,8 +130,8 @@ pub struct Sampler {
     /// The rooms our spawns stood in at the start (several in a capture), and the claims Memory declared.
     homes: Vec<String>,
     claims: Vec<String>,
-    /// Energy our terminals sent, by the room sent to, and the last transaction read: the engine keeps only the newest.
-    sent: BTreeMap<String, f64>,
+    /// What our terminals sent, by resource then the room sent to, and the last transaction read: the engine keeps only the newest.
+    sent_of: BTreeMap<String, BTreeMap<String, f64>>,
     sent_seq: u64,
 }
 
@@ -483,9 +483,18 @@ impl Sampler {
         for d in v.k.market.transactions.iter().filter(|d| d.seq > read) {
             self.sent_seq = d.seq;
             let of = |k: &str| d.obj.get(Atom::intern(k)).and_then(Val::as_str);
-            if of("sender") == Some(crate::world::US) && of("resourceType") == Some("energy") {
-                let to = self.sent.entry(of("to").unwrap_or_default().into());
-                *to.or_default() += num(&d.obj, Atom::intern("amount"));
+            if of("sender") == Some(crate::world::US) {
+                let (to, amount) = (
+                    of("to").unwrap_or_default(),
+                    num(&d.obj, Atom::intern("amount")),
+                );
+                let resource = of("resourceType").unwrap_or_default();
+                *self
+                    .sent_of
+                    .entry(resource.into())
+                    .or_default()
+                    .entry(to.into())
+                    .or_default() += amount;
             }
         }
         let mut claimed = Map::new();
@@ -522,7 +531,8 @@ impl Sampler {
             ("stillLoaded", json!(self.lives.still_loaded)),
             ("mineralAside", json!(self.lives.mineral_aside)),
             ("mineralHeld", json!(self.lives.mineral_held)),
-            ("sent", json!(self.sent)),
+            ("sent", json!(self.sent_of.get("energy"))),
+            ("sentOf", json!(self.sent_of)),
             ("others", json!({})),
         ] {
             row.insert(k.into(), value);

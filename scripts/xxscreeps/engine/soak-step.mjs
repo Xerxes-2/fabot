@@ -631,15 +631,17 @@ function wasted(rooms) {
     }
 }
 
-// Energy our terminals sent, by the room sent to. The engine lists a user's
-// last 100 sends; a terminal sends once in 10 ticks, ten in a sample.
-const sent = {};
+// What our terminals sent, by resource then the room sent to. The engine
+// lists a user's last 100 sends; a terminal sends once in 10 ticks, ten in a
+// sample.
+const sentOf = {};
 const sentSeen = new Set();
 async function sends() {
   for (const id of (await loadTransactionEntries(shard, ours)).outgoing.filter((id) => !sentSeen.has(id))) {
     sentSeen.add(id);
     const send = readTransaction(await loadTransactionBlob(shard, id));
-    if (send.resourceType === "energy") sent[send.to] = (sent[send.to] ?? 0) + send.amount;
+    const of = (sentOf[send.resourceType] ??= {});
+    of[send.to] = (of[send.to] ?? 0) + send.amount;
   }
 }
 
@@ -759,7 +761,8 @@ for (let t = 0; t < ticks; t++) {
     if (homes.length > 1) row.homes = Object.fromEntries(homes.map((h, i) => [h, summary(sample(t, time, rooms[i]))]));
     row.botCpu = fresh ? obs.cpu : null;
     await sends();
-    row.sent = { ...sent };
+    row.sent = { ...sentOf.energy };
+    row.sentOf = structuredClone(sentOf);
     row.stillLoaded = stillLoaded;
     row.mineralAside = mineralAside;
     row.mineralHeld = mineralHeld;
