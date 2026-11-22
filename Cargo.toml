@@ -22,6 +22,8 @@ serde_json = { version = "1", features = ["preserve_order"] }
 rustc-hash = { version = "2.1.3", default-features = false }
 strum = { version = "0.28", default-features = false, features = ["derive"] }
 enum-iterator = "2"
+# std keeps the failure seeds; fork and timeout are not used.
+proptest = { version = "1", default-features = false, features = ["std"] }
 
 [package]
 name = "fabot"
