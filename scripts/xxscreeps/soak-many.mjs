@@ -50,7 +50,7 @@ import { node26Env } from "./node26.mjs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sweep } from "./prune.mjs";
-import { invariants } from "./measures.mjs";
+import { exposureOf, invariants } from "./measures.mjs";
 import { unstood } from "../sim/node.mjs";
 import { TEMPLATE as SIM_TEMPLATE, buildPlan, exportTemplate, runSim, simBinary } from "../sim/run.mjs";
 
@@ -212,17 +212,12 @@ const rowOf = (run) => {
   const faults = (read(run, "faults.jsonl") ?? "").split("\n").filter(Boolean).length;
   const refusals = Object.values(JSON.parse(read(run, "refusals.json") ?? "{}")).reduce((a, b) => a + b, 0);
   const last = samples.at(-1) ?? {};
-  const sum = (named) =>
-    (read(run, "metrics.jsonl") ?? "").split("\n").filter(Boolean).reduce((a, l) => {
-      const { values } = JSON.parse(l);
-      return a + Object.entries(values).reduce((b, [n, v]) => b + (named(n) ? v : 0), 0);
-    }, 0);
   const at = (rcl) => levels.find((l) => l.rcl >= rcl)?.t;
   // What the economy ends with, in energy, as the room stands at the last
   // sample (the sampler's `worth`): every economy shows up here; a
   // diagnostic belongs in the run's own samples, not in this table.
-  const ledger = last.ledger;
   const w = last.worth;
+  const { exposure, lost, held, open } = exposureOf(dirOf(run), last);
   const k = (n) => (w ? `${Math.round(n / 1000)}k` : "-");
   return {
     ok: !failed(run),
@@ -236,11 +231,9 @@ const rowOf = (run) => {
     worth: k(w ? w.controller + w.structures + w.sites + w.fortification + w.stock : 0),
     score: k(last.score ? last.score.controller + last.score.structures + last.score.fortification + last.score.stock : 0),
     faults: faults + refusals,
-    exposure: sum((n) => n === "exposure"),
-    lostHeld: `${(sum((n) => n.startsWith("loss.")) / 1000).toFixed(1)}k/${(sum((n) => n === "held") / 1000).toFixed(1)}k`,
-    // The ledger closes within a percent of what was dug, or the worth is
-    // not to be read.
-    open: ledger && ledger.dug > 0 && Math.abs(ledger.residual) > ledger.dug / 100,
+    exposure,
+    lostHeld: `${(lost / 1000).toFixed(1)}k/${(held / 1000).toFixed(1)}k`,
+    open,
   };
 };
 

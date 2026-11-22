@@ -1,6 +1,6 @@
 // What a soak measured, read off its output directory: `scenario.mjs` bounds
 // these per scenario, and `npm run soak` and soak:many hold `invariants`.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { bugs, engagement } from "./prediction.mjs";
 
@@ -23,6 +23,21 @@ const livesOf = (dir) =>
     .map((l) => JSON.parse(l));
 const scoutsOf = (dir) => livesOf(dir).filter((b) => b.ours && b.name.startsWith("scout-"));
 export const samplesOf = (dir) => readFileSync(join(dir, "samples.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+// soak:many's columns beside worth, off a run's metrics and its last sample:
+// the worth is not to be read once the ledger is open past a percent of what was dug.
+export const exposureOf = (dir, last) => {
+  const path = join(dir, "metrics.jsonl");
+  const lines = existsSync(path) ? readFileSync(path, "utf8").split("\n").filter(Boolean) : [];
+  const sum = (named) =>
+    lines.reduce((a, l) => a + Object.entries(JSON.parse(l).values).reduce((b, [n, v]) => b + (named(n) ? v : 0), 0), 0);
+  const ledger = last?.ledger;
+  return {
+    exposure: sum((n) => n === "exposure"),
+    lost: sum((n) => n.startsWith("loss.")),
+    held: sum((n) => n === "held"),
+    open: Boolean(ledger && ledger.dug > 0 && Math.abs(ledger.residual) > ledger.dug / 100),
+  };
+};
 // The bot's per-tick counts (`ARCHITECTURE.md` §9.3), as `soak-step` reads them off
 // the observe segment; a tick whose segment was not rewritten carries last tick's.
 const countsOf = (dir, a) =>

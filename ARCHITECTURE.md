@@ -760,6 +760,8 @@ scenarios matching touched modules.
 - `soak:many -- --reset-every N` runs each sim start beside a twin whose heap is
   lost every N ticks (Memory, segments and world kept, as `src/app/driver.rs`
   meets a global reset); any gap beyond seed noise is a reset bug.
+- `soak:labs` (sim, 30k ticks, seeds 1,2) reads the boost chain on
+  `young-among-colonies`, its RCL8 homes digging O, U and K, X in one terminal.
 - `measures.mjs` enforces invariants on every home (no lost road, no level drop,
   ≥3 ramparts post-RCL4, no paying site waiting >10k ticks, zero refusals/faults).
 - Soaks are relative A/B comparisons; a win is re-checked on other starts (a

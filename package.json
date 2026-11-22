@@ -17,6 +17,7 @@
     "xx": "node scripts/xxscreeps/xx.mjs",
     "soak": "node scripts/xxscreeps/soak.mjs",
     "soak:many": "node scripts/xxscreeps/soak-many.mjs",
+    "soak:labs": "node scripts/sim/labs.mjs",
     "build:sim": "node scripts/sim/build.mjs",
     "metrics:baseline": "node scripts/metrics-baseline.mjs",
     "scenario": "node scripts/xxscreeps/scenario.mjs",

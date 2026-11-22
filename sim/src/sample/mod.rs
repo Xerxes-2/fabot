@@ -2,6 +2,8 @@
 //! field where `measures.mjs` and `soak-many.mjs` read them.
 use std::collections::{BTreeMap, BTreeSet};
 
+mod labs;
+
 use krebs::atom;
 use krebs::constants::{CREEP_CORPSE_RATE, CREEP_PART_MAX_ENERGY};
 use krebs::doc::{Atom, Obj, Val};
@@ -130,6 +132,7 @@ pub struct Sampler {
     /// What our terminals sent, by resource then the room sent to, and the last transaction read: the engine keeps only the newest.
     sent_of: BTreeMap<String, BTreeMap<String, f64>>,
     sent_seq: u64,
+    labs: labs::Labs,
 }
 
 /// Piles, tombstones (an Invader's corpse is ours to take), and stores nobody's or ours.
@@ -270,6 +273,7 @@ impl Sampler {
                     _ => {}
                 }
             }
+            self.labs.account(room, time);
             let (mut bank, mut hostile, mut low_spawns) = (0.0, false, 0.0);
             for &(kind, o) in &room.objects {
                 match kind {
@@ -423,7 +427,7 @@ impl Sampler {
             ("ledger", self.ledger()),
             ("worth", worth),
             ("score", score),
-            ("rooms", self.lines(v)),
+            ("rooms", self.labs.rooms(self.lines(v), v)),
         ] {
             row.insert(k.into(), value);
         }
@@ -486,6 +490,8 @@ impl Sampler {
                     num(&d.obj, Atom::intern("amount")),
                 );
                 let resource = of("resourceType").unwrap_or_default();
+                self.labs
+                    .sent(v, resource, of("from").unwrap_or_default(), to, amount);
                 *self
                     .sent_of
                     .entry(resource.into())
@@ -532,6 +538,9 @@ impl Sampler {
             ("sentOf", json!(self.sent_of)),
             ("others", json!({})),
         ] {
+            row.insert(k.into(), value);
+        }
+        for (k, value) in self.labs.totals(v, &self.rooms) {
             row.insert(k.into(), value);
         }
         Value::Object(row)
