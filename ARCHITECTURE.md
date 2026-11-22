@@ -407,6 +407,9 @@ pricer cost ~2× CPU and 580 lines for no gain and was not merged).
   reserved for active boosts (§6.5) drop out of reactions and are filled by
   carriers via `Ground::boost_lab`. Layout places no lab below RCL8 (labs are
   worth little early).
+  `❓` `makeable` promises reactions that leftover reagents under one
+  reaction's worth cannot carry, and a target less than one reaction above its
+  stock can be drained by a later target and never refilled.
 - **Abandon (`economy/abandon.rs`):** declared colonies stop digging, building,
   and upgrading past deadline, ship storage/terminal/lab contents out (energy
   last), destroy own structures (`destroy()` requires our controller, and owned

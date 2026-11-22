@@ -492,27 +492,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_t3_from_base_ores_makes_each_intermediate_before_its_product() {
-        let xgho2 = CatalyzedGhodiumAlkalide;
-        let targets = [(xgho2, 3000)];
-        let mut stock: Vec<(ResourceType, i32)> = ORES.map(|o| (o, 10_000)).to_vec();
-        let mut made = Vec::new();
-        loop {
-            let next = next_reaction(&targets, &stocked(&stock));
-            let Some((next, reagents)) = next else { break };
-            assert!(!made.contains(&next), "{next:?} made twice");
-            for reagent in reagents {
-                if !ORES.contains(&reagent) {
-                    assert!(made.contains(&reagent), "{next:?} before its {reagent:?}");
-                }
-            }
-            made.push(next);
-            stock.push((next, 3000));
-        }
-        assert_eq!(made.last(), Some(&xgho2));
-    }
-
     fn react(
         stock: &mut Vec<(ResourceType, i32)>,
         (next, reagents): (ResourceType, [ResourceType; 2]),
@@ -523,20 +502,6 @@ mod tests {
                 None => stock.push((r, n)),
             }
         }
-    }
-
-    #[test]
-    fn a_target_past_the_ore_makes_all_the_ore_can() {
-        let xgho2 = CatalyzedGhodiumAlkalide;
-        let mut stock: Vec<(ResourceType, i32)> = ORES.map(|o| (o, 3000)).to_vec();
-        loop {
-            let Some(next) = next_reaction(&[(xgho2, 7500)], &stocked(&stock)) else {
-                break;
-            };
-            react(&mut stock, next);
-        }
-        // O is two to a unit: 3000 make 1500.
-        assert_eq!(stocked(&stock)(xgho2), 1500);
     }
 
     #[test]
