@@ -852,7 +852,8 @@ progress), **exposure** (ticks a raid could cost a colony a level — a foe
 outliving the colony's running safe mode, in it or its nearest outposts, while
 below RCL3, lacking a stocked tower, or unable to fire safe mode), and
 **losses** (energy). Tracks idle share, churn, returned loads, spend split
-(within 2% of engine ledger), spawn use, stale paying or rampart sites,
+(within 2% of engine ledger), spawn use, stale paying or rampart sites per colony
+(one that becomes its structure restarts the colony's waits),
 refusals, CPU/phase, deaths, hostile dwell, and held steps (`Settled.held`).
 Alert thresholds (`observe health`) are `1.5 × healthy p99` from
 `npm run metrics:baseline` (0 for invariants); a metric a healthy run already

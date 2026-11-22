@@ -1,6 +1,5 @@
 use crate::vocabulary::{Part, ResourceType, takes};
 
-/// The compound of `tier` (0 for none) that boosts `part` in a fight.
 pub fn boosted(part: Part, tier: usize) -> Option<ResourceType> {
     use ResourceType::*;
     const LINES: [[ResourceType; 3]; 6] = [

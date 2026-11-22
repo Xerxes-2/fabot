@@ -279,7 +279,6 @@ fn boost_need(creep: &world::Creep, compound: ResourceType) -> (i32, i32) {
     )
 }
 
-/// The two reagent labs, and every lab within reach of both as an output.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Roles {
     pub reagents: (Id, Id),

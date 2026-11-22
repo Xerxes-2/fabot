@@ -146,6 +146,7 @@ where
             intents: &decided.result.settled.actions,
             held: &decided.result.settled.held,
             short: &decided.result.telemetry.short,
+            served: &decided.result.telemetry.served,
             refusals: &refusals,
             phases,
             walked: &walked,

@@ -120,7 +120,7 @@ const METRICS: &[Metric] = &[
     metric(
         STALE,
         Fold::Last,
-        "ticks since the room's freshest paying or rampart site was first seen or last progressed; read at window ends",
+        "ticks since the colony's freshest paying or rampart site, its outposts' too, was first seen, last progressed, or another became its structure; one out of sight keeps its wait; read at window ends",
     ),
     metric(SPAWN_TICKS, Fold::Sum, "spawn-ticks"),
     metric(
@@ -304,6 +304,8 @@ struct Held {
 struct Stale {
     progress: i32,
     since: i32,
+    at: Pos,
+    kind: StructureType,
 }
 
 #[derive(Clone, Copy, Debug, IntoStaticStr)]
@@ -372,6 +374,7 @@ pub struct Seen<'a> {
     pub intents: &'a [Action],
     pub held: &'a [String],
     pub short: &'a [(RoomName, &'static str, i32)],
+    pub served: &'a [(RoomName, RoomName)],
     pub refusals: &'a [Refusal],
     pub phases: &'a [(String, f64)],
     pub walked: &'a [(String, i32)],
@@ -822,7 +825,7 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
     let world = seen.world;
     let start = world.time - world.time.rem_euclid(WINDOW);
     if m.ticks > 0 && start != m.start {
-        m.close(world);
+        m.close(world, seen.served);
     }
     if m.ticks == 0 {
         m.start = start;
@@ -995,7 +998,7 @@ fn accrue<'a>(sums: &mut Vec<(String, f64)>, rows: impl Iterator<Item = (&'a Str
 
 impl Metrics {
     /// The `Last` metrics are read off this tick's world, the first past the window.
-    fn close(&mut self, world: &World) {
+    fn close(&mut self, world: &World, served: &[(RoomName, RoomName)]) {
         let time = world.time;
         let mut sums = std::mem::take(&mut self.sums);
         add(&mut sums, None, BUCKET, f64::from(world.bucket));
@@ -1012,25 +1015,55 @@ impl Metrics {
             add(&mut sums, None, &format!("{COUNT}{name}"), sum);
         }
 
-        self.sites
-            .retain(|id, _| (world.rooms.iter()).any(|r| r.sites.iter().any(|s| &s.id == id)));
+        // A room no colony owns or builds in has no build to stall.
+        let colony_of = |room| {
+            let owned = world
+                .room(room)
+                .and_then(|r| r.controller.as_ref())
+                .is_some_and(|c| c.owner.is_ours());
+            (served.iter().find(|(o, _)| *o == room))
+                .map(|(_, c)| *c)
+                .or(owned.then_some(room))
+        };
+        // A site that became its structure is its colony's build progressing.
+        let mut built = BTreeSet::new();
+        self.sites.retain(|id, s| {
+            if colony_of(s.at.room).is_none() {
+                return false;
+            }
+            let Some(r) = world.room(s.at.room) else {
+                return true;
+            };
+            let stands = r.sites.iter().any(|x| &x.id == id);
+            if !stands && (r.structures.iter()).any(|x| x.kind == s.kind && x.pos == s.at) {
+                built.extend(colony_of(s.at.room));
+            }
+            stands
+        });
         for r in &world.rooms {
-            let row = Some(r.name);
+            let Some(colony) = colony_of(r.name) else {
+                continue;
+            };
             for s in (r.sites.iter()).filter(|s| s.owner.is_ours() && drawn_for(s.kind)) {
                 let fresh = Stale {
                     progress: s.progress,
                     since: time,
+                    at: s.pos,
+                    kind: s.kind,
                 };
                 let stale = self.sites.entry(s.id).or_insert(fresh);
-                if stale.progress != s.progress {
+                if stale.progress != s.progress || built.contains(&colony) {
                     *stale = fresh;
                 }
                 let ticks = f64::from(time - stale.since);
-                let names = sums.entry(row).or_default();
+                let names = sums.entry(Some(colony)).or_default();
                 (names.entry(STALE.to_string()))
                     .and_modify(|at| *at = at.min(ticks))
                     .or_insert(ticks);
             }
+        }
+        for r in &world.rooms {
+            let row = Some(r.name);
             if let Some(c) = r.controller.as_ref().filter(|c| c.owner.is_ours()) {
                 let now = Upgraded {
                     level: c.level,

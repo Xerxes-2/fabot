@@ -82,6 +82,16 @@ enum Supply {
     Wait(Option<Task>),
 }
 
+/// Each worked room but a raised claim, and the colony whose builders serve it.
+pub fn served<'d>(
+    derived: &'d Derived,
+    owners: &'d [Option<usize>],
+) -> impl Iterator<Item = (&'d Ground, usize)> {
+    let worked = (derived.grounds.iter().zip(owners)).skip(derived.colonies.len());
+    (worked.filter(|(g, _)| g.controller.as_ref().is_none_or(|c| !c.owner.is_ours())))
+        .filter_map(|(g, o)| Some((g, (*o)?)))
+}
+
 /// A home worker its colony's carriers bring loads to, by its id: one that
 /// banks on a pile, as Hivemind's do until a storage; a crew digs its own.
 fn brought(derived: &Derived, slot: &Slot, body: &Body) -> Option<Id> {
@@ -784,12 +794,7 @@ impl<'a> Jobs<'a> {
             return Some(t);
         }
         let grounds: Vec<&Ground> = if own {
-            let served = (derived.grounds.iter().zip(self.owners))
-                .skip(derived.colonies.len())
-                .filter(|(g, o)| {
-                    **o == Some(ci) && g.controller.as_ref().is_none_or(|c| !c.owner.is_ours())
-                })
-                .map(|(g, _)| g);
+            let served = (served(derived, self.owners).filter(|(_, c)| *c == ci)).map(|(g, _)| g);
             std::iter::once(ground).chain(served).collect()
         } else {
             vec![ground]

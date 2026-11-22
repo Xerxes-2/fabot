@@ -18,7 +18,7 @@ use fabot_mv::plan;
 
 use super::bodies::{self, Pattern};
 use super::derived::{self, Body, Derived, Ground, LinkFact, RefillFact};
-use super::jobs::Jobs;
+use super::jobs::{self, Jobs};
 use super::slots::{self, Job, Slot, distance};
 use super::task::{self, Assignment, Task};
 
@@ -597,6 +597,9 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
             .map(|(room, p, n)| (room, p.into(), n))
             .collect(),
         traces: Vec::new(),
+        served: (jobs::served(&derived, &owners))
+            .map(|(g, ci)| (g.room, derived.colonies[ci].room))
+            .collect(),
     };
 
     let scouted = scouting(&*context.atlas, &derived, &state.assignments);

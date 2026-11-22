@@ -154,7 +154,6 @@ pub enum Action {
     Link(Id, LinkAct),
     Lab(Id, LabAct),
     Terminal(Id, TerminalAct),
-    /// An observer and the room it brings in sight next tick.
     Observe(Id, RoomName),
 }
 
@@ -180,6 +179,8 @@ pub struct Telemetry {
     /// A colony's open slots of a pattern, by its name, left uncast.
     pub short: Vec<(RoomName, &'static str, i32)>,
     pub traces: Vec<(String, Vec<(crate::world::Pos, i64)>)>,
+    /// Each outpost and the colony that builds there (`jobs::served`).
+    pub served: Vec<(RoomName, RoomName)>,
 }
 
 /// A module's tick: `Tick` settles the asks and wishes of every module as one.
@@ -199,6 +200,7 @@ impl ModuleOutput {
         self.telemetry.counts.extend(other.telemetry.counts);
         self.telemetry.short.extend(other.telemetry.short);
         self.telemetry.traces.extend(other.telemetry.traces);
+        self.telemetry.served.extend(other.telemetry.served);
     }
 }
 
