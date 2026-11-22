@@ -15,9 +15,9 @@ use fabot_base::vocabulary::{Part, ResourceType::Energy};
 use fabot_base::world::{
     Controller, Creep, Id, Owner, Pos, Room, RoomName, Rules, StructureType, World, hostiles,
 };
-use fabot_economy::abandon;
 use fabot_economy::bodies::{self, Pattern};
 use fabot_economy::task::{Assignment, Task};
+use fabot_economy::{abandon, derived::drawn_for};
 use fabot_fight::shape::{Cast, Engagement, Phase};
 
 pub const WINDOW: i32 = 100;
@@ -120,7 +120,7 @@ const METRICS: &[Metric] = &[
     metric(
         STALE,
         Fold::Last,
-        "ticks since the room's freshest site was first seen or last progressed: its building stalled, not queued; read at window ends",
+        "ticks since the room's freshest paying or rampart site was first seen or last progressed; read at window ends",
     ),
     metric(SPAWN_TICKS, Fold::Sum, "spawn-ticks"),
     metric(
@@ -253,7 +253,7 @@ const THRESHOLDS: &[(&str, Bound)] = &[
     (CHURN, Bound::Max(50)),
     (RETURNED, Bound::Max(1800)),
     (IDLE_WANT, Bound::Max(0)),
-    (STALE, Bound::Max(3000)),
+    (STALE, Bound::Max(600)),
     (FLIPS, Bound::Max(1)),
     (DEATH, Bound::Max(2)),
     (LOST, Bound::Max(0)),
@@ -1016,7 +1016,7 @@ impl Metrics {
             .retain(|id, _| (world.rooms.iter()).any(|r| r.sites.iter().any(|s| &s.id == id)));
         for r in &world.rooms {
             let row = Some(r.name);
-            for s in r.sites.iter().filter(|s| s.owner.is_ours()) {
+            for s in (r.sites.iter()).filter(|s| s.owner.is_ours() && drawn_for(s.kind)) {
                 let fresh = Stale {
                     progress: s.progress,
                     since: time,
