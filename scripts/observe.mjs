@@ -19,7 +19,7 @@ const USAGE = `usage: npm run observe -- <command>
   switches           Memory.v2.switches as stored
   switch <name> on|off|clear
                      off: \`false\` (the module is skipped); on: \`true\` (the recorder's opt-in); clear: remove the key
-  declare [reserve <n> | allies <name,…> | enemies <name,…> | sieges <room,…> | avoid <room,…> | abandon <room,…> | outposts <capture.json> | claims <capture.json> | tactics <rules.json> | labs <room> <compound=n,…>]
+  declare [reserve <n> | allies <name,…> | enemies <name,…> | sieges <room,…> | avoid <room,…> | abandon <room,…> | outposts <capture.json> | claims <capture.json> | tactics <rules.json>]
                      Memory.v2.declarations as stored; with a name, set it
                      (outposts: the capture's, \`scripts/capture-world.mjs\`; reserve: creep lifetimes of tower fire the reserve holds)
   capture [out.jsonl]
@@ -112,7 +112,7 @@ switch (cmd) {
     console.log(JSON.stringify((await memory("v2.switches")) ?? {}, null, 2));
     break;
   case "declare": {
-    const [name, value, more] = args;
+    const [name, value] = args;
     const stored = await memory("v2.declarations");
     const declarations = stored ?? {};
     if (name === undefined) {
@@ -128,9 +128,7 @@ switch (cmd) {
       const rules = file.declarations?.tactics ?? file.tactics ?? file;
       if (!Array.isArray(rules)) fail("declare tactics: the file holds a list of { \"rival\"?, \"room\"?, \"pin\"?, \"forbid\"? }");
       declarations.tactics = rules;
-    } else if (name === "labs" && value !== undefined && more !== undefined)
-      declarations.labs = { home: value, targets: Object.fromEntries(more.split(",").map((p) => p.split("=")).map(([c, n]) => [c, Number(n)])) };
-    else fail("usage: observe declare [reserve <n ≥ 0> | allies <name,…> | enemies <name,…> | sieges <room,…> | avoid <room,…> | abandon <room,…> | outposts <capture.json> | claims <capture.json> | tactics <rules.json> | labs <room> <compound=n,…>]");
+    } else fail("usage: observe declare [reserve <n ≥ 0> | allies <name,…> | enemies <name,…> | sieges <room,…> | avoid <room,…> | abandon <room,…> | outposts <capture.json> | claims <capture.json> | tactics <rules.json>]");
     // A memory write is not read back at once: a whole-object write would
     // revert a key declared just before it.
     await (stored ? putV2(`declarations.${name}`, declarations[name]) : putV2("declarations", declarations));

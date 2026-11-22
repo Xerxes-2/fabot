@@ -4,8 +4,29 @@
 /// tick or a reset loses nothing.
 use fabot_base::boost::{Roles, roles_of};
 use fabot_base::engine;
-use fabot_base::vocabulary::{ORES, ResourceType};
+use fabot_base::vocabulary::{BOOSTS, Boost, ORES, ResourceType, ores_in};
 use fabot_base::world::{Id, Pos};
+
+/// Hivemind's "high": past it the first-ranked boost leaves the ore to the next.
+const BOOST_STOCK: i32 = 7_500;
+
+/// An ore is held while a compound made of it is, or a target drops mid-tree.
+pub fn targets(have: &[ResourceType]) -> Vec<(ResourceType, i32)> {
+    let held = |ore: usize| have.iter().any(|r| ores_in(*r)[ore] > 0);
+    (BOOSTS.iter())
+        .filter(|(boost, _)| {
+            use Boost::*;
+            matches!(
+                boost.boost(),
+                Some(Attack(_) | RangedAttack(_) | Heal(_) | Tough(_) | Move(_))
+            )
+        })
+        .filter(|(boost, _)| {
+            (ores_in(*boost).iter().enumerate()).all(|(ore, n)| *n == 0 || held(ore))
+        })
+        .map(|(boost, _)| (*boost, BOOST_STOCK))
+        .collect()
+}
 
 /// Toward the first target its stock stands short of. A reagent compound short
 /// of the shortfall is made first; once none can be, the compound itself from
@@ -32,12 +53,40 @@ pub fn next_reaction(
         })
     }
 
-    targets.iter().find_map(|(compound, target)| {
-        let short = target - stock(*compound);
+    (makeable(targets, stock).into_iter()).find_map(|(compound, target)| {
+        let short = target - stock(compound);
         (short > 0)
-            .then(|| toward(*compound, short, stock))
+            .then(|| toward(compound, short, stock))
             .flatten()
     })
+}
+
+/// A reagent made past its target spends its sibling's ore; a part reaction
+/// left over hands the target's intermediates to the next.
+pub fn makeable(
+    targets: &[(ResourceType, i32)],
+    stock: &dyn Fn(ResourceType) -> i32,
+) -> Vec<(ResourceType, i32)> {
+    let mut capped: Vec<(ResourceType, i32)> = Vec::new();
+    for (compound, target) in targets {
+        let have = stock(*compound);
+        let made = |n: i32| {
+            let asked = [capped.as_slice(), &[(*compound, have + n)]].concat();
+            ore_short(&asked, stock).is_empty()
+        };
+        let (mut short, mut over) = (0, target - have + 1);
+        while over - short > 1 {
+            let mid = (short + over) / 2;
+            if made(mid) {
+                short = mid;
+            } else {
+                over = mid;
+            }
+        }
+        let reactions = short / engine::LAB_REACTION_AMOUNT;
+        capped.push((*compound, have + reactions * engine::LAB_REACTION_AMOUNT));
+    }
+    capped
 }
 
 /// The ore the cluster lacks to bring every target up: each shortfall broken
@@ -267,6 +316,58 @@ mod tests {
             stock.push((next, 3000));
         }
         assert_eq!(made.last(), Some(&xgho2));
+    }
+
+    fn react(
+        stock: &mut Vec<(ResourceType, i32)>,
+        (next, reagents): (ResourceType, [ResourceType; 2]),
+    ) {
+        for (r, n) in reagents.into_iter().map(|r| (r, -5)).chain([(next, 5)]) {
+            match stock.iter_mut().find(|(s, _)| *s == r) {
+                Some(at) => at.1 += n,
+                None => stock.push((r, n)),
+            }
+        }
+    }
+
+    #[test]
+    fn a_target_past_the_ore_makes_all_the_ore_can() {
+        let xgho2 = CatalyzedGhodiumAlkalide;
+        let mut stock: Vec<(ResourceType, i32)> = ORES.map(|o| (o, 3000)).to_vec();
+        loop {
+            let Some(next) = next_reaction(&[(xgho2, 7500)], &stocked(&stock)) else {
+                break;
+            };
+            react(&mut stock, next);
+        }
+        // O is two to a unit: 3000 make 1500.
+        assert_eq!(stocked(&stock)(xgho2), 1500);
+    }
+
+    #[test]
+    fn targets_sharing_an_ore_take_it_in_turn() {
+        fn within(r: ResourceType, of: ResourceType) -> bool {
+            r == of || (of.reaction_components()).is_some_and(|rs| rs.iter().any(|c| within(r, *c)))
+        }
+        // XGHO2 is first and Z too short to make it; the rest leave leftovers.
+        let ore = |o| (o, if o == Zynthium { 3 } else { 3003 });
+        let mut stock: Vec<(ResourceType, i32)> = ORES.map(ore).to_vec();
+        let targets = targets(&ORES);
+        assert!(targets.len() > 1);
+        for _ in 0..10_000 {
+            let Some(next) = next_reaction(&targets, &stocked(&stock)) else {
+                return;
+            };
+            let first = (makeable(&targets, &stocked(&stock)).into_iter())
+                .find(|(c, n)| *n > stocked(&stock)(*c))
+                .map(|(c, _)| c);
+            assert!(
+                first.is_some_and(|c| within(next.0, c)),
+                "{next:?} for {first:?}"
+            );
+            react(&mut stock, next);
+        }
+        panic!("the reactions never end");
     }
 
     #[test]

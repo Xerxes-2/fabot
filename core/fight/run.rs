@@ -238,7 +238,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
         armed,
         landed,
         spawning,
-        boost: casting::cluster_boost(world, declarations),
+        boosts: casting::cluster_boosts(world, context.derived.cluster),
     };
 
     // A planned barrier fallen advances the plan, never re-prices it; a

@@ -391,7 +391,7 @@ impl<'a> Scene<'a> {
             &casting::walking(capacity),
             |body| worth / engine::body_cost(body),
             0,
-            self.boost,
+            &self.boosts,
         )?;
 
         let seen = ours
@@ -755,7 +755,14 @@ impl<'a> Scene<'a> {
                     ..casting::side_in(room, ours_now.clone())
                 };
                 let (mut set, outcome, landed) = casting::price(
-                    stance, &side, &theirs, terrain, &blocks, &copies_of, tick_worth, self.boost,
+                    stance,
+                    &side,
+                    &theirs,
+                    terrain,
+                    &blocks,
+                    &copies_of,
+                    tick_worth,
+                    &self.boosts,
                 )?;
                 let cast = set.len();
                 let priced: Vec<Fighter> = (bodies.iter().chain(&asked_fighters).cloned())

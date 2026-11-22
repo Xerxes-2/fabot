@@ -17,7 +17,7 @@
 //            drifts from a small change, which the seed alone does not
 //   --node   a start from §10.2's nodes (default ticks 5000): N1 is the
 //            respawn above; N2-T7 stand what Layout's plan (`src/bin/plan.rs`)
-//            builds by the node's level (a node declaring `labs` with
+//            builds by the node's level (a node with `labs` stands
 //            them too, which Layout never places below RCL8), the first spawn on its planned
 //            tile, and the node's stock in storage; E1 is N4 with the two
 //            neighbours `colony.mjs` picks declared as outposts
@@ -27,7 +27,7 @@
 //            X2 is N5 with a GCL level spare and nothing declared, F2 X2
 //            with its expansion to the first of them in flight since long ago,
 //            Y2 X2 with R6's stock;
-//            L5 is N5 with H, O and U stocked and its labs the cluster (`labs`);
+//            L5 is N5 with its labs and the ore for XKHO2 stocked;
 //            N6 and N7 are RCL7 and RCL8 with their bodies standing; R8 is
 //            RCL8 on RCL7's plan, roads on the extension tiles RCL8 adds, and
 //            R8 and A7 (N7) avoid every room in reach
@@ -400,10 +400,9 @@ if (flags["--ended"]) node26([XXSCREEPS, script("node.mjs"), "ended", colony.roo
 else if ((opponents.length && !seated) || flags["--unsafe"]) node26([XXSCREEPS, script("node.mjs"), "unsafe", colony.room], world);
 if ((node?.outposts || node?.claims || node?.stale) && colony.outposts.length === 0) fail(`${colony.room}: no neighbour fits an outpost`);
 const allies = opponents.filter((o) => o.ally).map((o) => o.name);
-if (node?.outposts || node?.claims || node?.spare || node?.labs || node?.alone || (allies.length && !seated && !from)) {
+if (node?.outposts || node?.claims || node?.spare || node?.alone || (allies.length && !seated && !from)) {
   const claims = colony.outposts.slice(0, node?.claims ?? 0);
-  const labs = node?.labs ? { labs: { home: colony.room, targets: node.labs } } : {};
-  writeFileSync(join(world, "declarations.json"), JSON.stringify({ outposts: node?.outposts ? colony.outposts : [], claims, allies, ...labs, ...(node?.alone ? { avoid: near(colony.room, 3) } : {}) }));
+  writeFileSync(join(world, "declarations.json"), JSON.stringify({ outposts: node?.outposts ? colony.outposts : [], claims, allies, ...(node?.alone ? { avoid: near(colony.room, 3) } : {}) }));
   if (node?.stale) writeFileSync(join(world, "v2.json"), JSON.stringify({ expansion: { room: colony.outposts[0].room, since: -100000 } }));
   node26([XXSCREEPS, script("node.mjs"), "declare", colony.room, OUR_NAME, "declarations.json", ...(node?.short ? ["short"] : node?.spare ? [String(node.spare)] : []), ...(node?.stale ? ["v2.json"] : [])], world);
 }

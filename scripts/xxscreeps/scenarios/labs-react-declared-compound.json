@@ -1,7 +1,0 @@
-{
-  "why": "the declared cluster's labs are filled from its stores and react toward the declared compound",
-  "modules": ["atlas", "economy", "layout", "mv"],
-  "start": { "room": "W8N3", "seed": 1, "node": "L5" },
-  "ticks": 4000,
-  "assert": [{ "measure": "made", "resource": "UH", "min": 200 }]
-}

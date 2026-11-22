@@ -1485,7 +1485,7 @@ pub fn cheapest_win(
     tick_worth: i32,
     theirs: &Side,
     terrain: Terrain,
-    boost: Option<(ResourceType, i32)>,
+    boosts: &[(ResourceType, i32)],
 ) -> Option<Vec<Body>> {
     let cost = |body: &Body, n: i32| -> Option<i32> {
         let side = Side {
@@ -1494,7 +1494,7 @@ pub fn cheapest_win(
                 .iter()
                 .cloned()
                 .chain(std::iter::repeat_n(
-                    fighter::cast_boosted(body, boost),
+                    fighter::cast_boosted(body, boosts),
                     n.max(0) as usize,
                 ))
                 .collect(),
@@ -1816,5 +1816,15 @@ mod tests {
         assert!(hits(&ranger, 17, &gunner) > hits(&ranger, 12, &gunner));
         assert!(hits(&medic, 18, &gunner) > hits(&medic, 12, &gunner));
         assert_eq!(hits(&ranger, 17, &swinger), hits(&ranger, 12, &swinger));
+    }
+
+    #[test]
+    fn a_body_takes_the_strongest_compound_covering_it() {
+        use ResourceType::{CatalyzedUtriumAcid as T3, UtriumAcid as T2, UtriumHydride as T1};
+        let body = [[Part::Attack; 10], [Part::Move; 10]].concat();
+        let held = [(T1, 50), (T2, 10), (T3, 9)];
+        assert_eq!(fighter::boosted_by(&body, &held), Some(T2));
+        assert_eq!(fighter::boosted_by(&body, &held[..1]), Some(T1));
+        assert_eq!(fighter::boosted_by(&body[10..], &held), None);
     }
 }

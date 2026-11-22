@@ -1,6 +1,5 @@
 use std::collections::BTreeSet;
 
-use crate::vocabulary::ResourceType;
 use crate::world::{Id, Pos, RoomName};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -50,18 +49,6 @@ pub struct ColonyPlan {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Node {
-    Colony(RoomName),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Flow {
-    pub what: ResourceType,
-    pub to: Node,
-    pub stock: i32,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OpKind {
     Defend,
     Siege,
@@ -87,7 +74,6 @@ pub struct Declarations {
     /// The rival rooms whose towers and economy are razed.
     pub sieges: Vec<RoomName>,
     pub colonies: Vec<ColonyPlan>,
-    pub flows: Vec<Flow>,
     /// Rooms no fight body walks through on its way: a rival's towers.
     pub avoid: BTreeSet<RoomName>,
     /// The operator's tactic rules, per rival and room (§6.3).
@@ -153,17 +139,6 @@ impl Declarations {
     pub fn abandoning(&self, room: RoomName) -> bool {
         (self.colonies.iter()).any(|p| p.room == room && p.stage == Stage::Abandon)
     }
-
-    pub fn labs(&self) -> Option<(RoomName, Vec<(ResourceType, i32)>)> {
-        let Node::Colony(home) = self.flows.first()?.to;
-        let mut targets: Vec<(ResourceType, i32)> = (self.flows.iter())
-            .filter(|f| f.to == Node::Colony(home) && f.stock > 0)
-            .filter(|f| f.what.reaction_components().is_some())
-            .map(|f| (f.what, f.stock))
-            .collect();
-        targets.sort_by_key(|(r, _)| *r as u32);
-        Some((home, targets))
-    }
 }
 
 pub fn undeclared() -> Declarations {
@@ -175,7 +150,6 @@ pub fn undeclared() -> Declarations {
         enemies: BTreeSet::new(),
         sieges: Vec::new(),
         colonies: Vec::new(),
-        flows: Vec::new(),
         avoid: BTreeSet::new(),
         tactics: Vec::new(),
         operations: Vec::new(),

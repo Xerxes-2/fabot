@@ -172,7 +172,7 @@ fn boost_stop(
     actions: &mut Vec<Action>,
     wishes: &[(RoomName, Wish)],
 ) -> Option<Vec<(RoomName, Wish)>> {
-    let (home, _) = context.declarations.labs()?;
+    let home = context.derived.cluster?;
     let mut stalls: Vec<(String, Pos, Id, ResourceType)> = Vec::new();
 
     for creep in (context.world.creeps.iter()).filter(|c| c.owner.is_ours() && c.pos.room == home) {
@@ -336,6 +336,7 @@ pub fn decide<'t>(
     );
     let declarations = declarations.planned(plans);
     derived.worked = worked(world, &sightings, &declarations, &derived);
+    derived.cluster = boost::cluster(world, &declarations);
 
     let mut context = Context {
         world,

@@ -10,13 +10,7 @@
   "outposts": [],
   "enemies": [
    "rival"
-  ],
-  "labs": {
-   "home": "W1N1",
-   "targets": {
-    "UH2O": 3000
-   }
-  }
+  ]
  },
  "memory": {},
  "rooms": [

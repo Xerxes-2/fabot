@@ -1,7 +1,7 @@
 {
-  "why": "a declared T3 is made from base ores alone: the cluster walks its whole reaction tree (UL, ZK, G, GO, OH, GHO2) before XGHO2",
+  "why": "a T3 nobody declared is made from base ores alone: the cluster walks its whole reaction tree (UL, ZK, G, GO, OH, GHO2) before XGHO2; with its ore capping the target at 1,500 each intermediate is made to that first, so XGHO2 starts near t3300",
   "modules": ["economy", "layout"],
   "start": { "room": "W8N3", "seed": 1, "node": "L8" },
-  "ticks": 4000,
+  "ticks": 5000,
   "assert": [{ "measure": "made", "resource": "XGHO2", "min": 400 }]
 }

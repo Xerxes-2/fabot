@@ -2,7 +2,7 @@ use std::cmp::Reverse;
 
 use fabot_base::engine;
 use fabot_base::grid::{FatigueFactor, step_ticks};
-use fabot_base::vocabulary::{Part, ResourceType, part_count_in, takes};
+use fabot_base::vocabulary::{Part, ResourceType, multiple, part_count_in, takes};
 use fabot_base::world::Pos;
 
 /// A body as the exchange reads it, on either side.
@@ -60,9 +60,9 @@ pub fn cast(body: &[Part]) -> Fighter {
     of_parts(body, &[], engine::PART_HITS * body.len() as i32, None)
 }
 
-/// A not-yet-cast body carrying `boost`'s compound on every part it takes.
-pub fn cast_boosted(body: &[Part], boost: Option<(ResourceType, i32)>) -> Fighter {
-    let boosts: Vec<Option<ResourceType>> = match boosted_by(body, boost) {
+/// A not-yet-cast body carrying its `boosted_by` compound on every part it takes.
+pub fn cast_boosted(body: &[Part], held: &[(ResourceType, i32)]) -> Fighter {
+    let boosts: Vec<Option<ResourceType>> = match boosted_by(body, held) {
         Some(compound) => body
             .iter()
             .map(|p| takes(*p, compound).then_some(compound))
@@ -72,12 +72,15 @@ pub fn cast_boosted(body: &[Part], boost: Option<(ResourceType, i32)>) -> Fighte
     of_parts(body, &boosts, engine::PART_HITS * body.len() as i32, None)
 }
 
-/// The compound `boost` gives `body`, when its stock covers every part the
-/// compound would take: `boost` is the compound and the parts it covers.
-pub fn boosted_by(body: &[Part], boost: Option<(ResourceType, i32)>) -> Option<ResourceType> {
-    let (compound, covered) = boost?;
-    let parts = (body.iter()).filter(|p| takes(**p, compound)).count() as i32;
-    (parts > 0 && parts <= covered).then_some(compound)
+/// Of the compounds `held` (each with the parts its stock covers), the one
+/// that multiplies `body` most among those covering every part they take.
+pub fn boosted_by(body: &[Part], held: &[(ResourceType, i32)]) -> Option<ResourceType> {
+    let parts = |c: ResourceType| (body.iter()).filter(|p| takes(**p, c)).count() as i32;
+    let gain = |c: ResourceType| body.iter().map(|p| multiple(*p, Some(c))).sum::<i32>();
+    (held.iter())
+        .filter(|(c, covered)| (1..=*covered).contains(&parts(*c)))
+        .max_by_key(|(c, _)| gain(*c))
+        .map(|(c, _)| *c)
 }
 
 /// Unlike `Hostiles.armed`, a healer or a dismantler beside a striker does not count: it deals no damage.

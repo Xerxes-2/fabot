@@ -67,8 +67,7 @@ pub(super) struct Scene<'a> {
     pub(super) armed: BTreeSet<Id>,
     pub(super) landed: Vec<Cast>,
     pub(super) spawning: Vec<Cast>,
-    /// The compound the declared lab cluster covers, and the parts it buys.
-    pub(super) boost: Option<(ResourceType, i32)>,
+    pub(super) boosts: Vec<(ResourceType, i32)>,
 }
 
 impl<'a> Scene<'a> {
@@ -404,7 +403,7 @@ impl<'a> Scene<'a> {
 
             if let Some(colony) = colony {
                 asked.queue(colony, &body);
-                let suffix = fighter::boosted_by(&body, self.boost)
+                let suffix = fighter::boosted_by(&body, &self.boosts)
                     .map_or_else(String::new, |c| format!("-{c}"));
                 let name = format!(
                     "{}{}-{}-{slot}{suffix}",

@@ -1,3 +1,4 @@
+use super::declarations::Declarations;
 use super::engine;
 use super::vocabulary::{self, ResourceType};
 use super::world::{self, Id, Pos, RoomName, StructureType, World};
@@ -37,6 +38,16 @@ pub fn booster<'a>(
         .or_else(|| (labs_in(world, room)).min_by_key(|l| (reagent(l), other(l), l.id)))
 }
 
+/// Most labs, ties to the first by name: one still building never takes it.
+pub fn cluster(world: &World, declarations: &Declarations) -> Option<RoomName> {
+    (world::hostiles::owned(&world.rooms).into_iter())
+        .filter(|room| !declarations.abandoning(*room))
+        .map(|room| (labs_in(world, room).count(), std::cmp::Reverse(room)))
+        .filter(|(labs, _)| *labs > 0)
+        .max()
+        .map(|(_, room)| room.0)
+}
+
 pub fn labs_in<'a>(world: &'a World, room: RoomName) -> impl Iterator<Item = &'a world::Structure> {
     (world.rooms.iter())
         .filter(move |r| r.name == room)
@@ -68,8 +79,7 @@ pub fn home_holds(world: &World, room: RoomName, compound: ResourceType) -> (i32
     })
 }
 
-/// Whether the lab holds the compound or nothing: a lab holds one mineral, so
-/// another one in it leaves the compound nowhere to land.
+/// A lab holds one mineral: another in it leaves the compound nowhere to land.
 fn holds_room_for(lab: &world::Structure, compound: ResourceType) -> bool {
     (lab.store.held.iter()).all(|(r, n)| *n <= 0 || *r == compound || !vocabulary::is_mineral(*r))
 }

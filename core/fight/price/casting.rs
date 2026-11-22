@@ -1,8 +1,7 @@
 use std::collections::BTreeMap;
 
-use fabot_base::declarations::Declarations;
 use fabot_base::engine;
-use fabot_base::vocabulary::{Part, ResourceType};
+use fabot_base::vocabulary::{Boost, Part, RESOURCES_ALL, ResourceType};
 use fabot_base::world::{
     Creep, Id, Owner, Pos, Room, RoomName, Spawn, Store, Structure, StructureType, World, terrain,
 };
@@ -172,15 +171,21 @@ pub fn side_in(room: Option<&Room>, bodies: Vec<Fighter>) -> exchange::Side {
     }
 }
 
-/// A body the lab stock does not all cover is cast unboosted rather than held.
-pub fn cluster_boost(world: &World, declarations: &Declarations) -> Option<(ResourceType, i32)> {
-    let (home, _) = declarations.labs()?;
-    let uh2o = ResourceType::UtriumAcid;
-    let (compound, energy) = fabot_base::boost::home_holds(world, home, uh2o);
-    let parts =
-        (compound / engine::BOOST_MINERAL_PER_PART).min(energy / engine::BOOST_ENERGY_PER_PART);
-
-    (parts > 0).then_some((ResourceType::UtriumAcid, parts))
+/// Each ATTACK compound the cluster holds and the parts its stock covers.
+pub fn cluster_boosts(world: &World, cluster: Option<RoomName>) -> Vec<(ResourceType, i32)> {
+    (cluster.into_iter())
+        .flat_map(|home| {
+            (RESOURCES_ALL.iter().copied())
+                .filter(|c| matches!(c.boost(), Some(Boost::Attack(_))))
+                .map(move |c| {
+                    let (compound, energy) = fabot_base::boost::home_holds(world, home, c);
+                    let parts = (compound / engine::BOOST_MINERAL_PER_PART)
+                        .min(energy / engine::BOOST_ENERGY_PER_PART);
+                    (c, parts)
+                })
+        })
+        .filter(|(_, parts)| *parts > 0)
+        .collect()
 }
 
 pub fn wins(
@@ -202,20 +207,20 @@ pub fn price(
     bodies: &[Body],
     copies_of: impl Fn(&Body) -> i32,
     tick_worth: i32,
-    boost: Option<(ResourceType, i32)>,
+    boosts: &[(ResourceType, i32)],
 ) -> Option<(Vec<Body>, exchange::Outcome, exchange::Side)> {
     let set: Vec<Body> = if wins(stance, ours, theirs, terrain) {
         Vec::new()
     } else {
         exchange::cheapest_win(
-            stance, ours, bodies, copies_of, tick_worth, theirs, terrain, boost,
+            stance, ours, bodies, copies_of, tick_worth, theirs, terrain, boosts,
         )?
     };
 
     let mut landed = ours.clone();
     landed
         .bodies
-        .extend(set.iter().map(|body| fighter::cast_boosted(body, boost)));
+        .extend(set.iter().map(|body| fighter::cast_boosted(body, boosts)));
 
     let outcome = exchange::outcome(stance, &landed, theirs, terrain);
 

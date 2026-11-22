@@ -25,18 +25,18 @@ export const NODES = {
   X2: { level: 6, stored: 100000, without: ["rampart"], spare: 1 },
   F2: { level: 6, stored: 100000, without: ["rampart"], spare: 1, stale: true },
   Y2: { level: 6, stored: 20000, without: ["rampart"], spare: 1 },
-  // N5 with the ore for the UH line stocked and its labs declared the cluster.
-  L5: { level: 6, stored: "100000,H:6000,O:6000,U:6000", without: ["rampart"], labs: { UH2O: 3000 } },
+  // N5 with its labs and the ore for XKHO2 alone stocked.
+  L5: { level: 6, stored: "100000,H:6000,O:6000,K:6000,X:6000", without: ["rampart"], labs: true },
   // L5 without its tower, its first lab holding what a body is boosted with:
   // the raid must be answered by a cast, and the lab can boost one at once.
-  B5: { level: 6, stored: "100000,H:6000,O:6000,U:6000", without: ["rampart", "tower"], labs: { UH2O: 3000 }, labStock: "energy:2000,UH2O:900" },
+  B5: { level: 6, stored: "100000,H:6000,O:6000,U:6000", without: ["rampart", "tower"], labs: true, labStock: "energy:2000,UH2O:900" },
   // B5's lab with no compound: the cast is not held waiting for one.
-  S5: { level: 6, stored: "100000,H:6000,O:6000", without: ["rampart", "tower"], labs: { UH2O: 3000 }, labStock: "energy:2000" },
+  S5: { level: 6, stored: "100000,H:6000,O:6000", without: ["rampart", "tower"], labs: true, labStock: "energy:2000" },
   // B5 with the compound in the storage and its labs empty: a hauler fills the
   // lab the waiting body walks to, as the minerals rest in the terminal first.
-  W5: { level: 6, stored: "100000,H:6000,O:6000,U:6000,UH2O:900", without: ["rampart", "tower"], labs: { UH2O: 3000 } },
-  // W5 at RCL7, six labs to spare one: the cluster reacts in the others.
-  W7: { level: 7, stored: "100000,H:6000,O:6000,U:6000,UH2O:900", without: ["rampart", "tower", "link", "factory"], labs: { UH2O: 3000 } },
+  W5: { level: 6, stored: "100000,H:6000,O:6000,U:6000,UH2O:900", without: ["rampart", "tower"], labs: true },
+  // W5 at RCL7, six labs.
+  W7: { level: 7, stored: "100000,H:6000,O:6000,U:6000,UH2O:900", without: ["rampart", "tower", "link", "factory"], labs: true },
   // An RCL7 node as another bot left it: its roads and containers worn to
   // half, its links and ramparts sites to build.
   T7: { level: 7, stored: 100000, without: ["link", "rampart", "factory"], worn: 0.5 },
@@ -52,7 +52,7 @@ export const NODES = {
   // N7 with every room in reach avoided.
   A7: { level: 8, stored: 500000, without: ["rampart"], modern: true, bodies: LATE_BODIES, alone: true },
   // A T3 from base ores alone: the cluster walks the whole reaction tree.
-  L8: { level: 8, stored: "500000,H:3000,O:3000,U:3000,K:3000,L:3000,Z:3000,X:3000", without: ["rampart"], modern: true, bodies: LATE_BODIES, alone: true, labs: { XGHO2: 500 } },
+  L8: { level: 8, stored: "500000,H:3000,O:3000,U:3000,K:3000,L:3000,Z:3000,X:3000", without: ["rampart"], modern: true, bodies: LATE_BODIES, alone: true },
 };
 
 export const near = (room, hops) => {
@@ -202,7 +202,7 @@ export function standNode(world, room, name, plan) {
 
   const fits = outposts(world, room);
   if ((node.outposts || node.claims || node.stale) && !fits.length) throw new Error(`${room}: no neighbour fits an outpost`);
-  const declarations = { outposts: node.outposts ? fits : [], claims: fits.slice(0, node.claims ?? 0), ...(node.labs && { labs: { home: room, targets: node.labs } }), ...(node.alone && { avoid: near(room, 3) }) };
+  const declarations = { outposts: node.outposts ? fits : [], claims: fits.slice(0, node.claims ?? 0), ...(node.alone && { avoid: near(room, 3) }) };
   // As `engine/node.mjs declare`: the engine's GCL for that many rooms past the first.
   const rooms = node.spare ?? declarations.claims.length;
   const gcl = rooms && !node.short ? Math.ceil(1e6 * rooms ** 2.4) : world.gcl;

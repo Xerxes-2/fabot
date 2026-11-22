@@ -10,7 +10,7 @@ use fabot_base::grid::Footprint;
 use fabot_base::intel::{self, Intel, Scout};
 use fabot_base::tiles::{self, Tile};
 use fabot_base::vocabulary::ResourceType::{self, Energy};
-use fabot_base::vocabulary::{Part, part_count_in};
+use fabot_base::vocabulary::{ORES, Part, part_count_in};
 use fabot_base::world::{
     self, BodyPart, Built, Controller, Creep, Id, Owner, Pos, Room, RoomName, Source, Spawn, Store,
     Structure, StructureType, World, terrain,
@@ -904,7 +904,20 @@ fn free_at(grounds: &[Ground], room: RoomName) -> i32 {
         .map_or(0, |t| t.store.free())
 }
 
-/// The declared lab home's plan and boost lab, and each other colony's ore
+fn minerals_dug_or_held(world: &World, colonies: &[Ground]) -> Vec<ResourceType> {
+    let carried = (world.creeps.iter().filter(|c| c.owner.is_ours()))
+        .flat_map(|c| c.store.held.iter().filter(|(_, n)| *n > 0).map(|(r, _)| *r));
+    (colonies.iter())
+        .flat_map(|g| {
+            let held = (g.ores.iter().map(|o| o.2))
+                .chain(g.labs.iter().filter_map(|l| l.held.map(|h| h.0)));
+            (g.minerals.iter().map(|m| m.resource)).chain(held)
+        })
+        .chain(carried)
+        .collect()
+}
+
+/// The lab cluster's plan and boost lab, and each other colony's ore
 /// shipped to it.
 fn stock_labs(
     world: &World,
@@ -914,6 +927,12 @@ fn stock_labs(
     given_up: &dyn Fn(RoomName) -> bool,
 ) {
     let home = &home;
+    let ships = |g: &Ground| &g.room != home && g.terminal.is_some() && !given_up(g.room);
+    let shippable = ORES.map(|ore| {
+        (grounds.iter().take(colonies).filter(|g| ships(g)))
+            .flat_map(|g| g.ores.iter().filter(|o| o.2 == ore).map(|o| o.3))
+            .sum::<i32>()
+    });
     let Some(g) = grounds.iter_mut().find(|g| &g.room == home) else {
         return;
     };
@@ -995,12 +1014,16 @@ fn stock_labs(
                 energy: energy - lab.store.amount_of(Energy),
             })
         });
-    let mut short = super::labs::ore_short(targets, &stock);
+    let with_shippable = |r: ResourceType| {
+        stock(r) + (ORES.iter().position(|o| *o == r)).map_or(0, |i| shippable[i])
+    };
+    let makeable = super::labs::makeable(targets, &with_shippable);
+    let mut short = super::labs::ore_short(&makeable, &stock);
     let home_free = free_at(grounds, *home);
 
     // The colonies in their order, each the ore it holds up to what is left.
     for g in grounds.iter_mut().take(colonies) {
-        if &g.room == home || g.terminal.is_none() || given_up(g.room) {
+        if !ships(g) {
             continue;
         }
         for (ore, left) in &mut short {
@@ -1236,14 +1259,14 @@ pub fn of_world<'t>(
 
     let given_up = |room: RoomName| declarations.abandoning(room);
 
-    if let Some((home, targets)) = &declarations.labs()
-        && !given_up(*home)
-    {
+    if let Some(home) = ours.cluster {
+        let targets =
+            super::labs::targets(&minerals_dug_or_held(world, &grounds[..colonies.len()]));
         stock_labs(
             world,
             &mut grounds,
             colonies.len(),
-            (*home, targets),
+            (home, &targets),
             &given_up,
         );
     }

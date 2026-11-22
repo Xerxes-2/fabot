@@ -6,7 +6,7 @@ use fabot_base::declarations::{ColonyPlan, Declarations, Outpost, REACH_HOPS, St
 use fabot_base::engine;
 use fabot_base::intel::{self, Intel, Row};
 use fabot_base::tiles;
-use fabot_base::vocabulary::{ORES, ResourceType};
+use fabot_base::vocabulary::{BOOSTS, ORES, ResourceType, ores_in};
 use fabot_base::world::{Room, RoomName, StructureType, World};
 use fabot_layout::{ground, plan};
 use screeps::LocalRoomTerrain;
@@ -84,19 +84,11 @@ pub fn score(f: &Facts) -> f64 {
         + f.mineral
 }
 
-/// The base minerals in a unit of XGHO2, XLHO2, XKHO2, XGH2O and XZHO2 (the
-/// engine's REACTIONS), by `ORES`, and the owner's rank of the
-/// part each boosts: TOUGH, HEAL, RANGED_ATTACK, then upgrade and MOVE.
-const BOOSTS: [(i32, [i32; ORES.len()]); 5] = [
-    (4, [1, 2, 1, 1, 1, 1, 1]),
-    (3, [1, 2, 0, 0, 1, 0, 1]),
-    (2, [1, 2, 0, 1, 0, 0, 1]),
-    (1, [2, 1, 1, 1, 1, 1, 1]),
-    (1, [1, 2, 0, 0, 0, 1, 1]),
-];
-
 fn demand(ore: usize) -> i32 {
-    BOOSTS.iter().map(|(rank, bases)| rank * bases[ore]).sum()
+    BOOSTS
+        .iter()
+        .map(|(boost, rank)| rank * ores_in(*boost)[ore])
+        .sum()
 }
 
 /// The most demanded mineral's first copy is a source's dig, the flat bonus

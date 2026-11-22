@@ -7,9 +7,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
 
 use super::state::State;
-use fabot_base::declarations::{
-    ColonyPlan, Declarations, Declared, Flow, Node, Outpost, Stage, undeclared,
-};
+use fabot_base::declarations::{ColonyPlan, Declarations, Declared, Outpost, Stage, undeclared};
 use fabot_base::world::{Id, Pos, RoomName};
 use fabot_economy::EconomyState;
 use fabot_economy::task::{Assignment, of_task_id, task_id};
@@ -123,7 +121,6 @@ impl Memory {
                 _ => undeclared().reserve_lifetimes,
             },
             outposts: outposts(declared, "outposts"),
-            flows: flows(&declared["labs"]),
             claims: outposts(declared, "claims"),
             allies: list(declared, "allies"),
             enemies: list(declared, "enemies"),
@@ -186,20 +183,4 @@ fn outposts(declared: &Value, key: &str) -> Vec<Outpost> {
                 .collect(),
         })
         .collect()
-}
-
-/// `{ home, targets: { compound: stock } }`.
-fn flows(labs: &Value) -> Vec<Flow> {
-    let Some(home) = labs["home"].as_str().and_then(|name| name.parse().ok()) else {
-        return Vec::new();
-    };
-    let targets = labs["targets"].as_object().into_iter().flatten();
-    (targets.filter_map(|(name, stock)| {
-        Some(Flow {
-            what: name.parse().ok()?,
-            to: Node::Colony(home),
-            stock: stock.as_f64()? as i32,
-        })
-    }))
-    .collect()
 }

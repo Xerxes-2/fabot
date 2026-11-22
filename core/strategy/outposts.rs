@@ -112,11 +112,8 @@ pub fn busy(
         let tree = atlas.tree(&declarations.avoid, SIEGE_HOPS, room);
         serving.extend(casting::homes(&colonies, |from| tree.crossings(from, room)));
     }
-    let boosting = (declarations.labs())
-        .filter(|(_, targets)| !targets.is_empty())
-        .map(|(home, _)| home);
     (plans.iter())
-        .filter(|p| serving.contains(&p.room) || p.owes || boosting == Some(p.room))
+        .filter(|p| serving.contains(&p.room) || p.owes)
         .map(|p| p.room)
         .collect()
 }

@@ -135,6 +135,8 @@ pub struct Derived {
     pub danger: Vec<(RoomName, TileSet)>,
     pub trees: Vec<(RoomName, Tree)>,
     pub homes: Vec<Home>,
+    /// The colony whose labs react and boost (`boost::cluster`).
+    pub cluster: Option<RoomName>,
 }
 
 impl Derived {
@@ -209,6 +211,7 @@ pub fn derive(world: &World, atlas: &mut Atlas) -> Derived {
         colonies,
         worked: Vec::new(),
         trees,
+        cluster: None,
     }
 }
 

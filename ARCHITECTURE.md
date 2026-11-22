@@ -189,7 +189,7 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
 | `fight.groups` | list of `Group` (§6.1) | Fight | Memory | hostile cluster identity across ticks |
 | `fight.casts` | pending casts by engagement | Fight | Memory | prevent double-casting while spawning |
 | `fight.due` | colonies with imminent siege successor | Fight | Memory | feeds `ColonyPlan.owes` (§5) |
-| `declarations` | operator overrides + per-tick `Strategy` plans (`ColonyPlan`, outposts, claims, operations, flows, allies, enemies, sieges, avoid, tactic rules) | Strategy | Memory (operator); plans rebuilt per tick | world configuration as data |
+| `declarations` | operator overrides + per-tick `Strategy` plans (`ColonyPlan`, outposts, claims, operations, allies, enemies, sieges, avoid, tactic rules) | Strategy | Memory (operator); plans rebuilt per tick | world configuration as data |
 | `expansion` | in-flight claim, failed rooms (100k fade), abandoned colonies | Strategy | Memory | outlives travel, stock dips, and raze ticks |
 | `switches` | module name → bool (`false` disables; `recorder: true` opts in) | Main | Memory | live kill switches |
 | `observe.*` | health, faults, per-module CPU, counts, tactic offers, alerts | Observe | segment 1 | operator telemetry & benchmark calibration |
@@ -367,12 +367,22 @@ pricer cost ~2× CPU and 580 lines for no gain and was not merged).
   colony not given up, else the nearest whose bank casts a claimer; one rule
   on `Derived` facts that `outposts::busy` holds too), `Scout`, `Boost`, and future
   `Mine`/`Pickup` declarations without owning them.
-- **Labs (`economy/labs.rs`):** `labs::plan_for` derives a stateless per-tick
-  reaction plan from `declarations.flows` toward target compound stocks, any
-  lab product walked down the crate's `REACTIONS` to base ores; labs
+- **Labs (`economy/labs.rs`):** the cluster (`Derived.cluster`, read by
+  Economy, Fight, and `Tick`) is the colony not given up with the most labs,
+  at least one, ties to the first by name. One rule serves reacting (three
+  labs) and boosting (one): the colony with the most labs reacts if any can,
+  and fewer than three still boost. Its targets are derived, not declared: every
+  T3 combat boost whose ores the empire digs or holds, in the `BOOSTS` rank
+  expansion scores minerals by, each to Hivemind's "high" stock, so the labs
+  make what fights spend from what we dig with no operator in the loop.
+  `labs::plan_for` derives a stateless per-tick reaction plan toward them,
+  depth-first down the crate's `REACTIONS`, each target cut to whole
+  reactions the stock carries through to it after the targets before it
+  (`labs::makeable`); the other colonies ship the ore those cut targets lack
+  from what they hold. Labs
   reserved for active boosts (§6.5) drop out of reactions and are filled by
   carriers via `Ground::boost_lab`. Layout places no lab below RCL8 (labs are
-  worth little early); below RCL8 a declared cluster in a new room is inert.
+  worth little early).
 - **Abandon (`economy/abandon.rs`):** declared colonies stop digging, building,
   and upgrading past deadline, ship storage/terminal/lab contents out (energy
   last), destroy own structures (`destroy()` requires our controller, and owned
@@ -536,8 +546,10 @@ conflicts never silently cancel an act.
   soonest (hops + spawn queue + energy refill time); home `Defend` casts at
   home. Bodies end with one `MOVE` (`with_move_last`) and carry `HEAL` when
   leaving owned rooms (except siege dismantlers covered by medics).
-- **Boosts (`core/base/boost.rs`):** if the declared lab cluster covers a compound,
-  the cast encodes it in the creep name (`fight-<tick>-<eng>-<slot>-<compound>`).
+- **Boosts (`core/base/boost.rs`):** a body takes the ATTACK compound the
+  cluster's stock covers for every part it boosts that multiplies it most
+  (`fighter::boosted_by`, which the Exchange prices too); the cast encodes it
+  in the creep name (`fight-<tick>-<eng>-<slot>-<compound>`).
   `Tick` holds the creep at the boost lab while parts need it, stock covers it,
   and a carrier exists — a stateless tick fact, never a timer.
 
