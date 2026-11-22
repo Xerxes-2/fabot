@@ -17,6 +17,9 @@ rustc-hash.workspace = true
 strum.workspace = true
 enum-iterator.workspace = true
 
+[dev-dependencies]
+proptest.workspace = true
+
 [features]
 tools = []
 test-support = []
