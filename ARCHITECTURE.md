@@ -212,7 +212,7 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
 | `atlas.reads` | last tick's room reads around each asked room and hops | Atlas | heap | an unchanged read is handed on as last tick's `Rc`, so a kept walk or tree checks its rooms by address; dropped the tick after going unread |
 | `terrain` | room → `LocalRoomTerrain` (borrowed by `World`) + `getRoomStatus` | World | heap | terrain never changes and status only when novice/respawn ends (prefetched to `SIEGE_HOPS` to avoid seam calls); rooms of foreign status are never routed/served (engine traps creeps on exit) and unread rooms never observed (off-shard refuses observer) |
 | `buffers` | emptied `World` lists from last tick | World | heap | capacity reuse without allocation (§9.2) |
-| `fixed` | structure id → immutable type/tile/owner/hitsMax | World (`read.js`) | JS heap | avoids repeated getter cost (~1/5 of `world`); checked by `replay --check` |
+| `fixed` | structure id → immutable type/tile/owner/hitsMax | World (`read.js`) | JS heap | avoids repeated getter cost (~1/5 of `read`); checked by `replay --check` |
 
 **Rules:** Memory and segments are written once per tick by `Main` from `State'`;
 no `thread_local!`/`static` outside `app/driver.rs` and the heap rows above; no
@@ -697,7 +697,7 @@ Pure at module boundaries, systems Rust inside (measurements override defaults):
   per-creep/per-tile loops avoid per-tick allocations.
 - **Single-pass JS→WASM seam:** ~90% of world-read cost was seam calls rather
   than work, so `src/app/read.js` packs the tick into one `Int32Array` +
-  interned string buffer (interning cut `world` by −17%), decoded by
+  interned string buffer (interning cut `read` and `decode` by −17%), decoded by
   `core/base/world.rs`; never add per-field JS calls.
 - **Copy `world::Id`:** 96-bit left-aligned hex + length (`Copy`, lex-ordered as
   text), avoiding `String` allocations and pointer hashing.

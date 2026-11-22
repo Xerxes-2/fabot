@@ -49,6 +49,8 @@ pub trait Terrains {
 /// holds and what else the driver keeps of the read; the intents executed;
 /// Memory's text (when it changed) written with the world, that read and
 /// intel beside it, each pushing its own phases.
+pub type Phases = Vec<(String, f64)>;
+
 pub struct Seam<R, E, W> {
     pub read: R,
     pub execute: E,
@@ -71,21 +73,26 @@ pub fn run<'t, P, R, E, W>(
     seam: Seam<R, E, W>,
 ) -> Ran<'t>
 where
-    R: FnOnce(&Declarations, Option<RoomName>) -> (World<'t>, &'t dyn Terrains, P),
+    R: FnOnce(
+        &Declarations,
+        Option<RoomName>,
+        (f64, &mut Phases),
+    ) -> (World<'t>, &'t dyn Terrains, P, f64),
     E: FnOnce(&[Action]) -> Vec<Refusal>,
     W: FnOnce(&World, &P, &Intel, Option<String>, &mut Vec<(String, f64)>),
 {
     let start = clock();
     let mut state = memory.state();
     let declarations: Declarations = besieging(memory.declarations(), intel);
-    phases.push(("hydrate".to_string(), clock() - start));
     state.layout = std::mem::take(&mut heap.standing);
-
-    let start = clock();
     let drain = (state.fight.engagements.iter())
         .find(|e| e.phase == Phase::Draining)
         .map(|e| e.room);
-    let (mut world, maps, pass) = (seam.read)(&declarations, drain);
+    let read = clock();
+    phases.push(("hydrate".to_string(), read - start));
+
+    let (mut world, maps, pass, start) = (seam.read)(&declarations, drain, (read, phases));
+    (world.rooms.iter_mut()).for_each(|r| r.terrain = maps.terrain(r.name));
     let misread = world.drop_misread();
     let sightings = std::mem::take(&mut heap.sightings);
     let atlas = std::mem::take(&mut heap.atlas);

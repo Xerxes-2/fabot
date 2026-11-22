@@ -9,7 +9,7 @@ use fabot_base::intel::Intel;
 use fabot_base::intents::Action;
 use fabot_base::tiles;
 use fabot_base::world::{RoomName, World};
-use fabot_core::drive::{self, Terrains};
+use fabot_core::drive::{self, Phases, Terrains};
 use fabot_core::memory::Memory;
 use fabot_observe::metrics::{self, Metrics};
 use krebs::intents::RoomIntents;
@@ -76,15 +76,15 @@ impl<W: Write> Driver<W> {
         let mut written = None;
         let mut stored = None;
         let maps = &self.maps;
-        let read_ms = std::cell::Cell::new(0.0);
         let seam = drive::Seam {
-            read: |declarations: &Declarations, _drain| {
-                let at = Instant::now();
+            read: |declarations: &Declarations, _drain, (start, phases): (f64, &mut Phases)| {
                 let mut world = read::world(v, declarations);
+                let mapping = clock();
+                phases.push(("decode".to_string(), mapping - start));
                 world.closed = maps.1.clone();
-                (world.rooms.iter_mut()).for_each(|r| r.terrain = maps.terrain(r.name));
-                read_ms.set(ms(at));
-                (world, maps as &dyn Terrains, ())
+                let mapped = clock();
+                phases.push(("map".to_string(), mapped - mapping));
+                (world, maps as &dyn Terrains, (), mapped)
             },
             execute: |intents: &[Action]| {
                 let (intents, refusals) = act::run(v, intents);
@@ -104,8 +104,8 @@ impl<W: Write> Driver<W> {
         self.memory = written.unwrap_or(memory.text);
         let decided = phases
             .iter()
-            .filter(|(p, _)| !matches!(p.as_str(), "execute" | "metrics"));
-        let decide_ms = decided.map(|(_, cpu)| cpu).sum::<f64>() - read_ms.get();
+            .filter(|(p, _)| !matches!(p.as_str(), "decode" | "map" | "execute" | "metrics"));
+        let decide_ms = decided.map(|(_, cpu)| cpu).sum::<f64>();
         self.decide_ms += decide_ms;
         self.adapter_ms += ms(began) - decide_ms;
 

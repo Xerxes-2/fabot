@@ -8,7 +8,7 @@ use crate::app::{executor, record, wire};
 use fabot_base::declarations::Declarations;
 use fabot_base::intel::{self, Intel};
 use fabot_base::world::{World, read};
-use fabot_core::drive::{self, Terrains as _};
+use fabot_core::drive;
 use fabot_observe::metrics::{self, Metrics};
 
 const FAULTS_KEPT: usize = 20;
@@ -80,12 +80,15 @@ fn run_tick() {
     let mut recorded = None;
     let (read_maps, read_buffers) = (&mut maps, &mut buffers);
     let seam = drive::Seam {
-        read: move |declarations: &Declarations, drain| {
+        read: move |declarations: &Declarations, drain, (start, phases): (f64, &mut _)| {
             let read_maps = read_maps;
-            let (mut world, read) = world::of_game(read_maps, read_buffers, declarations, drain);
-            let maps: &world::Maps = read_maps;
-            (world.rooms.iter_mut()).for_each(|r| r.terrain = maps.terrain(r.name));
-            (world, maps as &dyn drive::Terrains, read)
+            let (world, maps, read, mapped) = world::of_game(
+                read_maps,
+                read_buffers,
+                (declarations, drain),
+                (&clock, start, phases),
+            );
+            (world, maps as &dyn drive::Terrains, read, mapped)
         },
         execute: executor::run,
         write: |world: &World,

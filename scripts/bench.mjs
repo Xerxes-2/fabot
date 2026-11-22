@@ -114,7 +114,7 @@ console.log(
     `fingerprints ${unstable.length ? `UNSTABLE in ${unstable}` : "stable"}${sides.length === 2 ? `, A/B ${differ ? `DIFFER on ${differ} ticks` : "identical"}` : ""}`,
 );
 
-const phases = [...new Set(runs.A[0].flatMap((t) => Object.keys(t.ms)))];
+const phases = [...new Set(sides.toReversed().flatMap((s) => runs[s][0].flatMap((t) => Object.keys(t.ms))))];
 const table = (pick) => {
   const n = coldAt.filter(pick).length;
   if (n === 0) return console.log("  none: no window is longer than --cold");
@@ -135,7 +135,7 @@ const table = (pick) => {
     if (sides.length === 2) {
       const b = at("B", p);
       const ratios = a.perRound.map((x, k) => (x > 0 ? b.perRound[k] / x - 1 : 0));
-      row = [p, a.min.toFixed(3), b.min.toFixed(3), pct(b.min / a.min - 1), pct(mean(ratios)), `${(200 * se(ratios)).toFixed(1)}%`];
+      row = [p, a.min.toFixed(3), b.min.toFixed(3), a.min > 0 ? pct(b.min / a.min - 1) : "new", pct(mean(ratios)), `${(200 * se(ratios)).toFixed(1)}%`];
     } else row = [p, a.min.toFixed(3), mean(a.perRound).toFixed(3), (2 * se(a.perRound)).toFixed(3), `${((100 * a.min) / total).toFixed(1)}%`];
     console.log(row.map((c) => String(c).padStart(10)).join(""));
   }

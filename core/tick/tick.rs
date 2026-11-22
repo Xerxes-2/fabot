@@ -284,7 +284,7 @@ pub struct Decided {
 }
 
 /// From the world read to the intents settled. `began` is when the `world`
-/// phase began, before the driver read it.
+/// phase began, after the driver read it.
 pub fn decide<'t>(
     (clock, began): (impl Fn() -> f64, f64),
     phases: &mut Vec<(String, f64)>,

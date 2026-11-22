@@ -85,17 +85,21 @@ pub struct Pass {
     pub strs: String,
 }
 
-pub fn of_game(
-    maps: &mut Maps,
+pub fn of_game<'t>(
+    maps: &'t mut Maps,
     buffers: &mut read::Buffers,
-    declarations: &Declarations,
-    drain: Option<RoomName>,
-) -> (World<'static>, Pass) {
+    (declarations, drain): (&Declarations, Option<RoomName>),
+    (clock, start, phases): (&dyn Fn() -> f64, f64, &mut fabot_core::drive::Phases),
+) -> (World<'t>, &'t Maps, Pass, f64) {
     let packed = read(drain.map(|room| room.to_string()));
     let ints = packed.get(0).unchecked_into::<Int32Array>().to_vec();
     let text = packed.get(1).as_string().unwrap_or_default();
+    let decoding = clock();
+    phases.push(("read".to_string(), decoding - start));
     let mut world = read::world(&ints, &text, declarations, buffers);
     world.cpu_limit = f64::from(game::cpu::limit());
+    let mapping = clock();
+    phases.push(("decode".to_string(), mapping - decoding));
     for name in world.rooms.iter().map(|room| room.name) {
         if !matches!(maps.terrain.get(&name), Some(Some(_)))
             && let Some(terrain) = terrain_of(name)
@@ -110,7 +114,9 @@ pub fn of_game(
         .map(|s| s.pos.room);
     maps.read_around(homes.collect::<BTreeSet<_>>().into_iter());
     world.closed = read::closed(&world, declarations, |room| maps.status(room));
-    (world, Pass { ints, strs: text })
+    let mapped = clock();
+    phases.push(("map".to_string(), mapped - mapping));
+    (world, maps, Pass { ints, strs: text }, mapped)
 }
 
 /// The map serves rooms the bot cannot see, and reading it needs no `Room` object.
