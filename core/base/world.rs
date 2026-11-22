@@ -107,113 +107,77 @@ impl std::fmt::Debug for Id {
     }
 }
 
-/// A room by its world coordinates: W0 is x = -1, N0 is y = -1.
-/// Ordered west to east, then north to south: not as its name is.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct RoomName {
-    pub x: i16,
-    pub y: i16,
-}
+/// A room by its world coordinates (W0 is x = -1, N0 is y = -1); `sim` is W127N127, on no map.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RoomName(screeps::RoomName);
 
 impl RoomName {
+    pub const SIM: RoomName = RoomName(screeps::RoomName::from_packed(0));
+
+    #[cfg(any(test, feature = "test-support", feature = "tools"))]
+    pub const W1N1: RoomName = RoomName::new(-2, -2);
+
     pub const fn new(x: i32, y: i32) -> RoomName {
-        RoomName {
-            x: x as i16,
-            y: y as i16,
-        }
+        debug_assert!(-128 <= x && x <= 127 && -128 <= y && y <= 127);
+        let (x, y) = ((x + 128) as u16, (y + 128) as u16);
+        RoomName(screeps::RoomName::from_packed(x << 8 | y))
     }
 
-    /// The simulator's one room, off the grid, its name kept to write back.
-    pub const SIM: RoomName = RoomName {
-        x: i16::MIN,
-        y: i16::MIN,
-    };
-
-    /// `None` outside the `W3N1` grammar but for `sim`.
-    pub const fn parse(name: &str) -> Option<RoomName> {
-        let b = name.as_bytes();
-        if let [b's', b'i', b'm'] = b {
-            return Some(RoomName::SIM);
+    /// `None` past the grid's edge; `sim` has no neighbours.
+    pub fn offset(self, dx: i32, dy: i32) -> Option<RoomName> {
+        if (dx, dy) == (0, 0) {
+            return Some(self);
         }
-        match RoomName::axis(b, 0, b'W', b'E') {
-            Some((x, at)) => match RoomName::axis(b, at, b'N', b'S') {
-                Some((y, end)) if end == b.len() => Some(RoomName::new(x, y)),
-                _ => None,
-            },
-            None => None,
-        }
+        let (x, y) = self.on_grid().map(|(x, y)| (x + dx, y + dy))?;
+        let on = |c: i32| (-128..=127).contains(&c);
+        (on(x) && on(y) && (x, y) != (-128, -128)).then(|| RoomName::new(x, y))
     }
 
-    const fn axis(b: &[u8], at: usize, outward: u8, inward: u8) -> Option<(i32, usize)> {
-        if at >= b.len() || (b[at] != outward && b[at] != inward) {
-            return None;
-        }
-        let mut end = at + 1;
-        let mut value: i32 = 0;
-        while end < b.len() && b[end].is_ascii_digit() && end - at <= 4 {
-            value = value * 10 + (b[end] - b'0') as i32;
-            end += 1;
-        }
-        if end == at + 1 {
-            return None;
-        }
-        Some((if b[at] == outward { -value - 1 } else { value }, end))
+    pub fn on_map(self) -> Option<screeps::RoomName> {
+        (self != RoomName::SIM).then_some(self.0)
     }
 
-    /// `parse`, for names written in code: a fixture's or a plan's.
-    pub const fn named(name: &str) -> RoomName {
-        match RoomName::parse(name) {
-            Some(room) => room,
-            None => panic!("no room name"),
-        }
-    }
-
-    /// `sim` has no neighbours: its sentinel's would be far off the map.
     pub fn on_grid(self) -> Option<(i32, i32)> {
-        (self != RoomName::SIM).then(|| self.coords())
+        self.on_map().map(|r| (r.x_coord(), r.y_coord()))
     }
 
+    /// `sim`'s are far off the grid, so no room reads near it.
     pub fn coords(self) -> (i32, i32) {
-        (i32::from(self.x), i32::from(self.y))
+        let sentinel = i32::from(i16::MIN);
+        self.on_grid().unwrap_or((sentinel, sentinel))
     }
+}
 
-    /// Spelt on the stack: `Display` writes a name with no `String` between.
-    fn bytes(self) -> [u8; 12] {
-        let mut out = [0u8; 12];
-        if self == RoomName::SIM {
-            out[..3].copy_from_slice(b"sim");
-            return out;
+impl std::str::FromStr for RoomName {
+    type Err = screeps::local::RoomNameParseError;
+
+    fn from_str(name: &str) -> Result<RoomName, Self::Err> {
+        match name {
+            "sim" => Ok(RoomName::SIM),
+            _ => name.parse().map(RoomName),
         }
-        let mut at = 0;
-        for (outward, inward, value) in [(b'W', b'E', self.x), (b'N', b'S', self.y)] {
-            let (side, value) = if value < 0 {
-                (outward, -i32::from(value) - 1)
-            } else {
-                (inward, i32::from(value))
-            };
-            out[at] = side;
-            at += 1;
-            let start = at;
-            let mut rest = value;
-            loop {
-                out[at] = b'0' + (rest % 10) as u8;
-                at += 1;
-                rest /= 10;
-                if rest == 0 {
-                    break;
-                }
-            }
-            out[start..at].reverse();
-        }
-        out
     }
 }
 
 impl std::fmt::Display for RoomName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let bytes = self.bytes();
-        let len = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
-        f.write_str(std::str::from_utf8(&bytes[..len]).unwrap_or_default())
+        match self.on_map() {
+            Some(room) => room.fmt(f),
+            None => f.write_str("sim"),
+        }
+    }
+}
+
+impl PartialOrd for RoomName {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// West to east, then north to south, `sim` first: the crate's own order is `y` first.
+impl Ord for RoomName {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.packed_repr().cmp(&other.0.packed_repr())
     }
 }
 
@@ -251,7 +215,7 @@ impl serde::Serialize for RoomName {
 impl<'de> serde::Deserialize<'de> for RoomName {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let name = String::deserialize(d)?;
-        RoomName::parse(&name).ok_or_else(|| serde::de::Error::custom("no room name"))
+        name.parse().map_err(serde::de::Error::custom)
     }
 }
 
@@ -265,10 +229,6 @@ pub struct Pos {
 impl Pos {
     pub fn new(room: RoomName, x: i32, y: i32) -> Pos {
         Pos { room, x, y }
-    }
-
-    pub fn index(&self) -> i32 {
-        self.y * 50 + self.x
     }
 
     #[inline]
@@ -301,10 +261,7 @@ impl PartialOrd for Pos {
 /// Row-major, as a tile index orders, where a derived order would put `x` first.
 impl Ord for Pos {
     fn cmp(&self, other: &Self) -> Ordering {
-        match self.room.cmp(&other.room) {
-            Ordering::Equal => self.index().cmp(&other.index()),
-            c => c,
-        }
+        (self.room, self.y, self.x).cmp(&(other.room, other.y, other.x))
     }
 }
 
@@ -715,7 +672,7 @@ pub mod read {
         /// The engine names every room in the grammar; a name outside it reads
         /// as `sim`'s, the one room the grid has no square for, not a panic.
         fn room_name(&mut self) -> RoomName {
-            RoomName::parse(self.word()).unwrap_or(RoomName::SIM)
+            self.word().parse().unwrap_or(RoomName::SIM)
         }
 
         fn word(&mut self) -> &'a str {
@@ -1479,9 +1436,9 @@ mod tests {
     fn a_room_out_of_sight_never_remembers_a_body_standing_now() {
         let mut dice = Dice::new(0x5167_7105);
         let names = [
-            RoomName::named("W1N1"),
-            RoomName::named("W2N1"),
-            RoomName::named("W3N1"),
+            RoomName::W1N1,
+            "W2N1".parse::<RoomName>().unwrap(),
+            "W3N1".parse::<RoomName>().unwrap(),
         ];
         let part = |kind| BodyPart {
             kind,

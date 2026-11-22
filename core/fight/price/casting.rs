@@ -464,7 +464,7 @@ mod tests {
         Room {
             energy_available: bank,
             energy_capacity: 12_900,
-            ..Room::empty(RoomName::named(name))
+            ..Room::empty(name.parse::<RoomName>().unwrap())
         }
     }
 
@@ -487,18 +487,12 @@ mod tests {
         let body: Body = vec![Part::Move; 20];
         let (near, far) = (colony("W1N1", 12_000), colony("W3N1", 12_000));
         let spawns = [
-            spawns_in(RoomName::named("W1N1"), 3),
-            spawns_in(RoomName::named("W3N1"), 1),
+            spawns_in(RoomName::W1N1, 3),
+            spawns_in("W3N1".parse::<RoomName>().unwrap(), 1),
         ]
         .concat();
-        let queued = BTreeMap::from([(RoomName::named("W1N1"), 600)]);
-        let walk = |from: RoomName| {
-            Some(if from == RoomName::named("W1N1") {
-                200
-            } else {
-                450
-            })
-        };
+        let queued = BTreeMap::from([(RoomName::W1N1, 600)]);
+        let walk = |from: RoomName| Some(if from == RoomName::W1N1 { 200 } else { 450 });
 
         assert_eq!(
             colony_for(
@@ -509,18 +503,12 @@ mod tests {
                 walk,
                 &body
             ),
-            Some(RoomName::named("W1N1")),
+            Some(RoomName::W1N1),
             "a 600-tick queue over three spawns beats a walk 250 longer"
         );
 
         let broke = colony("W1N1", 0);
-        let walk = |from: RoomName| {
-            Some(if from == RoomName::named("W1N1") {
-                200
-            } else {
-                250
-            })
-        };
+        let walk = |from: RoomName| Some(if from == RoomName::W1N1 { 200 } else { 250 });
 
         assert_eq!(
             colony_for(
@@ -531,7 +519,7 @@ mod tests {
                 walk,
                 &body
             ),
-            Some(RoomName::named("W3N1")),
+            Some("W3N1".parse::<RoomName>().unwrap()),
             "a bank with nothing for the body waits for the refill"
         );
     }

@@ -1066,7 +1066,7 @@ mod tests {
     ) -> TacticRule {
         TacticRule {
             rival: rival.map(str::to_string),
-            room: room.map(RoomName::named),
+            room: room.map(|r| r.parse::<RoomName>().unwrap()),
             pin: pin.map(str::to_string),
             forbid: forbid.iter().map(ToString::to_string).collect(),
         }
@@ -1081,16 +1081,16 @@ mod tests {
         ];
         let rivals: BTreeSet<&str> = ["rival"].into_iter().collect();
 
-        let here = ruling(&rules, RoomName::named("W1N1"), &rivals);
+        let here = ruling(&rules, RoomName::W1N1, &rivals);
         assert_eq!(here.pin, Some(Tactic::Hold));
         assert!(here.forbid.contains(&Tactic::BlobClose));
 
-        let elsewhere = ruling(&rules, RoomName::named("W2N2"), &rivals);
+        let elsewhere = ruling(&rules, "W2N2".parse::<RoomName>().unwrap(), &rivals);
         assert_eq!(elsewhere.pin, Some(Tactic::Kite));
         assert!(elsewhere.forbid.is_empty());
 
         let stranger: BTreeSet<&str> = ["other"].into_iter().collect();
-        assert_eq!(ruling(&rules, RoomName::named("W1N1"), &stranger).pin, None);
+        assert_eq!(ruling(&rules, RoomName::W1N1, &stranger).pin, None);
     }
 
     #[test]

@@ -103,7 +103,7 @@ pub fn to_text(intel: &Intel) -> String {
     }
     fn id_at(out: &mut String, sep: &str, id: Id, at: &Pos) {
         out.extend([sep, &id.text(), "@"]);
-        push_int(out, at.index());
+        push_int(out, tiles::of_pos(at).index() as i32);
     }
     let mut out = String::new();
     for (room, r) in intel {
@@ -198,7 +198,7 @@ pub fn of_text(text: &str) -> Intel {
             if !(7..=13).contains(&f.len()) {
                 return None;
             }
-            let room = RoomName::parse(f[0])?;
+            let room = f[0].parse().ok()?;
             let sources = match f.get(9).copied() {
                 None | Some(NONE) => None,
                 Some(".") => Some(Vec::new()),
@@ -249,11 +249,7 @@ mod tests {
         };
         let site = |dice: &mut Dice| Declared {
             id: format!("{:x}", dice.between(0, 9_999_999)).as_str().into(),
-            pos: Pos::new(
-                RoomName::named("W1N1"),
-                dice.between(0, 49),
-                dice.between(0, 49),
-            ),
+            pos: Pos::new(RoomName::W1N1, dice.between(0, 49), dice.between(0, 49)),
         };
         for _ in 0..300 {
             let row = Row {
@@ -276,7 +272,7 @@ mod tests {
                 mineral: dice.chance(2).then(|| dice.pick(&crate::vocabulary::ORES)),
                 stronghold: dice.chance(2),
             };
-            let intel: Intel = [(RoomName::named("W1N1"), row)].into();
+            let intel: Intel = [(RoomName::W1N1, row)].into();
             assert_eq!(of_text(&to_text(&intel)), intel);
         }
     }

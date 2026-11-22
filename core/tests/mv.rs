@@ -12,7 +12,7 @@ use fabot_base::wish::Wish;
 use fabot_base::world::{BodyPart, Creep, Owner, Room, RoomName, Store, World, terrain};
 use fabot_mv::{arbitrate::arbitrate, plan};
 
-const ROOM: RoomName = RoomName::named("W1N1");
+const ROOM: RoomName = RoomName::W1N1;
 const CASES: u64 = 500;
 
 /// A room's ground, the tiles bodies outside the wishes hold, the wishes, and
@@ -158,7 +158,11 @@ fn errand(dice: &mut Dice) -> Errand {
             store: Store::empty(),
         },
         target: Target {
-            room: if away { RoomName::named("W2N1") } else { ROOM },
+            room: if away {
+                "W2N1".parse::<RoomName>().unwrap()
+            } else {
+                ROOM
+            },
             tiles: vec![goal],
             range,
             avoid: BTreeSet::new(),

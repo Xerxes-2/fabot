@@ -180,7 +180,10 @@ mod tests {
             Window {
                 start: 100,
                 ticks: 100,
-                rows: row(RoomName::parse("W1N1"), &[("held", 100), ("exposure", 3)]),
+                rows: row(
+                    "W1N1".parse::<RoomName>().ok(),
+                    &[("held", 100), ("exposure", 3)],
+                ),
             },
         ]);
         let mut m = Metrics::default();

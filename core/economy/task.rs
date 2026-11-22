@@ -39,7 +39,7 @@ impl Target {
     }
 
     fn parse(text: &str) -> Option<Target> {
-        let room = |tag: &str| text.strip_prefix(tag).and_then(RoomName::parse);
+        let room = |tag: &str| text.strip_prefix(tag).and_then(|name| name.parse().ok());
         (room(RING).map(Target::Ring))
             .or_else(|| room(PILE).map(Target::Pile))
             .or_else(|| Id::parse(text).map(Target::Object))
@@ -122,7 +122,7 @@ pub fn of_task_id(id: &str) -> Option<Task> {
     let mut parts = id.split(':');
     let [tag, text, resource, rest] = [parts.next(), parts.next(), parts.next(), parts.next()];
     if let (Some("s"), Some(room), None) = (tag, text, resource) {
-        return Some(Task::Scout(RoomName::parse(room)?));
+        return Some(Task::Scout(room.parse().ok()?));
     }
     let t = Target::parse(text?)?;
     match (tag?, resource.map(str::parse::<ResourceType>), rest) {

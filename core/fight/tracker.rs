@@ -320,7 +320,7 @@ mod tests {
 
     /// Two rooms sharing a seam, and tiles crowded near it so clusters touch.
     fn arrival(rng: &mut Rng, id: &str) -> Creep {
-        let room = rng.pick(&[RoomName::named("W1N1"), RoomName::named("W2N1")]);
+        let room = rng.pick(&[RoomName::W1N1, "W2N1".parse::<RoomName>().unwrap()]);
         let x = rng.pick(&[0, 1, 3, 6, 9, 43, 46, 48, 49]);
         let y = rng.between(0, 12);
         let armed = rng.chance(4, 1);
@@ -397,8 +397,8 @@ mod tests {
             let east = rng.between(0, 2);
             let y = rng.between(1, 47);
             let dy = rng.between(-1, 1);
-            let a = at(RoomName::named("W2N1"), west, y);
-            let b = at(RoomName::named("W1N1"), east, y + dy);
+            let a = at("W2N1".parse::<RoomName>().unwrap(), west, y);
+            let b = at(RoomName::W1N1, east, y + dy);
             assert_eq!(linked(&a, &b), (49 - west) + east < 1);
         }
     }

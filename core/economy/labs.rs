@@ -271,7 +271,7 @@ mod tests {
 
     #[test]
     fn the_reagent_pair_is_the_one_most_labs_reach() {
-        let at = |x, y| Pos::new(RoomName::named("W1N1"), x, y);
+        let at = |x, y| Pos::new(RoomName::W1N1, x, y);
         let labs: Vec<(Id, Pos)> = [(0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (10, 10)]
             .iter()
             .enumerate()

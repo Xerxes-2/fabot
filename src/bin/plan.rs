@@ -21,7 +21,7 @@ fn main() {
     let mut text = String::new();
     std::io::stdin().read_to_string(&mut text).unwrap();
     let input: Value = serde_json::from_str(&text).unwrap();
-    let name = RoomName::named(input["room"].as_str().unwrap());
+    let name = input["room"].as_str().unwrap().parse::<RoomName>().unwrap();
     let level = input["level"].as_i64().unwrap() as i32;
     let pos = |e: &Value| {
         Pos::new(

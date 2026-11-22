@@ -255,7 +255,7 @@ pub fn world(v: &View, declarations: &Declarations) -> World<'static> {
     seen.sort_by_key(|i| v.rooms[*i].name);
     for i in seen {
         let at = &v.rooms[i];
-        let name = RoomName::parse(at.name).unwrap_or(RoomName::SIM);
+        let name = at.name.parse().unwrap_or(RoomName::SIM);
         let mut room = Room::empty(name);
         let mut ovens: Vec<(&Obj, Spawn)> = Vec::new();
         for &(kind, o) in &at.objects {

@@ -334,7 +334,7 @@ mod tests {
     use fabot_base::world::{BodyPart, Store};
 
     fn at(x: i32, y: i32) -> Pos {
-        Pos::new(RoomName::named("W1N1"), x, y)
+        Pos::new(RoomName::W1N1, x, y)
     }
 
     fn creep(owner: Owner, kinds: &[Part], pos: Pos, hurt: bool) -> Creep {
@@ -677,20 +677,14 @@ mod tests {
                 id: 1,
                 members: BTreeSet::from(["raider".into()]),
                 last_seen: 0,
-                centre: Pos::new(RoomName::named(room), 25, 25),
+                centre: Pos::new(room.parse::<RoomName>().unwrap(), 25, 25),
             });
             let e = Engagement {
                 phase: phases[rng.below(phases.len() as u64) as usize],
                 lost: rng.between(OUTPOST_LOSSES, OUTPOST_LOSSES + 2),
                 budget: rng.between(0, 3),
                 unanswered: false,
-                ..crate::scene::fresh(
-                    1,
-                    Objective::Defend,
-                    RoomName::named("W1N1"),
-                    0,
-                    Tactic::Close,
-                )
+                ..crate::scene::fresh(1, Objective::Defend, RoomName::W1N1, 0, Tactic::Close)
             };
             let facts = Facts {
                 time: 1,
@@ -732,13 +726,7 @@ mod tests {
                 lost: rng.between(0, OUTPOST_LOSSES),
                 budget: rng.between(0, 3),
                 unanswered: rng.flip(),
-                ..crate::scene::fresh(
-                    1,
-                    Objective::Defend,
-                    RoomName::named("W1N1"),
-                    0,
-                    Tactic::Close,
-                )
+                ..crate::scene::fresh(1, Objective::Defend, RoomName::W1N1, 0, Tactic::Close)
             };
             let standing: BTreeSet<String> =
                 e.ours.iter().filter(|_| rng.flip()).cloned().collect();

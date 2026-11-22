@@ -298,10 +298,11 @@ pub fn step<'t>(
             .all(|c| tiles::rooms_apart(*c, room) >= 2)
     };
     let free_near = |room: RoomName| -> usize {
-        let (x, y) = room.coords();
         let mut n = 0;
         for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
-            let next = RoomName::new(x + dx, y + dy);
+            let Some(next) = room.offset(dx, dy) else {
+                continue;
+            };
             let worked = (declarations.outposts.iter().chain(outposts)).any(|o| o.room == next);
             if let Some(row) = intel
                 .get(&next)
@@ -324,10 +325,11 @@ pub fn step<'t>(
     };
     let mut scored: Vec<(f64, Outpost)> = Vec::new();
     for (home, tree) in derived.trees.iter().filter(|(h, _)| sponsors.contains(h)) {
-        let (hx, hy) = home.coords();
         for dx in -REACH_HOPS..=REACH_HOPS {
             for dy in -REACH_HOPS..=REACH_HOPS {
-                let name = RoomName::new(hx + dx, hy + dy);
+                let Some(name) = home.offset(dx, dy) else {
+                    continue;
+                };
                 let (Some(crossings), Some(row)) = (tree.crossings(name, *home), intel.get(&name))
                 else {
                     continue;

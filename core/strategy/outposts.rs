@@ -217,10 +217,11 @@ pub fn survey(
             let mean = ranges.iter().sum::<i32>() / (ranges.len() as i32).max(1);
             mean.max(hops * engine::ROOM_SIDE)
         };
-        let (hx, hy) = home.coords();
         for dx in -REACH_HOPS..=REACH_HOPS {
             for dy in -REACH_HOPS..=REACH_HOPS {
-                let name = RoomName::new(hx + dx, hy + dy);
+                let Some(name) = home.offset(dx, dy) else {
+                    continue;
+                };
                 let Some(hops) = tree.crossings(name, *home).filter(|h| *h > 0) else {
                     continue;
                 };

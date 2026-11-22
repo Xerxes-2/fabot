@@ -78,7 +78,7 @@ impl Map {
 
     /// The tile Layout's plan puts the first spawn on, as `soak.mjs` seats a respawn.
     pub fn seat(&self, room: &str) -> (i64, i64) {
-        let name = RoomName::parse(room).expect("a room name");
+        let name = room.parse::<RoomName>().expect("a room name");
         let at = |o: &Value| {
             let xy = |k: &str| o[k].as_i64().expect("a tile") as i32;
             Pos::new(name, xy("x"), xy("y"))

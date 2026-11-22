@@ -14,7 +14,7 @@ use fabot_base::world::{
     Store, Structure, StructureType, World, terrain,
 };
 
-pub const ROOM: RoomName = RoomName::named("W1N1");
+pub const ROOM: RoomName = RoomName::W1N1;
 
 /// `FsCheckConfig.maxTest`: the samples each property runs over.
 pub const MAX_TEST: usize = 150;

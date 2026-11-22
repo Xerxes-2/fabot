@@ -285,7 +285,10 @@ impl Run<'_> {
         let mut controllers = self.v.rooms[room].of("controller");
         let active = controllers.any(|c| ours(c) && num(c, atom!("level")) >= 8.0);
         check(!active, RclNotEnough)?;
-        let at = world::RoomName::parse(self.v.rooms[room].name).ok_or(InvalidArgs)?;
+        let at = self.v.rooms[room]
+            .name
+            .parse::<world::RoomName>()
+            .map_err(|_| InvalidArgs)?;
         check(
             tiles::rooms_apart(at, target) > engine::OBSERVER_RANGE,
             NotInRange,

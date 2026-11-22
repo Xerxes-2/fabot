@@ -106,11 +106,10 @@ pub fn threat_radius(
             )
         })
         .flat_map(|(home, tree)| {
-            let (x, y) = home.coords();
             (-super::NEAR..=super::NEAR)
-                .flat_map(move |dx| (-super::NEAR..=super::NEAR).map(move |dy| (x + dx, y + dy)))
-                .filter(|c| tiles::has_controller(*c))
-                .map(|(x, y)| RoomName::new(x, y))
+                .flat_map(move |dx| (-super::NEAR..=super::NEAR).map(move |dy| home.offset(dx, dy)))
+                .flatten()
+                .filter(|room| tiles::has_controller(room.coords()))
                 .filter(|room| atlas.has_terrain(*room))
                 .filter_map(move |room| Some((room, tree.crossings(room, home)?)))
         })
@@ -181,9 +180,8 @@ pub fn sight(
     // Never seen, beside a room seen: an unseen world has no row to go stale.
     let mut frontier: Vec<RoomName> = intel
         .keys()
-        .map(|room| room.coords())
-        .flat_map(|(x, y)| [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)])
-        .map(|(x, y)| RoomName::new(x, y))
+        .flat_map(|room| [(1, 0), (-1, 0), (0, 1), (0, -1)].map(|(dx, dy)| room.offset(dx, dy)))
+        .flatten()
         .filter(|room| !intel.contains_key(room))
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()

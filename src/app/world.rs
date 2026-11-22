@@ -51,15 +51,16 @@ impl fabot_core::drive::Terrains for Maps {
 
 impl Maps {
     /// Kept when empty too, so a room the map lacks is asked once.
-    fn read_around(&mut self, homes: impl Iterator<Item = (i32, i32)>) {
+    fn read_around(&mut self, homes: impl Iterator<Item = RoomName>) {
         let reach = fabot_base::declarations::SIEGE_HOPS;
         let mut unread: Vec<(i32, RoomName)> = Vec::new();
-        for (x, y) in homes {
+        for home in homes {
             for dx in -reach..=reach {
                 let side = reach - dx.abs();
                 for dy in -side..=side {
-                    let room = RoomName::new(x + dx, y + dy);
-                    if !self.terrain.contains_key(&room) {
+                    if let Some(room) = home.offset(dx, dy)
+                        && !self.terrain.contains_key(&room)
+                    {
                         unread.push((dx.abs() + dy.abs(), room));
                     }
                 }
@@ -106,7 +107,7 @@ pub fn of_game(
         .spawns
         .iter()
         .filter(|s| s.pos.room != RoomName::SIM)
-        .map(|s| s.pos.room.coords());
+        .map(|s| s.pos.room);
     maps.read_around(homes.collect::<BTreeSet<_>>().into_iter());
     world.closed = read::closed(&world, declarations, |room| maps.status(room));
     (world, Pass { ints, strs: text })
@@ -114,14 +115,10 @@ pub fn of_game(
 
 /// The map serves rooms the bot cannot see, and reading it needs no `Room` object.
 fn terrain_of(name: RoomName) -> Option<LocalRoomTerrain> {
-    map::get_room_terrain(engine_name(name)?).map(LocalRoomTerrain::from)
+    map::get_room_terrain(name.on_map()?).map(LocalRoomTerrain::from)
 }
 
 /// `None` where the map has no `getRoomStatus` (the bench), so no room reads closed.
 fn status_of(name: RoomName) -> Option<RoomStatus> {
-    map::get_room_status(engine_name(name)?).map(|result| result.status())
-}
-
-fn engine_name(name: RoomName) -> Option<screeps::RoomName> {
-    name.to_string().parse().ok()
+    map::get_room_status(name.on_map()?).map(|result| result.status())
 }

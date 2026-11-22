@@ -23,7 +23,11 @@ fn each<'a>(e: &'a Value, key: &str) -> &'a Vec<Value> {
 }
 
 fn predict(sample: &Value) -> Value {
-    let room = RoomName::named(sample["room"].as_str().unwrap());
+    let room = sample["room"]
+        .as_str()
+        .unwrap()
+        .parse::<RoomName>()
+        .unwrap();
     let pos = |e: &Value| Pos::new(room, int(e, "x"), int(e, "y"));
     let side = |e: &Value| Side {
         bodies: each(e, "bodies")

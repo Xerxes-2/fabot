@@ -47,7 +47,7 @@ pub(crate) mod dice {
 
     /// The scenes' tile: every body and every offer stand on it.
     pub fn at() -> Pos {
-        Pos::new(RoomName::named("W9N9"), 25, 25)
+        Pos::new("W9N9".parse::<RoomName>().unwrap(), 25, 25)
     }
 
     pub fn task(dice: &mut Dice, target: Target) -> Task {

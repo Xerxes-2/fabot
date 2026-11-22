@@ -356,9 +356,8 @@ pub fn seam_range(a: &Pos, b: &Pos) -> Option<i32> {
 }
 
 pub fn room_toward(name: RoomName, exit: i32) -> Option<RoomName> {
-    let (x, y) = name.on_grid()?;
     match exit {
-        1 | 3 | 5 | 7 => Some(RoomName::new(x + dx(exit), y + dy(exit))),
+        1 | 3 | 5 | 7 => name.offset(dx(exit), dy(exit)),
         _ => None,
     }
 }

@@ -1133,7 +1133,7 @@ impl Metrics {
                 .filter_map(|(v, name)| Some((name.to_string(), v.parse().ok()?)))
                 .collect();
             if let Some(w) = ring.back_mut() {
-                w.rows.insert(RoomName::parse(head), values);
+                w.rows.insert(head.parse().ok(), values);
             }
         }
         Metrics {
@@ -1204,8 +1204,8 @@ mod tests {
         let mut dice = Dice::new(3);
         let rooms = [
             None,
-            Some(RoomName::named("W1N1")),
-            Some(RoomName::named("E2S3")),
+            Some(RoomName::W1N1),
+            Some("E2S3".parse::<RoomName>().unwrap()),
         ];
         let names = [
             STOCK,
@@ -1246,7 +1246,7 @@ mod tests {
 
     #[test]
     fn a_body_counts_its_stuck_steps_flips_and_swings() {
-        let (x, y) = (RoomName::named("W1N1"), RoomName::named("W2N1"));
+        let (x, y) = (RoomName::W1N1, "W2N1".parse::<RoomName>().unwrap());
         let mut t = Track {
             id: "a".into(),
             seen: 0,

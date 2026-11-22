@@ -20,7 +20,6 @@ use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::time::Instant;
 
-use fabot_base::world::RoomName;
 use krebs::cron::{CronCtx, JOBS};
 use krebs::hooks::ProcessorHooks;
 use krebs::intents::RoomIntents;
@@ -207,7 +206,7 @@ fn main() {
                 .try_into()
                 .ok()?;
             Some((
-                RoomName::parse(name)?,
+                name.parse().ok()?,
                 screeps::LocalRoomTerrain::new_from_bits(bits),
             ))
         })
@@ -224,11 +223,7 @@ fn main() {
         file("cpu.jsonl"),
         file("metrics.jsonl"),
     ];
-    let closed = map
-        .closed
-        .iter()
-        .filter_map(|r| RoomName::parse(r))
-        .collect();
+    let closed = map.closed.iter().filter_map(|r| r.parse().ok()).collect();
     let mut driver = driver::Driver::new(driver::Maps(terrains, closed), map.memory.clone(), out);
     driver.heap.atlas.check = args.check;
 

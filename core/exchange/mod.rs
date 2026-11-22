@@ -1599,7 +1599,7 @@ pub fn damage_map(room: RoomName, towers: &[Pos], foes: &[Fighter]) -> Table<i32
 mod tests {
     use super::*;
 
-    const ROOM: RoomName = RoomName::named("W1N1");
+    const ROOM: RoomName = RoomName::W1N1;
 
     const CASES: usize = 1000;
 

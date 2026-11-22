@@ -15,7 +15,7 @@ use fabot_base::world::{
     World, read, terrain,
 };
 
-const ROOM: RoomName = RoomName::named("W1N1");
+const ROOM: RoomName = RoomName::W1N1;
 const CASES: u64 = 100;
 
 fn structure(kind: StructureType, walkable: bool, x: i32, y: i32) -> Structure {
@@ -240,11 +240,11 @@ fn a_tiles_index_round_trips_through_its_column_and_row_in_terrain_order() {
 
 #[test]
 fn a_room_name_round_trips_through_world_coordinates() {
-    for x in -299..300 {
-        for y in (-299..300).step_by(7) {
+    for x in -127..128 {
+        for y in (-128..128).step_by(7) {
             let name = RoomName::new(x, y).to_string();
             assert_eq!(
-                RoomName::parse(&name).map(RoomName::coords),
+                name.parse().ok().map(RoomName::coords),
                 Some((x, y)),
                 "{name}"
             );
@@ -254,13 +254,17 @@ fn a_room_name_round_trips_through_world_coordinates() {
 
 #[test]
 fn names_read_as_the_engine_spells_them() {
-    assert_eq!(RoomName::parse("W12S28"), Some(RoomName::new(-13, 28)));
-    assert_eq!(RoomName::parse("E0N0"), Some(RoomName::new(0, -1)));
-    assert_eq!(RoomName::parse("W1"), None, "half a name");
-    let sim = RoomName::parse("sim").expect("the simulator's room");
+    assert_eq!(
+        "W12S28".parse::<RoomName>().ok(),
+        Some(RoomName::new(-13, 28))
+    );
+    assert_eq!("E0N0".parse::<RoomName>().ok(), Some(RoomName::new(0, -1)));
+    assert_eq!("W1".parse::<RoomName>().ok(), None, "half a name");
+    let sim = "sim".parse::<RoomName>().expect("the simulator's room");
     assert_eq!(sim.to_string(), "sim");
     assert_eq!(sim.on_grid(), None, "off the grid");
     assert_eq!(tiles::room_toward(sim, tiles::TOP), None, "no neighbours");
+    assert_eq!(RoomName::new(127, 0).offset(1, 0), None, "past the edge");
 }
 
 #[test]

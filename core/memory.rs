@@ -190,7 +190,7 @@ fn outposts(declared: &Value, key: &str) -> Vec<Outpost> {
 
 /// `{ home, targets: { compound: stock } }`.
 fn flows(labs: &Value) -> Vec<Flow> {
-    let Some(home) = labs["home"].as_str().and_then(RoomName::parse) else {
+    let Some(home) = labs["home"].as_str().and_then(|name| name.parse().ok()) else {
         return Vec::new();
     };
     let targets = labs["targets"].as_object().into_iter().flatten();
