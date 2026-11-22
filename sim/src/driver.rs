@@ -38,7 +38,7 @@ impl Terrains for Maps {
 pub struct Driver<W: Write> {
     maps: Maps,
     pub memory: String,
-    pub kept: reset::Kept,
+    pub kept: reset::Twin,
     pub faults: BTreeSet<(&'static str, String)>,
     pub refused: BTreeMap<String, u64>,
     windows_read: i32,
@@ -53,7 +53,7 @@ impl<W: Write> Driver<W> {
         Driver {
             maps,
             memory,
-            kept: reset::Kept::default(),
+            kept: reset::Twin::default(),
             faults: BTreeSet::new(),
             refused: BTreeMap::new(),
             windows_read: i32::MIN,

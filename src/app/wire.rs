@@ -101,18 +101,18 @@ pub fn write_observe(o: &Observed) {
     write_segment(OBSERVE_SEGMENT, text);
 }
 
-/// The engine keeps the active list across uploads and counts every loaded
-/// segment against the ten saved per tick, so a cold heap replaces it.
+/// The engine keeps the active list on the user record across resets and
+/// uploads, so a cold heap reads what it loaded and replaces the list: every
+/// loaded segment counts against the ten saved per tick.
 pub fn read_intel(asked: bool) -> Option<Intel> {
     if !asked {
         raw_memory::set_active_segments(&[INTEL_SEGMENT, METRICS_SEGMENT]);
-        return None;
     }
     let text = raw_memory::segments().get(INTEL_SEGMENT);
-    Some(text.map_or_else(Intel::new, |text| intel::of_text(&text)))
+    (asked || text.is_some()).then(|| text.map_or_else(Intel::new, |text| intel::of_text(&text)))
 }
 
-/// Read once after a reset, the tick after `read_intel` asked for it.
+/// Read once after a reset, with intel.
 pub fn read_metrics() -> Metrics {
     let text = raw_memory::segments().get(METRICS_SEGMENT);
     text.map_or_else(Metrics::default, |text| Metrics::of_text(&text))

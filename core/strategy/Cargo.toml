@@ -11,6 +11,7 @@ doctest = false
 [dependencies]
 fabot-base.workspace = true
 fabot-atlas.workspace = true
+fabot-economy.workspace = true
 fabot-layout.workspace = true
 fabot-fight.workspace = true
 screeps-game-api.workspace = true

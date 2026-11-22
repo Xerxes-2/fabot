@@ -1,9 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use fabot_atlas::{self as atlas, Atlas, Context, Mover, Target};
-use fabot_base::declarations;
+use fabot_base::declarations::{self, Declarations};
 use fabot_base::engine;
 use fabot_base::grid::{self, Footprint};
+use fabot_base::intel::Intel;
 use fabot_base::intel::Scout;
 use fabot_base::intents::{
     Action, Ask, CreepAct, LabAct, LinkAct, ModuleOutput, Rank, SpawnAct, Telemetry, TerminalAct,
@@ -12,7 +13,7 @@ use fabot_base::tiles::{self, TileSet};
 use fabot_base::vocabulary::Part;
 use fabot_base::vocabulary::ResourceType::{self, Energy};
 use fabot_base::wish::Wish;
-use fabot_base::world::{Creep, Id, Pos, RoomName, StructureType};
+use fabot_base::world::{Creep, Id, Pos, RoomName, StructureType, World};
 use fabot_mv::plan;
 
 use super::bodies::{self, Pattern};
@@ -498,27 +499,59 @@ fn work(
     plan::toward_round(atlas, creep, mover, &target, weight_of(&slot.job), danger)
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default)]
 pub struct EconomyState {
     pub assignments: BTreeMap<String, Assignment>,
-    pub spare: BTreeMap<RoomName, f64>,
+    pub homes: Option<derived::Homes>,
+}
+
+/// `{ World with Creeps = filtered }`: a creep a fight holds is not in the
+/// economy, and only the creep list differs.
+fn seen<'w>(world: &'w World) -> Vec<&'w Creep> {
+    (world.creeps.iter())
+        .filter(|c| !declarations::fights(&c.name))
+        .collect()
+}
+
+/// Each colony's spawn time a life left by its own bodies, read before
+/// Strategy picks outposts: none of them counts, so `declarations` need hold
+/// none. Its colonies' facts are `decide`'s this tick.
+pub fn spare(
+    (world, atlas): (&World, &mut Atlas),
+    (ours, declarations): (&atlas::Derived, &Declarations),
+    intel: &Intel,
+    state: &mut EconomyState,
+) -> BTreeMap<RoomName, f64> {
+    let seen = seen(world);
+    let homes = derived::homes(world, &seen, atlas, declarations, ours);
+    let derived = derived::of_world(
+        homes,
+        (world, &seen),
+        atlas,
+        declarations,
+        ours,
+        (intel, &[]),
+    );
+    let owners = slots::owners(atlas, (&derived, declarations));
+    let (_, spare) = slots::colonies(atlas, &derived, &owners, &state.assignments);
+    state.homes = Some(derived.into_homes());
+    spare
 }
 
 pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout]) -> ModuleOutput {
-    // `{ World with Creeps = filtered }`: a creep a fight holds is not in the
-    // economy, and only the creep list differs.
-    let seen: Vec<&Creep> = (context.world.creeps.iter())
-        .filter(|c| !declarations::fights(&c.name))
-        .collect();
+    let seen = seen(context.world);
 
+    let homes = state.homes.take().unwrap_or_else(|| {
+        let (world, declarations) = (context.world, context.declarations);
+        derived::homes(world, &seen, context.atlas, declarations, context.derived)
+    });
     let derived = derived::of_world(
-        context.world,
-        &seen,
+        homes,
+        (context.world, &seen),
         context.atlas,
         context.declarations,
         context.derived,
-        context.intel,
-        scouts,
+        (context.intel, scouts),
     );
 
     let movers: BTreeMap<&str, Mover> = (seen.iter())
@@ -533,8 +566,7 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
 
     let of = (&derived, context.declarations);
     let owners = slots::owners(context.atlas, of);
-    let (slots, spare) = slots::plan(context.atlas, of, &owners, &state.assignments);
-    state.spare = spare;
+    let slots = slots::plan(context.atlas, of, &owners, &state.assignments);
     let (assigned, holders, retired) =
         slots::assign(&*context.atlas, &derived, &slots, &state.assignments);
     let (casts, short) = slots::casts(&derived, &slots, &holders);

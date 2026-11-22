@@ -6,6 +6,8 @@ use crate::tiles::{self, Post, Tile};
 use crate::vocabulary::ResourceType;
 use crate::world::{Controller, Id, Owner, Pos, Room, RoomName, Source, World, push_int};
 
+pub const WRITTEN_EVERY: i32 = 100;
+
 /// A room as it stood when last seen, by username: a stance is the
 /// declarations' and changes without a sight.
 #[derive(Clone, Debug, PartialEq, Eq)]

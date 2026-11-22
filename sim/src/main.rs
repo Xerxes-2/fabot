@@ -226,7 +226,7 @@ fn main() {
     ];
     let closed = map.closed.iter().filter_map(|r| r.parse().ok()).collect();
     let mut driver = driver::Driver::new(driver::Maps(terrains, closed), map.memory.clone(), out);
-    driver.kept = reset::Kept::new(args.reset_every, args.check);
+    driver.kept = reset::Twin::new(args.reset_every, args.check);
 
     let mut engine = Engine {
         hooks: ProcessorHooks::default(),

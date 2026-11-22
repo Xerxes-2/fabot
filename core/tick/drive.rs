@@ -23,7 +23,6 @@ use fabot_tactics::Offer;
 #[derive(Default)]
 pub struct Heap {
     pub standing: BTreeMap<RoomName, Standing>,
-    pub spare: BTreeMap<RoomName, f64>,
     pub sightings: Sightings,
     pub atlas: Atlas,
 }
@@ -81,7 +80,6 @@ where
     let declarations: Declarations = besieging(memory.declarations(), intel);
     phases.push(("hydrate".to_string(), clock() - start));
     state.layout = std::mem::take(&mut heap.standing);
-    state.economy.spare = std::mem::take(&mut heap.spare);
 
     let start = clock();
     let drain = (state.fight.engagements.iter())
@@ -151,7 +149,6 @@ where
         ..
     } = decided;
     heap.standing = std::mem::take(&mut result.state.layout);
-    heap.spare = std::mem::take(&mut result.state.economy.spare);
     heap.sightings = sightings;
     heap.atlas = atlas;
     let engagements = result.state.fight.engagements.iter();

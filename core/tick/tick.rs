@@ -323,7 +323,7 @@ pub fn decide<'t>(
             &state.fight.casts,
             &state.fight.due,
         ),
-        (&state.layout, &state.economy.spare),
+        (&state.layout, &mut state.economy),
         (terrain, &mut state.strategy),
     );
     let declarations = declarations.planned(plans);

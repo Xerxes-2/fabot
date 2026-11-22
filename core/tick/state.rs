@@ -6,7 +6,7 @@ use fabot_fight::shape::FightState;
 use fabot_layout::shape::LayoutState;
 use fabot_strategy::StrategyState;
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default)]
 pub struct State {
     /// A module named here is skipped and its last output not replayed.
     pub off: BTreeSet<String>,

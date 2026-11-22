@@ -965,19 +965,8 @@ pub fn plan(
     (derived, declarations): (&Derived, &Declarations),
     owners: &[Option<usize>],
     held: &BTreeMap<String, Assignment>,
-) -> (Vec<Slot>, BTreeMap<RoomName, f64>) {
-    let sponsors = sponsors(atlas, derived);
-    let mut plan = Plan {
-        atlas: &*atlas,
-        derived,
-        held,
-        out: Vec::new(),
-        spare: BTreeMap::new(),
-    };
-    for ci in 0..derived.colonies.len() {
-        plan.colony(ci, owners, &sponsors);
-    }
-    let (mut out, spare) = (plan.out, plan.spare);
+) -> Vec<Slot> {
+    let (mut out, _) = colonies(atlas, derived, owners, held);
     // A stood-down outpost keeps its dig and reserver slots, never cast, so
     // its bodies hold them and come back when it reopens.
     for o in &derived.closed {
@@ -1035,7 +1024,27 @@ pub fn plan(
         s.home_walk = walk_to(atlas, derived, s.colony, &s.body, &s.seat).unwrap_or(0);
     }
     debug_assert_eq!(shared_ids(&out), 0);
-    (out, spare)
+    out
+}
+
+pub fn colonies(
+    atlas: &mut Atlas,
+    derived: &Derived,
+    owners: &[Option<usize>],
+    held: &BTreeMap<String, Assignment>,
+) -> (Vec<Slot>, BTreeMap<RoomName, f64>) {
+    let sponsors = sponsors(atlas, derived);
+    let mut plan = Plan {
+        atlas: &*atlas,
+        derived,
+        held,
+        out: Vec::new(),
+        spare: BTreeMap::new(),
+    };
+    for ci in 0..derived.colonies.len() {
+        plan.colony(ci, owners, &sponsors);
+    }
+    (plan.out, plan.spare)
 }
 
 /// A controller inside its downgrade deadline is worked before any other

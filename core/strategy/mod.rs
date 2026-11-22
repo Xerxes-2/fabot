@@ -17,6 +17,7 @@ use fabot_base::intel::Intel;
 use fabot_base::tiles;
 use fabot_base::vocabulary::{Part, ResourceType, multiple};
 use fabot_base::world::{Pos, RoomName, Rules, StructureType, World, sightings};
+use fabot_economy::EconomyState;
 use fabot_fight::shape::{Cast, Engagement};
 use fabot_layout::{RING_LEVEL, Standing};
 use screeps::LocalRoomTerrain;
@@ -145,7 +146,7 @@ pub fn plan<'t>(
     declarations: &Declarations,
     intel: &Intel,
     (engagements, casts, due): (&[Engagement], &[Cast], &BTreeSet<RoomName>),
-    (layout, spare): (&BTreeMap<RoomName, Standing>, &BTreeMap<RoomName, f64>),
+    (layout, economy): (&BTreeMap<RoomName, Standing>, &mut EconomyState),
     (terrain, state): (
         &dyn Fn(RoomName) -> Option<&'t LocalRoomTerrain>,
         &mut StrategyState,
@@ -254,7 +255,10 @@ pub fn plan<'t>(
         (&declared, engagements),
     );
     let candidates = outposts::survey(world, derived, (declarations, &plans, claimed), intel);
-    let chosen = outposts::chosen(world, candidates, (&busy, spare));
+    let homes =
+        (declarations.clone()).planned((plans.clone(), Vec::new(), claiming.clone(), Vec::new()));
+    let spare = fabot_economy::spare((world, atlas), (derived, &homes), intel, economy);
+    let chosen = outposts::chosen(world, candidates, (&busy, &spare));
     let fought: BTreeSet<RoomName> = engagements.iter().map(|e| e.room).collect();
     let around = expand::Around {
         rivals: &rivals,

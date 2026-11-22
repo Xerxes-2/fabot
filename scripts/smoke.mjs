@@ -168,7 +168,7 @@ try {
 globalThis.__fabotRead = read;
 console.error = error;
 if (!trapped) fail("a short read did not trap");
-// A cold heap replaces the active list even when intel is loaded, and reads it the tick after.
+// A cold heap replaces the active list and still reads the intel already loaded.
 segments[2] += "W9N9 50 - 0 - - - -\n";
 segments[3] = "names stock\n@0 100\nW1N1 5\n";
 active.length = 0;
@@ -183,7 +183,7 @@ if (!segments[2].includes("W9N9 50 ")) fail(`intel was not read after a reset: $
 // The metrics' ring outlives a reset; the window it was open on is lost.
 Game.time = 200;
 main.loop();
-if (!/^@0 100\nW1N1 5$/m.test(segments[3]) || !/^@100 1$/m.test(segments[3])) fail(`the metrics' ring after a reset: ${segments[3]}`);
+if (!/^@0 100\nW1N1 5$/m.test(segments[3]) || !/^@100 2$/m.test(segments[3])) fail(`the metrics' ring after a reset: ${segments[3]}`);
 
 // A vm timeout terminates as the engine's CPU limit does, past any catch or finally.
 globalThis.__fabotRead = () => {

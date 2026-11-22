@@ -12,8 +12,6 @@ use fabot_core::drive::{self, Terrains as _};
 use fabot_observe::metrics::{self, Metrics};
 
 const FAULTS_KEPT: usize = 20;
-/// A reset loses at most this many ticks of sight.
-const INTEL_WRITTEN_EVERY: i32 = 100;
 
 struct Heap {
     /// A module named here is skipped and its last output not replayed.
@@ -70,7 +68,7 @@ fn run_tick() {
         )
     });
     let mut intel = held.or_else(|| wire::read_intel(asked));
-    let mut metrics = metrics.or_else(|| asked.then(wire::read_metrics));
+    let mut metrics = metrics.or_else(|| intel.is_some().then(wire::read_metrics));
 
     let start = clock();
     let mut memory = wire::read_memory();
@@ -97,7 +95,7 @@ fn run_tick() {
                 phases: &mut Vec<(String, f64)>| {
             let start = clock();
             wire::write_memory(text);
-            if held_intel && world.time % INTEL_WRITTEN_EVERY == 0 {
+            if held_intel && world.time % intel::WRITTEN_EVERY == 0 {
                 wire::write_intel(rows);
             }
             phases.push(("write".to_string(), clock() - start));

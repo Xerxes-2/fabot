@@ -213,6 +213,7 @@ version = "0.1.0"
 dependencies = [
  "fabot-atlas",
  "fabot-base",
+ "fabot-economy",
  "fabot-fight",
  "fabot-layout",
  "screeps-game-api",

@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use fabot_atlas::{self as atlas, Atlas, Tree};
 use fabot_base::HashMap;
+use fabot_base::boost;
 use fabot_base::declarations::{self, Declarations, Outpost};
 use fabot_base::engine;
 use fabot_base::grid::Footprint;
@@ -375,6 +376,8 @@ pub struct Derived<'t> {
     pub closed: Vec<Outpost>,
     pub spots: HashMap<Target, Pos>,
     pub ours: &'t atlas::Derived,
+    abandoning: Vec<RoomName>,
+    minerals: Vec<Shipment>,
 }
 
 impl Derived<'_> {
@@ -1326,28 +1329,34 @@ fn ovens_of(world: &World) -> Vec<Body> {
         .collect()
 }
 
-pub fn of_world<'t>(
+/// The colonies' own facts, read once before Strategy picks the outposts.
+#[derive(Clone, Debug)]
+pub struct Homes {
+    colonies: Vec<Colony>,
+    grounds: Vec<Ground>,
+    bodies: Vec<Body>,
+    ovens: Vec<Body>,
+    minerals: Vec<Shipment>,
+}
+
+pub fn homes(
     world: &World,
     creeps: &[&Creep],
     atlas: &Atlas,
     declarations: &Declarations,
-    ours: &'t atlas::Derived,
-    intel: &Intel,
-    scouts: &[Scout],
-) -> Derived<'t> {
+    ours: &atlas::Derived,
+) -> Homes {
     let colony_rooms: Vec<&Room> = (ours.colonies.iter())
         .filter_map(|name| world.room(*name))
         .collect();
     let plan_of = |room: RoomName| (declarations.colonies.iter()).find(|p| p.room == room);
     let colonies: Vec<Colony> = (colony_rooms.iter())
         .filter_map(|room| {
-            let controller = room.controller.clone()?;
-            let plan = plan_of(room.name);
             Some(Colony {
                 room: room.name,
-                reserve: plan.map_or(0, |p| p.reserve),
-                owes: plan.is_some_and(|p| p.owes),
-                controller,
+                reserve: 0,
+                owes: false,
+                controller: room.controller.clone()?,
                 spawns: (world.working_spawns())
                     .filter(|s| s.pos.room == room.name)
                     .cloned()
@@ -1357,18 +1366,6 @@ pub fn of_world<'t>(
             })
         })
         .collect();
-
-    let is_colony = |name: RoomName| colonies.iter().any(|c| c.room == name);
-
-    // A declared room is dug by bodies its richest colony casts.
-    let richest = colony_rooms
-        .iter()
-        .map(|r| r.energy_capacity)
-        .max()
-        .unwrap_or(0);
-
-    let remote_of =
-        |outpost: &Outpost| remote_of(atlas, world, intel, declarations, richest, outpost);
 
     let mut grounds: Vec<Ground> = colony_rooms
         .iter()
@@ -1404,26 +1401,16 @@ pub fn of_world<'t>(
         }
     }
 
-    for outpost in ours.worked.iter().filter(|o| !is_colony(o.room)) {
-        grounds.push(remote_of(outpost));
-    }
-
-    let strikes = strikes_of(world);
-    for r in grounds.iter_mut().flat_map(|g| &mut g.repairs) {
-        r.struck = strikes.get(&r.id).copied().unwrap_or(0);
-    }
-
     let given_up = |room: RoomName| declarations.abandoning(room);
-
+    let clusters = boost::clusters(world, declarations);
     let mut minerals = Vec::new();
-    if !ours.clusters.is_empty() {
-        let targets =
-            super::labs::targets(&minerals_dug_or_held(world, &grounds[..colonies.len()]));
+    if !clusters.is_empty() {
+        let targets = super::labs::targets(&minerals_dug_or_held(world, &grounds));
         minerals = stock_labs(
             world,
             &mut grounds,
             colonies.len(),
-            (&ours.clusters, &targets),
+            (&clusters, &targets),
             (&given_up, &|room| plan_of(room).is_some_and(|p| p.fights)),
         );
     }
@@ -1432,21 +1419,10 @@ pub fn of_world<'t>(
         if given_up(room.name) {
             let to = grounds
                 .iter()
-                .take(colonies.len())
                 .filter(|g| g.terminal.is_some() && !given_up(g.room))
                 .map(|g| (g.room, free_at(&grounds, g.room)))
                 .max_by_key(|(_, free)| *free);
             super::abandon::evacuate(&mut grounds[i], room, &world.creeps, to);
-        }
-    }
-
-    // A terminal sends to one colony a tick: minerals first, as aid can wait
-    // in the stock while a lab cannot.
-    let aid = give_aid(&colonies, &grounds, &given_up, &minerals);
-    for s in minerals.into_iter().chain(aid) {
-        if let Some(g) = grounds.iter_mut().find(|g| g.room == s.from) {
-            g.shipment = s.load;
-            g.ship_to = Some((s.to, s.taker_free));
         }
     }
 
@@ -1462,15 +1438,106 @@ pub fn of_world<'t>(
             )
         })
         .collect();
+    let mut homes = Homes {
+        colonies,
+        grounds,
+        bodies,
+        ovens: ovens_of(world),
+        minerals,
+    };
+    homes.struck(world, 0);
+    homes
+}
 
-    // A bay with no harvester beside to keep it is the carriers' (Hivemind's).
-    for g in &mut grounds {
-        let kept = |r: &RefillFact| {
-            (bodies.iter()).any(|b| {
-                b.pattern == Pattern::Harvester && b.store.capacity > 0 && b.pos.within(1, &r.pos)
-            })
-        };
-        g.refills.extend(g.bays.extract_if(.., |r| !kept(r)));
+impl Homes {
+    /// A bay with no harvester beside to keep it is the carriers' (Hivemind's).
+    fn struck(&mut self, world: &World, from: usize) {
+        let strikes = strikes_of(world);
+        let bodies = &self.bodies;
+        for g in &mut self.grounds[from..] {
+            for r in &mut g.repairs {
+                r.struck = strikes.get(&r.id).copied().unwrap_or(0);
+            }
+            let kept = |r: &RefillFact| {
+                (bodies.iter()).any(|b| {
+                    b.pattern == Pattern::Harvester
+                        && b.store.capacity > 0
+                        && b.pos.within(1, &r.pos)
+                })
+            };
+            g.refills.extend(g.bays.extract_if(.., |r| !kept(r)));
+        }
+    }
+}
+
+impl Derived<'_> {
+    /// Aid ships again against the final reserves; an evacuation stays.
+    pub fn into_homes(mut self) -> Homes {
+        self.grounds.truncate(self.colonies.len());
+        for g in &mut self.grounds {
+            if !self.abandoning.contains(&g.room) {
+                g.shipment.clear();
+                g.ship_to = None;
+            }
+        }
+        Homes {
+            colonies: self.colonies,
+            grounds: self.grounds,
+            bodies: self.bodies,
+            ovens: self.ovens,
+            minerals: self.minerals,
+        }
+    }
+}
+
+pub fn of_world<'t>(
+    homes: Homes,
+    (world, creeps): (&World, &[&Creep]),
+    atlas: &Atlas,
+    declarations: &Declarations,
+    ours: &'t atlas::Derived,
+    (intel, scouts): (&Intel, &[Scout]),
+) -> Derived<'t> {
+    let mut homes = homes;
+    let plan_of = |room: RoomName| (declarations.colonies.iter()).find(|p| p.room == room);
+    for c in &mut homes.colonies {
+        let plan = plan_of(c.room);
+        c.reserve = plan.map_or(0, |p| p.reserve);
+        c.owes = plan.is_some_and(|p| p.owes);
+    }
+
+    // A declared room is dug by bodies its richest colony casts.
+    let richest = (homes.colonies.iter())
+        .map(|c| c.bank_capacity)
+        .max()
+        .unwrap_or(0);
+    let from = homes.grounds.len();
+    for outpost in &ours.worked {
+        if !homes.colonies.iter().any(|c| c.room == outpost.room) {
+            let ground = remote_of(atlas, world, intel, declarations, richest, outpost);
+            homes.grounds.push(ground);
+        }
+    }
+    if homes.grounds.len() > from {
+        homes.struck(world, from);
+    }
+    let Homes {
+        colonies,
+        mut grounds,
+        bodies,
+        ovens,
+        minerals,
+    } = homes;
+
+    // A terminal sends to one colony a tick: minerals first, as aid can wait
+    // in the stock while a lab cannot.
+    let given_up = |room: RoomName| declarations.abandoning(room);
+    let aid = give_aid(&colonies, &grounds, &given_up, &minerals);
+    for s in minerals.iter().cloned().chain(aid) {
+        if let Some(g) = grounds.iter_mut().find(|g| g.room == s.from) {
+            g.shipment = s.load;
+            g.ship_to = Some((s.to, s.taker_free));
+        }
     }
 
     let mut routes: BTreeMap<RoomName, Cow<Tree>> = (ours.trees.iter())
@@ -1499,6 +1566,10 @@ pub fn of_world<'t>(
 
     Derived {
         time: world.time,
+        abandoning: (colonies.iter())
+            .map(|c| c.room)
+            .filter(|room| given_up(*room))
+            .collect(),
         colonies,
         grounds,
         scouts: scouts
@@ -1507,9 +1578,10 @@ pub fn of_world<'t>(
             .collect(),
         spots,
         claims,
-        ovens: ovens_of(world),
+        ovens,
         routes,
         bodies,
+        minerals,
         closed: (declarations.outposts.iter())
             .filter(|o| !ours.worked.iter().any(|w| w.room == o.room))
             .filter(|o| !ours.owned.contains(&o.room))

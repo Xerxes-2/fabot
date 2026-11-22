@@ -138,12 +138,12 @@ segments over multiple ticks (economy first); a cold tick never spends more than
 | `Engine` | `fabot-base` | Game formulas & non-global server constants (vanilla tables from `screeps-game-api`) | — | — |
 | `World` | `fabot-base` | Single-pass tick snapshot, event-log strikes/destroys, per-tick `rules` (`CONTROLLER_STRUCTURES`) | `Game` | — |
 | `Atlas` | `fabot-atlas` | Room graph (region nodes, border-stretch crossings, keeper-strike avoidance, blind keeper & stronghold penalty) and per-room tile grid (creep-free weights, reverse floods, seats, footprint queries; a hostile's tile is walled only in this tick's step floods and passability, never in a kept flood, so one moving redoes no flood, tree or walk); out-of-sight grids hold what stood when last seen (else terrain) struck where intel places the keepers (`atlas.unseen`) | `World`, `terrain`, `intel.rooms`, `Declarations` (colony plans, for `server`) | flood table, `atlas.carried` |
-| `Economy` | `fabot-economy` | Slots, casts, sticky tasks, logistics dispatcher, links, labs, terminals, abandon | `Derived`, `Atlas`, `declarations`, `EconomyState`, Strategy's `scouts` | tasks, casts, `assignments`, `spare` |
+| `Economy` | `fabot-economy` | Slots, casts, sticky tasks, logistics dispatcher, links, labs, terminals, abandon | `Derived`, `Atlas`, `declarations`, `EconomyState`, Strategy's `scouts` | tasks, casts, `assignments` |
 | `Layout` | `fabot-layout` | Colony placement plan (Hivemind planner + xxscreeps JPS), rampart ring, construction sites, buried-road destroy, tower firing | `Derived`, `Atlas`, `declarations` | sites, destroys, tower actions, `standing.layout` |
 | `Exchange` | `fabot-exchange` | Pure combat arithmetic (`outcome`, `cheapest_win`, breach planning) | fighters, terrain | — |
 | `Fight` | `fabot-fight` | Hostile `Tracker`, engagements (`kinds/`: defend, siege, sweep, raid), casting | `Derived`, `Atlas`, `Exchange`, `declarations` (its operations table), `intel`, `FightState` | fight actions, asks, wishes, casts, `FightState` |
 | `Tactics` | `fabot-tactics` | Per-creep combat actions, stepping, and the operator's tactic rules (`ruling`, `checked`) (no `Fight` import) | `Atlas`, `Move`, `Sight` + plan | creep actions, wishes |
-| `Strategy` | `fabot-strategy` | Intel, observers/scouts, `ColonyPlan` & outpost selection, expansion/abandon, operation opening & global force priority | `World`, `Derived`, `intel`, `Season`, `standing.layout`, `spare`, fight state | `declarations` (`ColonyPlan`, outposts, claims, operations), `intel`, `expansion`, `piles` |
+| `Strategy` | `fabot-strategy` | Intel, observers/scouts, `ColonyPlan` & outpost selection, expansion/abandon, operation opening & global force priority | `World`, `Derived`, `intel`, `Season`, `standing.layout`, `economy::spare` over `EconomyState.assignments` (its colonies' own bodies, priced this tick), fight state | `declarations` (`ColonyPlan`, outposts, claims, operations), `intel`, `expansion`, `piles` |
 | `Season` | `fabot-strategy` (private `season`) | Disposable seasonal rules (`worth`, `spent`, season structures/scoring) | `World` | declarations to `Strategy`, season actions |
 | `Move` | `fabot-mv` | Room-level movement arbitration (augmenting-path matching) and stepping (`plan`, `blob`) | wishes, `Atlas` | moves & held bodies (`Settled`) |
 | `Executor` | `fabot` | Turning settled actions into API calls | `Settled.actions` | `Game`, refusals |
@@ -200,9 +200,9 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
 | `recorder` | deflated `read.js` pass + Memory + intel ring | Main | segments 10–14 | live capture for benchmark & replay (§9.1) |
 | `engagements.log` | closed engagements (`Predicted` vs `Actual`) | Observe | segment `❓` | live `Exchange` error tracking (§10.1) |
 | `metrics` | open window sums & per-creep/site/room deltas | Observe | heap | incremental tick deltas |
-| `standing.layout` | per-room layout plan & incremental drawing state + ground key | Layout | heap | rebuilds at 4 variations/tick after reset |
-| `spare` | colony → spawn ticks/life left by home's own bodies at a steady pace; never an outpost's body or spend | Economy | heap | Strategy prices outposts against it |
+| `standing.layout` | per-room layout plan & incremental drawing state + ground key + `cold` (drawn with no standing held: a reset or a new colony) | Layout | heap | rebuilds at 4 variations/tick after reset; `cold` marks the first plan `piles` is checked against |
 | `scouts` | scout targets | Strategy | heap (this tick) | derived from intel for Economy |
+| `homes` | the colonies' own economy facts (`derived::Homes`) | Economy | heap (this tick) | read once by `economy::spare` before outposts are picked, finished by Economy's `of_world` |
 | `sightings` | room → armed hostile / core id → expiry tick | World | heap | vision grace for stood-down outposts |
 | `sightings.last` | per sighting (room, id): its creep's parts, boosts, hits, hits max and tile as last seen (`Glimpse`; none for a core); written on sight, cleared when that creep stands in another room, expires with its sighting; `--check`: in sight it is the creep now and every armed creep there has one, out of sight its creep stands nowhere | World | heap (a stored observation, like the sighting, not a derived memo) | a blind `Defend` prices and seeks the raid it last saw (§6.2) |
 | `atlas.floods` | per-room cached reverse floods (bounded per room) | Atlas | heap | reused while room weights hold |
@@ -250,9 +250,11 @@ pricer cost ~2× CPU and 580 lines for no gain and was not merged).
   bodies leave over a life, so a far ring of outposts never casts nothing but
   haulers. While `ColonyPlan.owes` is true (a fight cast owed or imminent siege
   successor), no surplus-spending body is spawned so spawns stay free.
-- **Spare (§4 `spare`):** home's own bodies at a steady pace, its floor a
+- **Spare (`economy::spare`):** home's own bodies at a steady pace, its floor a
   constant 2 workers whatever this tick's floor: home's repairs and sites move
   with the outposts' haul wear, so a floor read from them made the choice flap.
+  Strategy prices it each tick before picking outposts, as it reads none of
+  them.
 
 ### Logistics, banks & links
 
