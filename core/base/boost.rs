@@ -1,13 +1,11 @@
 use super::engine;
-use super::vocabulary::{self, Compound, Resource};
+use super::vocabulary::{self, ResourceType};
 use super::world::{self, Id, Kind, Pos, RoomName, World};
 
 /// A cast name's last token names the compound its body walks to a lab for.
-pub fn of_name(name: &str) -> Option<Compound> {
-    match vocabulary::resource_of_name(name.rsplit('-').next()?) {
-        Resource::Compound(compound) => Some(compound),
-        _ => None,
-    }
+pub fn of_name(name: &str) -> Option<ResourceType> {
+    let compound: ResourceType = name.rsplit('-').next()?.parse().ok()?;
+    compound.reaction_components().map(|_| compound)
 }
 
 /// The lab a body asking for `compound` is boosted from: one with room for it
@@ -17,9 +15,9 @@ pub fn of_name(name: &str) -> Option<Compound> {
 pub fn booster<'a>(
     world: &'a World,
     room: RoomName,
-    compound: Compound,
+    compound: ResourceType,
 ) -> Option<&'a world::Structure> {
-    let held = |s: &world::Structure| s.store.amount_of(&Resource::Compound(compound));
+    let held = |s: &world::Structure| s.store.amount_of(compound);
     let most = |a: &&'a world::Structure, b: &&'a world::Structure| {
         held(a).cmp(&held(b)).then_with(|| b.id.cmp(&a.id))
     };
@@ -28,7 +26,7 @@ pub fn booster<'a>(
     let reagent = |l: &world::Structure| reagents.is_some_and(|(a, b)| l.id == a || l.id == b);
     let other = |l: &world::Structure| {
         (l.store.held.iter())
-            .filter(|(r, _)| vocabulary::is_mineral(r))
+            .filter(|(r, _)| vocabulary::is_mineral(*r))
             .map(|(_, n)| *n)
             .sum::<i32>()
     };
@@ -46,14 +44,8 @@ pub fn labs_in<'a>(world: &'a World, room: RoomName) -> impl Iterator<Item = &'a
         .filter(|s| s.kind == world::Kind::Lab && s.owner.is_ours())
 }
 
-/// Over the stores a haul fills: labs, terminal, storage and bodies' loads.
-pub fn home_holds(world: &World, room: RoomName, compound: Compound) -> (i32, i32) {
-    let held = |s: &world::Store| {
-        (
-            s.amount_of(&Resource::Compound(compound)),
-            s.amount_of(&Resource::Energy),
-        )
-    };
+pub fn home_holds(world: &World, room: RoomName, compound: ResourceType) -> (i32, i32) {
+    let held = |s: &world::Store| (s.amount_of(compound), s.amount_of(ResourceType::Energy));
     let stores = (world.rooms.iter())
         .filter(|r| r.name == room)
         .flat_map(|r| r.structures.iter())
@@ -74,19 +66,18 @@ pub fn home_holds(world: &World, room: RoomName, compound: Compound) -> (i32, i3
 
 /// Whether the lab holds the compound or nothing: a lab holds one mineral, so
 /// another one in it leaves the compound nowhere to land.
-fn holds_room_for(lab: &world::Structure, compound: Compound) -> bool {
-    let wanted = Resource::Compound(compound);
-    (lab.store.held.iter()).all(|(r, n)| *n <= 0 || r == &wanted || !vocabulary::is_mineral(r))
+fn holds_room_for(lab: &world::Structure, compound: ResourceType) -> bool {
+    (lab.store.held.iter()).all(|(r, n)| *n <= 0 || *r == compound || !vocabulary::is_mineral(*r))
 }
 
-pub fn can_boost(lab: &world::Structure, compound: Compound) -> bool {
-    lab.store.amount_of(&Resource::Compound(compound)) >= engine::BOOST_MINERAL_PER_PART
-        && lab.store.amount_of(&Resource::Energy) >= engine::BOOST_ENERGY_PER_PART
+pub fn can_boost(lab: &world::Structure, compound: ResourceType) -> bool {
+    lab.store.amount_of(compound) >= engine::BOOST_MINERAL_PER_PART
+        && lab.store.amount_of(ResourceType::Energy) >= engine::BOOST_ENERGY_PER_PART
 }
 
-fn boost_need(creep: &world::Creep, compound: Compound) -> (i32, i32) {
+fn boost_need(creep: &world::Creep, compound: ResourceType) -> (i32, i32) {
     let parts = (creep.body.iter())
-        .filter(|p| p.boost.is_none() && vocabulary::takes(p.kind, compound.resource_type()))
+        .filter(|p| p.boost.is_none() && vocabulary::takes(p.kind, compound))
         .count() as i32;
 
     (
@@ -97,7 +88,7 @@ fn boost_need(creep: &world::Creep, compound: Compound) -> (i32, i32) {
 
 pub struct Waiting<'a> {
     pub lab: &'a world::Structure,
-    pub compound: Compound,
+    pub compound: ResourceType,
     pub mineral: i32,
     pub energy: i32,
 }

@@ -9,7 +9,7 @@ use fabot_base::grid::{
 };
 use fabot_base::testing::Dice;
 use fabot_base::tiles::{self, Tile, TileSet};
-use fabot_base::vocabulary::{ALL_BODY_PARTS, Part, Resource};
+use fabot_base::vocabulary::{ALL_BODY_PARTS, Part, ResourceType};
 use fabot_base::world::{
     BodyPart, Creep, Kind, Mineral, Owner, Pos, Room, RoomName, Source, Store, Structure, World,
     terrain,
@@ -372,7 +372,7 @@ fn a_loaded_body_weighs_at_least_its_empty_self_and_a_creep_reads_as_its_parts()
             ticks_to_live: 1,
             fatigue: 0,
             store: Store {
-                held: vec![(Resource::Energy, engine::CARRY_PART_CAPACITY * 50)],
+                held: vec![(ResourceType::Energy, engine::CARRY_PART_CAPACITY * 50)],
                 capacity: 0,
             },
         };
@@ -466,7 +466,7 @@ fn no_seat_is_a_sources_a_minerals_or_a_controllers_tile() {
         world.rooms[0].minerals = vec![Mineral {
             id: "min".into(),
             pos: across,
-            resource: Resource::Energy,
+            resource: None,
             amount: 0,
         }];
         let atlas = Atlas::of_world(&world);

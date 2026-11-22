@@ -1,6 +1,6 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
-use crate::vocabulary::{Compound, Resource};
+use crate::vocabulary::ResourceType;
 use crate::world::{Id, Pos, RoomName};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,7 +56,7 @@ pub enum Node {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Flow {
-    pub what: Resource,
+    pub what: ResourceType,
     pub to: Node,
     pub stock: i32,
 }
@@ -154,16 +154,14 @@ impl Declarations {
         (self.colonies.iter()).any(|p| p.room == room && p.stage == Stage::Abandon)
     }
 
-    pub fn labs(&self) -> Option<(RoomName, BTreeMap<Compound, i32>)> {
+    pub fn labs(&self) -> Option<(RoomName, Vec<(ResourceType, i32)>)> {
         let Node::Colony(home) = self.flows.first()?.to;
-        let targets = (self.flows.iter())
-            .filter_map(|f| match f.what {
-                Resource::Compound(c) if f.to == Node::Colony(home) && f.stock > 0 => {
-                    Some((c, f.stock))
-                }
-                _ => None,
-            })
+        let mut targets: Vec<(ResourceType, i32)> = (self.flows.iter())
+            .filter(|f| f.to == Node::Colony(home) && f.stock > 0)
+            .filter(|f| f.what.reaction_components().is_some())
+            .map(|f| (f.what, f.stock))
             .collect();
+        targets.sort_by_key(|(r, _)| *r as u32);
         Some((home, targets))
     }
 }

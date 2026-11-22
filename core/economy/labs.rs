@@ -2,40 +2,38 @@
 /// it makes next, which lab plays which part, what each lab is filled with or
 /// drained of. Derived whole every tick from what the stores hold, so a lost
 /// tick or a reset loses nothing.
-use std::collections::BTreeMap;
-
 use fabot_base::boost::{Roles, roles_of};
 use fabot_base::engine;
-use fabot_base::vocabulary::{Compound, Resource};
+use fabot_base::vocabulary::{ORES, ResourceType};
 use fabot_base::world::{Id, Pos};
 
-/// Toward the first target (in compound order) its stock stands short of. A
-/// reagent compound short of the shortfall is made first; once none can be,
-/// the compound itself from what stands, so a reagent run out leaves the
-/// cluster working on with the other.
+/// Toward the first target its stock stands short of. A reagent compound short
+/// of the shortfall is made first; once none can be, the compound itself from
+/// what stands, so a reagent run out leaves the cluster working on with the other.
 pub fn next_reaction(
-    targets: &BTreeMap<Compound, i32>,
-    stock: &dyn Fn(&Resource) -> i32,
-) -> Option<Compound> {
-    fn toward(compound: Compound, want: i32, stock: &dyn Fn(&Resource) -> i32) -> Option<Compound> {
-        let [first, second] = compound.reagents();
-        let deeper = [&first, &second]
-            .into_iter()
-            .find_map(|reagent| match reagent {
-                Resource::Compound(inner) if stock(reagent) < want => {
-                    toward(*inner, want - stock(reagent), stock)
-                }
-                _ => None,
-            });
+    targets: &[(ResourceType, i32)],
+    stock: &dyn Fn(ResourceType) -> i32,
+) -> Option<(ResourceType, [ResourceType; 2])> {
+    fn toward(
+        compound: ResourceType,
+        want: i32,
+        stock: &dyn Fn(ResourceType) -> i32,
+    ) -> Option<(ResourceType, [ResourceType; 2])> {
+        let [first, second] = compound.reaction_components()?;
+        let deeper = [first, second].into_iter().find_map(|reagent| {
+            (stock(reagent) < want)
+                .then(|| toward(reagent, want - stock(reagent), stock))
+                .flatten()
+        });
         deeper.or_else(|| {
-            (stock(&first) >= engine::LAB_REACTION_AMOUNT
-                && stock(&second) >= engine::LAB_REACTION_AMOUNT)
-                .then_some(compound)
+            (stock(first) >= engine::LAB_REACTION_AMOUNT
+                && stock(second) >= engine::LAB_REACTION_AMOUNT)
+                .then_some((compound, [first, second]))
         })
     }
 
     targets.iter().find_map(|(compound, target)| {
-        let short = target - stock(&Resource::Compound(*compound));
+        let short = target - stock(*compound);
         (short > 0)
             .then(|| toward(*compound, short, stock))
             .flatten()
@@ -46,55 +44,53 @@ pub fn next_reaction(
 /// down through its recipe, a compound or ore already in `stock` spent before
 /// the ore under it is counted. What the other colonies ship, and no more.
 pub fn ore_short(
-    targets: &BTreeMap<Compound, i32>,
-    stock: &dyn Fn(&Resource) -> i32,
-) -> BTreeMap<Resource, i32> {
+    targets: &[(ResourceType, i32)],
+    stock: &dyn Fn(ResourceType) -> i32,
+) -> Vec<(ResourceType, i32)> {
     fn need(
-        resource: &Resource,
+        resource: ResourceType,
         amount: i32,
-        left: &mut BTreeMap<Resource, i32>,
-        short: &mut BTreeMap<Resource, i32>,
-        stock: &dyn Fn(&Resource) -> i32,
+        left: &mut Vec<(ResourceType, i32)>,
+        short: &mut [i32; ORES.len()],
+        stock: &dyn Fn(ResourceType) -> i32,
     ) {
-        let have = left
-            .entry(resource.clone())
-            .or_insert_with(|| stock(resource));
-        let spent = (*have).min(amount);
-        *have -= spent;
+        let at = (left.iter().position(|(r, _)| *r == resource)).unwrap_or_else(|| {
+            left.push((resource, stock(resource)));
+            left.len() - 1
+        });
+        let spent = left[at].1.min(amount);
+        left[at].1 -= spent;
         let rest = amount - spent;
-        match resource {
-            _ if rest <= 0 => (),
-            Resource::Compound(c) => {
-                let [first, second] = c.reagents();
-                need(&first, rest, left, short, stock);
-                need(&second, rest, left, short, stock);
+        if rest <= 0 {
+            return;
+        }
+        if let Some(reagents) = resource.reaction_components() {
+            for reagent in reagents {
+                need(reagent, rest, left, short, stock);
             }
-            Resource::Ore(_) => *short.entry(resource.clone()).or_insert(0) += rest,
-            _ => (),
+        } else if let Some(ore) = ORES.iter().position(|o| *o == resource) {
+            short[ore] += rest;
         }
     }
 
-    let mut left = BTreeMap::new();
-    let mut short = BTreeMap::new();
+    let mut left = Vec::new();
+    let mut short = [0; ORES.len()];
     for (compound, target) in targets {
-        need(
-            &Resource::Compound(*compound),
-            *target,
-            &mut left,
-            &mut short,
-            stock,
-        );
+        need(*compound, *target, &mut left, &mut short, stock);
     }
-    short
+    ORES.into_iter()
+        .zip(short)
+        .filter(|(_, n)| *n > 0)
+        .collect()
 }
 
 /// One tick of the cluster: the reaction and the labs that run it, the fills
 /// (lab, mineral, the room it has for it) and the drains (lab, mineral).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Plan {
-    pub reaction: Option<(Compound, Roles)>,
-    pub fills: Vec<(Id, Resource, i32)>,
-    pub drains: Vec<(Id, Resource)>,
+    pub reaction: Option<(ResourceType, [ResourceType; 2], Roles)>,
+    pub fills: Vec<(Id, ResourceType, i32)>,
+    pub drains: Vec<(Id, ResourceType)>,
 }
 
 /// Each reagent lab holds its reagent: anything else is drained, and one under
@@ -103,17 +99,17 @@ pub struct Plan {
 /// the product once it stands half full. A reagent goes to the lab that already
 /// holds it. With no reaction to run, the outputs are emptied.
 pub fn plan_for(
-    targets: &BTreeMap<Compound, i32>,
-    stock: &dyn Fn(&Resource) -> i32,
+    targets: &[(ResourceType, i32)],
+    stock: &dyn Fn(ResourceType) -> i32,
     labs: &[(Id, Pos)],
-    held: &dyn Fn(Id) -> Option<(Resource, i32)>,
+    held: &dyn Fn(Id) -> Option<(ResourceType, i32)>,
 ) -> Plan {
     let half = engine::LAB_MINERAL_CAPACITY / 2;
     let Some(roles) = roles_of(labs) else {
         return Plan::default();
     };
 
-    let Some(compound) = next_reaction(targets, stock) else {
+    let Some((compound, [first, second])) = next_reaction(targets, stock) else {
         return Plan {
             drains: roles
                 .outputs
@@ -124,39 +120,38 @@ pub fn plan_for(
         };
     };
 
-    let [first, second] = compound.reagents();
     let (one, other) = roles.reagents;
-    let holds = |lab: Id, mineral: &Resource| held(lab).is_some_and(|(m, _)| &m == mineral);
-    let (first_lab, second_lab) = if holds(one, &second) || holds(other, &first) {
+    let holds = |lab: Id, mineral: ResourceType| held(lab).is_some_and(|(m, _)| m == mineral);
+    let (first_lab, second_lab) = if holds(one, second) || holds(other, first) {
         (other, one)
     } else {
         (one, other)
     };
 
     let mut plan = Plan::default();
-    for (lab, reagent) in [(first_lab, &first), (second_lab, &second)] {
+    for (lab, reagent) in [(first_lab, first), (second_lab, second)] {
         match held(lab) {
-            Some((m, _)) if &m != reagent => plan.drains.push((lab, m)),
+            Some((m, _)) if m != reagent => plan.drains.push((lab, m)),
             Some((_, amount)) if amount >= half => (),
             h => {
                 let amount = h.map_or(0, |(_, amount)| amount);
                 plan.fills
-                    .push((lab, reagent.clone(), engine::LAB_MINERAL_CAPACITY - amount));
+                    .push((lab, reagent, engine::LAB_MINERAL_CAPACITY - amount));
             }
         }
     }
 
-    let product = Resource::Compound(compound);
     for &lab in &roles.outputs {
         match held(lab) {
-            Some((m, _)) if m != product => plan.drains.push((lab, m)),
-            Some((_, amount)) if amount >= half => plan.drains.push((lab, product.clone())),
+            Some((m, _)) if m != compound => plan.drains.push((lab, m)),
+            Some((_, amount)) if amount >= half => plan.drains.push((lab, compound)),
             _ => (),
         }
     }
 
     plan.reaction = Some((
         compound,
+        [first, second],
         Roles {
             reagents: (first_lab, second_lab),
             outputs: roles.outputs,
@@ -170,20 +165,18 @@ pub fn plan_for(
 /// (output, first reagent's lab, second's).
 pub fn ready_runs(
     plan: &Plan,
-    held: &dyn Fn(Id) -> Option<(Resource, i32)>,
+    held: &dyn Fn(Id) -> Option<(ResourceType, i32)>,
     cooldown: &dyn Fn(Id) -> i32,
 ) -> Vec<(Id, Id, Id)> {
-    let Some((compound, roles)) = &plan.reaction else {
+    let Some((compound, [first, second], roles)) = &plan.reaction else {
         return Vec::new();
     };
     let (one, other) = roles.reagents;
-    let [first, second] = compound.reagents();
-    let product = Resource::Compound(*compound);
-    let stocked = |lab: Id, reagent: &Resource| {
-        held(lab).is_some_and(|(m, amount)| &m == reagent && amount >= engine::LAB_REACTION_AMOUNT)
+    let stocked = |lab: Id, reagent: ResourceType| {
+        held(lab).is_some_and(|(m, amount)| m == reagent && amount >= engine::LAB_REACTION_AMOUNT)
     };
 
-    if !(stocked(one, &first) && stocked(other, &second)) {
+    if !(stocked(one, *first) && stocked(other, *second)) {
         return Vec::new();
     }
     roles
@@ -192,7 +185,7 @@ pub fn ready_runs(
         .filter(|lab| {
             cooldown(**lab) == 0
                 && held(**lab).is_none_or(|(m, amount)| {
-                    m == product
+                    m == *compound
                         && amount + engine::LAB_REACTION_AMOUNT <= engine::LAB_MINERAL_CAPACITY
                 })
         })
@@ -203,105 +196,75 @@ pub fn ready_runs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fabot_base::vocabulary::{Ore, RESOURCES_ALL, ResourceType};
+    use ResourceType::*;
+    use fabot_base::vocabulary::RESOURCES_ALL;
     use fabot_base::world::RoomName;
 
-    fn stocked(pairs: &[(Resource, i32)]) -> impl Fn(&Resource) -> i32 + '_ {
-        move |r| pairs.iter().find(|(p, _)| p == r).map_or(0, |(_, n)| *n)
+    fn stocked(pairs: &[(ResourceType, i32)]) -> impl Fn(ResourceType) -> i32 + '_ {
+        move |r| pairs.iter().find(|(p, _)| *p == r).map_or(0, |(_, n)| *n)
     }
 
     #[test]
     fn a_short_compound_makes_its_short_reagent_first() {
-        let targets = BTreeMap::from([(Compound::new(ResourceType::UtriumAcid), 3000)]);
-        let ore = |o| (Resource::Ore(o), 10_000);
-        let stock = [ore(Ore::Hydrogen), ore(Ore::Oxygen), ore(Ore::Utrium)];
+        let targets = [(UtriumAcid, 3000)];
+        let stock = [(Hydrogen, 10_000), (Oxygen, 10_000), (Utrium, 10_000)];
         assert_eq!(
-            next_reaction(&targets, &stocked(&stock)),
-            Some(Compound::new(ResourceType::UtriumHydride))
+            next_reaction(&targets, &stocked(&stock)).map(|r| r.0),
+            Some(UtriumHydride)
         );
         let mut more = stock.to_vec();
-        more.push((
-            Resource::Compound(Compound::new(ResourceType::Hydroxide)),
-            3000,
-        ));
-        more.push((
-            Resource::Compound(Compound::new(ResourceType::UtriumHydride)),
-            3000,
-        ));
+        more.extend([(Hydroxide, 3000), (UtriumHydride, 3000)]);
         assert_eq!(
-            next_reaction(&targets, &stocked(&more)),
-            Some(Compound::new(ResourceType::UtriumAcid))
+            next_reaction(&targets, &stocked(&more)).map(|r| r.0),
+            Some(UtriumAcid)
         );
-        more.push((
-            Resource::Compound(Compound::new(ResourceType::UtriumAcid)),
-            3000,
-        ));
+        more.push((UtriumAcid, 3000));
         assert_eq!(next_reaction(&targets, &stocked(&more)), None);
     }
 
     #[test]
     fn the_ore_short_is_the_target_less_what_stands_through_its_recipe() {
-        let targets = BTreeMap::from([(Compound::new(ResourceType::UtriumAcid), 3000)]);
-        let stock = [
-            (
-                Resource::Compound(Compound::new(ResourceType::Hydroxide)),
-                1000,
-            ),
-            (Resource::Ore(Ore::Hydrogen), 2000),
-        ];
-        let short = ore_short(&targets, &stocked(&stock));
+        let targets = [(UtriumAcid, 3000)];
+        let stock = [(Hydroxide, 1000), (Hydrogen, 2000)];
         // OH: 2000 to make, of H and O; UH: 3000, of U and H; H: 5000 less 2000.
-        assert_eq!(short.get(&Resource::Ore(Ore::Hydrogen)), Some(&3000));
-        assert_eq!(short.get(&Resource::Ore(Ore::Oxygen)), Some(&2000));
-        assert_eq!(short.get(&Resource::Ore(Ore::Utrium)), Some(&3000));
+        assert_eq!(
+            ore_short(&targets, &stocked(&stock)),
+            vec![(Hydrogen, 3000), (Oxygen, 2000), (Utrium, 3000)]
+        );
     }
 
     #[test]
     fn every_compound_breaks_down_to_base_ores() {
-        fn bottoms_out(r: &Resource) -> bool {
-            match r {
-                Resource::Ore(_) => true,
-                Resource::Compound(c) => c.reagents().iter().all(bottoms_out),
-                _ => false,
-            }
+        fn bottoms_out(r: ResourceType) -> bool {
+            ORES.contains(&r)
+                || (r.reaction_components()).is_some_and(|rs| rs.into_iter().all(bottoms_out))
         }
-        let all: Vec<Compound> = RESOURCES_ALL
-            .iter()
-            .filter_map(|r| Compound::of(*r))
+        let all: Vec<ResourceType> = (RESOURCES_ALL.iter().copied())
+            .filter(|r| r.reaction_components().is_some())
             .collect();
         assert!(!all.is_empty());
         for c in all {
-            assert!(bottoms_out(&Resource::Compound(c)), "{c:?}");
+            assert!(bottoms_out(c), "{c:?}");
         }
     }
 
     #[test]
     fn a_t3_from_base_ores_makes_each_intermediate_before_its_product() {
-        let xgho2 = Compound::new(ResourceType::CatalyzedGhodiumAlkalide);
-        let targets = BTreeMap::from([(xgho2, 3000)]);
-        let mut stock: Vec<(Resource, i32)> = [
-            Ore::Hydrogen,
-            Ore::Oxygen,
-            Ore::Utrium,
-            Ore::Keanium,
-            Ore::Lemergium,
-            Ore::Zynthium,
-            Ore::Catalyst,
-        ]
-        .map(|o| (Resource::Ore(o), 10_000))
-        .to_vec();
+        let xgho2 = CatalyzedGhodiumAlkalide;
+        let targets = [(xgho2, 3000)];
+        let mut stock: Vec<(ResourceType, i32)> = ORES.map(|o| (o, 10_000)).to_vec();
         let mut made = Vec::new();
         loop {
             let next = next_reaction(&targets, &stocked(&stock));
-            let Some(next) = next else { break };
+            let Some((next, reagents)) = next else { break };
             assert!(!made.contains(&next), "{next:?} made twice");
-            for reagent in next.reagents() {
-                if let Resource::Compound(c) = reagent {
-                    assert!(made.contains(&c), "{next:?} before its {c:?}");
+            for reagent in reagents {
+                if !ORES.contains(&reagent) {
+                    assert!(made.contains(&reagent), "{next:?} before its {reagent:?}");
                 }
             }
             made.push(next);
-            stock.push((Resource::Compound(next), 3000));
+            stock.push((next, 3000));
         }
         assert_eq!(made.last(), Some(&xgho2));
     }

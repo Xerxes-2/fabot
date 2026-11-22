@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use fabot_base::declarations::Declarations;
 use fabot_base::engine;
-use fabot_base::vocabulary::{Compound, Part, Resource, ResourceType};
+use fabot_base::vocabulary::{Part, ResourceType};
 use fabot_base::world::{
     Creep, Id, Kind, Owner, Pos, Room, RoomName, Spawn, Store, Structure, World, terrain,
 };
@@ -165,7 +165,7 @@ pub fn side_in(room: Option<&Room>, bodies: Vec<Fighter>) -> exchange::Side {
             .into_iter()
             .map(|s| exchange::Tower {
                 pos: s.pos,
-                energy: s.store.amount_of(&Resource::Energy),
+                energy: s.store.amount_of(ResourceType::Energy),
             })
             .collect(),
         ..exchange::Side::default()
@@ -175,7 +175,7 @@ pub fn side_in(room: Option<&Room>, bodies: Vec<Fighter>) -> exchange::Side {
 /// A body the lab stock does not all cover is cast unboosted rather than held.
 pub fn cluster_boost(world: &World, declarations: &Declarations) -> Option<(ResourceType, i32)> {
     let (home, _) = declarations.labs()?;
-    let uh2o = const { Compound::new(ResourceType::UtriumAcid) };
+    let uh2o = ResourceType::UtriumAcid;
     let (compound, energy) = fabot_base::boost::home_holds(world, home, uh2o);
     let parts =
         (compound / engine::BOOST_MINERAL_PER_PART).min(energy / engine::BOOST_ENERGY_PER_PART);

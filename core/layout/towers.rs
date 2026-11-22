@@ -2,7 +2,7 @@
 //! may hold no worker for a life.
 use fabot_base::engine;
 use fabot_base::intents::{Action, TowerAct};
-use fabot_base::vocabulary::{Part, Resource};
+use fabot_base::vocabulary::{Part, ResourceType};
 use fabot_base::world::{self, Creep, Pos, Structure, power};
 
 fn range(a: &Creep, b: &Creep) -> i32 {
@@ -118,7 +118,7 @@ pub fn fire(
         .filter(|r| r.hits <= 2 * engine::RAMPART_DECAY_AMOUNT)
         .min_by_key(|r| (r.hits, &r.id))
         && let Some(tower) = (free.iter())
-            .find(|t| t.store.amount_of(&Resource::Energy) >= engine::TOWER_CAPACITY / 2)
+            .find(|t| t.store.amount_of(ResourceType::Energy) >= engine::TOWER_CAPACITY / 2)
     {
         acts.push(Action::Tower(tower.id, TowerAct::Repair(dying.id)));
     }

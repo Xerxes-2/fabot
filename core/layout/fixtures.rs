@@ -8,7 +8,7 @@ use crate::plan;
 use crate::shape::Plan;
 use fabot_base::declarations::{ColonyPlan, Stage};
 use fabot_base::tiles::{self, Tile};
-use fabot_base::vocabulary::Resource;
+use fabot_base::vocabulary::ResourceType;
 use fabot_base::world::{
     Controller, Creep, Kind, Mineral, Owner, Pos, Room, RoomName, Rules, Site, Source, Spawn,
     Store, Structure, World, terrain,
@@ -204,7 +204,7 @@ fn colony_of(rng: &mut Rng, blobs: i32) -> Option<Colony> {
         minerals: vec![Mineral {
             id: "m".into(),
             pos: at(mineral),
-            resource: Resource::Energy,
+            resource: None,
             amount: 0,
         }],
         structures,
@@ -400,7 +400,7 @@ pub fn creep(id: &str, owner: Owner, hits: i32, tile: Tile) -> Creep {
 pub fn tower(id: &str, tile: Tile, energy: i32) -> Structure {
     Structure {
         store: Store {
-            held: vec![(Resource::Energy, energy)],
+            held: vec![(ResourceType::Energy, energy)],
             capacity: 1000,
         },
         ..structure(id, Kind::Tower, Owner::Ours, tile)

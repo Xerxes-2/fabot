@@ -9,7 +9,8 @@ use fabot_base::intents::{
     Action, Ask, CreepAct, LabAct, LinkAct, ModuleOutput, Rank, SpawnAct, Telemetry, TerminalAct,
 };
 use fabot_base::tiles::{self, TileSet};
-use fabot_base::vocabulary::{Part, Resource};
+use fabot_base::vocabulary::Part;
+use fabot_base::vocabulary::ResourceType::{self, Energy};
 use fabot_base::wish::Wish;
 use fabot_base::world::{Creep, Id, Kind, Pos, RoomName};
 use fabot_mv::plan;
@@ -92,30 +93,30 @@ fn spot_of(derived: &Derived, task: &Task) -> Option<Pos> {
 
 /// What a store, link, lab or container holds of `r`: the engine refuses a
 /// draw from nothing.
-fn holds(derived: &Derived, id: task::Target, r: &Resource) -> i32 {
+fn holds(derived: &Derived, id: task::Target, r: ResourceType) -> i32 {
     let object = id.object();
     derived
         .grounds
         .iter()
         .map(|g| {
             let stored = (g.stores.iter())
-                .filter(|s| s.id == id && r.is_energy())
+                .filter(|s| s.id == id && r == Energy)
                 .map(|s| s.energy)
                 .sum::<i32>();
             let linked = (g.links.iter())
-                .filter(|l| Some(l.id) == object && r.is_energy())
+                .filter(|l| Some(l.id) == object && r == Energy)
                 .map(|l| l.energy)
                 .sum::<i32>();
             let ores = (g.ores.iter())
-                .filter(|o| Some(o.0) == object && &o.2 == r)
+                .filter(|o| Some(o.0) == object && o.2 == r)
                 .map(|o| o.3)
                 .sum::<i32>();
             let labs = (g.labs.iter())
                 .filter(|l| Some(l.id) == object)
-                .filter_map(|l| l.held.as_ref().filter(|h| &h.0 == r).map(|h| h.1))
+                .filter_map(|l| l.held.filter(|h| h.0 == r).map(|h| h.1))
                 .sum::<i32>();
             let mined = (g.minerals.iter())
-                .filter(|m| m.container.is_some() && m.container == object && &m.resource == r)
+                .filter(|m| m.container.is_some() && m.container == object && m.resource == r)
                 .map(|m| m.held)
                 .sum::<i32>();
             let terminal = (g.terminal.iter())
@@ -148,10 +149,10 @@ fn act_of(derived: &Derived, task: &Task) -> Option<CreepAct> {
     Some(match task {
         Task::Harvest(id) => CreepAct::Harvest(at(id)?),
         Task::Withdraw(id, _) if piled(derived, *id) => CreepAct::Pickup(at(id)?),
-        Task::Refill(id, r) if piled(derived, *id) => CreepAct::Drop(r.clone()),
-        Task::Withdraw(id, r) => CreepAct::Withdraw(at(id)?, r.clone()),
+        Task::Refill(id, r) if piled(derived, *id) => CreepAct::Drop(*r),
+        Task::Withdraw(id, r) => CreepAct::Withdraw(at(id)?, *r),
         Task::Pickup(id, _) => CreepAct::Pickup(at(id)?),
-        Task::Refill(id, r) => CreepAct::Transfer(at(id)?, r.clone()),
+        Task::Refill(id, r) => CreepAct::Transfer(at(id)?, *r),
         Task::Build(id) => CreepAct::Build(at(id)?),
         Task::Repair(id) => CreepAct::Repair(at(id)?),
         Task::Upgrade(id) => CreepAct::Upgrade(at(id)?),
@@ -173,10 +174,10 @@ fn pickups(derived: &Derived, taken: &BTreeSet<String>) -> Vec<Action> {
         if b.free > 0
             && b.pattern != Pattern::Harvester
             && !taken.contains(&b.name)
-            && b.store.held.iter().all(|(r, _)| r.is_energy())
+            && b.store.held.iter().all(|(r, _)| *r == Energy)
         {
             let pile = (derived.grounds.iter()).find_map(|g| {
-                (g.piles.iter()).find(|p| p.resource.is_energy() && b.pos.within(1, &p.pos))
+                (g.piles.iter()).find(|p| p.resource == Energy && b.pos.within(1, &p.pos))
             });
 
             if let Some(p) = pile {
@@ -231,26 +232,32 @@ fn terminal_send(g: &Ground) -> Option<Action> {
         return None;
     }
     let apart = tiles::rooms_apart(g.room, *home);
-    let energy = t.store.amount_of(&Resource::Energy);
+    let energy = t.store.amount_of(Energy);
     let fees: i32 = g
         .shipment
         .iter()
-        .filter(|(r, _)| !r.is_energy())
+        .filter(|(r, _)| *r != Energy)
         .map(|(_, n)| engine::send_cost(*n, apart))
         .sum();
     let kept = if fees > 0 { fees + 100 } else { 0 };
     g.shipment.iter().find_map(|(ore, owed)| {
-        let (pays, sent) = if ore.is_energy() {
+        let (pays, sent) = if *ore == Energy {
             (energy - kept, 1)
         } else {
             (energy, 0)
         };
-        let mut amount = t.store.amount_of(ore).min(*owed).min(*free);
+        let mut amount = t.store.amount_of(*ore).min(*owed).min(*free);
         while amount > 0 && engine::send_cost(amount, apart) + sent * amount > pays {
             amount = amount * 9 / 10;
         }
-        (amount >= engine::TERMINAL_MIN_SEND.min(*owed))
-            .then(|| Action::Terminal(t.id, TerminalAct::Send(ore.clone(), amount, *home)))
+        (amount >= engine::TERMINAL_MIN_SEND.min(*owed)).then_some(Action::Terminal(
+            t.id,
+            TerminalAct::Send {
+                resource: *ore,
+                amount,
+                to: *home,
+            },
+        ))
     })
 }
 
@@ -287,7 +294,7 @@ fn sends(derived: &Derived) -> Vec<Action> {
         sends.extend(terminal_send(g));
         if let Some(plan) = &g.lab_plan {
             let lab = |id: Id| g.labs.iter().find(|l| l.id == id);
-            let held = |id: Id| lab(id).and_then(|l| l.held.clone());
+            let held = |id: Id| lab(id).and_then(|l| l.held);
             let cooldown = |id: Id| lab(id).map_or(0, |l| l.cooldown);
             for (output, a, b) in super::labs::ready_runs(plan, &held, &cooldown) {
                 sends.push(Action::Lab(output, LabAct::RunReaction(a, b)));
@@ -410,7 +417,7 @@ fn work(
 ) -> Wish {
     let members = ring_members(derived, task, &creep.pos);
     let ring = match (task, members.first()) {
-        (Task::Refill(_, r), Some(f)) => Some(Task::Refill(f.id.into(), r.clone())),
+        (Task::Refill(_, r), Some(f)) => Some(Task::Refill(f.id.into(), *r)),
         _ => None,
     };
     let task = ring.as_ref().unwrap_or(task);
@@ -435,7 +442,7 @@ fn work(
     {
         acts.push(Action::Creep(
             creep.name.clone(),
-            CreepAct::Withdraw(id, Resource::Energy),
+            CreepAct::Withdraw(id, Energy),
         ));
     }
     let digs = matches!(slot.job, Job::Dig(_));
@@ -452,9 +459,9 @@ fn work(
             Task::Upgrade(_) | Task::Build(_) | Task::Repair(_) => body.energy > 0 && body.work > 0,
             Task::Harvest(_) => body.work > 0,
             Task::Reserve(_) | Task::Claim(_) => body.claim > 0,
-            Task::Withdraw(id, r) => holds(derived, *id, r) > 0 && body.free > 0,
+            Task::Withdraw(id, r) => holds(derived, *id, *r) > 0 && body.free > 0,
             Task::Pickup(..) => body.free > 0,
-            Task::Refill(_, r) => body.store.amount_of(r) > 0,
+            Task::Refill(_, r) => body.store.amount_of(*r) > 0,
             _ => true,
         };
         if arrived
@@ -474,7 +481,7 @@ fn work(
             if body.energy > 0 {
                 acts.push(Action::Creep(
                     creep.name.clone(),
-                    CreepAct::Transfer(to, Resource::Energy),
+                    CreepAct::Transfer(to, Energy),
                 ));
             }
             let under = (g.stores.iter()).find(|s| s.pos == creep.pos && s.energy > 0);
@@ -483,7 +490,7 @@ fn work(
             {
                 acts.push(Action::Creep(
                     creep.name.clone(),
-                    CreepAct::Withdraw(id, Resource::Energy),
+                    CreepAct::Withdraw(id, Energy),
                 ));
             }
         }
@@ -633,7 +640,7 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
         let danger = context.derived.danger(creep.pos.room);
         let Some((slot, body, task)) = at else {
             // A load held idle is lost to every sink.
-            let loaded = creep.store.amount_of(&Resource::Energy) > 0;
+            let loaded = creep.store.amount_of(Energy) > 0;
             let works = creep.live(Part::Work) > 0;
             let sink = (derived.grounds.iter())
                 .filter(|g| g.room == creep.pos.room)
@@ -648,9 +655,10 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
                     (true, Some(c), _) if c.owner.is_ours() && slots::fed(c) => {
                         Some((c.pos, task::RANGE_UPGRADE, CreepAct::Upgrade(c.id)))
                     }
-                    (_, _, Some(s)) if s.owned => (s.id.object())
-                        .map(|id| (s.pos, 1, CreepAct::Transfer(id, Resource::Energy))),
-                    (false, _, Some(s)) => Some((s.pos, 0, CreepAct::Drop(Resource::Energy))),
+                    (_, _, Some(s)) if s.owned => {
+                        (s.id.object()).map(|id| (s.pos, 1, CreepAct::Transfer(id, Energy)))
+                    }
+                    (false, _, Some(s)) => Some((s.pos, 0, CreepAct::Drop(Energy))),
                     _ => None,
                 });
             if let Some((to, reach, act)) = sink.filter(|_| loaded) {

@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use fabot_base::declarations::{ColonyPlan, Stage};
 use fabot_base::engine;
 use fabot_base::tiles::{self, Tile, TileSet};
-use fabot_base::vocabulary::Resource;
+use fabot_base::vocabulary::ResourceType;
 use fabot_base::world::{Creep, Id, Kind, Pos, RoomName, Structure, World};
 
 use super::ground;
@@ -89,7 +89,7 @@ pub fn colonies(
             .filter(|s| {
                 s.kind == Kind::Tower
                     && s.owner.is_ours()
-                    && s.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST
+                    && s.store.amount_of(ResourceType::Energy) >= engine::TOWER_ENERGY_COST
             })
             .cloned()
             .collect();

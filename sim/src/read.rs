@@ -75,10 +75,8 @@ impl Reader<'_> {
         let held = (obj(o, atom!("store")).into_iter())
             .flat_map(Obj::iter)
             .filter_map(|(k, v)| Some((k.as_str(), v.as_f64()? as i32)))
-            .filter(|(name, amount)| {
-                *amount > 0 && name.parse::<vocabulary::ResourceType>().is_ok()
-            })
-            .map(|(name, amount)| (vocabulary::resource_of_name(name), amount))
+            .filter(|(_, amount)| *amount > 0)
+            .filter_map(|(name, amount)| Some((name.parse().ok()?, amount)))
             .collect();
         let by_resource =
             obj(o, atom!("storeCapacityResource")).map_or(0.0, |c| num(c, atom!("energy")));
@@ -290,7 +288,7 @@ pub fn world(v: &View, declarations: &Declarations) -> World<'static> {
                 "mineral" => room.minerals.push(Mineral {
                     id: Id::of_engine(text(o, atom!("_id"))),
                     pos: r.pos(name, o),
-                    resource: vocabulary::resource_of_name(text(o, atom!("mineralType"))),
+                    resource: text(o, atom!("mineralType")).parse().ok(),
                     amount: num(o, atom!("mineralAmount")) as i32,
                 }),
                 "constructionSite" => room.sites.push(Site {
@@ -301,12 +299,14 @@ pub fn world(v: &View, declarations: &Declarations) -> World<'static> {
                     progress: num(o, atom!("progress")) as i32,
                     progress_total: num(o, atom!("progressTotal")) as i32,
                 }),
-                "energy" => room.piles.push(Pile {
-                    id: Id::of_engine(text(o, atom!("_id"))),
-                    pos: r.pos(name, o),
-                    resource: vocabulary::resource_of_name(text(o, atom!("resourceType"))),
-                    amount: num(o, Atom::intern(text(o, atom!("resourceType")))) as i32,
-                }),
+                "energy" => room
+                    .piles
+                    .extend(text(o, atom!("resourceType")).parse().map(|resource| Pile {
+                        id: Id::of_engine(text(o, atom!("_id"))),
+                        pos: r.pos(name, o),
+                        resource,
+                        amount: num(o, Atom::intern(text(o, atom!("resourceType")))) as i32,
+                    })),
                 "tombstone" => room.remains.push(r.remains(name, o, true)),
                 "ruin" => room.remains.push(r.remains(name, o, false)),
                 "creep" if o.get(Atom::intern("spawning")) == Some(&Val::Bool(true)) => {}
@@ -316,7 +316,7 @@ pub fn world(v: &View, declarations: &Declarations) -> World<'static> {
                 kind => {
                     if ours(o) && matches!(kind, "spawn" | "extension") && view::on(o) {
                         let store = Reader::store(o);
-                        room.energy_available += store.amount_of(&vocabulary::Resource::Energy);
+                        room.energy_available += store.amount_of(vocabulary::ResourceType::Energy);
                         room.energy_capacity += store.capacity;
                     }
                     if ours(o) && kind == "spawn" {

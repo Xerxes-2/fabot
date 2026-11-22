@@ -3,7 +3,7 @@
 use fabot_base::engine;
 use fabot_base::intents::{Action, ControllerAct, RoomAct};
 use fabot_base::tiles;
-use fabot_base::vocabulary::Resource;
+use fabot_base::vocabulary::ResourceType::{self, Energy};
 use fabot_base::world::{Creep, Kind, Room, RoomName, Structure};
 
 use super::derived::Ground;
@@ -78,29 +78,29 @@ pub fn evacuate(g: &mut Ground, room: &Room, creeps: &[Creep], to: Option<(RoomN
                 .held
                 .iter()
                 .filter(|(_, n)| *n > 0)
-                .map(|(r, n)| (s.id, s.pos, r.clone(), *n))
+                .map(|(r, n)| (s.id, s.pos, *r, *n))
         })
         .collect();
 
-    let mut owed: Vec<(Resource, i32)> = Vec::new();
+    let mut owed: Vec<(ResourceType, i32)> = Vec::new();
     // A load aboard is still owed, or its carrier finds no terminal to fill.
     let aboard = creeps
         .iter()
         .filter(|c| c.owner.is_ours() && c.pos.room == room.name)
-        .flat_map(|c| c.store.held.iter().cloned());
-    for (r, n) in g.ores.iter().map(|o| (o.2.clone(), o.3)).chain(aboard) {
+        .flat_map(|c| c.store.held.iter().copied());
+    for (r, n) in g.ores.iter().map(|o| (o.2, o.3)).chain(aboard) {
         match owed.iter_mut().find(|(each, _)| *each == r) {
             Some((_, total)) => *total += n,
             None => owed.push((r, n)),
         }
     }
-    // Energy under the least send and its fee never leaves: what stays.
     let apart = to
         .as_ref()
         .map_or(0, |(home, _)| tiles::rooms_apart(g.room, *home));
-    let least = engine::TERMINAL_MIN_SEND + engine::send_cost(engine::TERMINAL_MIN_SEND, apart);
-    owed.retain(|(r, n)| to.is_some() && *n > 0 && (!r.is_energy() || *n >= least));
-    owed.sort_by_key(|(r, _)| r.is_energy());
+    let energy_kept_under =
+        engine::TERMINAL_MIN_SEND + engine::send_cost(engine::TERMINAL_MIN_SEND, apart);
+    owed.retain(|(r, n)| to.is_some() && *n > 0 && (*r != Energy || *n >= energy_kept_under));
+    owed.sort_by_key(|(r, _)| *r == Energy);
     g.shipment = owed;
     g.ship_to = to.filter(|_| !g.shipment.is_empty());
 }

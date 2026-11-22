@@ -1,7 +1,7 @@
 /// What a body is hired to do; Memory holds it as its `task_id`.
 use std::fmt::Write;
 
-use fabot_base::vocabulary::{Resource, resource_name, resource_of_name};
+use fabot_base::vocabulary::ResourceType;
 use fabot_base::world::{Id, RoomName};
 
 /// What a task acts on: an object, or a colony's spawn ring or bank pile,
@@ -56,9 +56,9 @@ pub struct Assignment {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Task {
     Harvest(Target),
-    Withdraw(Target, Resource),
-    Pickup(Target, Resource),
-    Refill(Target, Resource),
+    Withdraw(Target, ResourceType),
+    Pickup(Target, ResourceType),
+    Refill(Target, ResourceType),
     Build(Target),
     Repair(Target),
     Upgrade(Target),
@@ -113,8 +113,7 @@ pub fn task_id(task: &Task) -> String {
         (_, None) => (),
     }
     if let Task::Withdraw(_, r) | Task::Pickup(_, r) | Task::Refill(_, r) = task {
-        out.push(':');
-        out.push_str(&resource_name(r));
+        let _ = write!(out, ":{r}");
     }
     out
 }
@@ -126,11 +125,11 @@ pub fn of_task_id(id: &str) -> Option<Task> {
         return Some(Task::Scout(RoomName::parse(room)?));
     }
     let t = Target::parse(text?)?;
-    match (tag?, resource.map(resource_of_name), rest) {
+    match (tag?, resource.map(str::parse::<ResourceType>), rest) {
         ("h", None, _) => Some(Task::Harvest(t)),
-        ("w", Some(r), None) => Some(Task::Withdraw(t, r)),
-        ("p", Some(r), None) => Some(Task::Pickup(t, r)),
-        ("f", Some(r), None) => Some(Task::Refill(t, r)),
+        ("w", Some(Ok(r)), None) => Some(Task::Withdraw(t, r)),
+        ("p", Some(Ok(r)), None) => Some(Task::Pickup(t, r)),
+        ("f", Some(Ok(r)), None) => Some(Task::Refill(t, r)),
         ("b", None, _) => Some(Task::Build(t)),
         ("r", None, _) => Some(Task::Repair(t)),
         ("u", None, _) => Some(Task::Upgrade(t)),

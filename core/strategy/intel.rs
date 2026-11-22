@@ -53,7 +53,7 @@ pub fn step(world: &World, intel: &mut Intel) {
                 (room.structures.iter())
                     .any(|c| c.kind == Kind::Container && c.pos.within(1, &s.pos))
             }),
-            mineral: room.minerals.first().map(|m| m.resource.clone()),
+            mineral: room.minerals.first().and_then(|m| m.resource),
             stronghold: (room.structures.iter())
                 .any(|s| s.kind == Kind::InvaderCore && s.level > 0),
         };

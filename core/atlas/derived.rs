@@ -6,7 +6,7 @@ use fabot_base::engine;
 use fabot_base::grid::{self, Footprint};
 use fabot_base::intel::Intel;
 use fabot_base::tiles::{self, TileSet};
-use fabot_base::vocabulary::{Part, Resource};
+use fabot_base::vocabulary::{Part, ResourceType};
 use fabot_base::world::{Creep, Kind, Owner, Pos, Room, RoomName, Sightings, World, hostiles};
 
 pub struct Context<'a> {
@@ -160,7 +160,7 @@ fn danger(world: &World, owned: &BTreeSet<RoomName>) -> Vec<(RoomName, TileSet)>
                 s.kind == Kind::Tower
                     && s.owner.is_theirs()
                     && !s.owner.is_ally()
-                    && s.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST
+                    && s.store.amount_of(ResourceType::Energy) >= engine::TOWER_ENERGY_COST
             })
             .map(|s| (tiles::of_pos(&s.pos), engine::TOWER_FALLOFF_RANGE));
         creeps.chain(towers).collect::<Vec<_>>()

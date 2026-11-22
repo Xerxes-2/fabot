@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use strum::{AsRefStr, EnumDiscriminants, EnumString};
 
 use super::engine;
-use super::vocabulary::{Part, Resource, ResourceType};
+use super::vocabulary::{Part, ResourceType};
 use crate::declarations::Declarations;
 
 /// An object id in `screeps::RawObjectId`'s 128 bits, its digits left-aligned
@@ -361,7 +361,7 @@ impl Owner {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Store {
-    pub held: Vec<(Resource, i32)>,
+    pub held: Vec<(ResourceType, i32)>,
     /// Over every resource; 0 for no store.
     pub capacity: i32,
 }
@@ -375,10 +375,10 @@ impl Store {
     }
 
     #[inline]
-    pub fn amount_of(&self, resource: &Resource) -> i32 {
+    pub fn amount_of(&self, resource: ResourceType) -> i32 {
         self.held
             .iter()
-            .filter_map(|(r, n)| (r == resource).then_some(n))
+            .filter_map(|(r, n)| (*r == resource).then_some(n))
             .sum()
     }
 
@@ -530,7 +530,7 @@ pub struct Source {
 pub struct Mineral {
     pub id: Id,
     pub pos: Pos,
-    pub resource: Resource,
+    pub resource: Option<ResourceType>,
     pub amount: i32,
 }
 
@@ -538,7 +538,7 @@ pub struct Mineral {
 pub struct Pile {
     pub id: Id,
     pub pos: Pos,
-    pub resource: Resource,
+    pub resource: ResourceType,
     pub amount: i32,
 }
 
@@ -712,7 +712,6 @@ pub mod read {
     use std::collections::BTreeSet;
     use std::str::Split;
 
-    use screeps::ResourceType;
     use screeps::game::map::RoomStatus;
 
     use crate::tiles::{self, BOTTOM, LEFT, RIGHT, TOP};
@@ -720,7 +719,7 @@ pub mod read {
     use super::*;
     use crate::declarations::Declarations;
     use crate::engine;
-    use crate::vocabulary::{self, Part};
+    use crate::vocabulary::Part;
 
     struct Reader<'a> {
         ints: &'a [i32],
@@ -769,13 +768,17 @@ pub mod read {
             self.list_into(Vec::new(), each)
         }
 
-        fn list_into<T>(
+        fn list_into<T>(&mut self, out: Vec<T>, mut each: impl FnMut(&mut Self) -> T) -> Vec<T> {
+            self.list_some(out, |r| Some(each(r)))
+        }
+
+        fn list_some<T>(
             &mut self,
             mut out: Vec<T>,
-            mut each: impl FnMut(&mut Self) -> T,
+            mut each: impl FnMut(&mut Self) -> Option<T>,
         ) -> Vec<T> {
             let count = self.n();
-            out.extend((0..count).map(|_| each(self)));
+            out.extend((0..count).filter_map(|_| each(self)));
             out
         }
 
@@ -812,8 +815,8 @@ pub mod read {
             let count = self.n();
             let held = (0..count)
                 .map(|_| (self.word(), self.n()))
-                .filter(|(name, amount)| *amount > 0 && name.parse::<ResourceType>().is_ok())
-                .map(|(name, amount)| (vocabulary::resource_of_name(name), amount))
+                .filter(|(_, amount)| *amount > 0)
+                .filter_map(|(name, amount)| Some((name.parse().ok()?, amount)))
                 .collect();
             Store {
                 held,
@@ -956,7 +959,7 @@ pub mod read {
                 minerals: self.list_into(lists.minerals, |r| Mineral {
                     id: r.id(),
                     pos: r.pos(),
-                    resource: vocabulary::resource_of_name(r.word()),
+                    resource: r.word().parse().ok(),
                     amount: r.n(),
                 }),
                 structures: self.list_into(lists.structures, |r| r.structure(name)),
@@ -968,11 +971,16 @@ pub mod read {
                     progress: r.n(),
                     progress_total: r.n(),
                 }),
-                piles: self.list_into(lists.piles, |r| Pile {
-                    id: r.id(),
-                    pos: r.pos(),
-                    resource: vocabulary::resource_of_name(r.word()),
-                    amount: r.n(),
+                piles: self.list_some(lists.piles, |r| {
+                    let (id, pos) = (r.id(), r.pos());
+                    let resource = r.word().parse().ok();
+                    let amount = r.n();
+                    Some(Pile {
+                        id,
+                        pos,
+                        resource: resource?,
+                        amount,
+                    })
                 }),
                 remains: self.list_into(lists.remains, Reader::remains),
                 others: self.list_into(lists.others, Reader::creep),

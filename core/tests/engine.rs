@@ -2,7 +2,7 @@
 //! its own inverses.
 use fabot_base::engine;
 use fabot_base::testing::{Dice, boosted};
-use fabot_base::vocabulary::{ALL_BODY_PARTS, Part, ResourceType, resource_name, resource_of_name};
+use fabot_base::vocabulary::{ALL_BODY_PARTS, Part, ResourceType};
 
 const CASES: usize = 100;
 
@@ -88,28 +88,5 @@ fn the_damage_priced_for_a_loss_takes_at_least_that_loss() {
         let taken = dice.between(1, 10_000).min(hits);
         let damage = engine::damage_for(&body, &boosts, hits, taken);
         assert!(engine::damage_taken(&body, &boosts, hits, damage) >= taken - 1);
-    }
-}
-
-#[test]
-fn a_resources_engine_name_reads_back_as_itself() {
-    let mut dice = Dice::new(44);
-    let mut names: Vec<String> = [
-        "energy", "H", "O", "X", "OH", "UH", "UH2O", "XGHO2", "power",
-    ]
-    .map(String::from)
-    .to_vec();
-    for _ in 0..CASES {
-        let n = dice.between(1, 6);
-        names.push(
-            (0..n)
-                .map(|_| dice.pick(&['G', 'H', 'O', '2', 'x', 'é']))
-                .collect(),
-        );
-    }
-    for name in names {
-        let r = resource_of_name(&name);
-        assert_eq!(resource_name(&r), name);
-        assert_eq!(resource_of_name(&resource_name(&r)), r);
     }
 }

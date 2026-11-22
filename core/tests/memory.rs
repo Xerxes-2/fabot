@@ -65,6 +65,7 @@ fn declarations_read_each_key() {
     let declared = Memory::of_text(OURS.to_string()).declarations();
     assert_eq!(declared.reserve_lifetimes, 1.5);
     assert_eq!(declared.outposts[0].sources[0].pos.x, 5);
-    assert_eq!((declared.flows.len(), declared.tactics.len()), (1, 1));
+    let targets = declared.labs().map_or(0, |(_, targets)| targets.len());
+    assert_eq!((targets, declared.tactics.len()), (1, 1));
     assert!(declared.allies.contains("A"));
 }

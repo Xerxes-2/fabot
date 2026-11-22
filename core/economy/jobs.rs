@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use fabot_atlas::Atlas;
 use fabot_base::HashMap;
 use fabot_base::engine;
-use fabot_base::vocabulary::Resource;
+use fabot_base::vocabulary::ResourceType::{self, Energy};
 use fabot_base::world::{Id, Kind, Pos};
 
 use super::bodies::Pattern;
@@ -69,10 +69,10 @@ pub fn fee_short(ground: &Ground) -> i32 {
     };
     let apart = fabot_base::tiles::rooms_apart(ground.room, *home);
     let fee: i32 = (ground.shipment.iter())
-        .map(|(r, n)| engine::send_cost(*n, apart) + if r.is_energy() { *n } else { 0 })
+        .map(|(r, n)| engine::send_cost(*n, apart) + if *r == Energy { *n } else { 0 })
         .sum();
     let kept = if fee > 0 { fee + 100 } else { 0 };
-    0.max(kept - t.store.amount_of(&Resource::Energy))
+    0.max(kept - t.store.amount_of(Energy))
 }
 
 enum Supply {
@@ -138,7 +138,7 @@ fn hand_fed(derived: &Derived, g: &Ground) -> bool {
 fn sinks_of(derived: &Derived, ci: usize) -> Vec<Spot> {
     let g = &derived.grounds[ci];
     let mut out = Vec::new();
-    let mut add = |id: Target, pos: Pos, r: Resource, amount: i32, of: Of| {
+    let mut add = |id: Target, pos: Pos, r: ResourceType, amount: i32, of: Of| {
         if amount > 0 {
             out.push(Spot {
                 task: Task::Refill(id, r),
@@ -157,37 +157,31 @@ fn sinks_of(derived: &Derived, ci: usize) -> Vec<Spot> {
             spawn: open.iter().any(|r| r.kind == Kind::Spawn),
         };
         let free = open.iter().map(|r| r.free).sum();
-        add(Target::Ring(g.room), spawn.pos, Resource::Energy, free, of);
+        add(Target::Ring(g.room), spawn.pos, Energy, free, of);
     }
     for r in towers {
-        add(r.id.into(), r.pos, Resource::Energy, r.free, Of::Tower);
+        add(r.id.into(), r.pos, Energy, r.free, Of::Tower);
     }
     if let Some(b) = &g.boost_lab {
-        add(b.id.into(), b.pos, Resource::Energy, b.energy, Of::Lab);
-        add(b.id.into(), b.pos, b.compound.clone(), b.mineral, Of::Lab);
+        add(b.id.into(), b.pos, Energy, b.energy, Of::Lab);
+        add(b.id.into(), b.pos, b.compound, b.mineral, Of::Lab);
     }
     if let Some(t) = &g.terminal {
         let fee = Of::Terminal { fee: true };
         add(
             t.id.into(),
             t.pos,
-            Resource::Energy,
+            Energy,
             fee_short(g).min(t.store.free()),
             fee,
         );
         for (ore, n) in g
             .shipment
             .iter()
-            .filter(|(r, _)| !r.is_energy() || g.abandoned)
+            .filter(|(r, _)| *r != Energy || g.abandoned)
         {
-            let n = (n - t.store.amount_of(ore)).min(t.store.free());
-            add(
-                t.id.into(),
-                t.pos,
-                ore.clone(),
-                n,
-                Of::Terminal { fee: false },
-            );
+            let n = (n - t.store.amount_of(*ore)).min(t.store.free());
+            add(t.id.into(), t.pos, *ore, n, Of::Terminal { fee: false });
         }
     }
     if hand_fed(derived, g)
@@ -201,19 +195,19 @@ fn sinks_of(derived: &Derived, ci: usize) -> Vec<Spot> {
                 capacity: f.energy + f.free,
             }
         };
-        add(f.id, f.pos, Resource::Energy, f.free, of);
+        add(f.id, f.pos, Energy, f.free, of);
     }
     if let Some(plan) = &g.lab_plan {
         for (lab, reagent, room) in &plan.fills {
             if let Some(l) = g.labs.iter().find(|l| &l.id == lab) {
-                add((*lab).into(), l.pos, reagent.clone(), *room, Of::Reagent);
+                add((*lab).into(), l.pos, *reagent, *room, Of::Reagent);
             }
         }
     }
     if !g.abandoned
         && let Some(s) = g.bank()
     {
-        add(s.id, s.pos, Resource::Energy, s.free, Of::Bank);
+        add(s.id, s.pos, Energy, s.free, Of::Bank);
         if s.owned {
             for r in ores_aboard(derived) {
                 add(s.id, s.pos, r, s.free, Of::Bank);
@@ -223,11 +217,11 @@ fn sinks_of(derived: &Derived, ci: usize) -> Vec<Spot> {
     out
 }
 
-fn ores_aboard(derived: &Derived) -> Vec<Resource> {
-    let mut out: Vec<Resource> = Vec::new();
+fn ores_aboard(derived: &Derived) -> Vec<ResourceType> {
+    let mut out: Vec<ResourceType> = Vec::new();
     for (r, _) in derived.bodies.iter().flat_map(|b| &b.store.held) {
-        if !r.is_energy() && !out.contains(r) {
-            out.push(r.clone());
+        if *r != Energy && !out.contains(r) {
+            out.push(*r);
         }
     }
     out
@@ -255,7 +249,7 @@ fn takes_of(derived: &Derived, ci: usize, outposts: &[&Ground], short: i32) -> V
             });
         }
     };
-    let energy = |id: Target| Task::Withdraw(id, Resource::Energy);
+    let energy = |id: Target| Task::Withdraw(id, Energy);
     for o in outposts {
         for st in o.stores.iter().filter(|s| s.source_dug > 0) {
             add(energy(st.id), st.pos, st.energy, Of::Container);
@@ -268,9 +262,9 @@ fn takes_of(derived: &Derived, ci: usize, outposts: &[&Ground], short: i32) -> V
         for p in o
             .piles
             .iter()
-            .filter(|p| p.resource.is_energy() && posted(&p.pos))
+            .filter(|p| p.resource == Energy && posted(&p.pos))
         {
-            let task = Task::Pickup(p.id.into(), p.resource.clone());
+            let task = Task::Pickup(p.id.into(), p.resource);
             add(task, p.pos, p.amount, Of::Drop);
         }
     }
@@ -293,12 +287,12 @@ fn takes_of(derived: &Derived, ci: usize, outposts: &[&Ground], short: i32) -> V
     // Sent energy is banked, or the stock the spend is sized to never sees it.
     let sent = |o: &Ground| {
         o.ship_to.is_some_and(|(to, _)| to == g.room)
-            && o.shipment.iter().any(|(r, _)| r.is_energy())
+            && o.shipment.iter().any(|(r, _)| *r == Energy)
     };
     if let Some(t) =
         (g.terminal.as_ref()).filter(|_| g.ship_to.is_none() && derived.grounds.iter().any(sent))
     {
-        let n = t.store.amount_of(&Resource::Energy);
+        let n = t.store.amount_of(Energy);
         add(energy(t.id.into()), t.pos, n, Of::Received);
     }
     let net = g.link_net();
@@ -310,19 +304,14 @@ fn takes_of(derived: &Derived, ci: usize, outposts: &[&Ground], short: i32) -> V
         add(energy(l.id.into()), l.pos, l.energy, Of::Link);
     }
     for (store, pos, r, n) in &g.ores {
-        add(
-            Task::Withdraw((*store).into(), r.clone()),
-            *pos,
-            *n,
-            Of::Ore,
-        );
+        add(Task::Withdraw((*store).into(), *r), *pos, *n, Of::Ore);
     }
     if let Some(plan) = &g.lab_plan {
         for (lab, mineral) in &plan.drains {
             if let Some(l) = g.labs.iter().find(|l| &l.id == lab) {
                 let held = l.held.as_ref().map_or(0, |h| h.1);
                 add(
-                    Task::Withdraw((*lab).into(), mineral.clone()),
+                    Task::Withdraw((*lab).into(), *mineral),
                     l.pos,
                     held,
                     Of::Drain,
@@ -332,12 +321,12 @@ fn takes_of(derived: &Derived, ci: usize, outposts: &[&Ground], short: i32) -> V
     }
     for m in &g.minerals {
         if let Some(id) = &m.container {
-            let task = Task::Withdraw((*id).into(), m.resource.clone());
+            let task = Task::Withdraw((*id).into(), m.resource);
             add(task, m.post.unwrap_or(m.pos), m.held, Of::Mineral);
         }
     }
-    for p in g.piles.iter().filter(|p| p.resource.is_energy()) {
-        let task = Task::Pickup(p.id.into(), p.resource.clone());
+    for p in g.piles.iter().filter(|p| p.resource == Energy) {
+        let task = Task::Pickup(p.id.into(), p.resource);
         add(task, p.pos, p.amount, Of::Drop);
     }
     for s in g.stores.iter().filter(|s| s.kind.is_remains()) {
@@ -362,7 +351,7 @@ impl<'a> Jobs<'a> {
                 && 3 * body.free >= body.store.capacity
             {
                 sinks[s.colony].push(Spot {
-                    task: Task::Refill(id.into(), Resource::Energy),
+                    task: Task::Refill(id.into(), Energy),
                     pos: body.pos,
                     amount: body.free,
                     of: Of::Worker {
@@ -372,7 +361,7 @@ impl<'a> Jobs<'a> {
             }
         }
         let wants = |s: &Spot| {
-            !matches!(s.of, Of::Bank) && matches!(&s.task, Task::Refill(_, r) if r.is_energy())
+            !matches!(s.of, Of::Bank) && matches!(&s.task, Task::Refill(_, r) if *r == Energy)
         };
         let mut short: Vec<i32> = (sinks.iter())
             .map(|s| s.iter().filter(|s| wants(s)).map(|s| s.amount).sum())
@@ -381,7 +370,7 @@ impl<'a> Jobs<'a> {
             let (s, home) = (&slots[*si], derived.colonies[slots[*si].colony].room);
             let bank = derived.grounds[s.colony].bank().map(|b| b.id);
             let bound = task.as_ref().is_some_and(|t| match t {
-                Task::Withdraw(id, r) => r.is_energy() && Some(*id) == bank,
+                Task::Withdraw(id, r) => *r == Energy && Some(*id) == bank,
                 t => sinks[s.colony].iter().any(|x| &x.task == t && wants(x)),
             });
             if s.job == Job::Fill && body.pos.room == home && bound {
@@ -552,17 +541,17 @@ impl<'a> Jobs<'a> {
         kept: Option<&Task>,
         carrier: bool,
     ) -> Option<Task> {
-        let held: Vec<Resource> = body
+        let held: Vec<ResourceType> = body
             .store
             .held
             .iter()
             .filter(|(_, n)| *n > 0)
-            .map(|(r, _)| r.clone())
+            .map(|(r, _)| *r)
             .collect();
         let kept = kept.filter(|t| matches!(t, Task::Refill(_, r) if held.contains(r)));
         let fits = |s: &Spot| {
             matches!(&s.task, Task::Refill(_, r) if held.contains(r)
-                && (carrier || (!matches!(s.of, Of::Bank) || !r.is_energy()) && !matches!(s.of, Of::Worker { .. })))
+                && (carrier || (!matches!(s.of, Of::Bank) || *r != Energy) && !matches!(s.of, Of::Worker { .. })))
         };
         let i = (kept.and_then(|t| self.valid(ci, &self.sinks[ci], t, (body, carrier))))
             .or_else(|| self.pick(ci, &self.sinks[ci], (body, carrier), &fits))?;
@@ -570,7 +559,7 @@ impl<'a> Jobs<'a> {
         let Task::Refill(_, r) = &spot.task else {
             return None;
         };
-        Jobs::book(&mut self.booked_load, spot, body.store.amount_of(r));
+        Jobs::book(&mut self.booked_load, spot, body.store.amount_of(*r));
         Some(spot.task.clone())
     }
 
@@ -600,18 +589,18 @@ impl<'a> Jobs<'a> {
                 _ => false,
             };
             let of = |t: &Task| match t {
-                Task::Withdraw(id, r) | Task::Pickup(id, r) => Some((*id, r.clone())),
+                Task::Withdraw(id, r) | Task::Pickup(id, r) => Some((*id, *r)),
                 _ => None,
             };
             i = self.pick(ci, takes, me, &|s| fits(s) && !on_demand(s));
-            let stocked = |r: &Resource| {
+            let stocked = |r: ResourceType| {
                 takes
                     .iter()
-                    .any(|s| fits(s) && of(&s.task).is_some_and(|(_, x)| &x == r))
+                    .any(|s| fits(s) && of(&s.task).is_some_and(|(_, x)| x == r))
             };
             let sinks = &self.sinks[ci];
             let wanted = |s: &Spot| {
-                !matches!(s.of, Of::Bank) && matches!(&s.task, Task::Refill(_, r) if stocked(r))
+                !matches!(s.of, Of::Bank) && matches!(&s.task, Task::Refill(_, r) if stocked(*r))
             };
             if let Some(d) = self.pick(ci, sinks, me, &wanted)
                 && i.is_none_or(|i| {
@@ -633,8 +622,8 @@ impl<'a> Jobs<'a> {
     fn fetching(body: &Body, kept: Option<&Task>) -> bool {
         let cap = body.store.capacity;
         let used = cap - body.free;
-        let ore = (body.store.held.iter()).any(|(r, n)| !r.is_energy() && *n > 0);
-        let bringing = matches!(kept, Some(Task::Refill(_, r)) if body.store.amount_of(r) > 0);
+        let ore = (body.store.held.iter()).any(|(r, n)| *r != Energy && *n > 0);
+        let bringing = matches!(kept, Some(Task::Refill(_, r)) if body.store.amount_of(*r) > 0);
         !bringing
             && (10 * used <= cap && !ore || 10 * used < 9 * cap && kept.is_none_or(Task::is_intake))
     }
@@ -654,7 +643,7 @@ impl<'a> Jobs<'a> {
                 // Energy is fetched only for a sink with room: with none, the
                 // dig waits in its container for the workers, not aboard.
                 let room: i32 = (self.sinks[ci].iter())
-                    .filter(|s| matches!(&s.task, Task::Refill(_, r) if r.is_energy()))
+                    .filter(|s| matches!(&s.task, Task::Refill(_, r) if *r == Energy))
                     .map(|s| s.amount.max(0))
                     .sum();
                 // The home's carriers are cast for its own flows and stay on
@@ -664,7 +653,7 @@ impl<'a> Jobs<'a> {
                 let fits = |s: &Spot| {
                     (far || s.pos.room == home)
                         && (room > 0
-                            || !matches!(&s.task, Task::Withdraw(_, r) | Task::Pickup(_, r) if r.is_energy()))
+                            || !matches!(&s.task, Task::Withdraw(_, r) | Task::Pickup(_, r) if *r == Energy))
                 };
                 let mut takes = std::mem::take(&mut self.takes[ci]);
                 let used = body.store.capacity - body.free;
@@ -744,17 +733,11 @@ impl<'a> Jobs<'a> {
                 }
                 StoreKind::Storage | StoreKind::Remains => false,
             })
-            .map(|s| {
-                (
-                    Task::Withdraw(s.id, Resource::Energy),
-                    s.pos,
-                    s.kind.is_buffer(),
-                )
-            });
+            .map(|s| (Task::Withdraw(s.id, Energy), s.pos, s.kind.is_buffer()));
         let piles = (g.piles.iter())
-            .filter(|p| p.resource.is_energy() && p.amount >= body.store.capacity)
+            .filter(|p| p.resource == Energy && p.amount >= body.store.capacity)
             .filter(|p| p.pos.within(reach, &c.pos))
-            .map(|p| (Task::Pickup(p.id.into(), p.resource.clone()), p.pos, false));
+            .map(|p| (Task::Pickup(p.id.into(), p.resource), p.pos, false));
         let near: Vec<(Task, Pos, bool)> = stores.chain(piles).collect();
         if let Some((t, _, _)) = near.iter().find(|(t, _, _)| Some(t) == kept) {
             return Some(t.clone());
@@ -941,16 +924,11 @@ impl<'a> Jobs<'a> {
                 } else {
                     spare
                 };
-                (Task::Withdraw(s.id, Resource::Energy), s.pos, n)
+                (Task::Withdraw(s.id, Energy), s.pos, n)
             })
             .chain(
-                (g.piles.iter().filter(|p| p.resource.is_energy())).map(|p| {
-                    (
-                        Task::Pickup(p.id.into(), p.resource.clone()),
-                        p.pos,
-                        p.amount,
-                    )
-                }),
+                (g.piles.iter().filter(|p| p.resource == Energy))
+                    .map(|p| (Task::Pickup(p.id.into(), p.resource), p.pos, p.amount)),
             )
             .collect();
         // A pioneer brings its colony's stock past the reserve when the room
@@ -960,11 +938,7 @@ impl<'a> Jobs<'a> {
             && let Some(st) = home.stores.iter().find(|s| s.owned)
         {
             let n = Some(st.spare(c.reserve)).filter(|n| *n >= body.free);
-            loads.push((
-                Task::Withdraw(st.id, Resource::Energy),
-                st.pos,
-                n.unwrap_or(0),
-            ));
+            loads.push((Task::Withdraw(st.id, Energy), st.pos, n.unwrap_or(0)));
         }
         // Not Hivemind's rank: ranked, a worker waits idle on a drop another holds.
         let loads = (loads.iter())

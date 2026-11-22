@@ -16,7 +16,7 @@ use fabot_base::intents::{
     Action, Ask, CreepAct, LabAct, ModuleOutput, Rank, Settled, SpawnAct, Telemetry,
 };
 use fabot_base::tiles::{self, Tile};
-use fabot_base::vocabulary::Compound;
+use fabot_base::vocabulary::ResourceType;
 use fabot_base::wish::Wish;
 use fabot_base::world::{self, Id, Kind, Pos, Room, RoomName, Sightings, Structure, World};
 use fabot_mv as mv;
@@ -171,7 +171,7 @@ fn boost_stop(
     wishes: &[(RoomName, Wish)],
 ) -> Option<Vec<(RoomName, Wish)>> {
     let (home, _) = context.declarations.labs()?;
-    let mut stalls: Vec<(String, Pos, Id, Compound)> = Vec::new();
+    let mut stalls: Vec<(String, Pos, Id, ResourceType)> = Vec::new();
 
     for creep in (context.world.creeps.iter()).filter(|c| c.owner.is_ours() && c.pos.room == home) {
         if let Some(w) = boost::waiting(context.world, home, creep) {

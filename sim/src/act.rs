@@ -8,7 +8,7 @@ use fabot_base::intents::{
     Action, ControllerAct, CreepAct, LabAct, LinkAct, Refusal, RoomAct, SpawnAct, TerminalAct,
     TowerAct,
 };
-use fabot_base::vocabulary::{self, Part, Resource};
+use fabot_base::vocabulary::{Part, ResourceType};
 use fabot_base::{engine, tiles, world};
 use krebs::atom;
 use krebs::doc::{Atom, Id, Obj, Val};
@@ -168,7 +168,7 @@ impl Run<'_> {
                 ("move", json!({ "direction": direction }))
             }
             CreepAct::Drop(r) => {
-                let r = vocabulary::resource_name(r);
+                let r = r.to_string();
                 let amount = store(creep.1, Atom::intern(&r));
                 check(amount <= 0.0, NotEnough)?;
                 ("drop", json!({ "amount": amount, "resourceType": r }))
@@ -176,11 +176,11 @@ impl Run<'_> {
             CreepAct::RangedMassAttack => ("rangedMassAttack", json!({})),
             CreepAct::Transfer(t, r) => {
                 let t = self.target(*t)?;
-                let r = vocabulary::resource_name(r);
-                if r == "energy" && text(t.1, atom!("type")) == "controller" {
+                if *r == ResourceType::Energy && text(t.1, atom!("type")) == "controller" {
                     let id = world::Id::parse(text(t.1, atom!("_id"))).ok_or(InvalidTarget)?;
                     return self.creep(name, &CreepAct::Upgrade(id));
                 }
+                let r = r.to_string();
                 let room = capacity(t.1, &r);
                 check(room == 0.0, InvalidTarget)?;
                 near(t)?;
@@ -199,7 +199,7 @@ impl Run<'_> {
             }
             CreepAct::Withdraw(t, r) => {
                 let t = self.target(*t)?;
-                let r = vocabulary::resource_name(r);
+                let r = r.to_string();
                 near(t)?;
                 let empty = num(creep.1, atom!("storeCapacity")) - used(creep.1);
                 check(empty <= 0.0, Full)?;
@@ -330,7 +330,6 @@ impl Run<'_> {
     }
 
     fn act(&mut self, intent: &Action) -> (&'static str, Result<(), ErrorCode>) {
-        let resource = |r: &Resource| vocabulary::resource_name(r).to_string();
         match intent {
             Action::Creep(name, act) => (act.into(), self.creep(name, act)),
             Action::Room(room, RoomAct::CreateSite(x, y, kind)) => {
@@ -377,9 +376,16 @@ impl Run<'_> {
                 "boostCreep",
                 self.on(*id, &[*c], "boostCreep", json!({ "id": c })),
             ),
-            Action::Terminal(id, TerminalAct::Send(r, amount, room)) => {
-                let value = json!({ "resourceType": resource(r), "amount": amount,
-                    "targetRoomName": room.to_string(), "description": "" });
+            Action::Terminal(
+                id,
+                TerminalAct::Send {
+                    resource,
+                    amount,
+                    to,
+                },
+            ) => {
+                let value = json!({ "resourceType": resource.to_string(), "amount": amount,
+                    "targetRoomName": to.to_string(), "description": "" });
                 ("send", self.on(*id, &[], "send", value))
             }
             Action::Observe(id, room) => ("observeRoom", self.observe(*id, *room)),

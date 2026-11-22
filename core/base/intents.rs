@@ -1,6 +1,6 @@
 use strum::IntoStaticStr;
 
-use super::vocabulary::{Part, Resource};
+use super::vocabulary::{Part, ResourceType};
 use super::wish::Wish;
 use super::world::{Id, Kind, RoomName};
 
@@ -12,10 +12,10 @@ pub enum CreepAct {
     Move(i32),
     Say(String),
     Harvest(Id),
-    Transfer(Id, Resource),
-    Withdraw(Id, Resource),
+    Transfer(Id, ResourceType),
+    Withdraw(Id, ResourceType),
     Pickup(Id),
-    Drop(Resource),
+    Drop(ResourceType),
     Build(Id),
     Repair(Id),
     Upgrade(Id),
@@ -101,10 +101,13 @@ pub enum LabAct {
     BoostCreep(Id),
 }
 
-/// `send`: resource, amount, the room it lands in.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TerminalAct {
-    Send(Resource, i32, RoomName),
+    Send {
+        resource: ResourceType,
+        amount: i32,
+        to: RoomName,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

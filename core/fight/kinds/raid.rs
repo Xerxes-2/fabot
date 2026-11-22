@@ -9,7 +9,7 @@ use fabot_atlas::Atlas;
 use fabot_base::engine;
 use fabot_base::intents::CreepAct;
 use fabot_base::tiles::{self, Tile};
-use fabot_base::vocabulary::{Part, Resource};
+use fabot_base::vocabulary::{Part, ResourceType};
 use fabot_base::wish::Wish;
 use fabot_base::world::{Creep, Id, Kind, Pos, Room, Structure};
 use fabot_exchange::{self as exchange, Fighter, Ground, Losses, Outcome};
@@ -23,7 +23,7 @@ pub fn raids(e: &Engagement) -> bool {
 pub fn charged(room: &Room) -> Vec<Pos> {
     (room.structures.iter())
         .filter(|s| s.kind == Kind::Tower && !s.owner.is_ours())
-        .filter(|s| s.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST)
+        .filter(|s| s.store.amount_of(ResourceType::Energy) >= engine::TOWER_ENERGY_COST)
         .map(|s| s.pos)
         .collect()
 }
@@ -307,7 +307,7 @@ pub fn volley(sight: &Sight, room: &Room, c: &Creep) -> Option<CreepAct> {
         let Some(r) = reach(&s.pos) else { continue };
         let struck = cover(s).unwrap_or(s);
         let charged = s.kind == Kind::Tower
-            && s.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST;
+            && s.store.amount_of(ResourceType::Energy) >= engine::TOWER_ENERGY_COST;
 
         marks.push((
             struck.id,

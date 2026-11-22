@@ -65,7 +65,7 @@ pub fn bare(
             .map(|(i, pos)| Mineral {
                 id: format!("mineral{i}").as_str().into(),
                 pos: *pos,
-                resource: fabot_base::vocabulary::Resource::Energy,
+                resource: None,
                 amount: 0,
             })
             .collect(),

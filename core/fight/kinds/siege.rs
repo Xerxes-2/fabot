@@ -7,7 +7,7 @@ use super::sweep;
 use fabot_atlas::Atlas;
 use fabot_base::engine;
 use fabot_base::tiles::{self, Tile, TileSet};
-use fabot_base::vocabulary::Resource;
+use fabot_base::vocabulary::ResourceType;
 use fabot_base::world::{Controller, Id, Kind, Owner, Pos, Room, RoomName, Structure};
 use fabot_exchange::{self as exchange, Outcome};
 use fabot_tactics::{self as tactics, Offer, Tactic};
@@ -91,7 +91,7 @@ pub fn next_razed<'a>(room: &'a Room, walk: impl Fn(&Structure) -> i32) -> Optio
     let charged: Vec<&Pos> = theirs()
         .filter(|t| {
             t.kind == Kind::Tower
-                && t.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST
+                && t.store.amount_of(ResourceType::Energy) >= engine::TOWER_ENERGY_COST
         })
         .map(|t| &t.pos)
         .collect();

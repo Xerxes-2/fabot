@@ -8,7 +8,6 @@ use fabot_base::intents::{
     Action, ControllerAct, CreepAct, LabAct, LinkAct, Refusal, RoomAct, SpawnAct, TerminalAct,
     TowerAct,
 };
-use fabot_base::vocabulary;
 use fabot_base::world::Id;
 
 #[wasm_bindgen]
@@ -131,9 +130,9 @@ impl Pack {
                     CreepAct::Move(direction) => call.int(*direction),
                     CreepAct::Say(message) => call.text(message),
                     CreepAct::Transfer(id, resource) | CreepAct::Withdraw(id, resource) => {
-                        call.by_id(id).text(vocabulary::resource_name(resource))
+                        call.by_id(id).text(resource)
                     }
-                    CreepAct::Drop(resource) => call.text(vocabulary::resource_name(resource)),
+                    CreepAct::Drop(resource) => call.text(resource),
                     CreepAct::RangedMassAttack => call,
                     CreepAct::Harvest(id)
                     | CreepAct::Pickup(id)
@@ -172,11 +171,16 @@ impl Pack {
             Action::Lab(id, LabAct::BoostCreep(creep)) => {
                 self.call(OBJECT, id, "boostCreep").by_id(creep)
             }
-            Action::Terminal(id, TerminalAct::Send(resource, amount, room)) => (self
-                .call(OBJECT, id, "send")
-                .text(vocabulary::resource_name(resource)))
-            .int(*amount)
-            .text(room),
+            Action::Terminal(
+                id,
+                TerminalAct::Send {
+                    resource,
+                    amount,
+                    to,
+                },
+            ) => (self.call(OBJECT, id, "send").text(resource))
+                .int(*amount)
+                .text(to),
             Action::Observe(id, room) => self.call(OBJECT, id, "observeRoom").text(room),
             Action::Spawn(id, SpawnAct::RecycleCreep(creep)) => {
                 self.call(OBJECT, id, "recycleCreep").by_id(creep)

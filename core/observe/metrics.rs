@@ -11,7 +11,7 @@ use fabot_base::HashMap;
 use fabot_base::declarations::{self, Declarations, Refused};
 use fabot_base::engine;
 use fabot_base::intents::{Action, CreepAct, Refusal, SpawnAct, TowerAct};
-use fabot_base::vocabulary::{Part, Resource};
+use fabot_base::vocabulary::{Part, ResourceType::Energy};
 use fabot_base::world::{Creep, Id, Kind, Owner, Pos, Room, RoomName, World, hostiles};
 use fabot_economy::abandon;
 use fabot_economy::bodies::{self, Pattern};
@@ -390,7 +390,7 @@ fn ours(room: &Room) -> bool {
 }
 
 fn energy(creep: &Creep) -> i32 {
-    creep.store.amount_of(&Resource::Energy)
+    creep.store.amount_of(Energy)
 }
 
 /// The energy each working body is fed this tick: the engine applies a
@@ -417,12 +417,12 @@ fn fed<'a>(creeps: &HashMap<&str, &'a Creep>, intents: &'a [Action]) -> HashMap<
             continue;
         };
         match act {
-            CreepAct::Transfer(id, Resource::Energy) => {
+            CreepAct::Transfer(id, Energy) => {
                 if let Some(to) = by_id.get(id) {
                     *out.entry(to.name.as_str()).or_default() += energy(c).min(to.store.free());
                 }
             }
-            CreepAct::Withdraw(_, Resource::Energy) | CreepAct::Pickup(_) => {
+            CreepAct::Withdraw(_, Energy) | CreepAct::Pickup(_) => {
                 *out.entry(name.as_str()).or_default() += c.store.free();
             }
             _ => (),
@@ -508,7 +508,7 @@ fn returned(
         let Some(c) = creeps.get(name.as_str()) else {
             continue;
         };
-        if let CreepAct::Transfer(id, Resource::Energy) = act
+        if let CreepAct::Transfer(id, Energy) = act
             && let Some(s) = (world.rooms.iter().flat_map(|r| r.structures.iter()))
                 .find(|s| s.id == *id && matches!(s.kind, Kind::Spawn | Kind::Extension))
             && !refused.contains(&(name, "transfer"))
@@ -522,17 +522,17 @@ fn returned(
             );
         }
         match act {
-            CreepAct::Withdraw(id, Resource::Energy) if !refused.contains(&(name, "withdraw")) => {
+            CreepAct::Withdraw(id, Energy) if !refused.contains(&(name, "withdraw")) => {
                 drawn.insert(name.clone(), (*id, c.store.free()));
             }
-            CreepAct::Transfer(id, Resource::Energy) if !refused.contains(&(name, "transfer")) => {
+            CreepAct::Transfer(id, Energy) if !refused.contains(&(name, "transfer")) => {
                 if let Some((from, n)) = drawn.remove(name.as_str())
                     && from == *id
                 {
                     add(sums, None, RETURNED, f64::from(n.min(energy(c))));
                 }
             }
-            CreepAct::Transfer(_, Resource::Energy) => (),
+            CreepAct::Transfer(_, Energy) => (),
             CreepAct::Transfer(..)
             | CreepAct::Build(_)
             | CreepAct::Repair(_)
@@ -750,7 +750,7 @@ fn towers(r: &Room) -> bool {
     (r.structures.iter()).any(|s| {
         s.kind == Kind::Tower
             && s.owner.is_ours()
-            && s.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST
+            && s.store.amount_of(Energy) >= engine::TOWER_ENERGY_COST
     })
 }
 
@@ -1026,7 +1026,7 @@ impl Metrics {
             }
             let stored = (r.structures.iter())
                 .filter(|s| matches!(s.kind, Kind::Storage | Kind::Terminal | Kind::Container))
-                .map(|s| s.store.amount_of(&Resource::Energy));
+                .map(|s| s.store.amount_of(Energy));
             let carried = (world.creeps.iter())
                 .filter(|c| c.pos.room == r.name)
                 .map(energy);

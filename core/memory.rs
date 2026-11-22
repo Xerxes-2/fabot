@@ -10,7 +10,6 @@ use super::state::State;
 use fabot_base::declarations::{
     ColonyPlan, Declarations, Declared, Flow, Node, Outpost, Stage, undeclared,
 };
-use fabot_base::vocabulary::{self, Resource};
 use fabot_base::world::{Id, Pos, RoomName};
 use fabot_economy::EconomyState;
 use fabot_economy::task::{Assignment, of_task_id, task_id};
@@ -195,13 +194,12 @@ fn flows(labs: &Value) -> Vec<Flow> {
         return Vec::new();
     };
     let targets = labs["targets"].as_object().into_iter().flatten();
-    (targets.filter_map(|(name, stock)| match vocabulary::resource_of_name(name) {
-        what @ Resource::Compound(_) => Some(Flow {
-            what,
+    (targets.filter_map(|(name, stock)| {
+        Some(Flow {
+            what: name.parse().ok()?,
             to: Node::Colony(home),
             stock: stock.as_f64()? as i32,
-        }),
-        _ => None,
+        })
     }))
     .collect()
 }

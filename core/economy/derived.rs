@@ -9,7 +9,8 @@ use fabot_base::engine;
 use fabot_base::grid::Footprint;
 use fabot_base::intel::{self, Intel, Scout};
 use fabot_base::tiles::{self, Tile};
-use fabot_base::vocabulary::{Part, Resource, part_count_in};
+use fabot_base::vocabulary::ResourceType::{self, Energy};
+use fabot_base::vocabulary::{Part, part_count_in};
 use fabot_base::world::{
     self, BodyPart, Controller, Creep, Id, Kind, Owner, Pos, Room, RoomName, Source, Spawn, Store,
     Structure, World, terrain,
@@ -71,7 +72,7 @@ pub struct LabFact {
     pub id: Id,
     pub pos: Pos,
     /// Its one mineral and how much of it.
-    pub held: Option<(Resource, i32)>,
+    pub held: Option<(ResourceType, i32)>,
     pub cooldown: i32,
 }
 
@@ -80,7 +81,7 @@ pub struct LabFact {
 pub struct MineralFact {
     pub id: Id,
     pub pos: Pos,
-    pub resource: Resource,
+    pub resource: ResourceType,
     pub amount: i32,
     pub cooldown: i32,
     pub post: Option<Pos>,
@@ -222,7 +223,7 @@ impl RepairFact {
 pub struct PileFact {
     pub id: Id,
     pub pos: Pos,
-    pub resource: Resource,
+    pub resource: ResourceType,
     pub amount: i32,
 }
 
@@ -256,7 +257,7 @@ pub struct Ground {
     pub labs: Vec<LabFact>,
     /// What our storage and terminal hold besides energy: (store, its tile,
     /// resource, amount).
-    pub ores: Vec<(Id, Pos, Resource, i32)>,
+    pub ores: Vec<(Id, Pos, ResourceType, i32)>,
     /// Only the declared cluster's home has one.
     pub lab_plan: Option<super::labs::Plan>,
     /// The lab a cast waiting at home is boosted from, and what its parts
@@ -264,7 +265,7 @@ pub struct Ground {
     pub boost_lab: Option<BoostLab>,
     pub terminal: Option<TerminalFact>,
     /// What this colony sends, and the colony and its terminal's free room.
-    pub shipment: Vec<(Resource, i32)>,
+    pub shipment: Vec<(ResourceType, i32)>,
     pub ship_to: Option<(RoomName, i32)>,
     pub abandoned: bool,
 }
@@ -330,7 +331,7 @@ pub fn drawn_for(kind: &Kind) -> bool {
 pub struct BoostLab {
     pub id: Id,
     pub pos: Pos,
-    pub compound: Resource,
+    pub compound: ResourceType,
     pub mineral: i32,
     pub energy: i32,
 }
@@ -412,7 +413,7 @@ fn body_of(
         cast_work: world::cast(parts, Part::Work),
         cast_carry: world::cast(parts, Part::Carry),
         store: store.clone(),
-        energy: store.amount_of(&Resource::Energy),
+        energy: store.amount_of(Energy),
         free: store.free(),
         ticks_to_live: life,
         pattern: bodies::pattern_of_name(name)
@@ -566,7 +567,7 @@ fn links_of(
                 id: s.id,
                 pos: s.pos,
                 role,
-                energy: s.store.amount_of(&Resource::Energy),
+                energy: s.store.amount_of(Energy),
                 free: s.store.free(),
                 cooldown: s.cooldown,
             })
@@ -579,16 +580,17 @@ fn minerals_of(room: &Room) -> Vec<MineralFact> {
         .filter_map(|m| {
             let extractor = (room.structures.iter())
                 .find(|s| s.kind == Kind::Extractor && s.owner.is_ours() && s.pos == m.pos)?;
+            let resource = m.resource?;
             let post = Atlas::post_of(room, &m.pos);
             let container = post.as_ref().and_then(|(_, id)| *id);
             let held = container
                 .as_ref()
                 .and_then(|id| room.structures.iter().find(|s| s.id == *id))
-                .map_or(0, |c| c.store.amount_of(&m.resource));
+                .map_or(0, |c| c.store.amount_of(resource));
             Some(MineralFact {
                 id: m.id,
                 pos: m.pos,
-                resource: m.resource.clone(),
+                resource,
                 amount: m.amount,
                 cooldown: extractor.cooldown,
                 post: post.map(|(p, _)| p),
@@ -615,7 +617,7 @@ fn stores_of(
             Kind::Container | Kind::Storage | Kind::Terminal
                 if s.kind != Kind::Terminal || s.owner.is_ours() =>
             {
-                let energy = s.store.amount_of(&Resource::Energy);
+                let energy = s.store.amount_of(Energy);
                 let owned = s.kind == Kind::Storage && s.owner.is_ours();
                 let dug = if s.kind == Kind::Container {
                     served_dug(&s.pos)
@@ -648,7 +650,7 @@ fn stores_of(
     }
 
     for r in &room.remains {
-        let energy = r.store.amount_of(&Resource::Energy);
+        let energy = r.store.amount_of(Energy);
 
         if energy > 0 {
             stores.push(StoreFact {
@@ -676,14 +678,14 @@ fn labs_of(room: &Room) -> Vec<LabFact> {
                 .store
                 .held
                 .iter()
-                .find(|(r, n)| !r.is_energy() && *n > 0)
-                .cloned(),
+                .find(|(r, n)| *r != Energy && *n > 0)
+                .copied(),
             cooldown: s.cooldown,
         })
         .collect()
 }
 
-fn ores_of(room: &Room) -> Vec<(Id, Pos, Resource, i32)> {
+fn ores_of(room: &Room) -> Vec<(Id, Pos, ResourceType, i32)> {
     room.structures
         .iter()
         .filter(|s| matches!(s.kind, Kind::Storage | Kind::Terminal) && s.owner.is_ours())
@@ -691,8 +693,8 @@ fn ores_of(room: &Room) -> Vec<(Id, Pos, Resource, i32)> {
             s.store
                 .held
                 .iter()
-                .filter(|(r, n)| fabot_base::vocabulary::is_mineral(r) && *n > 0)
-                .map(|(r, n)| (s.id, s.pos, r.clone(), *n))
+                .filter(|(r, n)| fabot_base::vocabulary::is_mineral(*r) && *n > 0)
+                .map(|(r, n)| (s.id, s.pos, *r, *n))
         })
         .collect()
 }
@@ -839,7 +841,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
             .map(|p| PileFact {
                 id: p.id,
                 pos: p.pos,
-                resource: p.resource.clone(),
+                resource: p.resource,
                 amount: p.amount,
             })
             .collect(),
@@ -901,7 +903,7 @@ fn stock_labs(
     world: &World,
     grounds: &mut [Ground],
     colonies: usize,
-    (home, targets): (RoomName, &BTreeMap<fabot_base::vocabulary::Compound, i32>),
+    (home, targets): (RoomName, &[(ResourceType, i32)]),
     given_up: &dyn Fn(RoomName) -> bool,
 ) {
     let home = &home;
@@ -910,33 +912,28 @@ fn stock_labs(
     };
     // The lab a body waiting at home is boosted from is the cast's and not
     // a reaction's: its compound is kept while the body still lacks it.
-    let kept: BTreeMap<Id, Resource> = (world.creeps.iter())
+    let kept: BTreeMap<Id, ResourceType> = (world.creeps.iter())
         .filter(|c| &c.pos.room == home)
         .filter_map(|c| {
             let compound = fabot_base::boost::of_name(&c.name)?;
             let lab = fabot_base::boost::booster(world, *home, compound)?;
-            Some((lab.id, Resource::Compound(compound)))
+            Some((lab.id, compound))
         })
         .collect();
     let labs: Vec<(Id, Pos)> = (g.labs.iter())
         .filter(|l| !kept.contains_key(&l.id))
         .map(|l| (l.id, l.pos))
         .collect();
-    let held = |id: Id| {
-        g.labs
-            .iter()
-            .find(|l| l.id == id)
-            .and_then(|l| l.held.clone())
-    };
-    let stock = |r: &Resource| -> i32 {
+    let held = |id: Id| g.labs.iter().find(|l| l.id == id).and_then(|l| l.held);
+    let stock = |r: ResourceType| -> i32 {
         g.ores
             .iter()
-            .filter(|o| &o.2 == r)
+            .filter(|o| o.2 == r)
             .map(|o| o.3)
             .sum::<i32>()
             + g.labs
                 .iter()
-                .filter_map(|l| l.held.as_ref().filter(|h| &h.0 == r).map(|h| h.1))
+                .filter_map(|l| l.held.filter(|h| h.0 == r).map(|h| h.1))
                 .sum::<i32>()
             // A load between a store and a lab is still the home's.
             + world
@@ -962,22 +959,20 @@ fn stock_labs(
             continue;
         };
         for (r, n) in &lab.store.held {
-            if *n > 0 && r != compound && fabot_base::vocabulary::is_mineral(r) {
-                plan.drains.push((*id, r.clone()));
+            if *n > 0 && r != compound && fabot_base::vocabulary::is_mineral(*r) {
+                plan.drains.push((*id, *r));
             }
         }
     }
     g.lab_plan = Some(plan);
     // The lab a waiting cast is boosted from is stocked from the home's
     // stores: the reaction refuses it as a lab of its own.
-    let mut waited: BTreeMap<Id, (Resource, i32, i32)> = BTreeMap::new();
+    let mut waited: BTreeMap<Id, (ResourceType, i32, i32)> = BTreeMap::new();
     for creep in (world.creeps.iter()).filter(|c| &c.pos.room == home) {
         let Some(w) = fabot_base::boost::waiting(world, *home, creep) else {
             continue;
         };
-        let at = waited
-            .entry(w.lab.id)
-            .or_insert((Resource::Compound(w.compound), 0, 0));
+        let at = waited.entry(w.lab.id).or_insert((w.compound, 0, 0));
         at.1 += w.mineral;
         at.2 += w.energy;
     }
@@ -988,9 +983,9 @@ fn stock_labs(
             Some(BoostLab {
                 id,
                 pos: lab.pos,
-                compound: compound.clone(),
-                mineral: mineral - lab.store.amount_of(&compound),
-                energy: energy - lab.store.amount_of(&Resource::Energy),
+                compound,
+                mineral: mineral - lab.store.amount_of(compound),
+                energy: energy - lab.store.amount_of(Energy),
             })
         });
     let mut short = super::labs::ore_short(targets, &stock);
@@ -1002,10 +997,10 @@ fn stock_labs(
             continue;
         }
         for (ore, left) in &mut short {
-            let held: i32 = g.ores.iter().filter(|o| &o.2 == ore).map(|o| o.3).sum();
+            let held: i32 = g.ores.iter().filter(|o| o.2 == *ore).map(|o| o.3).sum();
             let sent = held.min(*left);
             if sent > 0 {
-                g.shipment.push((ore.clone(), sent));
+                g.shipment.push((*ore, sent));
                 *left -= sent;
             }
         }
@@ -1040,7 +1035,7 @@ fn give_aid(colonies: &[Colony], grounds: &mut [Ground], given_up: &dyn Fn(RoomN
         .filter(|(c, _)| !given_up(c.room))
         .filter_map(|(c, g)| {
             let t = g.terminal.as_ref()?;
-            let held = g.stock()? + t.store.amount_of(&Resource::Energy);
+            let held = g.stock()? + t.store.amount_of(Energy);
             Some(Taker {
                 room: c.room,
                 level: c.controller.level,
@@ -1067,7 +1062,7 @@ fn give_aid(colonies: &[Colony], grounds: &mut [Ground], given_up: &dyn Fn(RoomN
         if sent < engine::TERMINAL_MIN_SEND {
             continue;
         }
-        g.shipment = vec![(Resource::Energy, sent)];
+        g.shipment = vec![(Energy, sent)];
         g.ship_to = Some((to.room, to.free));
         takers[gi].held -= sent;
         takers[ti].held += sent;
@@ -1205,7 +1200,7 @@ pub fn of_world<'t>(
     for g in &mut grounds {
         if let Some(pos) = plan_of(g.room).and_then(|p| p.pile) {
             let energy: Vec<PileFact> = (g.piles)
-                .extract_if(.., |p| p.pos == pos && p.resource.is_energy())
+                .extract_if(.., |p| p.pos == pos && p.resource == Energy)
                 .collect();
             // A draw picks up the pile by its id; a drop needs none.
             let id = energy

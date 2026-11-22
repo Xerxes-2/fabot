@@ -1,10 +1,9 @@
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use crate::declarations::{Declarations, Declared, Outpost};
 use crate::engine;
 use crate::tiles::{self, Post, Tile};
-use crate::vocabulary::{Resource, resource_name, resource_of_name};
+use crate::vocabulary::ResourceType;
 use crate::world::{Controller, Id, Owner, Pos, Room, RoomName, Source, World, push_int};
 
 /// A room as it stood when last seen, by username: a stance is the
@@ -26,7 +25,7 @@ pub struct Row {
     pub sources: Option<Vec<Declared>>,
     pub contained: bool,
     /// None on a row written before minerals were read, or a room without one.
-    pub mineral: Option<Resource>,
+    pub mineral: Option<ResourceType>,
     /// An Invader stronghold stands: a core past level 0.
     pub stronghold: bool,
 }
@@ -155,13 +154,12 @@ pub fn to_text(intel: &Intel) -> String {
             }
         }
         out.push_str(if r.contained { " 1" } else { " 0" });
-        out.extend([
-            " ",
-            r.mineral
-                .as_ref()
-                .map_or(Cow::Borrowed(NONE), resource_name)
-                .as_ref(),
-        ]);
+        match r.mineral {
+            Some(m) => {
+                let _ = write!(out, " {m}");
+            }
+            None => out.extend([" ", NONE]),
+        }
         out.push_str(if r.stronghold { " 1" } else { " 0" });
         out.push('\n');
     }
@@ -229,10 +227,7 @@ pub fn of_text(text: &str) -> Intel {
                 controller: f.get(8).and_then(|c| site_of(room, c)),
                 sources,
                 contained: f.get(10) == Some(&"1"),
-                mineral: f
-                    .get(11)
-                    .filter(|m| **m != NONE)
-                    .map(|m| resource_of_name(m)),
+                mineral: f.get(11).and_then(|m| m.parse().ok()),
                 stronghold: f.get(12) == Some(&"1"),
             };
             Some((room, row))
@@ -287,9 +282,7 @@ mod tests {
                     .chance(2)
                     .then(|| (0..dice.below(3)).map(|_| site(&mut dice)).collect()),
                 contained: dice.chance(2),
-                mineral: dice
-                    .chance(2)
-                    .then(|| resource_of_name(dice.pick(&["H", "O", "U", "L", "K", "Z", "X"]))),
+                mineral: dice.chance(2).then(|| dice.pick(&crate::vocabulary::ORES)),
                 stronghold: dice.chance(2),
             };
             let intel: Intel = [(RoomName::named("W1N1"), row)].into();

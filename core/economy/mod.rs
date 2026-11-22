@@ -13,7 +13,7 @@ pub use run::{EconomyState, decide};
 pub(crate) mod dice {
     use fabot_base::declarations::{Declared, Outpost};
     use fabot_base::engine;
-    use fabot_base::vocabulary::{Compound, Ore, Part, Resource, ResourceType, part_count_in};
+    use fabot_base::vocabulary::{Part, ResourceType, part_count_in};
     use fabot_base::world::{
         BodyPart, Controller, Creep, Id, Kind, Mineral, Owner, Pile, Pos, Remains, Room, RoomName,
         Site, Source, Spawn, Store, Structure, World,
@@ -35,13 +35,13 @@ pub(crate) mod dice {
         }
     }
 
-    pub fn resources() -> Vec<Resource> {
+    pub fn resources() -> Vec<ResourceType> {
         vec![
-            Resource::Energy,
-            Resource::Ore(Ore::Hydrogen),
-            Resource::Ore(Ore::Catalyst),
-            Resource::Compound(Compound::new(ResourceType::UtriumAcid)),
-            Resource::Other("T".to_string()),
+            ResourceType::Energy,
+            ResourceType::Hydrogen,
+            ResourceType::Catalyst,
+            ResourceType::UtriumAcid,
+            ResourceType::Power,
         ]
     }
 
@@ -51,7 +51,7 @@ pub(crate) mod dice {
     }
 
     pub fn task(dice: &mut Dice, target: Target) -> Task {
-        let resource = resources()[dice.below(5) as usize].clone();
+        let resource = resources()[dice.below(5) as usize];
         match dice.between(0, 10) {
             0 => Task::Harvest(target),
             1 => Task::Withdraw(target, resource),
@@ -67,7 +67,7 @@ pub(crate) mod dice {
         }
     }
 
-    pub fn store(held: Vec<(Resource, i32)>, capacity: i32) -> Store {
+    pub fn store(held: Vec<(ResourceType, i32)>, capacity: i32) -> Store {
         Store { held, capacity }
     }
 
@@ -106,7 +106,7 @@ pub(crate) mod dice {
             pos: at,
             hits,
             hits_max,
-            store: store(vec![(Resource::Energy, energy)], capacity),
+            store: store(vec![(ResourceType::Energy, energy)], capacity),
             cooldown: 0,
             collapse: 0,
             spawn: None,
@@ -231,7 +231,7 @@ pub(crate) mod dice {
                 vec![Pile {
                     id: format!("{name}pile").as_str().into(),
                     pos: site_pos,
-                    resource: Resource::Energy,
+                    resource: ResourceType::Energy,
                     amount: pile_amount,
                 }]
             } else {
@@ -273,7 +273,7 @@ pub(crate) mod dice {
             hits_max: n * engine::PART_HITS,
             ticks_to_live: life,
             fatigue: 0,
-            store: store(vec![(Resource::Energy, energy)], carry),
+            store: store(vec![(ResourceType::Energy, energy)], carry),
         }
     }
 
