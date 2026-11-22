@@ -294,11 +294,10 @@ pub(super) fn act(
         (None, wish)
     };
 
-    let running = world.rooms.iter().any(|r| {
-        r.controller
-            .as_ref()
-            .is_some_and(|c| c.owner.is_ours() && c.safe_mode > 0)
-    });
+    let running = world
+        .rooms
+        .iter()
+        .any(|r| r.controller.as_ref().is_some_and(|c| c.our_safe_mode() > 0));
 
     let mut out = ModuleOutput::default();
 

@@ -648,10 +648,11 @@ impl<'a> Scene<'a> {
             return e.clone();
         };
 
+        let safe_left =
+            (room.and_then(|r| r.controller.as_ref())).map_or(0, world::Controller::our_safe_mode);
         let theirs = Side {
-            bodies: raid
-                .iter()
-                .filter(|h| !self.cores.contains(&h.id))
+            bodies: (raid.iter())
+                .filter(|h| !self.cores.contains(&h.id) && h.ticks_to_live >= safe_left)
                 .map(casting::fighter_of)
                 .collect(),
             ..Side::default()

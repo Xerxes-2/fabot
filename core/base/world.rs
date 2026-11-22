@@ -470,6 +470,14 @@ impl Controller {
             && self.upgrade_blocked == 0
             && self.ticks_to_downgrade >= engine::safe_mode_downgrade_line(self.level)
     }
+
+    pub fn our_safe_mode(&self) -> i32 {
+        if self.owner.is_ours() {
+            self.safe_mode
+        } else {
+            0
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

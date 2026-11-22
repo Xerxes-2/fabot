@@ -1,0 +1,10 @@
+{
+  "why": "an Invader raid in a home whose safe mode outlives it strikes nothing in its life (the engine refuses its attacks), so no Defend set is cast for it: the energy stays in the economy",
+  "modules": ["exchange", "fight"],
+  "start": { "room": "W8N3", "seed": 1, "node": "S5", "invaders": "W8N3:20000:1000" },
+  "ticks": 2600,
+  "assert": [
+    { "measure": "hostileTicks", "room": "W8N3", "min": 100 },
+    { "measure": "castIn", "name": "fight-", "room": "W8N3", "max": 0 }
+  ]
+}

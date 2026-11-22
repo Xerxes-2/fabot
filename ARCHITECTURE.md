@@ -535,6 +535,10 @@ and `cheapest_win` (adds only to already-standing `ours`).
   creep kind. Feature-keyed rules leave exploitable gaps (Trepidimous's
   defenders guarded our rangers while dismantlers razed his home); wrong choices
   are fixed by adding the missing term to the price.
+- **Our safe mode:** a hostile that ages out before it ends strikes nothing
+  in its life (the engine refuses its attacks and heals), so it is not priced:
+  it costs no cast; the ground it holds (a blocked source) is not priced
+  either, a gap the owner accepted.
 - **Tactic selection:** each kind declares candidate tactics; pricing scores
   each candidate as `Offer { tactic, value, cost, bodies }`, and
   `tactics::select` applies operator `forbid`/`pin` rules then picks max
