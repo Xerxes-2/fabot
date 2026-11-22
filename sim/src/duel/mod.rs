@@ -6,17 +6,18 @@
 //! bodies within three, else the first hit) to the end, our bodies dead and
 //! our hits lost (a dead body's whole).
 //!
-//! Usage: sim duel [--ticks N] [--seed N]
+//! Usage: sim duel [--ticks N] [--seed N] [`pgs::FLAGS`]
+mod pgs;
+
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use krebs::atom;
 use krebs::cron::JOBS;
-use krebs::doc::Val;
+use krebs::doc::{Id, Val};
 use krebs::hooks::ProcessorHooks;
 use krebs::intents::RoomIntents;
-use krebs::room_name::RoomXY;
 use krebs::world::World;
 use krebs_pathfinder::{Goal, PathFinder, Pos, RoomCost, SearchOpts};
 use screeps::{INVADER_USERNAME, Part};
@@ -237,7 +238,8 @@ impl Orders<'_> {
 
     /// A swing closes on the nearest foe; a gun holds three off it and flees a swing inside two; a
     /// healer keeps to its most hurt ally; a WORK body dismantles the nearest tower or rampart.
-    fn act(&mut self, c: &Thing, allies: &[&Thing], foes: &[&Thing], their_structures: &[&Thing]) {
+    fn act(&mut self, c: &Thing, v: &View) {
+        let (allies, foes, theirs) = (&v.allies, &v.foes, &v.theirs);
         let target = c.closest(foes);
         if c.has(Part::Attack) {
             let Some(target) = target else { return };
@@ -284,7 +286,7 @@ impl Orders<'_> {
                 _ => {}
             }
         } else if c.has(Part::Work) {
-            let Some(goal) = c.closest(their_structures) else {
+            let Some(goal) = c.closest(theirs) else {
                 return;
             };
             if c.range(goal) <= 1 {
@@ -342,36 +344,64 @@ fn stand(s: &Sample, seed: u64) -> World {
     world::krebs(db, seed, 1)
 }
 
-fn duel(s: &Sample, ticks: u64, seed: u64, pf: &mut PathFinder) -> Value {
-    let mut world = stand(s, seed);
+/// What a side's body acts on: its side's creeps, the other side's, and the other side's structures.
+struct View<'a> {
+    allies: Vec<&'a Thing>,
+    foes: Vec<&'a Thing>,
+    theirs: Vec<&'a Thing>,
+}
+
+/// A duel under way; `now` is each side's hits as last read.
+struct Duel {
+    world: World,
+    t: u64,
+    first: [BTreeMap<String, f64>; 2],
+    now: [BTreeMap<String, f64>; 2],
+    contact: Option<u64>,
+    struck: Option<u64>,
+    end: Option<u64>,
+    won: Option<bool>,
+}
+
+/// How a side's bodies act in a tick.
+type Act<'p> = &'p dyn Fn(&mut Orders, &Thing, &View);
+
+impl Duel {
+    fn new(s: &Sample, seed: u64) -> Self {
+        let world = stand(s, seed);
+        let begun = things(&world);
+        let first = [hits(&begun, Side::Ours), hits(&begun, Side::Theirs)];
+        Duel {
+            world,
+            t: 0,
+            now: first.clone(),
+            first,
+            contact: None,
+            struck: None,
+            end: None,
+            won: None,
+        }
+    }
+
     // No cron in a duel: each job last ran at the end of time.
-    let mut engine = crate::Engine {
-        hooks: ProcessorHooks::default(),
-        cron_last: vec![i64::MAX; JOBS.len()],
-        draw: seed,
-        processed: 0,
-    };
-    let xy = RoomXY::parse_engine(&s.room).expect("a room name");
-    let room = krebs_pathfinder::RoomXY { x: xy.x, y: xy.y };
-    let terrain = *world.terrain.raw(0);
-    let user_idx = |id: &str| {
-        let ids = world.users.iter().map(|u| text(&u.doc, atom!("_id")));
-        ids.into_iter().position(|u| u == id).expect("a user") as u32
-    };
-    let (us, them) = (user_idx(US), user_idx(RIVAL.0));
-    let begun = things(&world);
-    let first = [hits(&begun, Side::Ours), hits(&begun, Side::Theirs)];
-    let (mut last, mut contact, mut struck, mut end, mut won) =
-        (BTreeMap::new(), None, None, None, None);
-    for t in 0..ticks {
-        let all = things(&world);
+    fn engine(&self) -> crate::Engine {
+        crate::Engine {
+            hooks: ProcessorHooks::default(),
+            cron_last: vec![i64::MAX; JOBS.len()],
+            draw: self.world.seed,
+            processed: 0,
+        }
+    }
+
+    fn read(&mut self) -> Vec<Thing> {
+        let all = things(&self.world);
         let creeps: Vec<&Thing> = all.iter().filter(|o| o.kind == Kind::Creep).collect();
-        let now = [hits(&all, Side::Ours), hits(&all, Side::Theirs)];
-        if (first.iter().zip(&now)).any(|(f, n)| {
+        self.now = [hits(&all, Side::Ours), hits(&all, Side::Theirs)];
+        if (self.first.iter().zip(&self.now)).any(|(f, n)| {
             f.iter()
                 .any(|(id, h)| n.get(id).copied().unwrap_or(0.0) < *h)
         }) {
-            struck = struck.or(Some(t));
+            self.struck = self.struck.or(Some(self.t));
         }
         let near = (creeps.iter().filter(|c| c.side() == Side::Ours)).any(|a| {
             creeps
@@ -379,37 +409,49 @@ fn duel(s: &Sample, ticks: u64, seed: u64, pf: &mut PathFinder) -> Value {
                 .any(|b| b.side() == Side::Theirs && a.range(b) <= 3)
         });
         if near {
-            contact = contact.or(Some(t));
+            self.contact = self.contact.or(Some(self.t));
         }
-        let [ours, theirs] = now;
-        last = ours;
-        if last.is_empty() || theirs.is_empty() {
-            (end, won) = (Some(t), Some(!last.is_empty()));
-            break;
+        if self.now.iter().any(BTreeMap::is_empty) {
+            (self.end, self.won) = (Some(self.t), Some(!self.now[0].is_empty()));
         }
+        all
+    }
+
+    fn tick(&mut self, engine: &mut crate::Engine, pf: &mut PathFinder, acts: [Act; 2]) -> bool {
+        let all = self.read();
+        if self.won.is_some() {
+            return false;
+        }
+        let creeps: Vec<&Thing> = all.iter().filter(|o| o.kind == Kind::Creep).collect();
+        let xy = self.world.meta.rooms[0].xy;
         let mut users = Vec::new();
-        for (user, idx) in [(US, us), (RIVAL.0, them)] {
+        for (user, act) in [US, RIVAL.0].into_iter().zip(acts) {
+            let idx = self.world.user_ids[&Id::new(user).expect("a user id")];
             let mut orders = Orders {
                 pf,
-                room,
-                terrain: &terrain,
+                room: krebs_pathfinder::RoomXY { x: xy.x, y: xy.y },
+                terrain: self.world.terrain.raw(0),
                 stored: Stored::default(),
             };
-            let (allies, foes): (Vec<&Thing>, Vec<&Thing>) =
-                creeps.iter().partition(|c| c.user == user);
-            let their_structures: Vec<&Thing> = (all.iter())
+            let (allies, foes) = creeps.iter().partition(|c| c.user == user);
+            let theirs = (all.iter())
                 .filter(|o| o.kind != Kind::Creep && o.user != user)
                 .collect();
+            let view = View {
+                allies,
+                foes,
+                theirs,
+            };
             for tower in all
                 .iter()
                 .filter(|o| o.kind == Kind::Tower && o.user == user)
             {
-                if let Some(target) = tower.closest(&foes) {
+                if let Some(target) = tower.closest(&view.foes) {
                     orders.put(tower, "attack", json!({ "id": target.id }));
                 }
             }
-            for c in &allies {
-                orders.act(c, &allies, &foes, &their_structures);
+            for c in &view.allies {
+                act(&mut orders, c, &view);
             }
             users.extend(
                 orders
@@ -419,26 +461,54 @@ fn duel(s: &Sample, ticks: u64, seed: u64, pf: &mut PathFinder) -> Value {
                     .flat_map(|(_, r)| r.users),
             );
         }
-        engine.step(&mut world, vec![(0, RoomIntents { users })]);
+        engine.step(&mut self.world, vec![(0, RoomIntents { users })]);
+        self.t += 1;
+        true
     }
-    let (mut dead, mut lost) = (0, 0.0);
-    for (id, h) in &first[0] {
-        dead += u32::from(!last.contains_key(id));
-        lost += h - last.get(id).copied().unwrap_or(0.0);
+
+    fn result(&self) -> Value {
+        let (mut dead, mut lost) = (0, 0.0);
+        for (id, h) in &self.first[0] {
+            dead += u32::from(!self.now[0].contains_key(id));
+            lost += h - self.now[0].get(id).copied().unwrap_or(0.0);
+        }
+        let ticks = self
+            .end
+            .zip(self.contact.or(self.struck))
+            .map(|(e, s)| e - s);
+        json!({ "won": self.won, "ticks": ticks, "dead": dead, "hits": lost })
     }
-    json!({ "won": won, "ticks": end.zip(contact.or(struck)).map(|(e, s)| e - s), "dead": dead, "hits": lost })
+}
+
+fn duel(s: &Sample, ticks: u64, seed: u64, pf: &mut PathFinder) -> Value {
+    let mut d = Duel::new(s, seed);
+    let mut engine = d.engine();
+    let emit = |o: &mut Orders, c: &Thing, v: &View| o.act(c, v);
+    while d.t < ticks && d.tick(&mut engine, pf, [&emit, &emit]) {}
+    d.result()
 }
 
 pub fn main() {
     let mut flags = BTreeMap::from([("--ticks".to_string(), 400), ("--seed".to_string(), 1)]);
+    flags.extend(pgs::FLAGS.map(|(f, v)| (f.to_string(), v)));
+    let usage: String = flags.keys().map(|f| format!(" [{f} N]")).collect();
     let mut argv = std::env::args().skip(2);
     while let (Some(flag), Some(value)) = (argv.next(), argv.next()) {
-        let slot = flags
-            .get_mut(&flag)
-            .expect("usage: sim duel [--ticks N] [--seed N]");
+        let slot = (flags.get_mut(&flag)).unwrap_or_else(|| panic!("usage: sim duel{usage}"));
         *slot = value.parse().expect("a number");
     }
     let (ticks, seed) = (flags["--ticks"], flags["--seed"]);
+    let search = (flags["--rollout"] > 0).then(|| pgs::Search {
+        rollout: flags["--rollout"],
+        replan: flags["--replan"],
+        rounds: flags["--rounds"],
+        sides: [flags["--ours"] > 0, flags["--theirs"] > 0],
+    });
+    let run = |s: &Sample, pf: &mut PathFinder| match &search {
+        Some(search) => pgs::duel(s, ticks, seed, pf, search),
+        None if flags["--check-fork"] > 0 => pgs::check_fork(s, ticks, seed, pf),
+        None => duel(s, ticks, seed, pf),
+    };
     let mut text = String::new();
     std::io::stdin()
         .read_to_string(&mut text)
@@ -455,7 +525,7 @@ pub fn main() {
                     loop {
                         let i = next.fetch_add(1, Ordering::Relaxed);
                         let Some(s) = samples.get(i) else { break done };
-                        done.push((i, duel(s, ticks, seed, &mut pf)));
+                        done.push((i, run(s, &mut pf)));
                     }
                 })
             })
