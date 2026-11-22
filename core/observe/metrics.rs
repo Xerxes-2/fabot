@@ -13,7 +13,7 @@ use fabot_base::engine;
 use fabot_base::intents::{Action, CreepAct, Refusal, SpawnAct, TowerAct};
 use fabot_base::vocabulary::{Part, ResourceType::Energy};
 use fabot_base::world::{
-    Creep, Id, Owner, Pos, Room, RoomName, Rules, StructureType, World, hostiles,
+    Controller, Creep, Id, Owner, Pos, Room, RoomName, Rules, StructureType, World, hostiles,
 };
 use fabot_economy::abandon;
 use fabot_economy::bodies::{self, Pattern};
@@ -749,8 +749,9 @@ fn lost(sums: &mut Sums, world: &World) {
     }
 }
 
-fn armed(r: &Room) -> bool {
-    (r.hostiles()).any(|h| hostiles::foe(h) && hostiles::strikes(h))
+fn armed(r: &Room, safe_left: i32) -> bool {
+    (r.hostiles())
+        .any(|h| hostiles::foe(h) && hostiles::strikes(h) && hostiles::outlives(h, safe_left))
 }
 
 fn towers(rules: &Rules, r: &Room) -> bool {
@@ -765,7 +766,8 @@ fn dwell(sums: &mut Sums, seen: &Seen) {
     for r in &seen.world.rooms {
         let worked = r.controller.as_ref().is_some_and(|c| c.owner.is_ours())
             || (seen.declarations.outposts.iter()).any(|o| o.room == r.name);
-        let (armed, towers) = (armed(r), towers(&seen.world.rules, r));
+        let safe_left = r.controller.as_ref().map_or(0, Controller::our_safe_mode);
+        let (armed, towers) = (armed(r, safe_left), towers(&seen.world.rules, r));
         let answered = seen.engagements.iter().any(|e| {
             e.room == r.name
                 && e.phase != Phase::Disengaging
@@ -794,14 +796,15 @@ fn exposure(sums: &mut Sums, seen: &Seen) {
         let Some(c) = r.controller.as_ref() else {
             continue;
         };
-        let safe = c.safe_mode > 0 || c.safe_mode_fireable();
+        let safe_left = c.our_safe_mode();
+        let safe = safe_left > 0 || c.safe_mode_fireable();
         if c.level >= 3 && towers(&seen.world.rules, r) && safe {
             continue;
         }
         let mut outposts = (seen.declarations.outposts.iter())
             .filter(|o| nearest(o.room) == Some(*colony))
             .filter_map(|o| seen.world.room(o.room));
-        if armed(r) || outposts.any(armed) {
+        if armed(r, safe_left) || outposts.any(|o| armed(o, safe_left)) {
             add(sums, Some(*colony), EXPOSURE, 1.0);
         }
     }

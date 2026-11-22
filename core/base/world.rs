@@ -723,6 +723,10 @@ pub mod hostiles {
             .any(|p| p.kind == Part::Attack || p.kind == Part::RangedAttack)
     }
 
+    pub fn outlives(creep: &Creep, safe_left: i32) -> bool {
+        creep.ticks_to_live >= safe_left
+    }
+
     /// The tiles a body can strike before our next decision: its longest
     /// weapon's range plus the two ticks v1's `ReachHorizon` let it close in.
     pub fn reach(creep: &Creep) -> i32 {
