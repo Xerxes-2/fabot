@@ -8,7 +8,7 @@ use fabot_atlas::{self as atlas, Atlas, Mover, Target};
 use fabot_base::declarations::{self, Declarations};
 use fabot_base::grid::{self, Footprint};
 use fabot_base::tiles::Tile;
-use fabot_base::world::{self, Creep, Id, Kind, Pos, Room, RoomName, Structure};
+use fabot_base::world::{self, Creep, Id, Pos, Room, RoomName, Structure, StructureType};
 use fabot_base::{engine, tiles};
 use fabot_exchange::{self as exchange, Fighter, Ground, Losses, Outcome, Side, Stance, fighter};
 use fabot_tactics::{self as tactics, Offer, Tactic};
@@ -32,10 +32,8 @@ impl<'a> Scene<'a> {
         let gait = gait(set)?;
 
         for b in &barriers {
-            if room
-                .structures
-                .iter()
-                .all(|s| s.pos != b.pos || s.walkable || Scene::rival(s))
+            if !room.blocked.contains(&b.pos)
+                && (room.structures.iter()).all(|s| s.pos != b.pos || s.walkable || Scene::rival(s))
             {
                 weights[tiles::of_pos(&b.pos)] =
                     grid::weight(casting::terrain_at(Some(room), &b.pos).weight);
@@ -96,7 +94,7 @@ impl<'a> Scene<'a> {
                 .filter(|b| tiles::of_pos(&b.pos) == tile)
                 .collect();
 
-            at.sort_by_key(|b| (b.kind != Kind::Rampart, b.id));
+            at.sort_by_key(|b| (b.kind != StructureType::Rampart, b.id));
             at.into_iter().map(|b| b.id).collect()
         };
 
@@ -688,7 +686,7 @@ impl<'a> Scene<'a> {
             && room.is_some_and(|r| r.name == e.room)
             && theirs.bodies.iter().any(fighter::strikes)
             && (room.iter().flat_map(|r| &r.structures))
-                .any(|s| s.kind == Kind::Rampart && s.owner.is_ours())
+                .any(|s| s.kind == StructureType::Rampart && s.owner.is_ours())
         {
             Stance::Hold
         } else {

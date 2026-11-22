@@ -1,13 +1,13 @@
 use fabot_base::declarations::MUSTER_RANGE;
 /// Ahead of `State` so `State` can hold the standing plan.
 use fabot_base::tiles::{self, Tile};
-use fabot_base::world::{Kind, Pos, RoomName};
+use fabot_base::world::{Pos, RoomName, StructureType};
 
 /// `Level`: from which the engine allows it (its rank among its kind against
 /// CONTROLLER_STRUCTURES), or the level a rule gives a road or container.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Item {
-    pub kind: Kind,
+    pub kind: StructureType,
     pub tile: Tile,
     pub level: i32,
 }
@@ -20,7 +20,7 @@ pub struct Plan {
     pub items: Vec<Item>,
     /// Built only while Strategy declares it (`ColonyPlan.ring`).
     pub ring: Vec<Item>,
-    pub unfit: Vec<Kind>,
+    pub unfit: Vec<StructureType>,
     /// Where a free fight set waits (`muster`).
     pub muster: Option<Pos>,
 }
@@ -30,8 +30,11 @@ impl Plan {
     /// None where a structure takes it, as the controller's container can: a
     /// drop there fills the container and spills beside it unread.
     pub fn pile(&self) -> Option<Pos> {
-        let built =
-            |i: &Item| i.tile == self.anchor && i.kind != Kind::Road && i.kind != Kind::Rampart;
+        let built = |i: &Item| {
+            i.tile == self.anchor
+                && i.kind != StructureType::Road
+                && i.kind != StructureType::Rampart
+        };
         (!self.items.iter().any(built)).then(|| tiles::to_pos(self.room, self.anchor))
     }
 }
@@ -62,10 +65,10 @@ pub fn muster(
     let mut barred = [false; tiles::COUNT];
     for i in planned {
         taken[i.tile] = true;
-        if i.kind == Kind::Road {
+        if i.kind == StructureType::Road {
             barred[i.tile] = true;
         }
-        if i.kind == Kind::Spawn {
+        if i.kind == StructureType::Spawn {
             for n in tiles::within(1, i.tile) {
                 barred[n] = true;
             }

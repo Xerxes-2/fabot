@@ -7,7 +7,7 @@ use fabot_atlas::Atlas;
 use fabot_base::HashMap;
 use fabot_base::engine;
 use fabot_base::vocabulary::ResourceType::{self, Energy};
-use fabot_base::world::{Id, Kind, Pos};
+use fabot_base::world::{Built, Id, Pos, StructureType};
 
 use super::bodies::Pattern;
 use super::derived::{Body, Derived, Ground, StoreKind};
@@ -136,6 +136,7 @@ fn hand_fed(derived: &Derived, g: &Ground) -> bool {
 }
 
 fn sinks_of(derived: &Derived, ci: usize) -> Vec<Spot> {
+    use StructureType::*;
     let g = &derived.grounds[ci];
     let mut out = Vec::new();
     let mut add = |id: Target, pos: Pos, r: ResourceType, amount: i32, of: Of| {
@@ -150,11 +151,11 @@ fn sinks_of(derived: &Derived, ci: usize) -> Vec<Spot> {
     };
     // The spawn and its extensions are one sink, so a carrier walks the ring
     // and never re-chooses within it.
-    let (towers, ring): (Vec<_>, Vec<_>) = g.refills.iter().partition(|r| r.kind == Kind::Tower);
+    let (towers, ring): (Vec<_>, Vec<_>) = g.refills.iter().partition(|r| r.kind == Tower);
     if let Some(spawn) = derived.colonies.get(ci).and_then(|c| c.spawns.first()) {
         let open: Vec<_> = ring.iter().filter(|r| r.free > 0).collect();
         let of = Of::Ring {
-            spawn: open.iter().any(|r| r.kind == Kind::Spawn),
+            spawn: open.iter().any(|r| r.kind == Spawn),
         };
         let free = open.iter().map(|r| r.free).sum();
         add(Target::Ring(g.room), spawn.pos, Energy, free, of);
@@ -753,6 +754,7 @@ impl<'a> Jobs<'a> {
         body: &Body,
         kept: Option<&Task>,
     ) -> Option<Task> {
+        use StructureType::*;
         let ci = slot.colony;
         let derived = self.derived;
         let ground = derived.grounds.iter().find(|g| g.room == slot.room)?;
@@ -843,11 +845,11 @@ impl<'a> Jobs<'a> {
         };
         let first = |s: &super::derived::SiteFact| match s.kind {
             // A rampart's site costs 1: built in a tick, it never waits on a level.
-            Kind::Spawn | Kind::Rampart => 0,
-            Kind::Container if buffer(&s.pos) => 0,
-            Kind::Tower | Kind::Extension | Kind::Link => 1,
-            Kind::Container if crowded(&s.pos) => 1,
-            Kind::Container => 2,
+            Spawn | Rampart => 0,
+            Container if buffer(&s.pos) => 0,
+            Tower | Extension | Link => 1,
+            Container if crowded(&s.pos) => 1,
+            Container => 2,
             _ if s.kind.pays_back() => 3,
             _ => 4,
         };
@@ -859,7 +861,7 @@ impl<'a> Jobs<'a> {
         // A rampart to its target, anything else once it is half gone, by the
         // bodies the surplus hires for it: a floor body's pace is unpriced.
         if let Some(t) =
-            repair(&|r, _| slot.spends && (r.kind == Kind::Rampart || 2 * r.hits < r.hits_max))
+            repair(&|r, _| slot.spends && (r.kind == Rampart || 2 * r.hits < r.hits_max))
         {
             return Some(t);
         }

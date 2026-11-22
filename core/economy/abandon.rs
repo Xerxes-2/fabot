@@ -4,7 +4,7 @@ use fabot_base::engine;
 use fabot_base::intents::{Action, ControllerAct, RoomAct};
 use fabot_base::tiles;
 use fabot_base::vocabulary::ResourceType::{self, Energy};
-use fabot_base::world::{Creep, Kind, Room, RoomName, Structure};
+use fabot_base::world::{Creep, Room, RoomName, Structure, StructureType};
 
 use super::derived::Ground;
 use super::task::Target;
@@ -13,7 +13,11 @@ fn shipped(s: &Structure) -> bool {
     s.owner.is_ours()
         && matches!(
             s.kind,
-            Kind::Storage | Kind::Terminal | Kind::Lab | Kind::Factory | Kind::PowerSpawn
+            StructureType::Storage
+                | StructureType::Terminal
+                | StructureType::Lab
+                | StructureType::Factory
+                | StructureType::PowerSpawn
         )
 }
 
@@ -38,7 +42,7 @@ pub fn raze(room: &Room) -> Vec<Action> {
         return Vec::new();
     }
     let ours: Vec<Action> = (room.structures.iter())
-        .filter(|s| s.owner.is_ours() && s.kind.as_ref() != "controller")
+        .filter(|s| s.owner.is_ours() && s.kind != StructureType::Controller)
         .map(|s| Action::Room(room.name, RoomAct::Destroy(s.id)))
         .collect();
     if ours.is_empty() {

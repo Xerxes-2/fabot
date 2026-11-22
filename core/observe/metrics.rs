@@ -12,7 +12,7 @@ use fabot_base::declarations::{self, Declarations, Refused};
 use fabot_base::engine;
 use fabot_base::intents::{Action, CreepAct, Refusal, SpawnAct, TowerAct};
 use fabot_base::vocabulary::{Part, ResourceType::Energy};
-use fabot_base::world::{Creep, Id, Kind, Owner, Pos, Room, RoomName, World, hostiles};
+use fabot_base::world::{Creep, Id, Owner, Pos, Room, RoomName, StructureType, World, hostiles};
 use fabot_economy::abandon;
 use fabot_economy::bodies::{self, Pattern};
 use fabot_economy::task::{Assignment, Task};
@@ -509,8 +509,9 @@ fn returned(
             continue;
         };
         if let CreepAct::Transfer(id, Energy) = act
-            && let Some(s) = (world.rooms.iter().flat_map(|r| r.structures.iter()))
-                .find(|s| s.id == *id && matches!(s.kind, Kind::Spawn | Kind::Extension))
+            && let Some(s) = (world.rooms.iter().flat_map(|r| r.structures.iter())).find(|s| {
+                s.id == *id && matches!(s.kind, StructureType::Spawn | StructureType::Extension)
+            })
             && !refused.contains(&(name, "transfer"))
             && bodies::pattern_of_name(name) == Some(Pattern::Hauler)
         {
@@ -620,7 +621,7 @@ fn cause_of(room: Option<&Room>, by: &Id) -> Cause {
     match room
         .structures
         .iter()
-        .find(|s| s.id == *by && s.kind == Kind::Tower)
+        .find(|s| s.id == *by && s.kind == StructureType::Tower)
     {
         Some(s) if npc(&s.owner) => Cause::Npc,
         Some(_) => Cause::Tower,
@@ -748,7 +749,7 @@ fn armed(r: &Room) -> bool {
 
 fn towers(r: &Room) -> bool {
     (r.structures.iter()).any(|s| {
-        s.kind == Kind::Tower
+        s.kind == StructureType::Tower
             && s.owner.is_ours()
             && s.store.amount_of(Energy) >= engine::TOWER_ENERGY_COST
     })
@@ -1025,7 +1026,12 @@ impl Metrics {
                 continue;
             }
             let stored = (r.structures.iter())
-                .filter(|s| matches!(s.kind, Kind::Storage | Kind::Terminal | Kind::Container))
+                .filter(|s| {
+                    matches!(
+                        s.kind,
+                        StructureType::Storage | StructureType::Terminal | StructureType::Container
+                    )
+                })
                 .map(|s| s.store.amount_of(Energy));
             let carried = (world.creeps.iter())
                 .filter(|c| c.pos.room == r.name)

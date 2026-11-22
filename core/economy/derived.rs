@@ -12,8 +12,8 @@ use fabot_base::tiles::{self, Tile};
 use fabot_base::vocabulary::ResourceType::{self, Energy};
 use fabot_base::vocabulary::{Part, part_count_in};
 use fabot_base::world::{
-    self, BodyPart, Controller, Creep, Id, Kind, Owner, Pos, Room, RoomName, Source, Spawn, Store,
-    Structure, World, terrain,
+    self, BodyPart, Built, Controller, Creep, Id, Owner, Pos, Room, RoomName, Source, Spawn, Store,
+    Structure, StructureType, World, terrain,
 };
 
 use super::bodies::{self, Pattern};
@@ -93,7 +93,7 @@ pub struct MineralFact {
 pub struct RefillFact {
     pub id: Id,
     pub pos: Pos,
-    pub kind: Kind,
+    pub kind: StructureType,
     pub free: i32,
 }
 
@@ -169,7 +169,7 @@ pub struct LinkFact {
 #[derive(Clone, Debug)]
 pub struct SiteFact {
     pub id: Id,
-    pub kind: Kind,
+    pub kind: StructureType,
     pub pos: Pos,
     pub left: i32,
 }
@@ -177,7 +177,7 @@ pub struct SiteFact {
 #[derive(Clone, Debug)]
 pub struct RepairFact {
     pub id: Id,
-    pub kind: Kind,
+    pub kind: StructureType,
     pub pos: Pos,
     pub hits: i32,
     pub hits_max: i32,
@@ -313,7 +313,7 @@ impl Ground {
     /// A site that waits pays back nothing, so while one stands its builders
     /// draw the reserve.
     pub fn kept_from_builders(&self, reserve: i32) -> i32 {
-        if self.sites.iter().any(|s| drawn_for(&s.kind)) {
+        if self.sites.iter().any(|s| drawn_for(s.kind)) {
             0
         } else {
             reserve
@@ -322,8 +322,8 @@ impl Ground {
 }
 
 /// A rampart guards the reserve and costs one energy.
-pub fn drawn_for(kind: &Kind) -> bool {
-    kind.pays_back() || *kind == Kind::Rampart
+pub fn drawn_for(kind: StructureType) -> bool {
+    kind.pays_back() || kind == StructureType::Rampart
 }
 
 /// The lab a waiting body walks to, and what the colony's stores owe it.
@@ -468,13 +468,14 @@ const SAFE_PERIODS: i32 = 10;
 /// What keeping `s` standing costs, where it is below the hits we hold it at.
 fn repair_of(room: &Room, wall: i32, owned_room: bool, s: &Structure) -> Option<RepairFact> {
     let per = |amount: i32, time: i32| f64::from(amount) / f64::from(time);
-    let (hits_max, chunk, decay, wear, rebuild) = match s.kind {
-        Kind::Rampart if s.owner.is_ours() => {
+    let kind = s.kind;
+    let (hits_max, chunk, decay, wear, rebuild) = match kind {
+        StructureType::Rampart if s.owner.is_ours() => {
             let chunk = engine::RAMPART_DECAY_AMOUNT;
             let decay = per(chunk, engine::RAMPART_DECAY_TIME);
             (wall.min(s.hits_max), chunk, decay, 0.0, 0)
         }
-        Kind::Road => {
+        StructureType::Road => {
             let ratio = if terrain::is_swamp(room.terrain, s.pos.x, s.pos.y) {
                 engine::ROAD_SWAMP_RATIO
             } else {
@@ -494,7 +495,7 @@ fn repair_of(room: &Room, wall: i32, owned_room: bool, s: &Structure) -> Option<
                 engine::ROAD_BUILD_COST * ratio,
             )
         }
-        Kind::Container => {
+        StructureType::Container => {
             let period = if owned_room {
                 engine::CONTAINER_DECAY_TIME_OWNED
             } else {
@@ -511,9 +512,9 @@ fn repair_of(room: &Room, wall: i32, owned_room: bool, s: &Structure) -> Option<
         }
         _ => return None,
     };
-    (s.hits < hits_max).then(|| RepairFact {
+    (s.hits < hits_max).then_some(RepairFact {
         id: s.id,
-        kind: s.kind.clone(),
+        kind,
         pos: s.pos,
         hits: s.hits,
         hits_max,
@@ -548,7 +549,7 @@ fn links_of(
     storage: Option<&Structure>,
 ) -> Vec<LinkFact> {
     let role_of = |s: &Structure| {
-        if s.kind != Kind::Link || !s.owner.is_ours() {
+        if s.kind != StructureType::Link || !s.owner.is_ours() {
             None
         } else if Atlas::is_source_link(room, &s.pos) {
             Some(LinkRole::Source)
@@ -578,8 +579,9 @@ fn links_of(
 fn minerals_of(room: &Room) -> Vec<MineralFact> {
     (room.minerals.iter())
         .filter_map(|m| {
-            let extractor = (room.structures.iter())
-                .find(|s| s.kind == Kind::Extractor && s.owner.is_ours() && s.pos == m.pos)?;
+            let extractor = (room.structures.iter()).find(|s| {
+                s.kind == StructureType::Extractor && s.owner.is_ours() && s.pos == m.pos
+            })?;
             let resource = m.resource?;
             let post = Atlas::post_of(room, &m.pos);
             let container = post.as_ref().and_then(|(_, id)| *id);
@@ -610,22 +612,21 @@ fn stores_of(
     is_buffer: &dyn Fn(Id) -> bool,
     served_dug: &dyn Fn(&Pos) -> i32,
 ) -> Vec<StoreFact> {
+    use StructureType::*;
     let mut stores: Vec<StoreFact> = Vec::new();
 
     for s in &room.structures {
         match s.kind {
-            Kind::Container | Kind::Storage | Kind::Terminal
-                if s.kind != Kind::Terminal || s.owner.is_ours() =>
-            {
+            Container | Storage | Terminal if s.kind != Terminal || s.owner.is_ours() => {
                 let energy = s.store.amount_of(Energy);
-                let owned = s.kind == Kind::Storage && s.owner.is_ours();
-                let dug = if s.kind == Kind::Container {
+                let owned = s.kind == Storage && s.owner.is_ours();
+                let dug = if s.kind == Container {
                     served_dug(&s.pos)
                 } else {
                     0
                 };
 
-                let kind = if matches!(s.kind, Kind::Storage | Kind::Terminal) {
+                let kind = if matches!(s.kind, Storage | Terminal) {
                     StoreKind::Storage
                 } else if buffered && is_buffer(s.id) {
                     StoreKind::Buffer
@@ -670,7 +671,7 @@ fn stores_of(
 fn labs_of(room: &Room) -> Vec<LabFact> {
     room.structures
         .iter()
-        .filter(|s| s.kind == Kind::Lab && s.owner.is_ours())
+        .filter(|s| s.kind == StructureType::Lab && s.owner.is_ours())
         .map(|s| LabFact {
             id: s.id,
             pos: s.pos,
@@ -686,9 +687,10 @@ fn labs_of(room: &Room) -> Vec<LabFact> {
 }
 
 fn ores_of(room: &Room) -> Vec<(Id, Pos, ResourceType, i32)> {
+    use StructureType::*;
     room.structures
         .iter()
-        .filter(|s| matches!(s.kind, Kind::Storage | Kind::Terminal) && s.owner.is_ours())
+        .filter(|s| matches!(s.kind, Storage | Terminal) && s.owner.is_ours())
         .flat_map(|s| {
             s.store
                 .held
@@ -726,7 +728,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
     let storage = room
         .structures
         .iter()
-        .find(|s| s.kind == Kind::Storage && s.owner.is_ours());
+        .find(|s| s.kind == StructureType::Storage && s.owner.is_ours());
 
     let links = links_of(room, &is_buffer, storage);
 
@@ -754,7 +756,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
             seats,
             energy: s.energy,
             bay: (room.structures.iter())
-                .filter(|x| x.kind == Kind::Extension && x.owner.is_ours())
+                .filter(|x| x.kind == StructureType::Extension && x.owner.is_ours())
                 .filter(|x| post.as_ref().is_some_and(|(p, _)| p.within(1, &x.pos)))
                 .map(|x| x.store.capacity)
                 .sum(),
@@ -770,15 +772,20 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
     let served_dug = |pos: &Pos| -> i32 { dug_of(&|s| s.pos.range(pos) == Some(1)) };
 
     let (bays, refills): (Vec<RefillFact>, Vec<RefillFact>) = (room.structures.iter())
-        .filter(|s| matches!(s.kind, Kind::Spawn | Kind::Extension | Kind::Tower))
+        .filter(|s| {
+            matches!(
+                s.kind,
+                StructureType::Spawn | StructureType::Extension | StructureType::Tower
+            )
+        })
         .filter(|s| s.owner.is_ours() && s.store.free() > 0)
         .map(|s| RefillFact {
             id: s.id,
             pos: s.pos,
-            kind: s.kind.clone(),
+            kind: s.kind,
             free: s.store.free(),
         })
-        .partition(|r| in_bay(&r.kind, &r.pos));
+        .partition(|r| in_bay(r.kind, &r.pos));
     let mut stores = stores_of(room, owned_room, &is_buffer, &served_dug);
     let repairs: Vec<RepairFact> = (room.structures.iter())
         .flat_map(|s| repair_of(room, wall, owned_room, s))
@@ -829,7 +836,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
             .filter(|s| s.owner.is_ours())
             .map(|s| SiteFact {
                 id: s.id,
-                kind: s.kind.clone(),
+                kind: s.kind,
                 pos: s.pos,
                 left: 0.max(s.progress_total - s.progress),
             })
@@ -857,7 +864,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
         buffer_tile: built.map(|b| b.pos).or_else(|| {
             room.sites
                 .iter()
-                .find(|s| s.kind == Kind::Container && Atlas::is_buffer(room, &s.pos))
+                .find(|s| s.kind == StructureType::Container && Atlas::is_buffer(room, &s.pos))
                 .map(|s| s.pos)
         }),
         feed: feed.or_else(|| buffer.clone()),
@@ -870,7 +877,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
         terminal: room
             .structures
             .iter()
-            .find(|s| s.kind == Kind::Terminal && s.owner.is_ours())
+            .find(|s| s.kind == StructureType::Terminal && s.owner.is_ours())
             .map(|s| TerminalFact {
                 id: s.id,
                 pos: s.pos,

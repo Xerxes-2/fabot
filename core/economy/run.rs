@@ -12,7 +12,7 @@ use fabot_base::tiles::{self, TileSet};
 use fabot_base::vocabulary::Part;
 use fabot_base::vocabulary::ResourceType::{self, Energy};
 use fabot_base::wish::Wish;
-use fabot_base::world::{Creep, Id, Kind, Pos, RoomName};
+use fabot_base::world::{Creep, Id, Pos, RoomName, StructureType};
 use fabot_mv::plan;
 
 use super::bodies::{self, Pattern};
@@ -78,7 +78,7 @@ fn ring_members<'a>(derived: &'a Derived, task: &Task, at: &Pos) -> Vec<&'a Refi
     };
     let g = (derived.grounds.iter()).find(|g| g.room == *room);
     let mut members: Vec<&RefillFact> = (g.iter().flat_map(|g| &g.refills))
-        .filter(|f| f.kind != Kind::Tower && f.free > 0)
+        .filter(|f| f.kind != StructureType::Tower && f.free > 0)
         .collect();
     members.sort_by_key(|f| (at.range(&f.pos).unwrap_or(i32::MAX), &f.id));
     members
@@ -786,7 +786,7 @@ fn raising(derived: &Derived, body: &Body, slot: &Slot) -> Option<CreepAct> {
             if let Some(site) = slots::raised_by(g, body) {
                 return Some(CreepAct::Build(site.id));
             }
-            (g.repairs.iter()).find(|r| r.pos == *at && r.kind == Kind::Container)
+            (g.repairs.iter()).find(|r| r.pos == *at && r.kind == StructureType::Container)
         }
         Job::Upgrade => {
             (g.repairs.iter()).find(|r| g.buffer.as_ref().is_some_and(|b| b.id == r.id.into()))

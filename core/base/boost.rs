@@ -1,6 +1,6 @@
 use super::engine;
 use super::vocabulary::{self, ResourceType};
-use super::world::{self, Id, Kind, Pos, RoomName, World};
+use super::world::{self, Id, Pos, RoomName, StructureType, World};
 
 /// A cast name's last token names the compound its body walks to a lab for.
 pub fn of_name(name: &str) -> Option<ResourceType> {
@@ -41,7 +41,7 @@ pub fn labs_in<'a>(world: &'a World, room: RoomName) -> impl Iterator<Item = &'a
     (world.rooms.iter())
         .filter(move |r| r.name == room)
         .flat_map(|r| r.structures.iter())
-        .filter(|s| s.kind == world::Kind::Lab && s.owner.is_ours())
+        .filter(|s| s.kind == world::StructureType::Lab && s.owner.is_ours())
 }
 
 pub fn home_holds(world: &World, room: RoomName, compound: ResourceType) -> (i32, i32) {
@@ -50,7 +50,11 @@ pub fn home_holds(world: &World, room: RoomName, compound: ResourceType) -> (i32
         .filter(|r| r.name == room)
         .flat_map(|r| r.structures.iter())
         .filter(|s| {
-            s.owner.is_ours() && matches!(s.kind, Kind::Lab | Kind::Terminal | Kind::Storage)
+            s.owner.is_ours()
+                && matches!(
+                    s.kind,
+                    StructureType::Lab | StructureType::Terminal | StructureType::Storage
+                )
         })
         .map(|s| held(&s.store))
         .chain(

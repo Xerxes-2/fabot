@@ -141,8 +141,7 @@ impl Reader<'_> {
         }
     }
 
-    fn structure(&self, room: RoomName, kind: &str, o: &Obj) -> Structure {
-        let kind = Kind::from(kind);
+    fn structure(&self, room: RoomName, kind: StructureType, o: &Obj) -> Structure {
         let owner = self.owner(o);
         let cooldown = match o.get(Atom::intern("cooldown")) {
             Some(Val::Num(c)) => *c as i32,
@@ -161,16 +160,16 @@ impl Reader<'_> {
             },
             cooldown: if kind.has_cooldown() { cooldown } else { 0 },
             // The sim's cores carry no collapse effect or deploy timer; `read.js` reads that as the longest collapse.
-            collapse: if kind == Kind::InvaderCore {
+            collapse: if kind == StructureType::InvaderCore {
                 fabot_base::engine::STRONGHOLD_LONGEST_COLLAPSE
             } else {
                 0
             },
             level: 0,
-            spawn: (kind == Kind::KeeperLair)
+            spawn: (kind == StructureType::KeeperLair)
                 .then(|| num(o, atom!("nextSpawnTime")) as i32 - self.time)
                 .filter(|t| *t >= 0),
-            walkable: if kind == Kind::Rampart {
+            walkable: if kind == StructureType::Rampart {
                 owner.is_ours() || public
             } else {
                 kind.walkable()
@@ -257,26 +256,14 @@ pub fn world(v: &View, declarations: &Declarations) -> World<'static> {
     for i in seen {
         let at = &v.rooms[i];
         let name = RoomName::parse(at.name).unwrap_or(RoomName::SIM);
-        let mut room = Room {
-            name,
-            terrain: None,
-            controller: None,
-            energy_available: 0,
-            energy_capacity: 0,
-            sources: Vec::new(),
-            minerals: Vec::new(),
-            structures: Vec::new(),
-            sites: Vec::new(),
-            piles: Vec::new(),
-            remains: Vec::new(),
-            others: Vec::new(),
-        };
+        let mut room = Room::empty(name);
         let mut ovens: Vec<(&Obj, Spawn)> = Vec::new();
         for &(kind, o) in &at.objects {
             match kind {
                 "controller" => {
                     room.controller = Some(r.controller(name, o));
-                    room.structures.push(r.structure(name, "controller", o));
+                    room.structures
+                        .push(r.structure(name, StructureType::Controller, o));
                 }
                 "source" => room.sources.push(Source {
                     id: Id::of_engine(text(o, atom!("_id"))),
@@ -291,14 +278,17 @@ pub fn world(v: &View, declarations: &Declarations) -> World<'static> {
                     resource: text(o, atom!("mineralType")).parse().ok(),
                     amount: num(o, atom!("mineralAmount")) as i32,
                 }),
-                "constructionSite" => room.sites.push(Site {
-                    kind: Kind::from(text(o, atom!("structureType"))),
-                    id: Id::of_engine(text(o, atom!("_id"))),
-                    pos: r.pos(name, o),
-                    owner: r.owner(o),
-                    progress: num(o, atom!("progress")) as i32,
-                    progress_total: num(o, atom!("progressTotal")) as i32,
-                }),
+                "constructionSite" => {
+                    room.sites
+                        .extend(text(o, atom!("structureType")).parse().map(|kind| Site {
+                            kind,
+                            id: Id::of_engine(text(o, atom!("_id"))),
+                            pos: r.pos(name, o),
+                            owner: r.owner(o),
+                            progress: num(o, atom!("progress")) as i32,
+                            progress_total: num(o, atom!("progressTotal")) as i32,
+                        }))
+                }
                 "energy" => room
                     .piles
                     .extend(text(o, atom!("resourceType")).parse().map(|resource| Pile {
@@ -328,7 +318,10 @@ pub fn world(v: &View, declarations: &Declarations) -> World<'static> {
                         };
                         ovens.push((o, spawn));
                     }
-                    room.structures.push(r.structure(name, kind, o));
+                    match kind.parse() {
+                        Ok(kind) => room.structures.push(r.structure(name, kind, o)),
+                        Err(_) => room.blocked.push(r.pos(name, o)),
+                    }
                 }
             }
         }

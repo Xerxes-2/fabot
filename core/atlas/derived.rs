@@ -7,7 +7,9 @@ use fabot_base::grid::{self, Footprint};
 use fabot_base::intel::Intel;
 use fabot_base::tiles::{self, TileSet};
 use fabot_base::vocabulary::{Part, ResourceType};
-use fabot_base::world::{Creep, Kind, Owner, Pos, Room, RoomName, Sightings, World, hostiles};
+use fabot_base::world::{
+    Creep, Owner, Pos, Room, RoomName, Sightings, StructureType, World, hostiles,
+};
 
 pub struct Context<'a> {
     pub world: &'a World<'a>,
@@ -157,7 +159,7 @@ fn danger(world: &World, owned: &BTreeSet<RoomName>) -> Vec<(RoomName, TileSet)>
             .map(|c| (tiles::of_pos(&c.pos), hostiles::reach(c)));
         let towers = (r.structures.iter())
             .filter(|s| {
-                s.kind == Kind::Tower
+                s.kind == StructureType::Tower
                     && s.owner.is_theirs()
                     && !s.owner.is_ally()
                     && s.store.amount_of(ResourceType::Energy) >= engine::TOWER_ENERGY_COST
@@ -194,7 +196,7 @@ pub fn derive(world: &World, atlas: &mut Atlas) -> Derived {
             Some(Home {
                 spawn: world.spawns.iter().find(|s| s.pos.room == *home)?.pos,
                 stocked: (room.structures.iter())
-                    .any(|s| s.kind == Kind::Storage && s.owner.is_ours()),
+                    .any(|s| s.kind == StructureType::Storage && s.owner.is_ours()),
                 capacity: room.energy_capacity,
             })
         })
@@ -241,7 +243,7 @@ fn open(world: &World, sightings: &Sightings, owned: &BTreeSet<RoomName>, room: 
     let core = seen
         .structures
         .iter()
-        .any(|s| s.kind == Kind::InvaderCore && s.level > 0);
+        .any(|s| s.kind == StructureType::InvaderCore && s.level > 0);
     let foes: Vec<Creep> = seen.hostiles().cloned().collect();
     let work: Vec<&Pos> = seen
         .sources
@@ -250,7 +252,7 @@ fn open(world: &World, sightings: &Sightings, owned: &BTreeSet<RoomName>, room: 
         .chain(
             seen.structures
                 .iter()
-                .filter(|s| s.kind == Kind::Container)
+                .filter(|s| s.kind == StructureType::Container)
                 .map(|s| &s.pos),
         )
         .collect();

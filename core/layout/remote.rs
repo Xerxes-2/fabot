@@ -7,7 +7,7 @@ use fabot_base::declarations;
 use fabot_base::grid::Footprint;
 use fabot_base::intents::{Action, RoomAct};
 use fabot_base::tiles::{self, Tile, TileSet};
-use fabot_base::world::{Kind, Owner, Pos, Room, RoomName, World, terrain};
+use fabot_base::world::{Built, Owner, Pos, Room, RoomName, StructureType, World, terrain};
 
 use super::shape::Plan;
 use super::sites::SITES_IN_FLIGHT;
@@ -43,7 +43,7 @@ fn opened(
     }
 
     let mut tiles_open: TileSet = (room.structures.iter())
-        .filter(|s| s.kind != Kind::Rampart)
+        .filter(|s| s.kind != StructureType::Rampart)
         .map(|s| &s.pos)
         .chain(room.sites.iter().map(|s| &s.pos))
         .map(tiles::of_pos)
@@ -73,7 +73,7 @@ fn place(
     budget: &mut i32,
     intents: &mut Vec<Action>,
     pos: &Pos,
-    kind: &Kind,
+    kind: StructureType,
 ) {
     let Some(&room) = rooms.get(&pos.room) else {
         return;
@@ -93,7 +93,7 @@ fn place(
         *budget -= 1;
         intents.push(Action::Room(
             room.name,
-            RoomAct::CreateSite(pos.x, pos.y, kind.clone()),
+            RoomAct::CreateSite(pos.x, pos.y, kind),
         ));
     }
 }
@@ -114,7 +114,7 @@ fn sink_for<'t>(
     let sink = |i: usize| {
         let home = rooms.get(&homes[i].room)?;
         (home.structures.iter())
-            .find(|s| s.kind == Kind::Storage && s.owner.is_ours())
+            .find(|s| s.kind == StructureType::Storage && s.owner.is_ours())
             .map(|s| s.pos)
             .or_else(|| bank(home.name))
     };
@@ -222,7 +222,7 @@ pub fn sites(
                                         &mut budget,
                                         &mut intents,
                                         &tiles::to_pos(room.name, t),
-                                        &Kind::Container,
+                                        StructureType::Container,
                                     );
                                     None
                                 }
@@ -241,7 +241,7 @@ pub fn sites(
                             &mut budget,
                             &mut intents,
                             &p,
-                            &Kind::Road,
+                            StructureType::Road,
                         );
                     }
                 }

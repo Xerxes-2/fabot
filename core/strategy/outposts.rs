@@ -9,7 +9,7 @@ use fabot_base::engine;
 use fabot_base::intel::Intel;
 use fabot_base::tiles;
 use fabot_base::vocabulary::Part;
-use fabot_base::world::{Kind, RoomName, World};
+use fabot_base::world::{RoomName, StructureType, World};
 use fabot_fight::casting;
 use fabot_fight::shape::{Engagement, Objective};
 
@@ -129,7 +129,7 @@ pub fn chosen(
     // A young home opens every room that pays at once, as The International does.
     let stocked = |home: RoomName| {
         world.room(home).is_some_and(|r| {
-            (r.structures.iter()).any(|s| s.kind == Kind::Storage && s.owner.is_ours())
+            (r.structures.iter()).any(|s| s.kind == StructureType::Storage && s.owner.is_ours())
         })
     };
     // Before a storage the spawns' other half is the spend's.
@@ -207,7 +207,8 @@ pub fn survey(
         };
         // `ARCHITECTURE.md` §7.2.
         let level = room.controller.as_ref().map_or(0, |c| c.level);
-        let banks = (room.structures.iter()).any(|s| s.kind == Kind::Storage && s.owner.is_ours())
+        let banks = (room.structures.iter())
+            .any(|s| s.kind == StructureType::Storage && s.owner.is_ours())
             || plans.iter().any(|p| p.room == *home && p.pile.is_some());
         let picks = banks && level >= 2;
         let walk = |hops: i32, outpost: &Outpost| {

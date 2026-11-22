@@ -11,14 +11,14 @@ use fabot_base::testing::Dice;
 use fabot_base::tiles::{self, Tile, TileSet};
 use fabot_base::vocabulary::{ALL_BODY_PARTS, Part, ResourceType};
 use fabot_base::world::{
-    BodyPart, Creep, Kind, Mineral, Owner, Pos, Room, RoomName, Source, Store, Structure, World,
-    terrain,
+    BodyPart, Creep, Mineral, Owner, Pos, Room, RoomName, Source, Store, Structure, StructureType,
+    World, read, terrain,
 };
 
 const ROOM: RoomName = RoomName::named("W1N1");
 const CASES: u64 = 100;
 
-fn structure(kind: Kind, walkable: bool, x: i32, y: i32) -> Structure {
+fn structure(kind: StructureType, walkable: bool, x: i32, y: i32) -> Structure {
     Structure {
         id: format!("s{x},{y}").as_str().into(),
         kind,
@@ -55,18 +55,9 @@ impl Ground {
 
 fn room_of(name: RoomName, terrain: Vec<u8>, structures: Vec<Structure>) -> Room<'static> {
     Room {
-        name,
         terrain: terrain::leak(terrain),
-        controller: None,
-        energy_available: 0,
-        energy_capacity: 0,
-        sources: Vec::new(),
-        minerals: Vec::new(),
         structures,
-        sites: Vec::new(),
-        piles: Vec::new(),
-        remains: Vec::new(),
-        others: Vec::new(),
+        ..Room::empty(name)
     }
 }
 
@@ -92,12 +83,12 @@ fn world_of(ground: &Ground) -> World<'static> {
     let structures = ground
         .roads
         .iter()
-        .map(|&(x, y)| structure(Kind::Road, true, x, y))
+        .map(|&(x, y)| structure(StructureType::Road, true, x, y))
         .chain(
             ground
                 .walls
                 .iter()
-                .map(|&(x, y)| structure(Kind::Wall, false, x, y)),
+                .map(|&(x, y)| structure(StructureType::Wall, false, x, y)),
         )
         .collect();
     world_of_rooms(vec![room_of(ROOM, ground.terrain.clone(), structures)])
@@ -636,7 +627,7 @@ fn every_tile_a_keeper_strikes_is_walled_and_a_room_of_keepers_not_due_walls_non
         let (lair, rock, at) = (tile(&mut dice), tile(&mut dice), tile(&mut dice));
         let pos = |t: Tile| tiles::to_pos(ROOM, t);
         let room = &mut world.rooms[0];
-        let mut lair_of = structure(Kind::KeeperLair, false, pos(lair).x, pos(lair).y);
+        let mut lair_of = structure(StructureType::KeeperLair, false, pos(lair).x, pos(lair).y);
         lair_of.spawn = Some(dice.between(-1, 2 * Atlas::CROSSING_TICKS)).filter(|t| *t >= 0);
         let spawns = lair_of.spawn.is_some_and(|t| t <= Atlas::CROSSING_TICKS);
         room.structures.push(lair_of);
@@ -959,4 +950,32 @@ fn a_walk_toward_a_tile_follows_each_regions_way_on_where_split_rooms_lead_into_
     assert!(ticks(r, 10) > ticks(s, 10));
     assert!(ticks(s, 10) > ticks(s, 40));
     assert!(ticks(s, 40) > ticks(r, 40));
+}
+
+#[test]
+fn a_structure_of_a_kind_the_crate_does_not_name_only_blocks_its_tile() {
+    #[rustfmt::skip]
+    let ints = [
+        1, 1, // time, bucket
+        1, 0, 0, 0, 0, 0, 0, // a room, its energy, no controller, sources or minerals
+        2, 1, 10, 10, 0, 0, 0, 0, 0, // a season's structure, its store read and dropped
+        2, 11, 10, 0, 1, 1, // a road
+        0, 0, 0, 0, // sites, piles, remains, others
+        0, 0, 0, 0, 0, 0, 0, // attacks, destroyed, spawns, creeps, sites, rooms, rules
+        3,
+    ];
+    let text = "\0aa\0ab\0W1N1\0seasonThing\0road";
+    let declared = fabot_base::declarations::undeclared();
+    let mut world = read::world(&ints, text, &declared, &mut read::Buffers::default());
+    let room = &mut world.rooms[0];
+    room.terrain = terrain::leak(vec![0; tiles::COUNT]);
+    assert_eq!(room.blocked, [Pos::new(ROOM, 10, 10)]);
+    assert!(
+        room.structures
+            .iter()
+            .all(|s| s.kind == StructureType::Road)
+    );
+    let at = tiles::index(10, 10);
+    assert!(fabot_layout::ground::obstacles(room).contains(&at));
+    assert!(Atlas::of_world(&world).held_weights(ROOM).unwrap()[at].is_none());
 }

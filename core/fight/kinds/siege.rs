@@ -8,7 +8,7 @@ use fabot_atlas::Atlas;
 use fabot_base::engine;
 use fabot_base::tiles::{self, Tile, TileSet};
 use fabot_base::vocabulary::ResourceType;
-use fabot_base::world::{Controller, Id, Kind, Owner, Pos, Room, RoomName, Structure};
+use fabot_base::world::{Controller, Id, Owner, Pos, Room, RoomName, Structure, StructureType};
 use fabot_exchange::{self as exchange, Outcome};
 use fabot_tactics::{self as tactics, Offer, Tactic};
 
@@ -51,32 +51,34 @@ pub struct Facts {
 }
 
 /// The towers and the whole economy (owner, 2026-10-18).
-pub fn razed(kind: &Kind) -> bool {
+pub fn razed(kind: StructureType) -> bool {
+    use StructureType::*;
     matches!(
         kind,
-        Kind::Tower
-            | Kind::Spawn
-            | Kind::Extension
-            | Kind::Storage
-            | Kind::Terminal
-            | Kind::Link
-            | Kind::Lab
-            | Kind::Extractor
-            | Kind::Factory
-            | Kind::PowerSpawn
-            | Kind::Nuker
-            | Kind::Observer
+        Tower
+            | Spawn
+            | Extension
+            | Storage
+            | Terminal
+            | Link
+            | Lab
+            | Extractor
+            | Factory
+            | PowerSpawn
+            | Nuker
+            | Observer
     )
 }
 
 /// What razing `s` takes from the rival (owner, 2026-10-19): a fixed order a
 /// price of his loss replaces.
 pub fn taken(s: &Structure, sources: &[Pos]) -> i32 {
+    use StructureType::*;
     match s.kind {
-        Kind::Link if sources.iter().any(|p| p.within(2, &s.pos)) => 4,
-        Kind::Spawn | Kind::Extension | Kind::Tower => 3,
-        Kind::Storage | Kind::Terminal | Kind::Link => 2,
-        Kind::Extractor => 0,
+        Link if sources.iter().any(|p| p.within(2, &s.pos)) => 4,
+        Spawn | Extension | Tower => 3,
+        Storage | Terminal | Link => 2,
+        Extractor => 0,
         _ => 1,
     }
 }
@@ -90,7 +92,7 @@ pub fn next_razed<'a>(room: &'a Room, walk: impl Fn(&Structure) -> i32) -> Optio
     let theirs = || structures.iter().filter(|s| s.owner.is_theirs());
     let charged: Vec<&Pos> = theirs()
         .filter(|t| {
-            t.kind == Kind::Tower
+            t.kind == StructureType::Tower
                 && t.store.amount_of(ResourceType::Energy) >= engine::TOWER_ENERGY_COST
         })
         .map(|t| &t.pos)
@@ -101,7 +103,7 @@ pub fn next_razed<'a>(room: &'a Room, walk: impl Fn(&Structure) -> i32) -> Optio
             .sum()
     };
 
-    theirs().filter(|s| razed(&s.kind)).min_by_key(|&s| {
+    theirs().filter(|s| razed(s.kind)).min_by_key(|&s| {
         (
             struck(&s.pos),
             std::cmp::Reverse(taken(s, &sources)),
@@ -211,9 +213,10 @@ pub fn replanned(time: i32, held: bool, e: &Engagement) -> Engagement {
 }
 
 pub fn barrier_at<'a>(room: &'a Room) -> BTreeMap<Id, &'a Structure> {
+    use StructureType::*;
     room.structures
         .iter()
-        .filter(|s| !s.owner.is_ours() && matches!(s.kind, Kind::Rampart | Kind::Wall))
+        .filter(|s| !s.owner.is_ours() && matches!(s.kind, Rampart | Wall))
         .map(|s| (s.id, s))
         .collect()
 }

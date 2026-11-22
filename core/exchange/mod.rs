@@ -1601,7 +1601,6 @@ mod tests {
 
     const ROOM: RoomName = RoomName::named("W1N1");
 
-    /// `maxTest = 1000` of the F# generated cases, from a fixed seed.
     const CASES: usize = 1000;
 
     struct Rng(u64);

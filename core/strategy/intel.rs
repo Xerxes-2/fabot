@@ -7,7 +7,7 @@ use fabot_base::intel::{Intel, Row, STALE, Scout};
 use fabot_base::intents::Action;
 use fabot_base::tiles;
 use fabot_base::vocabulary::Part;
-use fabot_base::world::{Kind, Owner, RoomName, World};
+use fabot_base::world::{Owner, RoomName, StructureType, World};
 
 /// `Owner::of_user`'s inverse: a row outlives the stance it was seen under.
 fn user(me: &str, owner: &Owner) -> Option<String> {
@@ -51,11 +51,11 @@ pub fn step(world: &World, intel: &mut Intel) {
             ),
             contained: (room.sources.iter()).all(|s| {
                 (room.structures.iter())
-                    .any(|c| c.kind == Kind::Container && c.pos.within(1, &s.pos))
+                    .any(|c| c.kind == StructureType::Container && c.pos.within(1, &s.pos))
             }),
             mineral: room.minerals.first().and_then(|m| m.resource),
             stronghold: (room.structures.iter())
-                .any(|s| s.kind == Kind::InvaderCore && s.level > 0),
+                .any(|s| s.kind == StructureType::InvaderCore && s.level > 0),
         };
         intel.insert(room.name, row);
     }
@@ -134,7 +134,7 @@ pub fn sight(
         .rooms
         .iter()
         .flat_map(|r| r.structures.iter())
-        .filter(|s| s.kind == Kind::Observer && s.owner.is_ours())
+        .filter(|s| s.kind == StructureType::Observer && s.owner.is_ours())
         .collect();
     let mut stale: Vec<(i32, &RoomName)> = intel
         .iter()

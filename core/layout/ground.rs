@@ -1,7 +1,7 @@
 //! Built from the room alone, so a plan drawn on it moves only when the
 //! ground does.
 use fabot_base::tiles::{self, Tile};
-use fabot_base::world::{Kind, Room, RoomName, terrain};
+use fabot_base::world::{Room, RoomName, StructureType, terrain};
 
 use super::place::{SWAMP, WALL};
 
@@ -25,7 +25,8 @@ pub fn obstacles(room: &Room) -> Vec<Tile> {
         .filter(|s| !s.owner.is_ours() && !s.walkable)
         .map(|s| (s, tiles::of_pos(&s.pos)))
         // A wall has no owner: off the border, where the server alone builds, it is our ring's.
-        .filter_map(|(s, t)| (s.kind != Kind::Wall || tiles::on_edge(t)).then_some(t))
+        .filter_map(|(s, t)| (s.kind != StructureType::Wall || tiles::on_edge(t)).then_some(t))
+        .chain(room.blocked.iter().map(tiles::of_pos))
         .collect();
     found.sort_unstable();
     found

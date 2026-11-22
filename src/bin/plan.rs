@@ -11,7 +11,9 @@
 use std::io::Read;
 
 use fabot_base::tiles::{self, Tile};
-use fabot_base::world::{Kind, Owner, Pos, Room, RoomName, Rules, Store, Structure};
+use fabot_base::world::{
+    Built, Owner, Pos, Room, RoomName, Rules, Store, Structure, StructureType,
+};
 use fabot_layout::{self as layout, sites};
 use serde_json::{Value, json};
 
@@ -47,7 +49,7 @@ fn main() {
     let (plan, first_spawn) = layout::first_spawn(&rules, &room).unwrap();
 
     let mut built: Vec<Structure> = Vec::new();
-    let build = |built: &mut Vec<Structure>, kind: Kind, tile: Tile| {
+    let build = |built: &mut Vec<Structure>, kind: StructureType, tile: Tile| {
         let walkable = kind.walkable();
         built.push(Structure {
             id: format!("s{}", built.len()).as_str().into(),
@@ -64,7 +66,7 @@ fn main() {
             walkable,
         })
     };
-    build(&mut built, Kind::Spawn, first_spawn);
+    build(&mut built, StructureType::Spawn, first_spawn);
     loop {
         let census = sites::census_of(
             &Room {
@@ -85,16 +87,16 @@ fn main() {
     let labs = input["labs"].as_bool().unwrap_or(false);
     for i in (plan.items.iter()).filter(|i| labs && i.level <= level && !sites::placeable(i, level))
     {
-        build(&mut built, i.kind.clone(), i.tile);
+        build(&mut built, i.kind, i.tile);
     }
     // `"ring": true` stands the ring too, as a kept room's from its level.
     let ring = input["ring"].as_bool().unwrap_or(false);
     for i in plan.ring.iter().filter(|i| ring && i.level <= level) {
-        build(&mut built, i.kind.clone(), i.tile);
+        build(&mut built, i.kind, i.tile);
     }
     let out: Vec<Value> = built
         .iter()
-        .map(|s| json!({ "kind": s.kind.as_ref(), "x": s.pos.x, "y": s.pos.y }))
+        .map(|s| json!({ "kind": s.kind, "x": s.pos.x, "y": s.pos.y }))
         .collect();
     println!("{}", Value::Array(out));
 }

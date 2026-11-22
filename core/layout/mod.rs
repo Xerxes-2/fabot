@@ -34,7 +34,6 @@ pub fn bare(
 ) -> fabot_base::world::Room<'static> {
     use fabot_base::world::{Controller, Mineral, Owner, Room, Source};
     Room {
-        name,
         terrain: fabot_base::world::terrain::leak(terrain),
         controller: Some(Controller {
             id: "controller".into(),
@@ -50,8 +49,6 @@ pub fn bare(
             safe_mode_cooldown: 0,
             upgrade_blocked: 0,
         }),
-        energy_available: 0,
-        energy_capacity: 0,
         sources: (sources.iter().enumerate())
             .map(|(i, pos)| Source {
                 id: format!("source{i}").as_str().into(),
@@ -69,11 +66,7 @@ pub fn bare(
                 amount: 0,
             })
             .collect(),
-        structures: Vec::new(),
-        sites: Vec::new(),
-        piles: Vec::new(),
-        remains: Vec::new(),
-        others: Vec::new(),
+        ..Room::empty(name)
     }
 }
 
@@ -86,7 +79,7 @@ pub fn first_spawn(
     let tile = plan
         .items
         .iter()
-        .find(|i| i.kind == fabot_base::world::Kind::Spawn)?
+        .find(|i| i.kind == fabot_base::world::StructureType::Spawn)?
         .tile;
     Some((plan, tile))
 }

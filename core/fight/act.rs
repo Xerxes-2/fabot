@@ -12,7 +12,7 @@ use fabot_base::intents::{self, Action, ControllerAct, CreepAct, ModuleOutput};
 use fabot_base::tiles::Tile;
 use fabot_base::vocabulary::Part;
 use fabot_base::wish::Wish;
-use fabot_base::world::{self, Creep, Id, Kind, Owner, Pos, RoomName, Structure};
+use fabot_base::world::{self, Creep, Id, Owner, Pos, RoomName, Structure, StructureType};
 use fabot_base::{engine, tiles};
 use fabot_exchange as exchange;
 use fabot_tactics::{self as tactics, Tactic};
@@ -54,7 +54,7 @@ pub(super) fn act(
                 let ours = r
                     .structures
                     .iter()
-                    .filter(|s| s.kind == Kind::Rampart && s.owner.is_ours());
+                    .filter(|s| s.kind == StructureType::Rampart && s.owner.is_ours());
                 (r.name, ours.map(|s| s.pos).collect())
             })
             .collect(),
@@ -451,7 +451,7 @@ fn homes_of(scene: &Scene, decided: &[Engagement]) -> Vec<Home> {
 
             homes_lost.push(Home {
                 controller: controller.clone(),
-                towered: own.iter().any(|s| s.kind == Kind::Tower),
+                towered: own.iter().any(|s| s.kind == StructureType::Tower),
                 raid: room
                     .hostiles()
                     .filter(|h| raid.contains(&h.id))

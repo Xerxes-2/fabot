@@ -285,8 +285,6 @@ mod tests {
 
     use super::*;
 
-    /// The F# drew these; a swept grid says the same over every size a bank
-    /// can hold.
     fn capacities() -> Vec<i32> {
         let mut out: Vec<i32> = (0..1_200).collect();
         out.extend((0..15_000).step_by(37));

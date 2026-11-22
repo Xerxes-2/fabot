@@ -10,7 +10,7 @@ use fabot_atlas::{self as atlas, Atlas, Context};
 use fabot_base::declarations::{self, OpKind};
 use fabot_base::engine;
 use fabot_base::intents::{Ask, ModuleOutput, Rank};
-use fabot_base::world::{Creep, Id, Kind, Pos, RoomName, hostiles, sightings};
+use fabot_base::world::{Creep, Id, Pos, RoomName, StructureType, hostiles, sightings};
 use fabot_tactics::{self as tactics, Tactic};
 
 /// A merge keeps the older group's id; two engagements on one group are one,
@@ -87,7 +87,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
         let razed = r
             .structures
             .iter()
-            .filter(|s| s.kind == Kind::InvaderCore && s.level == 0);
+            .filter(|s| s.kind == StructureType::InvaderCore && s.level == 0);
         all.extend(razed.map(casting::core_as_hostile));
         cores.extend(all[seen..].iter().map(|c| c.id));
         foes.insert(r.name, all);

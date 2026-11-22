@@ -21,7 +21,7 @@ use fabot_base::grid::{
 };
 use fabot_base::tiles::{self, Post, Table, Tile, TileSet};
 use fabot_base::vocabulary::Part;
-use fabot_base::world::{Id, Kind, Owner, Pos, Room, RoomName, World};
+use fabot_base::world::{Built, Id, Owner, Pos, Room, RoomName, StructureType, World};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Mover {
@@ -505,7 +505,7 @@ impl Atlas {
         let c = room.controller.as_ref()?;
         (room.structures.iter())
             .filter(|s| {
-                s.kind == Kind::Link
+                s.kind == StructureType::Link
                     && s.owner.is_ours()
                     && c.pos.within(engine::UPGRADE_RANGE, &s.pos)
                     && !Atlas::is_source_link(room, &s.pos)
@@ -517,7 +517,7 @@ impl Atlas {
         Atlas::controller_link(room).or_else(|| {
             room.structures
                 .iter()
-                .find(|s| s.kind == Kind::Container && Atlas::is_buffer(room, &s.pos))
+                .find(|s| s.kind == StructureType::Container && Atlas::is_buffer(room, &s.pos))
         })
     }
 
@@ -538,10 +538,10 @@ impl Atlas {
     pub fn post_of(room: &Room, source: &Pos) -> Option<(Pos, Option<Id>)> {
         let from_controller = |p: &Pos| Atlas::from_controller(room, p);
         let built = (room.structures.iter())
-            .filter(|s| s.kind == Kind::Container)
+            .filter(|s| s.kind == StructureType::Container)
             .map(|s| (s.pos, Some(s.id)));
         let sites = (room.sites.iter())
-            .filter(|s| s.kind == Kind::Container && s.owner.is_ours())
+            .filter(|s| s.kind == StructureType::Container && s.owner.is_ours())
             .map(|s| (s.pos, None));
         (built.chain(sites))
             .filter(|(p, _)| p.within(1, source) && p != source)
@@ -565,9 +565,9 @@ impl Atlas {
     }
 
     /// A harvest bay's extension: its harvester keeps it, not the carriers.
-    pub fn in_bay(room: &Room) -> impl Fn(&Kind, &Pos) -> bool {
+    pub fn in_bay(room: &Room) -> impl Fn(StructureType, &Pos) -> bool {
         let posts = Atlas::source_posts(room);
-        move |kind, pos| *kind == Kind::Extension && posts.iter().any(|p| p.within(1, pos))
+        move |kind, pos| kind == StructureType::Extension && posts.iter().any(|p| p.within(1, pos))
     }
 
     /// A link buffer's upgrader tiles stay open: held, they priced every walk
@@ -577,7 +577,7 @@ impl Atlas {
             .map(tiles::of_pos)
             .collect();
         if let Some(b) = Atlas::buffer(room)
-            && b.kind == Kind::Container
+            && b.kind == StructureType::Container
         {
             seats.push(tiles::of_pos(&b.pos));
         }
@@ -602,7 +602,7 @@ impl Atlas {
         let lairs = room
             .structures
             .iter()
-            .filter(|s| s.kind == Kind::KeeperLair);
+            .filter(|s| s.kind == StructureType::KeeperLair);
         let post = |t: Tile| (t, Atlas::guarded(room, t).unwrap_or(t));
         lairs.map(|l| post(tiles::of_pos(&l.pos))).collect()
     }
@@ -670,7 +670,7 @@ impl Atlas {
         for lair in room
             .structures
             .iter()
-            .filter(|s| s.kind == Kind::KeeperLair)
+            .filter(|s| s.kind == StructureType::KeeperLair)
         {
             if lair.spawn.is_some_and(|t| t <= Atlas::CROSSING_TICKS) {
                 strikers.push(striker(tiles::of_pos(&lair.pos), Atlas::keeper_reach()));
@@ -752,7 +752,7 @@ impl Atlas {
             let mut weights = Atlas::ground(terrain.get_bits());
 
             for s in &room.structures {
-                if s.kind == Kind::Road {
+                if s.kind == StructureType::Road {
                     weights[tiles::of_pos(&s.pos)] = grid::weight(engine::ROAD_WEIGHT);
                 }
             }
@@ -764,6 +764,7 @@ impl Atlas {
             let structures = (room.structures.iter()).filter(|s| !s.walkable);
             let sites = (room.sites.iter()).filter(|s| s.owner.is_ours() && !s.kind.walkable());
             let solid = (structures.map(|s| &s.pos))
+                .chain(&room.blocked)
                 .chain(sites.map(|s| &s.pos))
                 .chain(room.sources.iter().map(|s| &s.pos))
                 .chain(room.minerals.iter().map(|m| &m.pos))

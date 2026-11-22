@@ -1,7 +1,7 @@
 //! Hivemind's variation generator and plan scorer (MIT, © David Franke): the
 //! room centres and harvest-bay spawns it tries, and how it picks one.
 use fabot_base::tiles::{self, Tile, index};
-use fabot_base::world::{Kind, Rules};
+use fabot_base::world::Rules;
 
 use super::build::{self, Built, Variation};
 use super::ground::Ground;
@@ -117,9 +117,9 @@ fn navigation(plan: &Labels, terrain: &[u8]) -> Vec<u8> {
 fn amount(rules: &Rules, plan: &Labels, label: &str) -> f64 {
     let cap = match label {
         "rampart" | "road" | "wall.quad" => 2500,
-        other => rules.allowed(&Kind::from(other), 8),
+        other => build::allowed(rules, other),
     };
-    plan.count(label).min(cap.max(0) as usize) as f64
+    plan.count(label).min(cap) as f64
 }
 
 pub(super) fn effect(a: Tile, b: Tile) -> f64 {

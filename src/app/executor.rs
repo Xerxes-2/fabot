@@ -153,7 +153,7 @@ impl Pack {
                 .call(ROOM, name, "createConstructionSite")
                 .int(*x)
                 .int(*y))
-            .text(kind.as_ref()),
+            .text(kind),
             Action::Room(_, RoomAct::Destroy(id)) => self.call(OBJECT, id, "destroy"),
             Action::Tower(id, TowerAct::Attack(t)) => self.call(OBJECT, id, "attack").by_id(t),
             Action::Tower(id, TowerAct::Heal(t)) => self.call(OBJECT, id, "heal").by_id(t),
@@ -202,7 +202,7 @@ fn act(intent: &Action, tag: i32) -> String {
         Action::Tower(..) if tag == GONE => "tower",
         Action::Creep(_, act) => act.into(),
         Action::Room(_, RoomAct::CreateSite(_, _, kind)) => {
-            return format!("site:{}", kind.as_ref());
+            return format!("site:{kind}");
         }
         Action::Room(_, RoomAct::Destroy(_)) => "destroy",
         Action::Tower(_, TowerAct::Attack(_)) => "attack",

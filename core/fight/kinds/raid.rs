@@ -11,7 +11,7 @@ use fabot_base::intents::CreepAct;
 use fabot_base::tiles::{self, Tile};
 use fabot_base::vocabulary::{Part, ResourceType};
 use fabot_base::wish::Wish;
-use fabot_base::world::{Creep, Id, Kind, Pos, Room, Structure};
+use fabot_base::world::{Creep, Id, Pos, Room, Structure, StructureType};
 use fabot_exchange::{self as exchange, Fighter, Ground, Losses, Outcome};
 use fabot_tactics::{self as tactics, Sight, Tactic};
 
@@ -22,7 +22,7 @@ pub fn raids(e: &Engagement) -> bool {
 
 pub fn charged(room: &Room) -> Vec<Pos> {
     (room.structures.iter())
-        .filter(|s| s.kind == Kind::Tower && !s.owner.is_ours())
+        .filter(|s| s.kind == StructureType::Tower && !s.owner.is_ours())
         .filter(|s| s.store.amount_of(ResourceType::Energy) >= engine::TOWER_ENERGY_COST)
         .map(|s| s.pos)
         .collect()
@@ -44,7 +44,7 @@ pub fn breached(room: &Room, passable: impl Fn(Tile) -> bool, goal: &Pos) -> boo
     let walls: BTreeSet<Tile> = room
         .structures
         .iter()
-        .filter(|s| matches!(s.kind, Kind::Rampart | Kind::Wall))
+        .filter(|s| matches!(s.kind, StructureType::Rampart | StructureType::Wall))
         .map(|s| tiles::of_pos(&s.pos))
         .collect();
     let open = |t: Tile| !walls.contains(&t) && passable(t);
@@ -85,7 +85,7 @@ fn next<'a>(room: &'a Room, members: &[&Creep]) -> Option<&'a Structure> {
     let towers = charged(room);
 
     (room.structures.iter())
-        .filter(|s| siege::razed(&s.kind) && s.owner.is_theirs())
+        .filter(|s| siege::razed(s.kind) && s.owner.is_theirs())
         .min_by_key(|s| {
             let removes = if towers.contains(&s.pos) {
                 engine::tower_attack_at(0)
@@ -142,7 +142,7 @@ pub fn hardest<'a>(room: &'a Room) -> Option<&'a Structure> {
     let guards = guards(room);
 
     (room.structures.iter())
-        .filter(|s| siege::razed(&s.kind) && s.owner.is_theirs())
+        .filter(|s| siege::razed(s.kind) && s.owner.is_theirs())
         .max_by_key(|s| {
             (
                 exchange::tower_strike(&towers, &s.pos) + exchange::guard_strike(&guards, &s.pos),
@@ -297,16 +297,17 @@ pub fn volley(sight: &Sight, room: &Room, c: &Creep) -> Option<CreepAct> {
     }
     let sources: Vec<Pos> = room.sources.iter().map(|s| s.pos).collect();
     let theirs = || room.structures.iter().filter(|s| s.owner.is_theirs());
-    let cover = |s: &Structure| theirs().find(|r| r.kind == Kind::Rampart && r.pos == s.pos);
+    let cover =
+        |s: &Structure| theirs().find(|r| r.kind == StructureType::Rampart && r.pos == s.pos);
     let reach = |at: &Pos| c.pos.range(at).filter(|r| *r <= engine::RANGED_RANGE);
 
     // A mark: id, range, hits it takes, what its loss costs, charged, bare.
     let mut marks: Vec<(Id, i32, i32, i32, bool, bool)> = Vec::new();
 
-    for s in theirs().filter(|s| siege::razed(&s.kind)) {
+    for s in theirs().filter(|s| siege::razed(s.kind)) {
         let Some(r) = reach(&s.pos) else { continue };
         let struck = cover(s).unwrap_or(s);
-        let charged = s.kind == Kind::Tower
+        let charged = s.kind == StructureType::Tower
             && s.store.amount_of(ResourceType::Energy) >= engine::TOWER_ENERGY_COST;
 
         marks.push((

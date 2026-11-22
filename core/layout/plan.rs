@@ -4,7 +4,7 @@
 use fabot_atlas::Atlas;
 use fabot_base::engine;
 use fabot_base::tiles::{self, Tile};
-use fabot_base::world::{Kind, Rules};
+use fabot_base::world::{Rules, StructureType};
 
 use super::build::{self, Built};
 use super::ground::Ground;
@@ -12,7 +12,7 @@ use super::place::{self, Labels, SWAMP};
 use super::score;
 use super::shape::{self, Item, Plan};
 
-pub fn level_of(rules: &Rules, kind: &Kind, rank: i32) -> i32 {
+pub fn level_of(rules: &Rules, kind: StructureType, rank: i32) -> i32 {
     (0..=engine::CONTROLLER_MAX_LEVEL)
         .find(|level| rules.allowed(kind, *level) > rank)
         .unwrap_or(engine::CONTROLLER_MAX_LEVEL + 1)
@@ -20,22 +20,14 @@ pub fn level_of(rules: &Rules, kind: &Kind, rank: i32) -> i32 {
 
 /// At the first level a room's energy goes to its controller alone.
 pub fn haul_level(rules: &Rules) -> i32 {
-    level_of(rules, &Kind::Extension, 0)
+    level_of(rules, StructureType::Extension, 0)
 }
 
 /// Not links, containers or roads: they are seated by what they serve.
-pub fn sized() -> Vec<Kind> {
+pub fn sized() -> Vec<StructureType> {
+    use StructureType::*;
     vec![
-        Kind::Spawn,
-        Kind::Extension,
-        Kind::Tower,
-        Kind::Storage,
-        Kind::Terminal,
-        Kind::Factory,
-        Kind::PowerSpawn,
-        Kind::Nuker,
-        Kind::Observer,
-        Kind::Lab,
+        Spawn, Extension, Tower, Storage, Terminal, Factory, PowerSpawn, Nuker, Observer, Lab,
     ]
 }
 
@@ -129,13 +121,13 @@ fn order(plan: &Labels, kind: &str, level: i32, controller: Option<Tile>) -> Vec
 fn leveled(
     rules: &Rules,
     plan: &Labels,
-    kind: &Kind,
+    kind: StructureType,
     controller: Option<Tile>,
 ) -> Vec<(Tile, i32)> {
     let mut built: Vec<(Tile, i32)> = Vec::new();
     for level in 1..=engine::CONTROLLER_MAX_LEVEL {
         let allowed = rules.allowed(kind, level).max(0) as usize;
-        for t in order(plan, kind.as_ref(), level, controller) {
+        for t in order(plan, &kind.to_string(), level, controller) {
             if built.len() >= allowed {
                 break;
             }
@@ -151,45 +143,47 @@ fn leveled(
 /// container other seats ring goes before the extensions: its harvester digs
 /// beside the crews (main's planner), and the nuker, which pays only loaded
 /// and fired, goes last.
-fn priority(kind: &Kind, level: i32, crowded: bool) -> i32 {
+fn priority(kind: StructureType, level: i32, crowded: bool) -> i32 {
+    use StructureType::*;
     match kind {
-        Kind::Tower => 0,
-        Kind::Spawn => 1,
-        Kind::Container if level < 6 && crowded => 2,
-        Kind::Extension => 3,
-        Kind::Container if level < 6 => 4,
-        Kind::Storage => 5,
-        Kind::Terminal => 6,
-        Kind::Road if level < 4 => 7,
-        Kind::Link => 8,
-        Kind::Extractor => 9,
-        Kind::Container => 10,
-        Kind::Rampart => 10,
-        Kind::Road => 11,
-        Kind::Lab => 13,
-        Kind::PowerSpawn => 14,
-        Kind::Observer => 15,
-        Kind::Nuker => 16,
+        Tower => 0,
+        Spawn => 1,
+        Container if level < 6 && crowded => 2,
+        Extension => 3,
+        Container if level < 6 => 4,
+        Storage => 5,
+        Terminal => 6,
+        Road if level < 4 => 7,
+        Link => 8,
+        Extractor => 9,
+        Container => 10,
+        Rampart => 10,
+        Road => 11,
+        Lab => 13,
+        PowerSpawn => 14,
+        Observer => 15,
+        Nuker => 16,
         _ => 17,
     }
 }
 
 fn to_plan(rules: &Rules, ground: &Ground, built: &Built) -> Plan {
+    use StructureType::*;
     let plan = &built.plan;
     let fixed: Vec<Tile> = (ground.sources.iter().chain(&ground.minerals))
         .chain(&ground.controller)
         .copied()
         .collect();
     let mut keyed: Vec<(i32, i32, usize, Item)> = Vec::new();
-    let mut push = |kind: Kind, tile: Tile, level: i32| {
-        if !fixed.contains(&tile) || kind == Kind::Extractor {
+    let mut push = |kind: StructureType, tile: Tile, level: i32| {
+        if !fixed.contains(&tile) || kind == Extractor {
             let seq = keyed.len();
             let rock = |r: &Tile| tiles::range(*r, tile) == 1;
             let seat = |n: &&Tile| ground.terrain[**n] != place::WALL && !fixed.contains(n);
             let crowded = (ground.sources.iter())
                 .any(|r| rock(r) && tiles::around(*r).iter().filter(seat).count() > 1);
             keyed.push((
-                priority(&kind, level, crowded),
+                priority(kind, level, crowded),
                 level,
                 seq,
                 Item { kind, tile, level },
@@ -197,22 +191,11 @@ fn to_plan(rules: &Rules, ground: &Ground, built: &Built) -> Plan {
         }
     };
     for kind in [
-        Kind::Tower,
-        Kind::Spawn,
-        Kind::Extension,
-        Kind::Container,
-        Kind::Storage,
-        Kind::Terminal,
-        Kind::Link,
-        Kind::Extractor,
-        Kind::Lab,
-        Kind::Nuker,
-        Kind::PowerSpawn,
-        Kind::Observer,
-        Kind::Factory,
+        Tower, Spawn, Extension, Container, Storage, Terminal, Link, Extractor, Lab, Nuker,
+        PowerSpawn, Observer, Factory,
     ] {
-        for (t, level) in leveled(rules, plan, &kind, ground.controller) {
-            push(kind.clone(), t, level);
+        for (t, level) in leveled(rules, plan, kind, ground.controller) {
+            push(kind, t, level);
         }
     }
     let early: Vec<Tile> = (plan.of("road.source").into_iter())
@@ -221,9 +204,9 @@ fn to_plan(rules: &Rules, ground: &Ground, built: &Built) -> Plan {
         .collect();
     // Main's: each spawn, tower, storage and terminal has its own rampart
     // from the ring's level, which a ring the roads hold back would leave bare.
-    for kind in [Kind::Spawn, Kind::Tower, Kind::Storage, Kind::Terminal] {
-        for (t, level) in leveled(rules, plan, &kind, ground.controller) {
-            push(Kind::Rampart, t, level.max(RING_LEVEL));
+    for kind in [Spawn, Tower, Storage, Terminal] {
+        for (t, level) in leveled(rules, plan, kind, ground.controller) {
+            push(Rampart, t, level.max(RING_LEVEL));
         }
     }
     // Our sites stack nothing on a container; Hivemind paves the controller's.
@@ -232,7 +215,7 @@ fn to_plan(rules: &Rules, ground: &Ground, built: &Built) -> Plan {
         .into_iter()
         .filter(|t| !plan.has("container", *t))
     {
-        push(Kind::Road, t, if early.contains(&t) { 2 } else { 4 });
+        push(Road, t, if early.contains(&t) { 2 } else { 4 });
     }
     keyed.sort_by_key(|(p, l, s, _)| (*p, *l, *s));
     // Hivemind plans its core over a controller link now and then; the
@@ -241,8 +224,7 @@ fn to_plan(rules: &Rules, ground: &Ground, built: &Built) -> Plan {
     for (_, _, _, i) in keyed {
         if !items.iter().any(|o| {
             o.tile == i.tile
-                && (o.kind == Kind::Road, o.kind == Kind::Rampart)
-                    == (i.kind == Kind::Road, i.kind == Kind::Rampart)
+                && (o.kind == Road, o.kind == Rampart) == (i.kind == Road, i.kind == Rampart)
         }) {
             items.push(i);
         }
@@ -251,27 +233,21 @@ fn to_plan(rules: &Rules, ground: &Ground, built: &Built) -> Plan {
     let ramp = |t: &Tile| plan.has("rampart.ramp", *t);
     let (main, ramps): (Vec<Tile>, Vec<Tile>) =
         plan.of("rampart").into_iter().partition(|t| !ramp(t));
-    let item = |kind: Kind, level: i32| {
-        move |tile: Tile| Item {
-            kind: kind.clone(),
-            tile,
-            level,
-        }
-    };
+    let item = |kind: StructureType, level: i32| move |tile: Tile| Item { kind, tile, level };
     let mut ring: Vec<Item> = main
         .into_iter()
         .chain(ramps)
-        .map(item(Kind::Rampart, 3))
+        .map(item(Rampart, 3))
         .collect();
     for (label, level) in [("wall.deco", 4), ("wall.quad", 6)] {
-        ring.extend(plan.of(label).into_iter().map(item(Kind::Wall, level)));
+        ring.extend(plan.of(label).into_iter().map(item(Wall, level)));
     }
     ring.sort_by_key(|i| i.level);
 
     let unfit = (sized().into_iter())
         .filter(|kind| {
             (items.iter().filter(|i| i.kind == *kind).count() as i32)
-                < rules.allowed(kind, engine::CONTROLLER_MAX_LEVEL)
+                < rules.allowed(*kind, engine::CONTROLLER_MAX_LEVEL)
         })
         .collect();
 
@@ -364,12 +340,8 @@ mod tests {
 
     #[test]
     fn the_allowance_never_falls_as_the_level_rises() {
-        let rules = Rules::vanilla();
-        for name in rules.structures.keys() {
-            for level in 0..engine::CONTROLLER_MAX_LEVEL {
-                let kind = Kind::from(name.as_str());
-                assert!(rules.allowed(&kind, level) <= rules.allowed(&kind, level + 1));
-            }
+        for row in &Rules::vanilla().structures {
+            assert!(row.windows(2).all(|w| w[0] <= w[1]));
         }
     }
 
@@ -385,15 +357,18 @@ mod tests {
                 .copied()
                 .collect();
             for level in 0..=engine::CONTROLLER_MAX_LEVEL {
-                for kind in sized().into_iter().chain([Kind::Link, Kind::Container]) {
+                for kind in sized()
+                    .into_iter()
+                    .chain([StructureType::Link, StructureType::Container])
+                {
                     let seated = (plan.items.iter())
                         .filter(|i| i.kind == kind && i.level <= level)
                         .count() as i32;
-                    assert!(seated <= rules.allowed(&kind, level), "{kind:?} at {level}");
+                    assert!(seated <= rules.allowed(kind, level), "{kind:?} at {level}");
                 }
             }
             let solid: Vec<Tile> = (plan.items.iter())
-                .filter(|i| i.kind != Kind::Road && i.kind != Kind::Rampart)
+                .filter(|i| i.kind != StructureType::Road && i.kind != StructureType::Rampart)
                 .map(|i| i.tile)
                 .collect();
             assert_eq!(
@@ -408,13 +383,13 @@ mod tests {
             for i in plan.items.iter().chain(&plan.ring) {
                 assert!(!tiles::on_edge(i.tile), "{i:?} on the edge");
                 assert!(
-                    (i.kind == Kind::Extractor) == rocks.contains(&i.tile),
+                    (i.kind == StructureType::Extractor) == rocks.contains(&i.tile),
                     "{i:?} on rock"
                 );
                 assert!(
                     ground.terrain[i.tile] != 1
-                        || i.kind == Kind::Road
-                        || i.kind == Kind::Extractor,
+                        || i.kind == StructureType::Road
+                        || i.kind == StructureType::Extractor,
                     "{i:?} on a wall"
                 );
             }
@@ -423,7 +398,7 @@ mod tests {
 
     fn source_posts(ground: &Ground, plan: &Plan) -> Vec<Tile> {
         (plan.items.iter())
-            .filter(|i| i.kind == Kind::Container)
+            .filter(|i| i.kind == StructureType::Container)
             .filter(|i| ground.sources.iter().any(|s| tiles::range(*s, i.tile) == 1))
             .map(|i| i.tile)
             .collect()
@@ -445,25 +420,25 @@ mod tests {
             // A harvest bay, its link too, stands outside the ring, beside its
             // post (owner).
             let bay = |i: &Item| {
-                matches!(i.kind, Kind::Extension | Kind::Link)
+                matches!(i.kind, StructureType::Extension | StructureType::Link)
                     && posts.iter().any(|p| tiles::range(*p, i.tile) == 1)
             };
             let shot = [
-                Kind::Spawn,
-                Kind::Extension,
-                Kind::Tower,
-                Kind::Storage,
-                Kind::Terminal,
-                Kind::Factory,
-                Kind::PowerSpawn,
-                Kind::Nuker,
-                Kind::Observer,
-                Kind::Lab,
+                StructureType::Spawn,
+                StructureType::Extension,
+                StructureType::Tower,
+                StructureType::Storage,
+                StructureType::Terminal,
+                StructureType::Factory,
+                StructureType::PowerSpawn,
+                StructureType::Nuker,
+                StructureType::Observer,
+                StructureType::Lab,
             ];
             let core: Vec<(Tile, i32)> = (plan.items.iter())
                 .filter(|i| !bay(i))
                 .filter_map(|i| match &i.kind {
-                    Kind::Link => Some((i.tile, 0)),
+                    StructureType::Link => Some((i.tile, 0)),
                     k if shot.contains(k) => Some((i.tile, engine::RANGED_RANGE)),
                     _ => None,
                 })
@@ -499,17 +474,21 @@ mod tests {
     #[test]
     fn every_extension_beside_a_source_container_ranks_with_the_bays() {
         let rules = Rules::vanilla();
-        let early = rules.allowed(&Kind::Extension, haul_level(&rules));
+        let early = rules.allowed(StructureType::Extension, haul_level(&rules));
         for colony in fx::samples(15).take(fx::MAX_TEST) {
             let Some((ground, plan)) = fx::plan_of(&colony) else {
                 continue;
             };
             let posts = source_posts(&ground, &plan);
             let bays: Vec<&Item> = (plan.items.iter())
-                .filter(|i| i.kind == Kind::Extension)
+                .filter(|i| i.kind == StructureType::Extension)
                 .filter(|i| posts.iter().any(|p| tiles::range(*p, i.tile) == 1))
                 .collect();
-            let last = level_of(&rules, &Kind::Extension, early + bays.len() as i32 - 1);
+            let last = level_of(
+                &rules,
+                StructureType::Extension,
+                early + bays.len() as i32 - 1,
+            );
             for b in bays {
                 assert!(b.level <= last, "{} at level {}", b.tile, b.level);
             }
@@ -529,12 +508,14 @@ mod tests {
             for i in plan.items.iter().chain(&plan.ring) {
                 let reach = tiles::range(i.tile, at);
                 assert!(
-                    !(i.kind == Kind::Road && reach <= fabot_base::declarations::MUSTER_RANGE),
+                    !(i.kind == StructureType::Road
+                        && reach <= fabot_base::declarations::MUSTER_RANGE),
                     "road at {}",
                     i.tile
                 );
                 assert!(
-                    !(i.kind == Kind::Spawn && reach <= fabot_base::declarations::MUSTER_RANGE + 1),
+                    !(i.kind == StructureType::Spawn
+                        && reach <= fabot_base::declarations::MUSTER_RANGE + 1),
                     "spawn at {}",
                     i.tile
                 );
@@ -551,7 +532,7 @@ mod tests {
             let at = |t: Tile| plan.items.iter().filter(move |i| i.tile == t);
             for s in &ground.sources {
                 let Some(c) = (plan.items.iter())
-                    .find(|i| i.kind == Kind::Container && tiles::range(i.tile, *s) == 1)
+                    .find(|i| i.kind == StructureType::Container && tiles::range(i.tile, *s) == 1)
                 else {
                     continue;
                 };
@@ -563,7 +544,7 @@ mod tests {
                     .filter(|t| ground.terrain[*t] != 1 && !exit(*t) && at(*t).next().is_none())
                     .collect();
                 let roads = (tiles::around(c.tile).iter())
-                    .filter(|t| at(**t).any(|i| i.kind == Kind::Road));
+                    .filter(|t| at(**t).any(|i| i.kind == StructureType::Road));
                 assert!(
                     bare.is_empty() && roads.count() >= 1,
                     "{bare:?} bare beside {c:?}"

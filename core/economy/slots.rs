@@ -8,7 +8,7 @@ use fabot_base::declarations::{self, Declarations};
 use fabot_base::engine;
 use fabot_base::grid::{self, Footprint};
 use fabot_base::vocabulary::{Part, part_count_in};
-use fabot_base::world::{Controller, Id, Kind, Pos, RoomName, Spawn};
+use fabot_base::world::{Controller, Id, Pos, RoomName, Spawn, StructureType};
 
 use super::bodies::{self, Leg, Pattern};
 use super::derived::{Body, Derived, Ground, SiteFact, dig_work, drawn_for};
@@ -459,7 +459,7 @@ impl Plan<'_> {
             if own || raised || colony.controller.level >= TOWER_LEVEL {
                 owed += g.sites.iter().map(|s| s.left).sum::<i32>();
                 payback += (g.sites.iter())
-                    .filter(|s| drawn_for(&s.kind))
+                    .filter(|s| drawn_for(s.kind))
                     .map(|s| s.left)
                     .sum::<i32>();
             }
@@ -476,7 +476,7 @@ impl Plan<'_> {
                 continue;
             }
             // Hivemind's mine builder.
-            let paves = g.sites.iter().any(|s| s.kind == Kind::Road);
+            let paves = g.sites.iter().any(|s| s.kind == StructureType::Road);
             if !own && (at_risk || paves) && colony.controller.level >= TOWER_LEVEL {
                 let mender = self.worker(ci, g.room, 0, (false, false), MENDER, MENDER_WORK);
                 fixed.add(mender, 0.0);
@@ -752,7 +752,7 @@ impl Plan<'_> {
         let kept = ((upgraded / f64::from(work)).round() as i32).min(standing);
         let kept = if upgrader.is_some() { kept } else { 0 };
         let rushed: i32 = (ground.sites.iter())
-            .filter(|s| matches!(s.kind, Kind::Extractor | Kind::Terminal))
+            .filter(|s| matches!(s.kind, StructureType::Extractor | StructureType::Terminal))
             .map(|s| s.left)
             .sum();
         let rush = (upgraded - f64::from(kept.max(0) * work)).clamp(0.0, f64::from(rushed));

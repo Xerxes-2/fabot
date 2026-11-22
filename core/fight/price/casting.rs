@@ -4,7 +4,7 @@ use fabot_base::declarations::Declarations;
 use fabot_base::engine;
 use fabot_base::vocabulary::{Part, ResourceType};
 use fabot_base::world::{
-    Creep, Id, Kind, Owner, Pos, Room, RoomName, Spawn, Store, Structure, World, terrain,
+    Creep, Id, Owner, Pos, Room, RoomName, Spawn, Store, Structure, StructureType, World, terrain,
 };
 use fabot_exchange::{self as exchange, Fighter, fighter};
 
@@ -149,7 +149,7 @@ pub fn terrain_at(room: Option<&Room>, at: &Pos) -> exchange::Terrain {
 }
 
 pub fn side_in(room: Option<&Room>, bodies: Vec<Fighter>) -> exchange::Side {
-    let ours = |kind: Kind| -> Vec<&Structure> {
+    let ours = |kind: StructureType| -> Vec<&Structure> {
         (room.iter().flat_map(|r| &r.structures))
             .filter(|s| s.kind == kind && s.owner.is_ours())
             .collect()
@@ -157,11 +157,11 @@ pub fn side_in(room: Option<&Room>, bodies: Vec<Fighter>) -> exchange::Side {
 
     exchange::Side {
         bodies,
-        ramparts: ours(Kind::Rampart)
+        ramparts: ours(StructureType::Rampart)
             .into_iter()
             .map(|s| (s.pos, s.hits))
             .collect::<BTreeMap<_, _>>(),
-        towers: ours(Kind::Tower)
+        towers: ours(StructureType::Tower)
             .into_iter()
             .map(|s| exchange::Tower {
                 pos: s.pos,
@@ -462,18 +462,9 @@ mod tests {
 
     fn colony(name: &str, bank: i32) -> Room<'static> {
         Room {
-            name: RoomName::named(name),
-            terrain: None,
-            controller: None,
             energy_available: bank,
             energy_capacity: 12_900,
-            sources: Vec::new(),
-            minerals: Vec::new(),
-            structures: Vec::new(),
-            sites: Vec::new(),
-            piles: Vec::new(),
-            remains: Vec::new(),
-            others: Vec::new(),
+            ..Room::empty(RoomName::named(name))
         }
     }
 

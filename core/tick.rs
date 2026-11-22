@@ -18,7 +18,9 @@ use fabot_base::intents::{
 use fabot_base::tiles::{self, Tile};
 use fabot_base::vocabulary::ResourceType;
 use fabot_base::wish::Wish;
-use fabot_base::world::{self, Id, Kind, Pos, Room, RoomName, Sightings, Structure, World};
+use fabot_base::world::{
+    self, Id, Pos, Room, RoomName, Sightings, Structure, StructureType, World,
+};
 use fabot_mv as mv;
 use fabot_strategy::{self as strategy, intel};
 use fabot_tactics as tactics;
@@ -60,15 +62,15 @@ fn by_room<T>(pairs: &[(RoomName, T)]) -> Vec<(RoomName, Vec<&T>)> {
 /// without a bay, so the engine keeps its own.
 fn drawn(r: &Room, spawn: &Pos) -> Vec<Id> {
     let in_bay = Atlas::in_bay(r);
-    let bay = |s: &&Structure| in_bay(&s.kind, &s.pos);
+    let bay = |s: &&Structure| in_bay(s.kind, &s.pos);
     let ours = (r.structures.iter()).filter(|s| s.owner.is_ours());
     let mut energy: Vec<&Structure> = ours
-        .filter(|s| matches!(s.kind, Kind::Spawn | Kind::Extension))
+        .filter(|s| matches!(s.kind, StructureType::Spawn | StructureType::Extension))
         .collect();
     if !energy.iter().any(bay) {
         return Vec::new();
     }
-    energy.sort_by_key(|s| (!bay(s), s.kind != Kind::Spawn, spawn.range(&s.pos)));
+    energy.sort_by_key(|s| (!bay(s), s.kind != StructureType::Spawn, spawn.range(&s.pos)));
     energy.into_iter().map(|s| s.id).collect()
 }
 

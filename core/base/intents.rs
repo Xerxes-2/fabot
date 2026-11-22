@@ -2,7 +2,7 @@ use strum::IntoStaticStr;
 
 use super::vocabulary::{Part, ResourceType};
 use super::wish::Wish;
-use super::world::{Id, Kind, RoomName};
+use super::world::{Id, RoomName, StructureType};
 
 /// Into `src/app/executor.rs`'s verb, which a refusal is counted under.
 #[derive(Clone, Debug, PartialEq, Eq, IntoStaticStr)]
@@ -84,7 +84,7 @@ pub enum SpawnAct {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RoomAct {
-    CreateSite(i32, i32, Kind),
+    CreateSite(i32, i32, StructureType),
     Destroy(Id),
 }
 

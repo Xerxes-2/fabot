@@ -338,7 +338,7 @@ impl Run<'_> {
                 };
                 self.sites += 1;
                 let value = json!({ "roomName": room.to_string(), "x": x, "y": y,
-                    "structureType": kind.as_ref(), "name": format!("Spawn{}", self.sites) });
+                    "structureType": kind, "name": format!("Spawn{}", self.sites) });
                 self.stored.push(r, "createConstructionSite", value);
                 ("site", Ok(()))
             }

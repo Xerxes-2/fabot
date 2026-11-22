@@ -1,7 +1,7 @@
 use screeps::LocalRoomTerrain;
+pub use screeps::StructureType;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
-use strum::{AsRefStr, EnumDiscriminants, EnumString};
 
 use super::engine;
 use super::vocabulary::{Part, ResourceType};
@@ -255,7 +255,6 @@ impl<'de> serde::Deserialize<'de> for RoomName {
     }
 }
 
-/// Compared by hand: Fable's record compare walks every field, per tile per tick.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct Pos {
     pub room: RoomName,
@@ -299,6 +298,7 @@ impl PartialOrd for Pos {
     }
 }
 
+/// Row-major, as a tile index orders, where a derived order would put `x` first.
 impl Ord for Pos {
     fn cmp(&self, other: &Self) -> Ordering {
         match self.room.cmp(&other.room) {
@@ -392,105 +392,52 @@ impl Store {
     }
 }
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString, AsRefStr, EnumDiscriminants,
-)]
-#[strum(serialize_all = "camelCase")]
-#[strum_discriminants(vis(pub(crate)))]
-pub enum Kind {
-    Spawn,
-    Extension,
-    Tower,
-    Road,
-    Container,
-    Storage,
-    Link,
-    Rampart,
-    #[strum(serialize = "constructedWall")]
-    Wall,
-    Extractor,
-    Terminal,
-    Observer,
-    Lab,
-    Factory,
-    PowerSpawn,
-    Nuker,
-    KeeperLair,
-    InvaderCore,
-    PowerBank,
-    Portal,
-    #[strum(default, transparent)]
-    Other(String),
-}
-
-impl Kind {
+pub trait Built: Copy {
     /// Hivemind's (MIT) build-out, and the ore RCL6 is reached for (owner).
-    pub fn pays_back(&self) -> bool {
+    fn pays_back(self) -> bool;
+    fn has_store(self) -> bool;
+    fn has_cooldown(self) -> bool;
+    fn walkable(self) -> bool;
+}
+
+impl Built for StructureType {
+    fn pays_back(self) -> bool {
+        use StructureType::*;
         matches!(
             self,
-            Kind::Spawn
-                | Kind::Extension
-                | Kind::Container
-                | Kind::Storage
-                | Kind::Link
-                | Kind::Tower
-                | Kind::Extractor
-                | Kind::Terminal
+            Spawn | Extension | Container | Storage | Link | Tower | Extractor | Terminal
         )
     }
 
-    pub fn ordinal(&self) -> i32 {
-        KindDiscriminants::from(self) as i32
-    }
-
-    /// The kinds the engine gives a `store`: the seam reads none on the rest.
-    pub fn has_store(&self) -> bool {
-        matches!(
+    /// read.js's KNOWN minus STORED: the kinds it streams no store for.
+    fn has_store(self) -> bool {
+        use StructureType::*;
+        !matches!(
             self,
-            Kind::Spawn
-                | Kind::Extension
-                | Kind::Tower
-                | Kind::Container
-                | Kind::Storage
-                | Kind::Link
-                | Kind::Terminal
-                | Kind::Lab
-                | Kind::Factory
-                | Kind::PowerSpawn
-                | Kind::Nuker
-                | Kind::InvaderCore
-                | Kind::Other(_)
+            Road | Rampart | Wall | Extractor | Observer | KeeperLair | PowerBank | Portal
         )
     }
 
-    /// The kinds the engine gives a `cooldown`.
-    pub fn has_cooldown(&self) -> bool {
+    fn has_cooldown(self) -> bool {
+        use StructureType::*;
         matches!(
             self,
-            Kind::Tower
-                | Kind::Link
-                | Kind::Lab
-                | Kind::Extractor
-                | Kind::Terminal
-                | Kind::Factory
-                | Kind::Nuker
-                | Kind::PowerSpawn
+            Tower | Link | Lab | Extractor | Terminal | Factory | Nuker | PowerSpawn
         )
     }
 
-    /// A rampart is walkable only if ours or public: `Structure.Walkable`.
-    pub fn walkable(&self) -> bool {
-        matches!(
-            self,
-            Kind::Road | Kind::Container | Kind::Rampart | Kind::Portal
-        )
+    fn walkable(self) -> bool {
+        use StructureType::*;
+        matches!(self, Road | Container | Rampart | Portal)
     }
 }
+
+pub const KIND_COUNT: usize = <StructureType as enum_iterator::Sequence>::CARDINALITY;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Structure {
     pub id: Id,
-    pub kind: Kind,
+    pub kind: StructureType,
     pub pos: Pos,
     pub owner: Owner,
     pub hits: i32,
@@ -509,7 +456,7 @@ pub struct Structure {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Site {
     pub id: Id,
-    pub kind: Kind,
+    pub kind: StructureType,
     pub pos: Pos,
     pub owner: Owner,
     pub progress: i32,
@@ -617,8 +564,10 @@ pub struct Room<'a> {
     pub energy_capacity: i32,
     pub sources: Vec<Source>,
     pub minerals: Vec<Mineral>,
-    /// Every structure, any owner.
+    /// Every structure, any owner, of a kind the crate names.
     pub structures: Vec<Structure>,
+    /// Under a structure of a kind the crate does not name: no walking or building there.
+    pub blocked: Vec<Pos>,
     /// Every construction site, any owner.
     pub sites: Vec<Site>,
     pub piles: Vec<Pile>,
@@ -628,6 +577,24 @@ pub struct Room<'a> {
 }
 
 impl Room<'_> {
+    pub fn empty(name: RoomName) -> Room<'static> {
+        Room {
+            name,
+            terrain: None,
+            controller: None,
+            energy_available: 0,
+            energy_capacity: 0,
+            sources: Vec::new(),
+            minerals: Vec::new(),
+            structures: Vec::new(),
+            blocked: Vec::new(),
+            sites: Vec::new(),
+            piles: Vec::new(),
+            remains: Vec::new(),
+            others: Vec::new(),
+        }
+    }
+
     pub fn hostiles(&self) -> impl Iterator<Item = &Creep> {
         self.others.iter().filter(|c| !c.owner.is_ally())
     }
@@ -676,33 +643,30 @@ pub struct World<'a> {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Rules {
-    pub structures: BTreeMap<String, Vec<i32>>,
+    pub structures: Vec<Vec<i32>>,
 }
 
 impl Rules {
+    pub fn of(rows: impl IntoIterator<Item = (StructureType, Vec<i32>)>) -> Rules {
+        let mut structures = vec![Vec::new(); KIND_COUNT];
+        for (kind, row) in rows {
+            structures[kind as usize] = row;
+        }
+        Rules { structures }
+    }
+
     /// `CONTROLLER_STRUCTURES`; sites count with standing structures.
     #[inline]
-    pub fn allowed(&self, kind: &Kind, level: i32) -> i32 {
-        let row = self
-            .structures
-            .get(kind.as_ref())
-            .map_or(&[][..], Vec::as_slice);
+    pub fn allowed(&self, kind: StructureType, level: i32) -> i32 {
+        let row = (self.structures.get(kind as usize)).map_or(&[][..], Vec::as_slice);
         let at = usize::try_from(level).map_or(None, |l| row.get(l).or(row.last()));
         at.copied().unwrap_or(0)
     }
 
     #[cfg(any(test, feature = "test-support", feature = "tools"))]
-    #[allow(clippy::unwrap_used)]
     pub fn vanilla() -> Rules {
-        use screeps::StructureType;
-        let built = "spawn extension link road constructedWall rampart storage tower observer \
-                     powerSpawn extractor terminal lab container nuker factory";
         let row = |kind: StructureType| (0..=8).map(move |l| kind.controller_structures(l) as i32);
-        let structures = (built.split_whitespace())
-            .map(|name| (name.to_string(), row(name.parse().unwrap()).collect()));
-        Rules {
-            structures: structures.collect(),
-        }
+        Rules::of(enum_iterator::all::<StructureType>().map(|k| (k, row(k).collect())))
     }
 }
 
@@ -759,7 +723,6 @@ pub mod read {
             self.words.get(i as usize).copied().unwrap_or_default()
         }
 
-        /// A string only parsed: no copy.
         fn str(&mut self) -> &'a str {
             self.strs.next().unwrap_or_default()
         }
@@ -873,23 +836,27 @@ pub mod read {
             }
         }
 
-        fn structure(&mut self, room: RoomName) -> Structure {
-            let kind = Kind::from(self.word());
+        fn structure(&mut self, room: RoomName, blocked: &mut Vec<Pos>) -> Option<Structure> {
+            let kind = self.word().parse::<StructureType>();
             let id = self.id();
             let pos = self.pos_in(room);
             let owner = self.owner();
             let hits = self.n();
             let hits_max = self.n();
-            let store = if kind.has_store() {
-                self.store()
-            } else {
+            let store = if kind.as_ref().is_ok_and(|k| !k.has_store()) {
                 Store::empty()
+            } else {
+                self.store()
+            };
+            let Ok(kind) = kind else {
+                blocked.push(pos);
+                return None;
             };
             let cooldown = if kind.has_cooldown() { self.n() } else { 0 };
-            let spawn = (kind == Kind::KeeperLair)
+            let spawn = (kind == StructureType::KeeperLair)
                 .then(|| self.n())
                 .filter(|t| *t >= 0);
-            let (collapse, level) = if kind == Kind::InvaderCore {
+            let (collapse, level) = if kind == StructureType::InvaderCore {
                 let running = self.flag();
                 let ticks = self.n();
                 let collapse = if running {
@@ -901,13 +868,13 @@ pub mod read {
             } else {
                 (0, 0)
             };
-            let walkable = if kind == Kind::Rampart {
+            let walkable = if kind == StructureType::Rampart {
                 let public = self.flag();
                 owner.is_ours() || public
             } else {
                 kind.walkable()
             };
-            Structure {
+            Some(Structure {
                 id,
                 kind,
                 pos,
@@ -920,7 +887,7 @@ pub mod read {
                 level,
                 spawn,
                 walkable,
-            }
+            })
         }
 
         /// A tombstone's creep keeps no hits or fatigue.
@@ -944,6 +911,7 @@ pub mod read {
         fn room(&mut self, buffers: &mut Buffers) -> Room<'static> {
             let name = self.room_name();
             let lists = buffers.rooms.pop().unwrap_or_default();
+            let mut blocked = Vec::new();
             Room {
                 terrain: None,
                 energy_available: self.n(),
@@ -962,14 +930,20 @@ pub mod read {
                     resource: r.word().parse().ok(),
                     amount: r.n(),
                 }),
-                structures: self.list_into(lists.structures, |r| r.structure(name)),
-                sites: self.list_into(lists.sites, |r| Site {
-                    kind: Kind::from(r.word()),
-                    id: r.id(),
-                    pos: r.pos_in(name),
-                    owner: r.owner(),
-                    progress: r.n(),
-                    progress_total: r.n(),
+                structures: self.list_some(lists.structures, |r| r.structure(name, &mut blocked)),
+                blocked,
+                sites: self.list_some(lists.sites, |r| {
+                    let kind = r.word().parse().ok();
+                    let (id, pos, owner) = (r.id(), r.pos_in(name), r.owner());
+                    let (progress, progress_total) = (r.n(), r.n());
+                    Some(Site {
+                        kind: kind?,
+                        id,
+                        pos,
+                        owner,
+                        progress,
+                        progress_total,
+                    })
                 }),
                 piles: self.list_some(lists.piles, |r| {
                     let (id, pos) = (r.id(), r.pos());
@@ -1082,12 +1056,10 @@ pub mod read {
             creeps,
             our_sites: r.n(),
             rooms_allowed: r.n(),
-            rules: Rules {
-                structures: r
-                    .list(|r| (r.word().to_string(), r.list(Reader::n)))
-                    .into_iter()
-                    .collect(),
-            },
+            rules: Rules::of(r.list_some(Vec::new(), |r| {
+                let (kind, row) = (r.word().parse().ok(), r.list(Reader::n));
+                Some((kind?, row))
+            })),
             closed: BTreeSet::new(),
             attacks,
             destroyed,
@@ -1233,7 +1205,9 @@ pub type Sightings = BTreeMap<RoomName, BTreeMap<Id, Seen>>;
 
 pub mod sightings {
     use super::hostiles;
-    use super::{Creep, Glimpse, Id, Kind, Owner, Pos, RoomName, Seen, Sightings, Store, World};
+    use super::{
+        Creep, Glimpse, Id, Owner, Pos, RoomName, Seen, Sightings, Store, StructureType, World,
+    };
     use std::collections::BTreeMap;
 
     fn standing<'w>(world: &'w World) -> BTreeMap<Id, (RoomName, &'w Creep)> {
@@ -1269,7 +1243,7 @@ pub mod sightings {
             }
 
             for s in &room.structures {
-                if s.kind == Kind::InvaderCore {
+                if s.kind == StructureType::InvaderCore {
                     seen.insert(
                         s.id,
                         Seen {
@@ -1489,25 +1463,15 @@ pub fn body_cost(creep: &Creep) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{BodyPart, Creep, Id, Kind, Owner, Pos, Room, RoomName, Rules, Sightings, Store};
+    use super::{BodyPart, Creep, Id, Owner, Pos, Room, RoomName, Rules, Sightings, Store};
     use super::{World, sightings};
     use crate::testing::Dice;
     use crate::vocabulary::Part;
 
     fn seen_in(name: RoomName, others: Vec<Creep>) -> Room<'static> {
         Room {
-            name,
-            terrain: None,
-            controller: None,
-            energy_available: 0,
-            energy_capacity: 0,
-            sources: Vec::new(),
-            minerals: Vec::new(),
-            structures: Vec::new(),
-            sites: Vec::new(),
-            piles: Vec::new(),
-            remains: Vec::new(),
             others,
+            ..Room::empty(name)
         }
     }
 
@@ -1571,11 +1535,6 @@ mod tests {
                 assert!(sightings::kept(&world, &kept));
             }
         }
-    }
-
-    #[test]
-    fn a_kind_the_engine_adds_keeps_its_name() {
-        assert_eq!(Kind::from("foo").as_ref(), "foo");
     }
 
     #[test]

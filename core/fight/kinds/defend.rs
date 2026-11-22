@@ -7,7 +7,7 @@ use fabot_base::engine;
 use fabot_base::tiles::{self};
 use fabot_base::vocabulary::Part;
 use fabot_base::world::{
-    self, Controller, Creep, Fallen, Id, Kind, Owner, Pos, RoomName, Structure,
+    self, Controller, Creep, Fallen, Id, Owner, Pos, RoomName, Structure, StructureType,
 };
 use fabot_tactics::Tactic;
 
@@ -196,11 +196,11 @@ fn razed(home: &Home) -> bool {
     let covered: BTreeSet<Pos> = home
         .ours
         .iter()
-        .filter(|s| s.kind == Kind::Rampart)
+        .filter(|s| s.kind == StructureType::Rampart)
         .map(|s| s.pos)
         .collect();
 
-    let share = |kind: Kind| -> (i32, i32) {
+    let share = |kind: StructureType| -> (i32, i32) {
         let all: Vec<&Structure> = home.ours.iter().filter(|s| s.kind == kind).collect();
 
         let lost = all
@@ -247,8 +247,8 @@ fn razed(home: &Home) -> bool {
     let left: i32 = hands.iter().filter(|c| !struck(c)).map(|c| carry(c)).sum();
     let whole: i32 =
         hands.iter().map(|c| carry(c)).sum::<i32>() + killed.iter().map(|c| carry(c)).sum::<i32>();
-    let (spawn_lost, spawn_all) = share(Kind::Spawn);
-    let (bank_lost, bank_all) = share(Kind::Extension);
+    let (spawn_lost, spawn_all) = share(StructureType::Spawn);
+    let (bank_lost, bank_all) = share(StructureType::Extension);
 
     !raid.is_empty()
         && (half(spawn_lost, spawn_all)
@@ -257,11 +257,9 @@ fn razed(home: &Home) -> bool {
             || culled)
 }
 
-fn keeps(kind: &Kind) -> bool {
-    matches!(
-        kind,
-        Kind::Spawn | Kind::Tower | Kind::Storage | Kind::Terminal
-    )
+fn keeps(kind: StructureType) -> bool {
+    use StructureType::*;
+    matches!(kind, Spawn | Tower | Storage | Terminal)
 }
 
 /// An unanswered raid is one the towers and ramparts are left to; the stock is
@@ -274,7 +272,7 @@ fn last_resort(home: &Home) -> bool {
             || home
                 .ours
                 .iter()
-                .any(|s| keeps(&s.kind) && s.hits < s.hits_max && reaches(true, 0, &raid, &s.pos))
+                .any(|s| keeps(s.kind) && s.hits < s.hits_max && reaches(true, 0, &raid, &s.pos))
             || razed(home))
 }
 

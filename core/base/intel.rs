@@ -47,8 +47,6 @@ pub fn blind(
     let row = intel.get(&outpost.room);
     let owner = |user: &String| Owner::of_user(user.clone(), &world.me, declarations);
     Room {
-        name: outpost.room,
-        terrain: None,
         controller: Some(Controller {
             id: outpost.controller.id,
             pos: outpost.controller.pos,
@@ -68,8 +66,6 @@ pub fn blind(
             safe_mode_cooldown: 0,
             upgrade_blocked: 0,
         }),
-        energy_available: 0,
-        energy_capacity: 0,
         sources: outpost
             .sources
             .iter()
@@ -81,12 +77,7 @@ pub fn blind(
                 ticks_to_regeneration: 0,
             })
             .collect(),
-        minerals: Vec::new(),
-        structures: Vec::new(),
-        sites: Vec::new(),
-        piles: Vec::new(),
-        remains: Vec::new(),
-        others: Vec::new(),
+        ..Room::empty(outpost.room)
     }
 }
 

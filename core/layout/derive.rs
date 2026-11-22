@@ -4,7 +4,7 @@ use fabot_base::declarations::{ColonyPlan, Stage};
 use fabot_base::engine;
 use fabot_base::tiles::{self, Tile, TileSet};
 use fabot_base::vocabulary::ResourceType;
-use fabot_base::world::{Creep, Id, Kind, Pos, RoomName, Structure, World};
+use fabot_base::world::{Creep, Id, Pos, RoomName, Structure, StructureType, World};
 
 use super::ground;
 use super::plan;
@@ -87,7 +87,7 @@ pub fn colonies(
             .structures
             .iter()
             .filter(|s| {
-                s.kind == Kind::Tower
+                s.kind == StructureType::Tower
                     && s.owner.is_ours()
                     && s.store.amount_of(ResourceType::Energy) >= engine::TOWER_ENERGY_COST
             })
@@ -122,22 +122,30 @@ pub fn colonies(
             struck: room
                 .structures
                 .iter()
-                .filter(|s| s.owner.is_ours() && s.kind != Kind::Road && s.kind != Kind::Container)
+                .filter(|s| {
+                    s.owner.is_ours()
+                        && s.kind != StructureType::Road
+                        && s.kind != StructureType::Container
+                })
                 .map(|s| &s.pos)
                 .chain(ours.iter().map(|c| &c.pos))
                 .copied()
                 .collect(),
             ours,
             ramparts: (room.structures.iter())
-                .filter(|s| s.kind == Kind::Rampart && s.owner.is_ours())
+                .filter(|s| s.kind == StructureType::Rampart && s.owner.is_ours())
                 .cloned()
                 .collect(),
             buried: (room.structures.iter())
-                .filter(|r| r.kind == Kind::Road && blocked.contains(tiles::of_pos(&r.pos)))
+                .filter(|r| {
+                    r.kind == StructureType::Road && blocked.contains(tiles::of_pos(&r.pos))
+                })
                 .map(|r| r.id)
                 .collect(),
             astray: (room.structures.iter())
-                .filter(|c| c.kind == Kind::Container && astray.contains(&tiles::of_pos(&c.pos)))
+                .filter(|c| {
+                    c.kind == StructureType::Container && astray.contains(&tiles::of_pos(&c.pos))
+                })
                 .map(|c| c.id)
                 .collect(),
         });
@@ -152,7 +160,7 @@ mod tests {
     use crate::fixtures as fx;
     use crate::shape::Plan;
     use fabot_base::tiles;
-    use fabot_base::world::{Kind, Owner, hostiles};
+    use fabot_base::world::{Owner, StructureType, hostiles};
 
     fn agree(a: &Option<Plan>, b: &Option<Plan>) -> bool {
         match (a, b) {
@@ -197,7 +205,7 @@ mod tests {
             let mut ringed = colony.room.clone();
             ringed.structures.push(fx::structure(
                 "r",
-                Kind::Wall,
+                StructureType::Wall,
                 Owner::Nobody,
                 tiles::index(25, 25),
             ));
@@ -207,7 +215,7 @@ mod tests {
 
             for edge in [tiles::index(0, 25), tiles::index(25, 49)] {
                 let mut edged = colony.room.clone();
-                let wall = fx::structure("e", Kind::Wall, Owner::Nobody, edge);
+                let wall = fx::structure("e", StructureType::Wall, Owner::Nobody, edge);
                 edged.structures.push(wall);
                 assert_ne!(ground::obstacles(&edged), ground::obstacles(&colony.room));
             }
@@ -215,7 +223,7 @@ mod tests {
             let mut walled = colony.room.clone();
             walled.structures.push(fx::structure(
                 "w",
-                Kind::Spawn,
+                StructureType::Spawn,
                 Owner::Stranger("x".into()),
                 Tile::of_index(wall.unsigned_abs() as usize % tiles::COUNT),
             ));

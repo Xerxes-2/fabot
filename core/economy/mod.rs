@@ -15,8 +15,8 @@ pub(crate) mod dice {
     use fabot_base::engine;
     use fabot_base::vocabulary::{Part, ResourceType, part_count_in};
     use fabot_base::world::{
-        BodyPart, Controller, Creep, Id, Kind, Mineral, Owner, Pile, Pos, Remains, Room, RoomName,
-        Site, Source, Spawn, Store, Structure, World,
+        BodyPart, Built, Controller, Creep, Id, Owner, Pile, Pos, Room, RoomName, Site, Source,
+        Spawn, Store, Structure, StructureType, World,
     };
 
     use super::task::{Target, Task};
@@ -78,31 +78,31 @@ pub(crate) mod dice {
     pub fn structure(dice: &mut Dice, room: RoomName, owned: bool, i: usize) -> Structure {
         let kind = if owned {
             dice.pick_of(&[
-                Kind::Extension,
-                Kind::Tower,
-                Kind::Container,
-                Kind::Storage,
-                Kind::Road,
-                Kind::Extractor,
+                StructureType::Extension,
+                StructureType::Tower,
+                StructureType::Container,
+                StructureType::Storage,
+                StructureType::Road,
+                StructureType::Extractor,
             ])
         } else {
-            dice.pick_of(&[Kind::Container, Kind::Road])
+            dice.pick_of(&[StructureType::Container, StructureType::Road])
         };
 
         let at = pos(dice, room);
-        let capacity = if kind == Kind::Road { 0 } else { 2000 };
+        let capacity = if kind == StructureType::Road { 0 } else { 2000 };
         let energy = dice.between(0, capacity);
         let hits_max = dice.between(1, 250_000);
         let hits = dice.between(1, hits_max);
 
         Structure {
             id: format!("{room}s{i}").as_str().into(),
-            owner: if owned && kind != Kind::Road && kind != Kind::Container {
+            owner: if owned && kind != StructureType::Road && kind != StructureType::Container {
                 Owner::Ours
             } else {
                 Owner::Nobody
             },
-            kind: kind.clone(),
+            kind,
             pos: at,
             hits,
             hits_max,
@@ -207,18 +207,16 @@ pub(crate) mod dice {
         let pile_amount = dice.between(0, 3000);
 
         let room = Room {
-            name,
             terrain: fabot_base::world::terrain::leak(vec![0; 2500]),
             controller: Some(controller),
             energy_available: if owned { bank } else { 0 },
             energy_capacity: if owned { bank_capacity } else { 0 },
             sources,
-            minerals: Vec::<Mineral>::new(),
             structures,
             sites: if has_site {
                 vec![Site {
                     id: format!("{name}site").as_str().into(),
-                    kind: Kind::Extension,
+                    kind: StructureType::Extension,
                     pos: site_pos,
                     owner: Owner::Ours,
                     progress: 100,
@@ -237,8 +235,7 @@ pub(crate) mod dice {
             } else {
                 Vec::new()
             },
-            remains: Vec::<Remains>::new(),
-            others: Vec::new(),
+            ..Room::empty(name)
         };
 
         (room, spawns)

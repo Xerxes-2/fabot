@@ -10,8 +10,8 @@ use fabot_base::declarations::{ColonyPlan, Stage};
 use fabot_base::tiles::{self, Tile};
 use fabot_base::vocabulary::ResourceType;
 use fabot_base::world::{
-    Controller, Creep, Kind, Mineral, Owner, Pos, Room, RoomName, Rules, Site, Source, Spawn,
-    Store, Structure, World, terrain,
+    Built, Controller, Creep, Mineral, Owner, Pos, Room, RoomName, Rules, Site, Source, Spawn,
+    Store, Structure, StructureType, World, terrain,
 };
 
 pub const ROOM: RoomName = RoomName::named("W1N1");
@@ -59,7 +59,7 @@ pub fn at(tile: Tile) -> Pos {
     tiles::to_pos(ROOM, tile)
 }
 
-pub fn structure(id: &str, kind: Kind, owner: Owner, tile: Tile) -> Structure {
+pub fn structure(id: &str, kind: StructureType, owner: Owner, tile: Tile) -> Structure {
     let walkable = kind.walkable();
 
     Structure {
@@ -156,12 +156,12 @@ fn colony_of(rng: &mut Rng, blobs: i32) -> Option<Colony> {
     let mut structures: Vec<Structure> = spawn_tiles
         .iter()
         .enumerate()
-        .map(|(i, t)| structure(&format!("p{i}"), Kind::Spawn, Owner::Ours, *t))
+        .map(|(i, t)| structure(&format!("p{i}"), StructureType::Spawn, Owner::Ours, *t))
         .collect();
     structures.extend(foreign_tiles.iter().enumerate().map(|(i, t)| {
         structure(
             &format!("w{i}"),
-            Kind::Spawn,
+            StructureType::Spawn,
             Owner::Stranger("x".into()),
             *t,
         )
@@ -172,7 +172,6 @@ fn colony_of(rng: &mut Rng, blobs: i32) -> Option<Colony> {
         terrain[*t] = terrain::WALL;
     }
     let room = Room {
-        name: ROOM,
         terrain: terrain::leak(terrain),
         controller: Some(Controller {
             id: "c".into(),
@@ -188,8 +187,6 @@ fn colony_of(rng: &mut Rng, blobs: i32) -> Option<Colony> {
             safe_mode_cooldown: 0,
             upgrade_blocked: 0,
         }),
-        energy_available: 0,
-        energy_capacity: 0,
         sources: source_tiles
             .iter()
             .enumerate()
@@ -208,10 +205,7 @@ fn colony_of(rng: &mut Rng, blobs: i32) -> Option<Colony> {
             amount: 0,
         }],
         structures,
-        sites: Vec::new(),
-        piles: Vec::new(),
-        remains: Vec::new(),
-        others: Vec::new(),
+        ..Room::empty(ROOM)
     };
 
     Some(Colony { room })
@@ -245,10 +239,6 @@ pub fn plan_of(colony: &Colony) -> Option<(Ground, Plan)> {
     Some((ground, plan))
 }
 
-pub fn walkable(kind: &Kind) -> bool {
-    matches!(kind, Kind::Road | Kind::Container | Kind::Rampart)
-}
-
 pub fn distinct<T: PartialEq + Copy>(values: &[T]) -> Vec<T> {
     let mut out: Vec<T> = Vec::new();
     for v in values {
@@ -267,7 +257,7 @@ pub fn reached(ground: &Ground, plan: &Plan) -> Vec<bool> {
         blocked[*t] = true;
     }
     for i in &plan.items {
-        blocked[i.tile] = !walkable(&i.kind) || (blocked[i.tile] && i.kind != Kind::Road);
+        blocked[i.tile] = !i.kind.walkable() || (blocked[i.tile] && i.kind != StructureType::Road);
     }
 
     let mut seen = vec![false; tiles::COUNT];
@@ -367,7 +357,7 @@ pub fn exploited(owned: &BTreeSet<RoomName>) -> Vec<ColonyPlan> {
         .collect()
 }
 
-pub fn site(id: &str, kind: Kind, tile: Tile) -> Site {
+pub fn site(id: &str, kind: StructureType, tile: Tile) -> Site {
     Site {
         id: id.into(),
         kind,
@@ -403,6 +393,6 @@ pub fn tower(id: &str, tile: Tile, energy: i32) -> Structure {
             held: vec![(ResourceType::Energy, energy)],
             capacity: 1000,
         },
-        ..structure(id, Kind::Tower, Owner::Ours, tile)
+        ..structure(id, StructureType::Tower, Owner::Ours, tile)
     }
 }

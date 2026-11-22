@@ -72,7 +72,7 @@ globalThis.__fabotRead = (() => {
     else n(1), w(c.reservation.username), n(c.reservation.ticksToEnd);
     n(c.safeMode), n(c.safeModeAvailable), n(c.safeModeCooldown), n(c.upgradeBlocked);
   };
-  // Only the kinds the engine gives a field read it (`Kind::has_store`, `has_cooldown`).
+  // Only the kinds the engine gives a field read it (`Built::has_store`, `has_cooldown`).
   const STORED = new Set(["spawn", "extension", "tower", "container", "storage", "link", "terminal", "lab", "factory", "powerSpawn", "nuker", "invaderCore"]);
   const KNOWN = new Set([...STORED, "road", "rampart", "constructedWall", "extractor", "observer", "keeperLair", "powerBank", "portal"]);
   const COOLED = new Set(["tower", "link", "lab", "extractor", "terminal", "factory", "nuker", "powerSpawn"]);
