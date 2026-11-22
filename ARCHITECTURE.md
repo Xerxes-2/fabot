@@ -754,6 +754,9 @@ scenarios matching touched modules.
   Hivemind two rooms off (`--xxscreeps`, Hivemind over TooAngel because it
   reaches RCL3 and walks outposts while TooAngel stays RCL2) to read exposure
   and losses with safe mode kept.
+- `soak:many -- --reset-every N` runs each sim start beside a twin whose heap is
+  lost every N ticks (Memory, segments and world kept, as `src/app/driver.rs`
+  meets a global reset); any gap beyond seed noise is a reset bug.
 - `measures.mjs` enforces invariants on every home (no lost road, no level drop,
   ≥3 ramparts post-RCL4, no paying site waiting >10k ticks, zero refusals/faults).
 - Soaks are relative A/B comparisons; a win is re-checked on other starts (a

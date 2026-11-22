@@ -1,7 +1,5 @@
 //! The soak on krebs, natively: `decide` on krebs's documents each tick,
 //! krebs's processor on our intents, `soak-step.mjs`'s files out.
-//!
-//! Usage: sim --world <world.json> --room <name> --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--follow A,B] [--npc <[[tick, room, bodies or null for a core]]>] [--ended] [--check]
 // A tool, not the bot: a panic fails the run that called it.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -11,6 +9,7 @@ mod engaged;
 mod lives;
 mod npc;
 mod read;
+mod reset;
 mod sample;
 mod view;
 mod world;
@@ -49,6 +48,7 @@ struct Args {
     ended: bool,
     /// What the heap keeps across ticks is computed afresh beside it.
     check: bool,
+    reset_every: u64,
     /// Rooms the samples follow beside the declared ones: an outpost Strategy picks is declared nowhere.
     follow: Vec<String>,
     npc: Vec<npc::Due>,
@@ -65,7 +65,7 @@ fn args() -> Args {
         };
         flags.insert(flag, value);
     }
-    let usage = "usage: sim --world <world.json> --room <name> --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--follow A,B] [--npc <[[tick, room, bodies or null for a core]]>] [--ended] [--check]";
+    let usage = "usage: sim --world <world.json> --room <name> --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--follow A,B] [--npc <[[tick, room, bodies or null for a core]]>] [--ended] [--check] [--reset-every N]";
     let need = |flag: &str| (flags.get(flag).cloned()).unwrap_or_else(|| panic!("{flag}: {usage}"));
     let number = |flag: &str, or: u64| {
         (flags.get(flag)).map_or(or, |v| {
@@ -82,6 +82,7 @@ fn args() -> Args {
         late: number("--late", 0),
         ended: flags.contains_key("--ended"),
         check: flags.contains_key("--check"),
+        reset_every: number("--reset-every", 0),
         follow: (flags.get("--follow").into_iter())
             .flat_map(|f| f.split(','))
             .filter(|r| !r.is_empty())
@@ -225,7 +226,7 @@ fn main() {
     ];
     let closed = map.closed.iter().filter_map(|r| r.parse().ok()).collect();
     let mut driver = driver::Driver::new(driver::Maps(terrains, closed), map.memory.clone(), out);
-    driver.heap.atlas.check = args.check;
+    driver.kept = reset::Kept::new(args.reset_every, args.check);
 
     let mut engine = Engine {
         hooks: ProcessorHooks::default(),

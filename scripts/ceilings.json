@@ -1,5 +1,5 @@
 {
-  "_": "Never raised (AGENTS.md). Lines are every line of every .rs under the path but its `#[cfg(test)]` items (each F#-era ceiling times its module's Rust-to-F# line ratio at the port, floored to 50); a path not built yet passes; `core/tactics` is its 926 lines at the split from fight plus 15% (owner), `core/fight/price` (split from fight by the owner) its 1417 lines at the split plus 15%, and `core/fight` its remaining 2191 lines plus 12, the headroom the lead sized to the next fight change: these are both modules' ceilings from now on, not a temporary raise; a row beneath another row's directory is counted against itself alone (a `<dir>/*` row per file, a `<dir>` row its whole tree); `core/base` is its 3467 lines at the split plus 3.8%, and `core/atlas` and `core/mv` lost the 629 and 51 lines that moved there. comments: the most percent of a src directory's own lines that are `//` comments, by the directory, else `_default`. counts: the most a per-tick count the bot reports in its observe segment (ARCHITECTURE.md \u00a79.3) may stand at, over a scenario's whole run: `floodsMost` the floods one tick ran, `atlasMissRate` the percent of `fieldOn` lookups that flooded, `threatLookupsMost` the tiles a Hunt scored in one tick (nine a body of the largest set, eight). `npm run scenario` asserts them.",
+  "_": "Never raised (AGENTS.md). Lines are every line of every .rs under the path but its `#[cfg(test)]` items (each F#-era ceiling times its module's Rust-to-F# line ratio at the port, floored to 50); a path not built yet passes; `core/tactics` is its 926 lines at the split from fight plus 15% (owner), `core/fight/price` (split from fight by the owner) its 1417 lines at the split plus 15%, and `core/fight` its remaining 2191 lines plus 12, the headroom the lead sized to the next fight change: these are both modules' ceilings from now on, not a temporary raise; a row beneath another row's directory is counted against itself alone (a `<dir>/*` row per file, a `<dir>` row its whole tree); `core/base` is its 3467 lines at the split plus 3.8%, and `core/atlas` and `core/mv` lost the 629 and 51 lines that moved there; `sim/src/reset` is its 72 lines at the split from sim plus 15% (owner), and `sim` its remaining 2749 lines. comments: the most percent of a src directory's own lines that are `//` comments, by the directory, else `_default`. counts: the most a per-tick count the bot reports in its observe segment (ARCHITECTURE.md \u00a79.3) may stand at, over a scenario's whole run: `floodsMost` the floods one tick ran, `atlasMissRate` the percent of `fieldOn` lookups that flooded, `threatLookupsMost` the tiles a Hunt scored in one tick (nine a body of the largest set, eight). `npm run scenario` asserts them.",
   "lines": {
     "core/fight": 2203,
     "core/fight/kinds/*": 550,
@@ -13,7 +13,8 @@
     "core/atlas": 3421,
     "core/observe": 1400,
     "core/base": 3600,
-    "sim": 2750
+    "sim": 2749,
+    "sim/src/reset": 82
   },
   "comments": {
     "_default": 7

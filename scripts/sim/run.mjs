@@ -163,7 +163,7 @@ export const buildPlan = () =>
   spawnSync("cargo", ["build", "--release", "--quiet", "--features", "tools", "--bin", "plan", "--manifest-path", join(REPO, "Cargo.toml")], { stdio: "inherit" }).status === 0;
 
 /** A soak into `out` on `world` (default the template); resolves to sim's exit code, -1 when it never ran. */
-export function runSim(bin, { world, room, node, ticks, seed = 1, late = 0, ended = false, unsafe = false, follow = [], rivals = [], invaders, wave, core, out }) {
+export function runSim(bin, { world, room, node, ticks, seed = 1, late = 0, ended = false, unsafe = false, follow = [], rivals = [], invaders, wave, core, resetEvery = 0, out }) {
   return new Promise((done) => {
     rmSync(out, { recursive: true, force: true });
     const base = JSON.parse(readFileSync(world ?? TEMPLATE, "utf8"));
@@ -190,7 +190,7 @@ export function runSim(bin, { world, room, node, ticks, seed = 1, late = 0, ende
       return finish(-1);
     }
     if (!existsSync(map)) return finish(-1);
-    const args = ["--world", map, "--room", room, "--ticks", String(ticks), "--seed", String(seed), "--late", String(late), "--every", "100", "--out", out, ...(follow.length ? ["--follow", follow.join(",")] : []), ...(ended ? ["--ended"] : []),
+    const args = ["--world", map, "--room", room, "--ticks", String(ticks), "--seed", String(seed), "--late", String(late), "--every", "100", "--out", out, ...(follow.length ? ["--follow", follow.join(",")] : []), ...(ended ? ["--ended"] : []), "--reset-every", String(resetEvery),
       "--npc", JSON.stringify(npc(invaders, bodies(wave), core, ticks))];
     spawn(bin, args, { stdio: "ignore" }).on("exit", (code) => (code === 0 ? engaged(out).then(() => finish(0), () => finish(-1)) : finish(code))).on("error", () => finish(-1));
   });

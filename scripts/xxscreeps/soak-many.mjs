@@ -31,6 +31,7 @@
 //   --jobs   runs at once (default every allowed core)
 //   --tag    output names: soak-runs/<tag>-<bundle>-s<seed>-<room>/ (default many)
 //   --fresh  run even where the cache holds this bundle, room, seed and ticks
+//   --reset-every N  beside each bundle, its twin `<name>-reset` reset (heap lost) every N ticks (sim only)
 //   --xxscreeps  each run on xxscreeps (`soak.mjs`), to cross-check sim: a
 //            --bot is then a bundle (default dist/main.js), and --jobs
 //            defaults to a quarter of the hardware threads (a soak keeps
@@ -59,7 +60,7 @@ const SOAK = join(HERE, "soak.mjs");
 const RUNS = join(REPO, "soak-runs");
 const CACHE = join(RUNS, ".cache");
 const usage =
-  "usage: npm run soak:many -- [--bot [name=]a,...] [--seed 1,2,1+7] [--room [world:]A[@N],...] [--ticks T] [--jobs J] [--tag name] [--node N] [--fresh] [--xxscreeps]";
+  "usage: npm run soak:many -- [--bot [name=]a,...] [--seed 1,2,1+7] [--room [world:]A[@N],...] [--ticks T] [--jobs J] [--tag name] [--node N] [--fresh] [--reset-every N] [--xxscreeps]";
 const fail = (m) => {
   console.error(m);
   process.exit(1);
@@ -72,7 +73,7 @@ for (let i = 0; i < rest.length; i++) {
     flags[rest[i]] = true;
     continue;
   }
-  if (!["--room", "--ticks", "--seed", "--jobs", "--tag", "--bot", "--node"].includes(rest[i])) fail(usage);
+  if (!["--room", "--ticks", "--seed", "--jobs", "--tag", "--bot", "--node", "--reset-every"].includes(rest[i])) fail(usage);
   const value = rest[i + 1];
   if (value === undefined || value.startsWith("--")) fail(`${rest[i]} needs a value\n${usage}`);
   flags[rest[i++]] = value;
@@ -111,13 +112,16 @@ const tag = flags["--tag"] ?? "many";
 if (!/^[A-Za-z0-9-]+$/.test(tag)) fail("--tag: letters, digits, dashes");
 
 const defaultBot = () => (native ? (simBinary() ?? fail("sim did not build")) : join(REPO, "dist/main.js"));
-const bots = (flags["--bot"] ?? defaultBot()).split(",").map((spec) => {
+const resetEvery = whole(flags["--reset-every"] ?? 0, "--reset-every", 0);
+if (resetEvery && !native) fail("--reset-every: sim only");
+const bundles = (flags["--bot"] ?? defaultBot()).split(",").map((spec) => {
   const [name, path] = spec.includes("=") ? spec.split("=") : [basename(spec, ".js"), spec];
   if (!/^[A-Za-z0-9-]+$/.test(name)) fail(`--bot: "${name}" is not a name (letters, digits, dashes)`);
   const file = resolve(path);
   if (!existsSync(file)) fail(`--bot: no file at ${file}`);
-  return { name, file };
+  return { name, file, resetEvery: 0 };
 });
+const bots = bundles.flatMap((b) => (resetEvery ? [b, { ...b, name: `${b.name}-reset`, resetEvery }] : [b]));
 if (new Set(bots.map((b) => b.name)).size < bots.length) fail("--bot: two bundles share a name");
 
 // The cache key: the bundle's code without its version stamp, so the same
@@ -147,7 +151,7 @@ const runs = bots.flatMap((bot) =>
       seed,
       start,
       name: `${tag}-${bot.name}-s${seed.seed}${seed.late ? `l${seed.late}` : ""}-${start.label.replace(/[:@+]/g, "-")}`,
-      key: hash(bot.code, start.room, start.rival ? `${start.rival.name}:${start.rival.room}` : "", planHash + start.node, start.world ? readFileSync(start.world) : native ? readFileSync(SIM_TEMPLATE) : "", String(seed.seed), String(seed.late), String(start.ticks), scriptsHash),
+      key: hash(bot.code, start.room, start.rival ? `${start.rival.name}:${start.rival.room}` : "", planHash + start.node, start.world ? readFileSync(start.world) : native ? readFileSync(SIM_TEMPLATE) : "", String(seed.seed), String(seed.late), String(start.ticks), scriptsHash, String(bot.resetEvery)),
     })),
   ),
 );
@@ -164,7 +168,7 @@ console.error(
 function soak(run) {
   return new Promise((done) => {
     const { room, world, node, rival, ticks, ended } = run.start;
-    if (native) return runSim(run.bot.file, { world, room, node, ticks, seed: run.seed.seed, late: run.seed.late, ended, out: join(RUNS, run.name) }).then(done);
+    if (native) return runSim(run.bot.file, { world, room, node, ticks, seed: run.seed.seed, late: run.seed.late, ended, resetEvery: run.bot.resetEvery, out: join(RUNS, run.name) }).then(done);
     const opponents = join(RUNS, `${run.name}.opponents.json`);
     if (rival) writeFileSync(opponents, JSON.stringify([rival]));
     const args = [...(rival ? ["--opponents", opponents] : []), ...(ended ? ["--ended"] : []), "--room", room, "--run", run.name, "--ticks", String(ticks), "--seed", String(run.seed.seed), "--late", String(run.seed.late), "--every", "100", "--bot", run.bot.file, ...(node ? ["--node", node] : []), ...(world ? ["--world", world] : [])];

@@ -1,5 +1,5 @@
 //! `src/app/driver.rs` without the wasm seam: Memory as text, segments as
-//! values, the heap (`ARCHITECTURE.md` §4) kept across ticks and never reset.
+//! values, the heap (`ARCHITECTURE.md` §4) kept across ticks until `reset`.
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::time::Instant;
@@ -17,7 +17,7 @@ use screeps::LocalRoomTerrain;
 use serde_json::{Value, json};
 
 use crate::view::{View, ms};
-use crate::{act, read};
+use crate::{act, read, reset};
 
 /// Every room's terrain, read once: the world never changes it.
 pub struct Maps(
@@ -38,9 +38,7 @@ impl Terrains for Maps {
 pub struct Driver<W: Write> {
     maps: Maps,
     pub memory: String,
-    pub heap: drive::Heap,
-    intel: Intel,
-    metrics: Metrics,
+    pub kept: reset::Kept,
     pub faults: BTreeSet<(&'static str, String)>,
     pub refused: BTreeMap<String, u64>,
     windows_read: i32,
@@ -55,9 +53,7 @@ impl<W: Write> Driver<W> {
         Driver {
             maps,
             memory,
-            heap: drive::Heap::default(),
-            intel: Intel::new(),
-            metrics: Metrics::default(),
+            kept: reset::Kept::default(),
             faults: BTreeSet::new(),
             refused: BTreeMap::new(),
             windows_read: i32::MIN,
@@ -98,9 +94,10 @@ impl<W: Write> Driver<W> {
             write: |_: &World, _: &(), _: &Intel, text, _: &mut Vec<(String, f64)>| written = text,
         };
         let mut phases = Vec::new();
+        let (heap, intel, metrics) = self.kept.decide(t);
         let ran = drive::run(
-            &mut self.heap,
-            (&mut memory, &mut self.intel, Some(&mut self.metrics)),
+            heap,
+            (&mut memory, intel, metrics),
             (&clock, &mut phases, false),
             seam,
         );
@@ -125,8 +122,9 @@ impl<W: Write> Driver<W> {
                 .entry(format!("{} {}", r.act, r.code))
                 .or_default() += 1;
         }
+        let m = self.kept.written(ran.world.time);
         if ran.world.time % metrics::WINDOW == 0 {
-            rows(&self.metrics, t, &mut self.windows_read, &ledger(), windows);
+            rows(m, t, &mut self.windows_read, &ledger(), windows);
         }
         let row = json!({ "t": t, "time": ran.world.time, "cpu": decide_ms, "phases": phases, "counts": ran.counts });
         let _ = writeln!(cpu, "{row}");
