@@ -5,9 +5,8 @@ pub const MAX_BODY_PARTS: usize = screeps::MAX_CREEP_SIZE as usize;
 pub const HARVEST_PER_WORK: i32 = screeps::HARVEST_POWER as i32;
 pub const CARRY_PART_CAPACITY: i32 = screeps::CARRY_CAPACITY as i32;
 pub const MINERAL_HARVEST_PER_WORK: i32 = screeps::HARVEST_MINERAL_POWER as i32;
-pub const EXTRACTOR_COOLDOWN: i32 = screeps::EXTRACTOR_COOLDOWN as i32;
 /// The intent pass runs before the object pass, so digs land one tick later.
-pub const MINERAL_HARVEST_CYCLE: i32 = EXTRACTOR_COOLDOWN + 1;
+pub const MINERAL_HARVEST_CYCLE: i32 = screeps::EXTRACTOR_COOLDOWN as i32 + 1;
 pub const CREEP_LIFETIME: i32 = screeps::CREEP_LIFE_TIME as i32;
 pub const CLAIM_LIFETIME: i32 = screeps::CREEP_CLAIM_LIFE_TIME as i32;
 /// ×1.1: the longest a deployed core stands.
@@ -16,7 +15,6 @@ pub const SPAWN_TICKS_PER_PART: i32 = screeps::CREEP_SPAWN_TIME as i32;
 pub const BOOST_ENERGY_PER_PART: i32 = screeps::LAB_BOOST_ENERGY as i32;
 pub const BOOST_MINERAL_PER_PART: i32 = screeps::LAB_BOOST_MINERAL as i32;
 pub const RESERVATION_CAP: i32 = screeps::CONTROLLER_RESERVE_MAX as i32;
-pub const SPAWN_ENERGY: i32 = screeps::SPAWN_ENERGY_CAPACITY as i32;
 
 pub fn extension_energy(level: i32) -> i32 {
     screeps::extension_energy_capacity(level.max(0) as u32) as i32
@@ -37,7 +35,6 @@ pub fn send_cost(amount: i32, distance: i32) -> i32 {
 }
 pub const LAB_MINERAL_CAPACITY: i32 = screeps::LAB_MINERAL_CAPACITY as i32;
 pub const LAB_REACTION_AMOUNT: i32 = screeps::LAB_REACTION_AMOUNT as i32;
-pub const LAB_REACTION_RANGE: i32 = screeps::LAB_REACTION_RANGE as i32;
 /// Chebyshev over the room grid; the observed room is visible the next tick alone.
 pub const OBSERVER_RANGE: i32 = screeps::OBSERVER_RANGE as i32;
 pub const MELEE_RANGE: i32 = 1;
@@ -52,8 +49,6 @@ pub fn keeper_body() -> Vec<Part> {
     body.extend([Part::Attack, Part::RangedAttack].repeat(10));
     body
 }
-pub const INVADER_USER: &str = screeps::INVADER_USERNAME;
-pub const KEEPER_USER: &str = screeps::SOURCE_KEEPER_USERNAME;
 pub const ATTACK_POWER: i32 = screeps::ATTACK_POWER as i32;
 pub const RANGED_ATTACK_POWER: i32 = screeps::RANGED_ATTACK_POWER as i32;
 pub const DISMANTLE_POWER: i32 = screeps::DISMANTLE_POWER as i32;
@@ -65,9 +60,7 @@ pub const TOWER_POWER_ATTACK: i32 = screeps::TOWER_POWER_ATTACK as i32;
 pub const TOWER_CAPACITY: i32 = screeps::TOWER_CAPACITY as i32;
 /// A tower holding less does nothing.
 pub const TOWER_ENERGY_COST: i32 = screeps::TOWER_ENERGY_COST as i32;
-pub const TOWER_OPTIMAL_RANGE: i32 = screeps::TOWER_OPTIMAL_RANGE as i32;
 pub const TOWER_FALLOFF_RANGE: i32 = screeps::TOWER_FALLOFF_RANGE as i32;
-pub const TOWER_FALLOFF: f64 = screeps::TOWER_FALLOFF;
 pub const PART_HITS: i32 = screeps::CREEP_HITS_PER_PART as i32;
 pub const HELD_OUTPUT_PER_TICK: i32 =
     (screeps::SOURCE_ENERGY_CAPACITY / screeps::ENERGY_REGEN_TIME) as i32;
@@ -101,7 +94,6 @@ pub const CONTAINER_DECAY_AMOUNT: i32 = screeps::CONTAINER_DECAY as i32;
 pub const CONTAINER_DECAY_TIME: i32 = screeps::CONTAINER_DECAY_TIME as i32;
 pub const CONTAINER_DECAY_TIME_OWNED: i32 = screeps::CONTAINER_DECAY_TIME_OWNED as i32;
 pub const CONTAINER_BUILD_COST: i32 = StructureType::Container.construction_cost().unwrap() as i32;
-pub const TOMBSTONE_DECAY_PER_PART: i32 = screeps::TOMBSTONE_DECAY_PER_PART as i32;
 /// A creep aged out is buried on its last tick: its tombstone's creep has this left.
 pub const AGED_OUT_TICKS_TO_LIVE: i32 = 1;
 pub const RAMPART_DECAY_AMOUNT: i32 = screeps::RAMPART_DECAY_AMOUNT as i32;
@@ -151,13 +143,14 @@ pub fn mass_attack_power_at(range: i32) -> i32 {
 }
 
 fn tower_power_at(power: i32, range: i32) -> i32 {
-    if range <= TOWER_OPTIMAL_RANGE {
+    const OPTIMAL: i32 = screeps::TOWER_OPTIMAL_RANGE as i32;
+    if range <= OPTIMAL {
         power
     } else {
         let full = f64::from(power);
         let r = range.min(TOWER_FALLOFF_RANGE);
-        let gone = full * TOWER_FALLOFF * f64::from(r - TOWER_OPTIMAL_RANGE)
-            / f64::from(TOWER_FALLOFF_RANGE - TOWER_OPTIMAL_RANGE);
+        let gone = full * screeps::TOWER_FALLOFF * f64::from(r - OPTIMAL)
+            / f64::from(TOWER_FALLOFF_RANGE - OPTIMAL);
         (full - gone).floor() as i32
     }
 }

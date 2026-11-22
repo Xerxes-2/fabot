@@ -14,8 +14,8 @@ fn user(me: &str, owner: &Owner) -> Option<String> {
     match owner {
         Owner::Ours => Some(me.to_string()),
         Owner::Ally(user) | Owner::Enemy(user) | Owner::Stranger(user) => Some(user.clone()),
-        Owner::Invader => Some(engine::INVADER_USER.to_string()),
-        Owner::Keeper => Some(engine::KEEPER_USER.to_string()),
+        Owner::Invader => Some(screeps::INVADER_USERNAME.to_string()),
+        Owner::Keeper => Some(screeps::SOURCE_KEEPER_USERNAME.to_string()),
         Owner::Nobody => None,
     }
 }

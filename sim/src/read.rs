@@ -20,8 +20,8 @@ use crate::world::{INVADER, KEEPER, US, USERNAME};
 pub fn username(user: &str) -> &str {
     match user {
         US => USERNAME,
-        INVADER => fabot_base::engine::INVADER_USER,
-        KEEPER => fabot_base::engine::KEEPER_USER,
+        INVADER => screeps::INVADER_USERNAME,
+        KEEPER => screeps::SOURCE_KEEPER_USERNAME,
         other => other,
     }
 }

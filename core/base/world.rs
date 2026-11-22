@@ -324,8 +324,8 @@ impl Owner {
     pub fn of_user(user: String, me: &str, declarations: &Declarations) -> Owner {
         match user.as_str() {
             u if u == me => Owner::Ours,
-            engine::INVADER_USER => Owner::Invader,
-            engine::KEEPER_USER => Owner::Keeper,
+            screeps::INVADER_USERNAME => Owner::Invader,
+            screeps::SOURCE_KEEPER_USERNAME => Owner::Keeper,
             u if declarations.allies.contains(u) => Owner::Ally(user),
             u if declarations.enemies.contains(u) => Owner::Enemy(user),
             _ => Owner::Stranger(user),

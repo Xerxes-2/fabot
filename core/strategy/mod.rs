@@ -63,7 +63,7 @@ const HEALERS: i32 = 3;
 /// The threat in, the hits a rampart is kept at out, and whether the quad
 /// out-heals the towers, which rings a colony below `RING_LEVEL` (§5).
 pub fn wall(rules: &Rules, rival: i32, level: i32, threatened: bool) -> (i32, bool) {
-    let capacity = engine::SPAWN_ENERGY
+    let capacity = screeps::SPAWN_ENERGY_CAPACITY as i32
         + rules.allowed(StructureType::Extension, rival) * engine::extension_energy(rival);
     let pairs = |part: Part| {
         (capacity / engine::body_cost(&[part, Part::Move])).min(engine::MAX_BODY_PARTS as i32 / 2)
@@ -130,7 +130,7 @@ pub fn plan<'t>(
     for (room, row) in intel {
         let owner = row.owner.as_deref().filter(|_| row.level > 0);
         let reserver = (row.reservation.as_ref())
-            .filter(|(user, lapse)| *lapse > world.time && user != engine::INVADER_USER)
+            .filter(|(user, lapse)| *lapse > world.time && user != screeps::INVADER_USERNAME)
             .map(|(user, _)| user.as_str());
         if owner.is_some_and(rival) {
             rivals.push((*room, row.level));

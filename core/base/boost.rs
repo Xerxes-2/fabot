@@ -144,7 +144,7 @@ pub struct Roles {
 pub fn roles_of(labs: &[(Id, Pos)]) -> Option<Roles> {
     let mut sorted: Vec<&(Id, Pos)> = labs.iter().collect();
     sorted.sort_by_key(|a| a.0);
-    let reaches = |a: &Pos, b: &Pos| a.range(b).is_some_and(|r| r <= engine::LAB_REACTION_RANGE);
+    let reaches = |a: &Pos, b: &Pos| a.within(screeps::LAB_REACTION_RANGE as i32, b);
 
     let mut best: Option<Roles> = None;
     for (i, (a, at_a)) in sorted.iter().map(|l| (&l.0, &l.1)).enumerate() {
