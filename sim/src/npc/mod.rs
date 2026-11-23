@@ -1,19 +1,28 @@
-//! A scenario's scheduled Invaders and level-0 cores, stood as the official
-//! engine stands them (cronjobs.js createRaid, strongholds.js expandStronghold);
-//! krebs's processor plays them from there.
+//! A scenario's Invaders, level-0 cores and strongholds as the official engine stands them; krebs plays them.
 use std::sync::Arc;
 
+use fabot_base::intel::Intel;
+use krebs::atom;
 use krebs::constants::{INVADER_CORE_HITS, OBSTACLE_OBJECT_TYPES};
-use krebs::doc::{Doc, Val};
+use krebs::cron::CronCtx;
+use krebs::cron::strongholds::{SpawnOpts, spawn_stronghold};
+use krebs::doc::{Doc, Obj, Val};
 use krebs::world::World;
 use krebs_util::json::Json;
 use serde_json::{Value, json};
 
-use crate::view::xy;
+use crate::view::{View, num, text, xy};
 use crate::world::INVADER;
 
-/// `soak.mjs`'s scheduled Invaders: on a tick, in a room, a wave of bodies or a level-0 core.
-pub type Due = (u64, String, Option<Vec<Vec<String>>>);
+/// On a tick, in a room: a wave's bodies, a stronghold's [level, deploy] or (null) a level-0 core.
+pub type Due = (u64, String, Option<Npc>);
+
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+pub enum Npc {
+    Wave(Vec<Vec<String>>),
+    Stronghold(u32, u32),
+}
 
 fn insert(k: &mut World, r: usize, docs: Vec<Value>) {
     let mut objects = k.rooms[r].objects.to_vec();
@@ -100,4 +109,43 @@ pub fn core(k: &mut World, room: &str, mut random: impl FnMut() -> f64) {
         "user": INVADER, "hits": INVADER_CORE_HITS, "hitsMax": INVADER_CORE_HITS,
         "strongholdId": null, "effects": null });
     insert(k, r, vec![doc]);
+}
+
+/// `bunker{level}` as the `strongholds.spawn` CLI stands it, deploying in `deploy` ticks.
+pub fn stronghold(k: &mut World, room: &str, level: u32, deploy: u32) {
+    let r = (k.meta.rooms.iter())
+        .position(|m| &*m.name == room)
+        .expect(room);
+    let opts = SpawnOpts {
+        template_name: Some(format!("bunker{level}")),
+        deploy_time: Some(f64::from(deploy)),
+        ..SpawnOpts::default()
+    };
+    let mut cx = CronCtx::new(k.seed, k.time, 0, "spawnStronghold");
+    if let Err(e) = spawn_stronghold(k, &mut cx, r as u32, &opts) {
+        panic!("a stronghold in {room}: {e}");
+    }
+}
+
+/// Each standing stronghold by room, beside intel's `[level, deploys_at, collapses_at, seen]`.
+pub fn strongholds(v: &View, intel: &Intel) -> Value {
+    let rooms = v.rooms.iter().filter_map(|room| {
+        let core = (room.of("invaderCore")).find(|o| num(o, atom!("level")) > 0.0)?;
+        let row = room.name.parse().ok().and_then(|r| intel.get(&r));
+        let read = row.and_then(|r| r.stronghold.map(|s| json!([s.level, s.deploys_at, s.collapses_at, r.seen])));
+        let defenders = (room.of("creep")).filter(|c| !text(c, atom!("strongholdId")).is_empty());
+        Some((room.name.to_string(), json!({ "level": num(core, atom!("level")), "deployTime": num(core, atom!("deployTime")),
+            "collapse": collapse(core).unwrap_or(0.0), "towers": room.of("tower").count(), "defenders": defenders.count(), "intel": read })))
+    });
+    Value::Object(rooms.collect())
+}
+
+pub fn collapse(o: &Obj) -> Option<f64> {
+    let Some(Val::Arr(effects)) = o.get(atom!("effects")) else {
+        return None;
+    };
+    let timer = f64::from(krebs::constants::EFFECT_COLLAPSE_TIMER);
+    (effects.iter().filter_map(Val::as_obj))
+        .find(|e| num(e, atom!("effect")) == timer)
+        .map(|e| num(e, atom!("endTime")))
 }

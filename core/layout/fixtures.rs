@@ -72,6 +72,7 @@ pub fn structure(id: &str, kind: StructureType, owner: Owner, tile: Tile) -> Str
         store: Store::empty(),
         cooldown: 0,
         collapse: 0,
+        deploy: 0,
         spawn: None,
         level: 0,
         walkable,

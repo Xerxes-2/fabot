@@ -185,17 +185,17 @@ impl<'a> Reader<'a> {
         let spawn = (kind == StructureType::KeeperLair)
             .then(|| self.n())
             .filter(|t| *t >= 0);
-        let (collapse, level) = if kind == StructureType::InvaderCore {
+        let (collapse, deploy, level) = if kind == StructureType::InvaderCore {
             let running = self.flag();
             let ticks = self.n();
-            let collapse = if running {
-                ticks
+            let (collapse, deploy) = if running {
+                (ticks, 0)
             } else {
-                ticks + engine::STRONGHOLD_LONGEST_COLLAPSE
+                (ticks + engine::STRONGHOLD_LONGEST_COLLAPSE, ticks)
             };
-            (collapse, self.n())
+            (collapse, deploy, self.n())
         } else {
-            (0, 0)
+            (0, 0, 0)
         };
         let walkable = if kind == StructureType::Rampart {
             let public = self.flag();
@@ -213,6 +213,7 @@ impl<'a> Reader<'a> {
             store,
             cooldown,
             collapse,
+            deploy,
             level,
             spawn,
             walkable,

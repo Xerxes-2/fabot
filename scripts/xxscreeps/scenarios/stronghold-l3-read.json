@@ -1,0 +1,10 @@
+{
+  "why": "a level-3 stronghold deployed beside a colony is read as it stands (level, deploy, collapse) from its first sight on; today's fight answers it as it does (no Stronghold engagement yet): the base for one",
+  "modules": ["atlas", "fight", "strategy"],
+  "start": { "room": "W8N3", "seed": 1, "node": "E1", "stronghold": "W8N2:1:3" },
+  "ticks": 3000,
+  "assert": [
+    { "measure": "strongholdMisread", "from": 400, "max": 0 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

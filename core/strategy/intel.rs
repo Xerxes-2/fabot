@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use fabot_atlas::Atlas;
 use fabot_base::declarations::{self, Declarations, Declared};
 use fabot_base::engine;
-use fabot_base::intel::{Intel, Row, STALE, Scout};
+use fabot_base::intel::{Intel, Row, STALE, Scout, Stronghold};
 use fabot_base::intents::Action;
 use fabot_base::tiles;
 use fabot_base::vocabulary::Part;
@@ -55,7 +55,12 @@ pub fn step(world: &World, intel: &mut Intel) {
             }),
             mineral: room.minerals.first().and_then(|m| m.resource),
             stronghold: (room.structures.iter())
-                .any(|s| s.kind == StructureType::InvaderCore && s.level > 0),
+                .find(|s| s.kind == StructureType::InvaderCore && s.level > 0)
+                .map(|s| Stronghold {
+                    level: s.level,
+                    deploys_at: world.time + s.deploy,
+                    collapses_at: world.time + s.collapse,
+                }),
         };
         intel.insert(room.name, row);
     }

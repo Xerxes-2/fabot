@@ -74,7 +74,7 @@ fn args() -> Args {
         };
         flags.insert(flag, value);
     }
-    let usage = "usage: sim (--world <world.json> --room <name> | --gen <seed> [--sectors WxH]) --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--follow A,B] [--npc <[[tick, room, bodies or null for a core]]>] [--ended] [--check] [--reset-every N] [--watch [--port N] [--tick-ms N] [--badge <json>]]";
+    let usage = "usage: sim (--world <world.json> --room <name> | --gen <seed> [--sectors WxH]) --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--follow A,B] [--npc <[[tick, room, bodies, [a stronghold's level, deploy] or null for a core]]>] [--ended] [--check] [--reset-every N] [--watch [--port N] [--tick-ms N] [--badge <json>]]";
     let need = |flag: &str| (flags.get(flag).cloned()).unwrap_or_else(|| panic!("{flag}: {usage}"));
     let number = |flag: &str, or: u64| {
         (flags.get(flag)).map_or(or, |v| {
@@ -284,6 +284,7 @@ fn main() {
             if t % args.every == 0 || t == args.ticks - 1 {
                 let mut row = sampler.sample(&v, t, &map);
                 row["faults"] = json!(driver.faults.len());
+                row["strongholds"] = npc::strongholds(&v, &driver.kept.intel);
                 let _ = writeln!(samples, "{row}");
                 eprintln!("t{t} rcl{rcl} {} creeps {}", row["progress"], row["creeps"]);
             }
@@ -302,9 +303,12 @@ fn main() {
 
         let at = Instant::now();
         engine.step(&mut k, intents);
-        for (_, room, wave) in args.npc.iter().filter(|n| n.0 == t) {
-            match wave {
-                Some(bodies) => npc::wave(&mut k, room, bodies, || engine.next()),
+        for (_, room, due) in args.npc.iter().filter(|n| n.0 == t) {
+            match due {
+                Some(npc::Npc::Wave(bodies)) => npc::wave(&mut k, room, bodies, || engine.next()),
+                Some(npc::Npc::Stronghold(level, deploy)) => {
+                    npc::stronghold(&mut k, room, *level, *deploy)
+                }
                 None => npc::core(&mut k, room, || engine.next()),
             }
         }

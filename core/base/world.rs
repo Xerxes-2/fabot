@@ -403,6 +403,8 @@ pub struct Structure {
     pub cooldown: i32,
     /// Ticks to an Invader core's collapse, at the latest; 0 for any other structure.
     pub collapse: i32,
+    /// Ticks an Invader core stays invulnerable before it deploys; 0 once deployed.
+    pub deploy: i32,
     /// An Invader core's level, 0 for an expansion core; 0 for any other structure.
     pub level: i32,
     /// A keeper lair's ticks to its next keeper; None while one lives.
@@ -1176,6 +1178,7 @@ mod tests {
             store: Store::empty(),
             cooldown: 0,
             collapse: 0,
+            deploy: 0,
             level: 0,
             spawn: None,
             walkable: false,

@@ -1,0 +1,11 @@
+{
+  "why": "a level-3 stronghold still in its 5000-tick deploy window beside a colony is read with the tick it deploys (invulnerable till then) and its latest collapse",
+  "modules": ["atlas", "fight", "strategy"],
+  "start": { "room": "W8N3", "seed": 1, "node": "E1", "stronghold": "W8N2:1:3:5000" },
+  "ticks": 3000,
+  "assert": [
+    { "measure": "strongholdDeploying", "from": 400, "min": 1 },
+    { "measure": "strongholdMisread", "from": 400, "max": 0 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

@@ -392,6 +392,19 @@ export const measures = {
     Math.max(0, ...rowsOf(dir).filter((e) => e.kind === "defend" && !e.disengaged && e.drafted != null && e.drafted >= (a.from ?? 0) && e.drafted < (a.to ?? Infinity)).map((e) => (e.closed ?? samples.at(-1).t) - e.drafted)),
   // Invader cores standing in the declared outposts at the window's end.
   coresAtEnd: (samples, a) => Object.values(at(samples, a.to ?? Infinity).rooms).reduce((n, r) => n + (r.cores ?? 0), 0),
+  // Samples in the window where intel keeps a standing stronghold's level, deploy or collapse
+  // otherwise than the engine stands it; a collapse read before the deploy is the latest, not known.
+  strongholdMisread: (samples, a) =>
+    within(samples, a).filter((s) =>
+      Object.values(s.strongholds ?? {}).some(({ level, deployTime, collapse, intel }) => {
+        if (!intel) return true;
+        const [l, deployed, c, seen] = intel;
+        return l !== level || (deployTime ? deployed !== deployTime : deployed > seen || c !== collapse);
+      }),
+    ).length,
+  // Samples in the window where intel read a still-deploying stronghold's deploy tick.
+  strongholdDeploying: (samples, a) =>
+    within(samples, a).filter((s) => Object.values(s.strongholds ?? {}).some((h) => h.deployTime && h.intel?.[1] === h.deployTime)).length,
   // Enemies standing in our room at the window's end.
   hostilesAtEnd: (samples, a) => at(samples, a.to ?? Infinity).hostiles,
   // `Hostiles.armed` off part letters; WORK counts anywhere, as every sample is our room.

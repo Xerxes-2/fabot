@@ -18,7 +18,7 @@ export const TEMPLATE = join(REPO, "soak-runs/.template.json");
 
 // What sim stands (`world.rs`, `node.mjs`) and what `scenario.mjs` reads off what it writes
 // (`sample.rs`, `lives.rs`, `engaged.rs`: no opponent's side).
-export const SIM_START = ["room", "seed", "late", "node", "ended", "unsafe", "world", "declarations", "memory", "gcl", "stock", "level", "follow", "opponents", "invaders", "wave", "core", "resetEvery"];
+export const SIM_START = ["room", "seed", "late", "node", "ended", "unsafe", "world", "declarations", "memory", "gcl", "stock", "level", "follow", "opponents", "invaders", "wave", "core", "stronghold", "resetEvery"];
 export const SIM_MEASURES = new Set([
   "metric", "spendError", "decayedAway", "roadsLost", "roadsAtEnd", "dug", "contactWait", "upgrade", "build", "linked", "builtAtEnd", "sitesAtEnd",
   "buriedAtEnd", "unroadedAtEnd", "oldestPayingSite", "extensionsBeforeContainer", "sourceContainersAtEnd", "postedLinksAtEnd",
@@ -28,7 +28,7 @@ export const SIM_MEASURES = new Set([
   "rcl2ToTower", "claimSpawned", "claimersCast", "made", "extractorToOre", "boosted", "boostedWith", "bounced", "stillLoaded", "mineralAside", "mineralHeld", "carriedOut", "castsBelow",
   "spawnStuck", "scoutsCast", "scoutStill", "scoutTicksIn", "reserverOnPost", "castIn", "bodiesOut", "bodiesStruck", "struckOn",
   "deathsError", "attackersAtEnd", "creepsLostBeforeSafeMode", "predictedWinsLost", "engagements", "oscillation", "bodiesLost",
-  "closedOnCore", "heldPastWave", "idleMost", "answeredMost", "sentTo", "sentBack", "draftedAfterOthers", "arrivedApart", "signsSent", "signedInRun",
+  "closedOnCore", "strongholdMisread", "strongholdDeploying", "heldPastWave", "idleMost", "answeredMost", "sentTo", "sentBack", "draftedAfterOthers", "arrivedApart", "signsSent", "signedInRun",
   "liveEngagements", "liveAstray", "liveEnergy",
 ]);
 
@@ -124,13 +124,17 @@ const bodies = (wave = "melee,healer,ranged") =>
     return [...INVADER[`${size}${role[0].toUpperCase()}${role.slice(1)}`].matchAll(/([a-z])(\d+)/g)].flatMap(([, p, n]) => Array(Number(n)).fill(PART[p]));
   });
 
-/** `soak.mjs`'s `--invaders room:every[:first],…` and `--core room:tick,…` as sim's `--npc`: [tick, room, a wave's bodies or null for a core]. */
-function npc(invaders = "", wave, core = "", ticks) {
+/**
+ * `soak.mjs`'s `--invaders room:every[:first],…` and `--core room:tick,…`, and a scenario's `stronghold` `room:tick:level[:deploy],…`
+ * (sim alone stands one), as sim's `--npc`: [tick, room, a wave's bodies, [a stronghold's level, deploy] or null for a core].
+ */
+function npc(invaders = "", wave, core = "", stronghold = "", ticks) {
   const waves = invaders.split(",").filter(Boolean).flatMap((w) => {
     const [room, every, first = every] = w.split(":").map((v, i) => (i ? Number(v) : v));
     return Array.from({ length: Math.max(0, Math.ceil((ticks - first) / every)) }, (_, i) => [first + i * every, room, wave]);
   });
-  return [...waves, ...core.split(",").filter(Boolean).map((c) => [Number(c.split(":")[1]), c.split(":")[0], null])];
+  const strongholds = stronghold.split(",").filter(Boolean).map((c) => c.split(":")).map(([room, tick, level, deploy = 1]) => [Number(tick), room, [Number(level), Number(deploy)]]);
+  return [...waves, ...core.split(",").filter(Boolean).map((c) => [Number(c.split(":")[1]), c.split(":")[0], null]), ...strongholds];
 }
 
 /** `engagements.jsonl` off the ticks sim wrote to `fight.jsonl`, as soak-step writes it on xxscreeps, and `segment4.jsonl` off `cpu.jsonl`. */
@@ -170,7 +174,7 @@ export const buildPlan = () =>
  * A soak into `out` on `world` (default the template), or on the world map.js generates off seed `gen`
  * (sim picks the room); resolves to sim's exit code, -1 when it never ran. `watch` ({port, ms, badge}) serves it to lazycreep.
  */
-export function runSim(bin, { world, gen, room, node, ticks, seed = 1, late = 0, ended = false, unsafe = false, follow = [], rivals = [], invaders, wave, core, resetEvery = 0, watch, out }) {
+export function runSim(bin, { world, gen, room, node, ticks, seed = 1, late = 0, ended = false, unsafe = false, follow = [], rivals = [], invaders, wave, core, stronghold, resetEvery = 0, watch, out }) {
   return new Promise((done) => {
     rmSync(out, { recursive: true, force: true });
     const map = `${out}.world.json`;
@@ -180,7 +184,7 @@ export function runSim(bin, { world, gen, room, node, ticks, seed = 1, late = 0,
     };
     const play = (where) => {
       const args = [...where, "--ticks", String(ticks), "--seed", String(seed), "--late", String(late), "--every", "100", "--out", out, ...(follow.length ? ["--follow", follow.join(",")] : []), ...(ended ? ["--ended"] : []), "--reset-every", String(resetEvery),
-        "--npc", JSON.stringify(npc(invaders, bodies(wave), core, ticks)), ...(watch ? ["--watch", "--port", String(watch.port), "--tick-ms", String(watch.ms), ...(watch.badge ? ["--badge", watch.badge] : [])] : [])];
+        "--npc", JSON.stringify(npc(invaders, bodies(wave), core, stronghold, ticks)), ...(watch ? ["--watch", "--port", String(watch.port), "--tick-ms", String(watch.ms), ...(watch.badge ? ["--badge", watch.badge] : [])] : [])];
       spawn(bin, args, { stdio: watch ? "inherit" : "ignore" }).on("exit", (code) => (code === 0 ? engaged(out).then(() => finish(0), () => finish(-1)) : finish(code))).on("error", () => finish(-1));
     };
     if (gen !== undefined) return play(["--gen", String(gen)]);

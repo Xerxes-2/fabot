@@ -9,7 +9,8 @@ use crate::world::{Controller, Id, Owner, Pos, Room, RoomName, Source, World, pu
 pub const WRITTEN_EVERY: i32 = 100;
 
 /// A room as it stood when last seen, by username: a stance is the
-/// declarations' and changes without a sight.
+/// declarations' and changes without a sight. `lairs` and `sources` are None
+/// on a row written before they were read: unknown, not none.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Row {
     pub seen: i32,
@@ -20,16 +21,20 @@ pub struct Row {
     /// Whose economy the room is; a hauler only passes, so WORK alone marks it.
     /// Never an Invader: its raid is Defend's to answer, not a rival working the room.
     pub worker: Option<String>,
-    /// None on a row written before posts were read: unknown, not none.
     pub lairs: Option<Vec<Post>>,
     pub controller: Option<Declared>,
-    /// None on a row written before sources were read: unknown, not none.
     pub sources: Option<Vec<Declared>>,
     pub contained: bool,
     /// None on a row written before minerals were read, or a room without one.
     pub mineral: Option<ResourceType>,
-    /// An Invader stronghold stands: a core past level 0.
-    pub stronghold: bool,
+    pub stronghold: Option<Stronghold>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Stronghold {
+    pub level: i32,
+    pub deploys_at: i32,
+    pub collapses_at: i32,
 }
 
 pub type Intel = BTreeMap<RoomName, Row>;
@@ -97,8 +102,8 @@ const NONE: &str = "-";
 
 /// One line a room, `room seen owner level reserver lapse worker lairs
 /// controller sources contained mineral stronghold`, `-` for none, `lairs` each lair's tile and its
-/// resource's as `lair.resource,…` and `sources` each as `id@tile,…` (`.`
-/// alone for none): a segment holds thousands.
+/// resource's as `lair.resource,…`, `sources` each as `id@tile,…` (`.`
+/// alone for none), `stronghold` as `level.deploys_at.collapses_at`; a segment holds thousands.
 pub fn to_text(intel: &Intel) -> String {
     use std::fmt::Write;
     fn name(user: &Option<String>) -> &str {
@@ -154,7 +159,12 @@ pub fn to_text(intel: &Intel) -> String {
             }
             None => out.extend([" ", NONE]),
         }
-        out.push_str(if r.stronghold { " 1" } else { " 0" });
+        match r.stronghold {
+            Some(s) => {
+                let _ = write!(out, " {}.{}.{}", s.level, s.deploys_at, s.collapses_at);
+            }
+            None => out.extend([" ", NONE]),
+        }
         out.push('\n');
     }
     out
@@ -193,6 +203,15 @@ fn site_of(room: RoomName, text: &str) -> Option<Declared> {
     })
 }
 
+fn stronghold_of(text: &str) -> Option<Stronghold> {
+    let mut n = text.split('.').map(|n| n.parse().ok());
+    Some(Stronghold {
+        level: n.next()??,
+        deploys_at: n.next()??,
+        collapses_at: n.next()??,
+    })
+}
+
 pub fn of_text(text: &str) -> Intel {
     let name = |s: &str| (s != NONE).then(|| s.to_string());
     text.lines()
@@ -222,7 +241,7 @@ pub fn of_text(text: &str) -> Intel {
                 sources,
                 contained: f.get(10) == Some(&"1"),
                 mineral: f.get(11).and_then(|m| m.parse().ok()),
-                stronghold: f.get(12) == Some(&"1"),
+                stronghold: f.get(12).and_then(|s| stronghold_of(s)),
             };
             Some((room, row))
         })
@@ -264,7 +283,7 @@ mod tests {
             option::of(vec(site, 0..3)),
             any::<bool>(),
             option::of(select(crate::vocabulary::ORES.to_vec())),
-            any::<bool>(),
+            option::of((1..=5, 0..=9_999_999, 0..=9_999_999)),
         );
         draws.prop_map(|draws| {
             let (
@@ -291,7 +310,11 @@ mod tests {
                 sources,
                 contained,
                 mineral,
-                stronghold,
+                stronghold: stronghold.map(|(level, deploys_at, collapses_at)| Stronghold {
+                    level,
+                    deploys_at,
+                    collapses_at,
+                }),
             }
         })
     }

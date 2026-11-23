@@ -149,6 +149,16 @@ impl Reader<'_> {
             _ => self.left(o, atom!("cooldownTime")),
         };
         let public = matches!(o.get(Atom::intern("isPublic")), Some(Val::Bool(true)));
+        let core = kind == StructureType::InvaderCore;
+        // As `read.js`: a core not yet collapsing collapses at the latest after its deploy.
+        let deploy = (num(o, atom!("deployTime")) as i32 - self.time).max(0);
+        let (collapse, deploy) = match crate::npc::collapse(o) {
+            Some(end) => (end as i32 - self.time, 0),
+            None => (
+                deploy + fabot_base::engine::STRONGHOLD_LONGEST_COLLAPSE,
+                deploy,
+            ),
+        };
         Structure {
             id: Id::of_engine(text(o, atom!("_id"))),
             pos: self.pos(room, o),
@@ -160,13 +170,13 @@ impl Reader<'_> {
                 Store::empty()
             },
             cooldown: if kind.has_cooldown() { cooldown } else { 0 },
-            // The sim's cores carry no collapse effect or deploy timer; `read.js` reads that as the longest collapse.
-            collapse: if kind == StructureType::InvaderCore {
-                fabot_base::engine::STRONGHOLD_LONGEST_COLLAPSE
+            collapse: if core { collapse } else { 0 },
+            deploy: if core { deploy } else { 0 },
+            level: if core {
+                num(o, atom!("level")) as i32
             } else {
                 0
             },
-            level: 0,
             spawn: (kind == StructureType::KeeperLair)
                 .then(|| num(o, atom!("nextSpawnTime")) as i32 - self.time)
                 .filter(|t| *t >= 0),

@@ -32,6 +32,7 @@ fn structure(kind: StructureType, walkable: bool, x: i32, y: i32) -> Structure {
         store: Store::empty(),
         cooldown: 0,
         collapse: 0,
+        deploy: 0,
         spawn: None,
         level: 0,
         walkable,

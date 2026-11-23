@@ -203,7 +203,7 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
 | `piles` | colony → its hub: pile tile, or built over (`Plan::pile`) | Strategy | Memory | written from the plan whenever one stands, read only while none does (a reset redraws it over ticks), so a colony banks and picks outposts on the cold tick as warm; no `--check`: a heap's first plan apart from the hub kept before it is a live fault, a warm replan updates it; dropped with its colony |
 | `switches` | module name → bool (`false` disables; `recorder: true` opts in) | Main | Memory | live kill switches |
 | `observe.*` | health, faults, per-module CPU, counts, tactic offers, alerts | Observe | segment 1 | operator telemetry & benchmark calibration |
-| `intel.rooms` | per-room snapshot (seen tick, owner/level, reservation, worker (another player's WORK body, never an Invader), keeper posts, controller/sources/containers, mineral, stronghold; by username, never stance) | Strategy | heap + segment 2 (every 100 ticks) | serve out-of-sight rooms; price outposts & expansion |
+| `intel.rooms` | per-room snapshot (seen tick, owner/level, reservation, worker (another player's WORK body, never an Invader), keeper posts, controller/sources/containers, mineral, stronghold (core level, deploy and collapse ticks); by username, never stance) | Strategy | heap + segment 2 (every 100 ticks) | serve out-of-sight rooms; price outposts & expansion |
 | `metrics.windows` | 100-tick aligned windows (per-room + world, up to 150 windows) | Observe | segment 3 | `observe metrics` & soak `metrics.jsonl` (§10.5) |
 | `recorder` | deflated `read.js` pass + Memory + intel ring | Main | segments 10–14 | live capture for benchmark & replay (§9.1) |
 | `engagements.log` | the last 200 priced engagements closed, a JSON row a line: id, kind, room, rivals, tactic, opened, contact, seen, closed, `predicted`, our dead, energy cast, and how it ended (`disengaged`, `gaveUp`, `left`, `safe`; none: its rival's death seen) | Observe (rows Fight's closes) | segment 4, written on a close (rows closed before a reset's first read wait in heap) | live `Exchange` error tracking (§10.1): an engagement's prediction goes with it, and 200 rows (~230 B each) fit one segment |
@@ -705,6 +705,10 @@ seasonal rules: scoring, season structures and resources, `season::worth`
 out). Vanilla returns `0.0` / `false`. Only `Strategy` imports `Season`; at
 season end the file is rewritten without touching the rest of the bot.
 
+A killed core's ruin lives to its stronghold's collapse in the vanilla engine
+(and krebs); Season 11's radiation took floor(log10 T on the tile) more off
+each `decayTime` every tick, so a ruin holding 100k+ T lasted a sixth as long.
+
 ## 9. Performance
 
 ### 9.1 The benchmark comes first
@@ -779,7 +783,8 @@ Two engines complement each other:
   build (`npm run build:sim`), default for economy scenarios and `soak:many`
   (one process per core). Models official backend cron timing (`genInvaders`
   every ~88 ticks, `INSIDE_PASS = 0.66` MLE-fit to Season 11 history), scripted
-  waves/level-0 cores, and `--check` cache verification. A season world
+  waves, level-0 cores and strongholds (`spawnStronghold`, bunker1–5), and
+  `--check` cache verification. A season world
   (`season-world.mjs`) carries each sector's centre 3×3 (centre and keeper
   rooms) because `genInvaders` raids only a sector with a live core and
   `genStrongholds` stands one only from a centre room in the world. When `sim`
