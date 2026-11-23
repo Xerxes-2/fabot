@@ -140,7 +140,7 @@ segments over multiple ticks (economy first); a cold tick never spends more than
 | `Bindings` / `app` | `fabot` | Screeps JS API seam, packed `read.js`, `driver.rs` | `Game`, `RawMemory` | `Game`, `RawMemory`, segments |
 | `Engine` | `fabot-base` | Game formulas & non-global server constants (vanilla tables from `screeps-game-api`) | — | — |
 | `World` | `fabot-base` | Single-pass tick snapshot, event-log strikes/destroys, per-tick `rules` (`CONTROLLER_STRUCTURES`) | `Game` | — |
-| `Atlas` | `fabot-atlas` | Room graph (region nodes, border-stretch crossings, keeper-strike avoidance, blind keeper penalty, stronghold rooms never crossed) and per-room tile grid (creep-free weights, reverse floods, seats, footprint queries; a hostile's tile is walled only in this tick's step floods and passability, never in a kept flood, so one moving redoes no flood, tree or walk); out-of-sight grids hold what stood when last seen (else terrain) struck where intel places the keepers (`atlas.unseen`) | `World`, `terrain`, `intel.rooms`, `Declarations` (colony plans, for `server`) | flood table, `atlas.carried` |
+| `Atlas` | `fabot-atlas` | Room graph (region nodes, border-stretch crossings, keeper-strike avoidance, blind keeper penalty, a room intel last saw with towers that fire on us (a live stronghold's, a non-ally player's) never crossed, only reached) and per-room tile grid (creep-free weights, reverse floods, seats, footprint queries; a hostile's tile is walled only in this tick's step floods and passability, never in a kept flood, so one moving redoes no flood, tree or walk); out-of-sight grids hold what stood when last seen (else terrain) struck where intel places the keepers (`atlas.unseen`) | `World`, `terrain`, `intel.rooms`, `Declarations` (colony plans, for `server`) | flood table, `atlas.carried` |
 | `Economy` | `fabot-economy` | Slots, casts, sticky tasks, logistics dispatcher, links, labs, terminals, abandon | `Derived`, `Atlas`, `declarations`, `EconomyState`, Strategy's `scouts` | tasks, casts, `assignments` |
 | `Layout` | `fabot-layout` | Colony placement plan (Hivemind planner + xxscreeps JPS), rampart ring, construction sites, buried-road destroy, tower firing | `Derived`, `Atlas`, `declarations` | sites, destroys, tower actions, `standing.layout` |
 | `Exchange` | `fabot-exchange` | Pure combat arithmetic (`outcome`, `cheapest_win`, breach planning) | fighters, terrain | — |
@@ -641,9 +641,10 @@ expansion, and operation priorities.
   owned rooms, needed from RCL1 for reserve & outpost selection) emit `Scout`
   declarations. Living 1-MOVE scouts rotate continuously via `atlas::onward`;
   unseen rooms offer nearest ring first and cast ahead of spend. Armed rooms are
-  skipped except declared sieges.
-- `❓` Derive avoided rooms from intel rows.
-- `❓` A stronghold room is never crossed (Atlas), but an outpost or claim in
+  skipped except declared sieges. A towered room (Atlas never crosses it) stays
+  in the radius one past its nearest neighbour, and a scout reaches it only as
+  its goal once its row is stale, so a tower since gone clears.
+- `❓` A towered room is never crossed (Atlas), but an outpost or claim in
   one, or reachable only through one, is not refused by name.
 
 ### 7.2 Expansion and declarations

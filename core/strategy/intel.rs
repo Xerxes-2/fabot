@@ -101,11 +101,13 @@ pub fn preyed(intel: &Intel, declarations: &Declarations, time: i32) -> Vec<Room
 
 /// Rooms a rival raising §5's reserve could hold and the remotes outposts
 /// picks from, so from RCL1; by route too, as one walled off by terrain raids no sooner than a far one.
+/// A guarded room, in no tree, sits one past its neighbour so a scout can clear its row.
 pub fn threat_radius(
-    world: &World,
-    atlas: &Atlas,
+    (world, atlas): (&World, &Atlas),
+    (intel, declarations): (&Intel, &Declarations),
     owned: &BTreeSet<RoomName>,
 ) -> BTreeMap<RoomName, i32> {
+    let guarded = |room: &RoomName| intel.get(room).is_some_and(|r| r.guarded(declarations));
     (owned.iter().filter_map(|r| world.room(*r)))
         .map(|room| {
             (
@@ -119,7 +121,18 @@ pub fn threat_radius(
                 .flatten()
                 .filter(|room| tiles::has_controller(room.coords()))
                 .filter(|room| atlas.has_terrain(*room))
-                .filter_map(move |room| Some((room, tree.crossings(room, home)?)))
+                .filter_map(move |room| {
+                    let beside = || {
+                        let sides = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+                        let near = (sides.into_iter())
+                            .filter_map(|(dx, dy)| tree.crossings(room.offset(dx, dy)?, home))
+                            .min()?;
+                        Some(near + 1).filter(|hops| *hops <= super::NEAR)
+                    };
+                    let hops = (tree.crossings(room, home))
+                        .or_else(|| guarded(&room).then(beside).flatten())?;
+                    Some((room, hops))
+                })
         })
         .filter(|(room, _)| !owned.contains(room) && !world.closed.contains(room))
         .fold(BTreeMap::new(), |mut radius, (room, hops)| {
@@ -208,8 +221,10 @@ pub fn sight(
         .filter(|(room, _)| !intel.contains_key(*room))
         .map(|(_, hops)| *hops)
         .min();
+    let fresh = |row: &Row| row.guarded(declarations) && world.time - row.seen <= STALE;
     let near = (radius.iter())
         .filter(|(room, hops)| intel.contains_key(*room) || Some(**hops) == ring)
+        .filter(|(room, _)| !intel.get(*room).is_some_and(fresh))
         .map(|(room, _)| room);
     let mut rooms: Vec<&RoomName> = declared(declarations)
         .chain(near)

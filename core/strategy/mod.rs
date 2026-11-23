@@ -61,7 +61,11 @@ pub fn decide(context: &mut Context, state: &mut StrategyState) -> ModuleOutput 
     // A scout only dies where armed bodies stand, and draws them off; a
     // siege's sight is the fight's.
     let unarmed = |room| sightings::unarmed(context.sightings, context.world.time, room);
-    let mut radius = intel::threat_radius(context.world, context.atlas, &context.derived.owned);
+    let mut radius = intel::threat_radius(
+        (context.world, context.atlas),
+        (context.intel, context.declarations),
+        &context.derived.owned,
+    );
     radius.retain(|room, _| unarmed(*room));
     let (observed, mut scouts) = intel::sight(
         context.world,

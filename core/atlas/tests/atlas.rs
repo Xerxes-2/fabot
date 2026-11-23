@@ -818,7 +818,7 @@ fn a_route_goes_round_a_stronghold_where_another_way_stands() {
 }
 
 #[test]
-fn a_stronghold_is_never_crossed_but_still_reached() {
+fn a_towered_room_is_never_crossed_but_still_reached() {
     let rooms: Vec<Room> = (0..3)
         .map(|x| room_of(RoomName::new(x, 0), vec![0; tiles::COUNT], Vec::new()))
         .collect();

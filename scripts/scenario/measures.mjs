@@ -351,6 +351,9 @@ export const measures = {
     const end = Math.max(...lives.map((b) => b.last));
     return new Set(lives.filter((b) => b.ours && b.last < end && b.ttl > 1).map((b) => b.name)).size;
   },
+  // Our bodies that walked through `room` (in by one side, out by another) on a tick in [from, to).
+  crossed: (samples, a, dir) =>
+    livesOf(dir).filter((b) => b.ours && (b.entered ?? []).some(([r, t], i, e) => r === a.room && i > 0 && i + 1 < e.length && e[i - 1][0] !== e[i + 1][0] && t - offsetOf(samples) >= (a.from ?? 0) && t - offsetOf(samples) < (a.to ?? Infinity))).length,
   // Our bodies that fell in `room` with life left.
   diedIn: (_, a, dir) => {
     const lives = livesOf(dir);

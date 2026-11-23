@@ -1,0 +1,10 @@
+{
+  "why": "a guarded row outlives its tower only until stale: intel says the rival's W6N3 holds a tower, but he has left it; a scout reaches it as its goal once the row is stale (STALE ticks), and from then walks bound past it cross it again; before, nothing reached W6N3, so the row never cleared",
+  "modules": ["atlas", "fight", "strategy"],
+  "start": { "world": "scripts/scenario/worlds/enemy-left-towered-home.json", "seed": 1, "follow": ["W6N3", "W5N3", "W6N4", "W5N4"] },
+  "ticks": 4500,
+  "assert": [
+    { "measure": "crossed", "room": "W6N3", "to": 1500, "max": 0 },
+    { "measure": "crossed", "room": "W6N3", "from": 1500, "min": 1 }
+  ]
+}

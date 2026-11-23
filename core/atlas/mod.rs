@@ -64,8 +64,8 @@ pub struct RoomGrid {
     seen: bool,
     /// A keeper room out of sight whose lairs no intel places: crossed last.
     blind: bool,
-    /// Intel saw an Invader stronghold here, its collapse still to come.
-    stronghold: bool,
+    /// Intel last saw towers here that fire on us: a live stronghold's or a non-ally's.
+    towered: bool,
 }
 
 /// What a flood is a function of besides the room's weights: the mover's
@@ -742,8 +742,8 @@ impl Atlas {
     }
 
     /// A room whose terrain buffer is not a whole room has no grid: routed by
-    /// name, never walked. `seen` is intel's: each room and its keepers'
-    /// posts, `None` where unread; `terrains` holds rooms out of sight too.
+    /// name, never walked. `seen` is intel's: each room, its keepers' posts
+    /// (`None` where unread) and its towers; `terrains` holds rooms out of sight too.
     pub fn following<'a>(
         mut previous: Atlas,
         world: &World,
@@ -804,16 +804,16 @@ impl Atlas {
                 placed: None,
                 seen: true,
                 blind: false,
-                stronghold: false,
+                towered: false,
             };
             rooms.insert(c, grid);
         }
 
-        let mut strongholds: Vec<Coords> = Vec::new();
+        let mut towered: Vec<Coords> = Vec::new();
         let posts: HashMap<RoomName, Option<&[Post]>> = (seen.into_iter())
-            .map(|(room, posts, stronghold)| {
-                if stronghold {
-                    strongholds.push(room.coords());
+            .map(|(room, posts, towers)| {
+                if towers {
+                    towered.push(room.coords());
                 }
                 (room, posts)
             })
@@ -870,7 +870,7 @@ impl Atlas {
                         struck,
                         seen: false,
                         blind,
-                        stronghold: false,
+                        towered: false,
                     }
                 }
             };
@@ -878,7 +878,7 @@ impl Atlas {
         }
 
         for (c, grid) in &mut rooms {
-            grid.stronghold = strongholds.contains(c);
+            grid.towered = towered.contains(c);
         }
         Atlas {
             rooms,
@@ -1056,9 +1056,9 @@ impl Atlas {
 
     const EXITS: [i32; 4] = [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT];
 
-    /// A stronghold's towers cover its room: a walk ends there or goes round it, never through.
-    fn stronghold(&self, c: Coords) -> bool {
-        self.rooms.get(&c).is_some_and(|grid| grid.stronghold)
+    /// Towers cover the whole room: a walk ends there or goes round it, never through.
+    fn towered(&self, c: Coords) -> bool {
+        self.rooms.get(&c).is_some_and(|grid| grid.towered)
     }
 
     /// A keeper room whose lairs no intel places.
@@ -1088,12 +1088,11 @@ impl Atlas {
                 })
                 .map(|c| {
                     let grid = self.rooms.get(&c);
-                    let (seen, stronghold) =
-                        grid.map_or((false, false), |g| (g.seen, g.stronghold));
+                    let (seen, towered) = grid.map_or((false, false), |g| (g.seen, g.towered));
                     let flags = [
                         seen,
                         self.crossed_last(c),
-                        stronghold,
+                        towered,
                         self.closed.contains(&c),
                     ];
                     RoomRead(

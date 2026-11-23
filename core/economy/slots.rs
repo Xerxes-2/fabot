@@ -957,7 +957,19 @@ fn scouter(atlas: &mut Atlas, derived: &Derived, at: &Pos) -> Option<usize> {
     let block = engine::body_cost(bodies::block_of(Pattern::Scout));
     let can =
         |ci: usize| !derived.grounds[ci].abandoned && derived.colonies[ci].bank_capacity >= block;
-    atlas::nearest(atlas, &|room| derived.route(room), &homes, can, at)
+    let near = atlas::nearest(atlas, &|room| derived.route(room), &homes, can, at);
+    // A towered room is in no home's tree, only a route's end.
+    let crossings = |ci: usize| {
+        let route = atlas.route(
+            &BTreeSet::new(),
+            declarations::REACH_HOPS,
+            homes[ci].room,
+            at.room,
+        );
+        Some((route?.len(), ci))
+    };
+    let fallback = (0..homes.len()).filter(|ci| can(*ci)).filter_map(crossings);
+    near.or_else(|| fallback.min().map(|(_, ci)| ci))
 }
 
 pub fn plan(

@@ -38,6 +38,13 @@ pub struct Stronghold {
     pub collapses_at: i32,
 }
 
+impl Row {
+    /// A player's tower stood here when last seen, and the player is no ally.
+    pub fn guarded(&self, declarations: &Declarations) -> bool {
+        self.towered && (self.owner.as_ref()).is_some_and(|u| !declarations.allies.contains(u))
+    }
+}
+
 pub type Intel = BTreeMap<RoomName, Row>;
 
 /// The owner's: a rival's hold turns over on a reservation's lapse or a

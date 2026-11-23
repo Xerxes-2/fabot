@@ -1,0 +1,10 @@
+{
+  "why": "no walk crosses a room intel last saw with an enemy's tower, only ends there: the sweep on his reserved W5N3 goes round his towered home W6N3 by the N4 rooms; before, it walked through, as did the scouts and anything else bound past it",
+  "modules": ["atlas", "fight", "strategy"],
+  "start": { "world": "scripts/scenario/worlds/enemy-towered-transit.json", "seed": 1, "follow": ["W6N3", "W5N3", "W6N4", "W5N4"] },
+  "ticks": 3000,
+  "assert": [
+    { "measure": "crossed", "room": "W6N3", "max": 0 },
+    { "measure": "sweptIn", "room": "W5N3", "min": 1 }
+  ]
+}

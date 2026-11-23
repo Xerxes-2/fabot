@@ -28,7 +28,7 @@ export const SIM_MEASURES = new Set([
   "rcl2ToTower", "claimSpawned", "claimersCast", "made", "produced", "seenAt", "extractorToOre", "boosted", "boostedWith", "bounced", "stillLoaded", "mineralAside", "mineralHeld", "carriedOut", "castsBelow",
   "spawnStuck", "scoutsCast", "scoutStill", "scoutTicksIn", "reserverOnPost", "castIn", "bodiesOut", "bodiesStruck", "struckOn",
   "deathsError", "attackersAtEnd", "creepsLostBeforeSafeMode", "predictedWinsLost", "engagements", "oscillation", "bodiesLost",
-  "closedOnCore", "strongholdMisread", "strongholdDeploying", "boostedShort", "diedIn", "heldPastWave", "idleMost", "answeredMost", "sentTo", "sentBack", "draftedAfterOthers", "arrivedApart", "signsSent", "signedInRun",
+  "closedOnCore", "strongholdMisread", "strongholdDeploying", "boostedShort", "diedIn", "crossed", "heldPastWave", "idleMost", "answeredMost", "sentTo", "sentBack", "draftedAfterOthers", "arrivedApart", "signsSent", "signedInRun",
   "liveEngagements", "sweptIn", "liveAstray", "liveEnergy", "defendsOpened", "defendSpent", "rivalSpent", "answeredAfter", "recycledWounded", "culled",
 ]);
 
