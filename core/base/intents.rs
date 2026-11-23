@@ -32,6 +32,8 @@ pub enum CreepAct {
     #[strum(serialize = "rangedHeal")]
     RangedHealCreep(Id),
     Dismantle(Id),
+    #[strum(serialize = "signController")]
+    Sign(Id, String),
 }
 
 pub const MELEE: u8 = 1;

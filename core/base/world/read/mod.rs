@@ -158,6 +158,10 @@ impl<'a> Reader<'a> {
             safe_mode_available: self.n(),
             safe_mode_cooldown: self.n(),
             upgrade_blocked: self.n(),
+            sign: self.flag().then(|| {
+                let user = self.word().to_string();
+                (self.user(user), self.s())
+            }),
         }
     }
 

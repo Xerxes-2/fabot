@@ -74,6 +74,10 @@ globalThis.__fabotRead = (() => {
     if (absent(c.reservation)) n(0);
     else n(1), w(c.reservation.username), n(c.reservation.ticksToEnd);
     n(c.safeMode), n(c.safeModeAvailable), n(c.safeModeCooldown), n(c.upgradeBlocked);
+    // A NUL in another's text would shift every later string.
+    const sign = c.sign;
+    if (absent(sign)) n(0);
+    else n(1), w(sign.username), s(sign.text.replaceAll("\0", ""));
   };
   // Only the kinds the engine gives a field read it (`Built::has_store`, `has_cooldown`).
   const STORED = new Set(["spawn", "extension", "tower", "container", "storage", "link", "terminal", "lab", "factory", "powerSpawn", "nuker", "invaderCore"]);
@@ -199,6 +203,7 @@ globalThis.__fabotRead = (() => {
       Object.assign(o, { level: n(), progress: n(), progressTotal: n(), ticksToDowngrade: n() });
       if (n()) o.reservation = { username: w(), ticksToEnd: n() };
       Object.assign(o, { safeMode: n(), safeModeAvailable: n(), safeModeCooldown: n(), upgradeBlocked: n() });
+      if (n()) o.sign = { username: w(), text: s() };
     };
     const structure = (room) => {
       const type = w();

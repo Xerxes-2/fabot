@@ -1,0 +1,17 @@
+{
+  "why": "a body of ours beside the controller of a room we own or reserve signs it once with the text the room's name picks, over our old text or a stranger's (never over another player's held room or an ally's sign: sign.rs's table): two homes and the three outposts a body stands beside, W6S7 signed by a stranger",
+  "modules": ["economy"],
+  "start": {
+    "world": "scripts/xxscreeps/worlds/haul-around-keepers.json",
+    "seed": 1
+  },
+  "ticks": 1500,
+  "assert": [
+    { "measure": "signedInRun", "room": "W7S5", "min": 1 },
+    { "measure": "signedInRun", "room": "W5S8", "min": 1 },
+    { "measure": "signedInRun", "room": "W7S6", "min": 1 },
+    { "measure": "signedInRun", "room": "W6S7", "min": 1 },
+    { "measure": "signedInRun", "room": "W5S7", "min": 1 },
+    { "measure": "signsSent", "max": 5 }
+  ]
+}

@@ -182,6 +182,7 @@ pub(crate) mod arb {
                 } else {
                     None
                 },
+                sign: None,
                 safe_mode: 0,
                 safe_mode_available: 0,
                 safe_mode_cooldown: 0,

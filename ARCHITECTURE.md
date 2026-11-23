@@ -55,7 +55,12 @@ Game ──World.ofGame──▶ World ──decide──▶ Actions ──Execu
   (one spawn queue and one movement arbitration per room) into `Settled`: the
   actions, and the bodies arbitration left standing for the metrics. Split by
   type, so the executor matches only what reaches the game and `intents`
-  imports neither `Fight` nor `Economy`.
+  imports neither `Fight` nor `Economy`. Settling adds the sign reflex
+  (`tick/sign.rs`): any body of ours beside a controller of a room we own,
+  reserve or nobody holds signs it when its sign is not ours with the text the
+  room's name and kind pick (owned, outpost even while its reservation lapses,
+  passing), unless an ally or the server signed it; no engine pipeline holds a
+  sign, so it cancels no other act and every module's body signs.
 - **`Executor`** turns each `Action` (`Creep`, `Spawn`, `Room`, `Tower`,
   `Controller`, `Link`, `Lab`, `Terminal`, `Observe`) into an API call and
   never decides; the driver prints the traces.

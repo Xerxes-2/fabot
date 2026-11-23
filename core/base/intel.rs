@@ -63,6 +63,7 @@ pub fn blind(
                 .and_then(|r| r.reservation.as_ref())
                 .filter(|(_, lapse)| *lapse > time)
                 .map(|(user, lapse)| (owner(user), lapse - time)),
+            sign: None,
             safe_mode: 0,
             safe_mode_available: 0,
             safe_mode_cooldown: 0,

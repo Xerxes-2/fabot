@@ -44,6 +44,7 @@ pub fn bare(
             progress_total: 0,
             ticks_to_downgrade: 0,
             reservation: None,
+            sign: None,
             safe_mode: 0,
             safe_mode_available: 0,
             safe_mode_cooldown: 0,

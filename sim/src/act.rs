@@ -252,10 +252,15 @@ impl Run<'_> {
             CreepAct::Reserve(t)
             | CreepAct::Unreserve(t)
             | CreepAct::ClaimController(t)
-            | CreepAct::Dismantle(t) => {
+            | CreepAct::Dismantle(t)
+            | CreepAct::Sign(t, _) => {
                 let t = self.target(*t)?;
                 near(t)?;
-                (stored(act), json!({ "id": text(t.1, atom!("_id")) }))
+                let mut intent = json!({ "id": text(t.1, atom!("_id")) });
+                if let CreepAct::Sign(_, sign) = act {
+                    intent["sign"] = json!(sign);
+                }
+                (stored(act), intent)
             }
         };
         self.stored.put(creep.0, &id, name, value);

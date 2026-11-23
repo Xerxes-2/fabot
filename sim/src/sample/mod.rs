@@ -125,7 +125,7 @@ pub struct Sampler {
     taken: BTreeSet<String>,
     graves: BTreeSet<String>,
     placed: BTreeMap<String, i64>,
-    lives: Lives,
+    pub lives: Lives,
     /// The rooms our spawns stood in at the start (several in a capture), and the claims Memory declared.
     homes: Vec<String>,
     claims: Vec<String>,
@@ -133,6 +133,7 @@ pub struct Sampler {
     sent_of: BTreeMap<String, BTreeMap<String, f64>>,
     sent_seq: u64,
     labs: labs::Labs,
+    signs_sent: usize,
 }
 
 /// Piles, tombstones (an Invader's corpse is ours to take), and stores nobody's or ours.
@@ -383,11 +384,6 @@ impl Sampler {
         }
     }
 
-    /// Each body's life, `bodies.jsonl`'s rows.
-    pub fn bodies(&mut self) -> Vec<Value> {
-        self.lives.close()
-    }
-
     /// The piles our bodies pick up and the bodies our spawns recycle, off this tick's intents.
     pub fn intend(&mut self, intents: &[(usize, RoomIntents)]) {
         let objects = intents
@@ -396,6 +392,10 @@ impl Sampler {
             .flat_map(|u| &u.objects);
         let target =
             |o: &Obj, act| obj(o, Atom::intern(act)).map(|t| text(t, atom!("id")).to_string());
+        let signs = objects
+            .clone()
+            .filter_map(|(_, o)| target(o, "signController"));
+        self.signs_sent += signs.count();
         let acts = objects.flat_map(|(_, o)| ["pickup", "recycleCreep"].map(|act| target(o, act)));
         self.taken = acts.flatten().collect();
     }
@@ -534,6 +534,7 @@ impl Sampler {
             ("sent", json!(self.sent_of.get("energy"))),
             ("sentOf", json!(self.sent_of)),
             ("others", json!({})),
+            ("signsSent", json!(self.signs_sent)),
         ] {
             row.insert(k.into(), value);
         }
@@ -778,11 +779,14 @@ impl Sampler {
                 }
             }
             let bodies = line.bodies.round();
+            let sign = (v.room(name).of("controller")).find_map(|c| obj(c, atom!("sign")));
+            let sign = sign.filter(|s| text(s, atom!("user")) == crate::world::US);
             out.insert(name.clone(), json!({ "dug": line.dug, "decayed": line.decayed, "build": line.build,
                 "upgrade": line.upgrade, "repair": line.repair, "bodies": bodies, "reserved": line.reserved,
                 "hostile": line.hostile, "waves": 0, "carriedOut": line.carried_out, "leastDowngrade": line.least_downgrade,
                 "net": line.dug - line.decayed - line.repair - bodies, "creeps": creeps, "hostiles": hostiles,
-                "roads": roads, "containers": containers, "cores": cores, "held": held, "ores": ores, "made": made }));
+                "roads": roads, "containers": containers, "cores": cores, "held": held, "ores": ores, "made": made,
+                "signed": sign.map(|s| num(s, atom!("time"))) }));
         }
         Value::Object(out)
     }

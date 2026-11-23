@@ -416,6 +416,7 @@ mod tests {
                 progress_total: 1,
                 ticks_to_downgrade: 100000,
                 reservation: None,
+                sign: None,
                 safe_mode: 0,
                 safe_mode_available: 1,
                 safe_mode_cooldown: 0,

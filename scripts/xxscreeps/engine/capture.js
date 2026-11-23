@@ -24,6 +24,7 @@ module.exports = (memory) => {
     if (s.spawning && typeof s.spawning === "object") s.spawning = { name: s.spawning.name, remainingTime: s.spawning.remainingTime };
     if (o.owner) s.owner = { username: o.owner.username };
     if (o.reservation) s.reservation = { username: o.reservation.username, ticksToEnd: o.reservation.ticksToEnd };
+    if (o.sign) s.sign = { username: o.sign.username, text: o.sign.text };
     if (o.pos) s.pos = { x: o.pos.x, y: o.pos.y, roomName: o.pos.roomName };
     if (o.body) s.body = o.body.map((p) => (p.boost === undefined ? { type: p.type, hits: p.hits } : { type: p.type, hits: p.hits, boost: p.boost }));
     if (o.store) s.store = { held: Object.fromEntries(Object.entries(o.store)), capacity: o.store.getCapacity() ?? o.store.getCapacity("energy") ?? 0 };

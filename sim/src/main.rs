@@ -311,7 +311,7 @@ fn main() {
     let write = |name: &str, value: serde_json::Value| {
         fs::write(format!("{}/{name}", args.out), format!("{value}\n")).expect("an output file");
     };
-    let bodies: Vec<String> = sampler.bodies().iter().map(ToString::to_string).collect();
+    let bodies = sampler.lives.close();
     fs::write(
         format!("{}/bodies.jsonl", args.out),
         bodies.iter().map(|b| format!("{b}\n")).collect::<String>(),

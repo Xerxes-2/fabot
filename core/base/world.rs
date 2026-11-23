@@ -458,6 +458,8 @@ pub struct Controller {
     pub ticks_to_downgrade: i32,
     /// Who holds it and the ticks left.
     pub reservation: Option<(Owner, i32)>,
+    /// Who signed it and the text.
+    pub sign: Option<(Owner, String)>,
     pub safe_mode: i32,
     pub safe_mode_available: i32,
     pub safe_mode_cooldown: i32,
@@ -1189,6 +1191,7 @@ mod tests {
             progress_total: 0,
             ticks_to_downgrade: 0,
             reservation: None,
+            sign: None,
             safe_mode: 0,
             safe_mode_available: 0,
             safe_mode_cooldown: 0,

@@ -124,6 +124,7 @@ impl Pack {
                     CreepAct::HealCreep(_) => "heal",
                     CreepAct::RangedHealCreep(_) => "rangedHeal",
                     CreepAct::Dismantle(_) => "dismantle",
+                    CreepAct::Sign(..) => "signController",
                 };
                 let call = self.call(CREEP, name, method);
                 match act {
@@ -133,6 +134,7 @@ impl Pack {
                         call.by_id(id).text(resource)
                     }
                     CreepAct::Drop(resource) => call.text(resource),
+                    CreepAct::Sign(id, text) => call.by_id(id).text(text),
                     CreepAct::RangedMassAttack => call,
                     CreepAct::Harvest(id)
                     | CreepAct::Pickup(id)

@@ -134,6 +134,7 @@ impl Reader<'_> {
             ticks_to_downgrade: downgrade,
             reservation: obj(o, atom!("reservation"))
                 .map(|r| (self.owner(r), self.left(r, atom!("endTime")))),
+            sign: obj(o, atom!("sign")).map(|s| (self.owner(s), text(s, atom!("text")).into())),
             safe_mode: self.left(o, atom!("safeMode")),
             safe_mode_available: num(o, atom!("safeModeAvailable")) as i32,
             safe_mode_cooldown: self.left(o, atom!("safeModeCooldown")),

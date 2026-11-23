@@ -222,6 +222,7 @@ fn settle(context: &mut Context, asked: &ModuleOutput) -> Settled {
     let walks = boost_stop(context, &mut out, &asked.wishes);
     let (moves, held) = arbitrate(context, walks.as_deref().unwrap_or(&asked.wishes));
     out.extend(moves);
+    out.extend(super::sign::reflex(context.world, context.declarations));
     Settled { actions: out, held }
 }
 
