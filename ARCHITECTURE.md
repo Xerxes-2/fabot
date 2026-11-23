@@ -363,6 +363,11 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   links never split a 1-wide post; a quad or decorative wall closing a
   structure in gives way, and a pocket of roads and ramparts no walk reaches
   is dropped (Hivemind checks neither, and our kept cut pockets get sealed).
+  `❓` The plan is chaotic under any builder or pathfinder change: each
+  variation's greedy build carries every road into its later steps (spawn,
+  bays, ramparts, towers), and the best variations score close together. So a
+  planner change re-baselines with a broad soak. The open fixes are choosing
+  the anchor first, canonical roads, or scoring only what a road tie cannot move.
 - **Ramparts (`strategy::wall`, `ColonyPlan.rampart_hits`):** kept at `ticks
   held × dismantler damage/tick`, where dismantler damage is the largest rival
   dismantler up to our RCL (capped at our level because a taller wall outbids
