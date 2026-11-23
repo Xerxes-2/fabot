@@ -10,7 +10,6 @@ use fabot_atlas::Atlas;
 use fabot_base::declarations;
 use fabot_base::intents::{self, Action, ControllerAct, CreepAct, ModuleOutput};
 use fabot_base::tiles::Tile;
-use fabot_base::vocabulary::Part;
 use fabot_base::wish::Wish;
 use fabot_base::world::{self, Creep, Id, Owner, Pos, RoomName, Structure, StructureType};
 use fabot_base::{engine, tiles};
@@ -73,8 +72,6 @@ pub(super) fn act(
         .filter(|c| declarations::fights(&c.name))
         .collect();
 
-    let swings = |c: &Creep| c.body.iter().any(|p| p.kind == Part::Attack);
-
     // A group lost from sight is sought in its room, which brings it back in
     // sight; a siege's room out of sight is entered anywhere, as its middle
     // may lie behind its walls.
@@ -100,50 +97,15 @@ pub(super) fn act(
         }
     };
 
+    let fortified = fortified(world, decided);
     let mut walking: BTreeMap<String, Wish> = BTreeMap::new();
-    // A siege's room is priced under its towers while out of sight.
-    let fortified: BTreeSet<RoomName> = world
-        .rooms
-        .iter()
-        .filter(|r| !raid::charged(r).is_empty())
-        .map(|r| r.name)
-        .chain(
-            decided
-                .iter()
-                .filter(|e| matches!(e.objective, Objective::Siege(_)))
-                .map(|e| e.room),
-        )
-        .collect();
-
     for e in decided {
-        // A Defend's blob lands in reach as one, as its together arm was priced.
-        let mark = (matches!(e.plan.tactic, Tactic::BlobClose) && e.objective == Objective::Defend)
-            .then(|| {
-                (e.plan.order.iter())
-                    .find_map(|id| scene.foes.values().flatten().find(|h| h.id == *id))
-            })
-            .flatten();
-        let formation = matches!(e.plan.tactic, Tactic::BlobClose | Tactic::BlobKite)
-            && !e.unanswered
-            && (e.phase == Phase::Approaching || mark.is_some() && e.phase == Phase::Fighting);
-        if !formation {
-            continue;
-        }
-
-        let members: Vec<&Creep> = scene
-            .members_of(e)
-            .into_iter()
-            .filter(|c| raid::raids(e) || mark.is_some() || !swings(c))
-            .collect();
-
-        if !members.is_empty() {
-            let (centre, range) =
-                mark.map_or_else(|| centre_of(e), |h| (h.pos, engine::MELEE_RANGE));
-
-            for wish in tactics::blob(&mut sight, &centre, range, &members, &fortified) {
-                walking.insert(wish.creep.clone(), wish);
-            }
-        }
+        let on = (e.plan.tactic, &e.plan.order[..]);
+        let defends = e.objective == Objective::Defend;
+        let walk = (e.phase, e.unanswered, defends, raid::raids(e));
+        let members = scene.members_of(e);
+        let blob = formation(&mut sight, on, walk, members, || centre_of(e), &fortified);
+        walking.extend(blob.into_iter().map(|w| (w.creep.clone(), w)));
     }
 
     let fronts: BTreeMap<i32, tactics::Front> = (decided.iter())
@@ -275,20 +237,14 @@ pub(super) fn act(
                     return (strike, wish);
                 }
 
-                let tactic = &e.plan.tactic;
-
-                if matches!(tactic, Tactic::BlobClose)
-                    && !swings(c)
-                    && tactics::exposed(sight, centre.room, &scene.members_of(e), c)
-                {
-                    tactics::step_back(sight, centre.room, &scene.members_of(e), c)
-                } else if matches!(tactic, Tactic::Kite | Tactic::BlobKite) && !swings(c) {
-                    tactics::kite(sight, order, &centre, enter, c)
-                } else if matches!(tactic, Tactic::Hold) {
-                    tactics::rampart(sight, &fighters, c)
-                } else {
-                    tactics::close(sight, order, &centre, enter, c)
-                }
+                let members = scene.members_of(e);
+                tactics::engage(
+                    sight,
+                    (e.plan.tactic, order),
+                    (&centre, enter),
+                    (&members, &fighters),
+                    c,
+                )
             }
         };
         (None, wish)
@@ -347,6 +303,56 @@ pub(super) fn act(
 
     out.telemetry.traces = traced;
     out.telemetry.counts.push(("threatLookups", lookups));
+    let patients = (&fighters[..], &world.creeps[..]);
+    out.actions.extend(reflexes(chosen, patients, &incoming));
+    out
+}
+
+/// The rooms a blob walks into under towers: a siege's is priced so while out of sight.
+pub fn fortified(world: &world::World, decided: &[Engagement]) -> BTreeSet<RoomName> {
+    let charged = world.rooms.iter().filter(|r| !raid::charged(r).is_empty());
+    let sieges = decided
+        .iter()
+        .filter(|e| matches!(e.objective, Objective::Siege(_)));
+    charged
+        .map(|r| r.name)
+        .chain(sieges.map(|e| e.room))
+        .collect()
+}
+
+/// A blob's wishes while it walks as one: a Defend's lands in reach of its mark once it fights,
+/// as its together arm was priced, else onto `centre`; none out of formation.
+pub fn formation(
+    sight: &mut tactics::Sight,
+    (tactic, order): (Tactic, &[Id]),
+    (phase, unanswered, defends, raids): (Phase, bool, bool, bool),
+    members: Vec<&Creep>,
+    centre: impl FnOnce() -> (Pos, i32),
+    fortified: &BTreeSet<RoomName>,
+) -> Vec<Wish> {
+    let foes = sight.hostiles;
+    let mark = (tactic == Tactic::BlobClose && defends)
+        .then(|| (order.iter()).find_map(|id| foes.values().flatten().find(|h| h.id == *id)))
+        .flatten();
+    let walks = matches!(tactic, Tactic::BlobClose | Tactic::BlobKite)
+        && !unanswered
+        && (phase == Phase::Approaching || mark.is_some() && phase == Phase::Fighting);
+    let members: Vec<&Creep> = (members.into_iter())
+        .filter(|c| raids || mark.is_some() || !c.swings())
+        .collect();
+    if !walks || members.is_empty() {
+        return Vec::new();
+    }
+    let (centre, range) = mark.map_or_else(centre, |h| (h.pos, engine::MELEE_RANGE));
+    tactics::blob(sight, &centre, range, &members, fortified)
+}
+
+/// Each body's acts and the heals its swing and shot leave it, as the engine performs them.
+pub fn reflexes(
+    mut chosen: BTreeMap<String, Vec<CreepAct>>,
+    (healers, patients): (&[&Creep], &[Creep]),
+    incoming: &BTreeMap<String, i32>,
+) -> impl Iterator<Item = Action> {
     let busy = |slot: u8| -> BTreeSet<String> {
         let taken = chosen
             .iter()
@@ -354,17 +360,14 @@ pub(super) fn act(
         taken.map(|(n, _)| n.clone()).collect()
     };
     let (swinging, shooting) = (busy(intents::MELEE), busy(intents::RANGED));
-    for (healer, act) in tactics::heals(&fighters, &world.creeps, &incoming, &swinging, &shooting) {
+    for (healer, act) in tactics::heals(healers, patients, incoming, &swinging, &shooting) {
         chosen.entry(healer).or_default().push(act);
     }
-
-    out.actions
-        .extend(chosen.into_iter().flat_map(|(name, wanted)| {
-            let done = intents::performed(&wanted);
-            done.into_iter()
-                .map(move |a| Action::Creep(name.clone(), a))
-        }));
-    out
+    chosen.into_iter().flat_map(|(name, wanted)| {
+        let done = intents::performed(&wanted);
+        done.into_iter()
+            .map(move |a| Action::Creep(name.clone(), a))
+    })
 }
 
 /// A siege's wall and what holds it: his line, his towers' strike on it, and

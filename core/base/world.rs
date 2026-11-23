@@ -975,6 +975,10 @@ impl Creep {
         live(&self.body, kind)
     }
 
+    pub fn swings(&self) -> bool {
+        self.body.iter().any(|p| p.kind == Part::Attack)
+    }
+
     /// Legs and a hold alone fight for nothing; only a home's towers heal them back.
     pub fn spent(&self) -> bool {
         !(self.body.iter())

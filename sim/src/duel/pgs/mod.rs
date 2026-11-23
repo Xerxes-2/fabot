@@ -1,7 +1,7 @@
-//! `sim duel --rollout R`: Portfolio Greedy Search (Churchill & Buro 2013)
-//! over each body's script, the duel's own world the forward model, a
-//! rollout scored by each side's living bodies and hits left.
-use std::collections::BTreeMap;
+//! `sim duel --rollout R --theirs 1`, `ARCHITECTURE.md` §10.2's stress test:
+//! Portfolio Greedy Search (Churchill & Buro 2013) over each of his bodies'
+//! scripts, the duel's own world the forward model, a rollout scored by each
+//! side's living bodies and hits left. Ours keep their side's play.
 use std::time::Instant;
 
 use krebs::world::{RoomsMeta, TerrainStore, World};
@@ -11,11 +11,10 @@ use serde_json::{Value, json};
 
 use super::{Duel, Orders, Sample, Side, Thing, View};
 
-pub const FLAGS: [(&str, u64); 6] = [
+pub const FLAGS: [(&str, u64); 5] = [
     ("--rollout", 0),
     ("--replan", 10),
     ("--rounds", 1),
-    ("--ours", 1),
     ("--theirs", 0),
     ("--check-fork", 0),
 ];
@@ -46,19 +45,20 @@ fn fork(d: &Duel) -> Duel {
         world: f,
         first,
         now,
+        real: d.real.clone(),
         ..*d
     }
 }
 
-/// The emitter's duel forked every tick; whether it ends as the unforked one does.
-pub fn check_fork(s: &Sample, ticks: u64, seed: u64, pf: &mut PathFinder) -> Value {
-    let mut d = Duel::new(s, seed);
+/// The duel forked every tick; whether it ends as the unforked one does.
+pub fn check_fork(s: &Sample, (ticks, seed, real): (u64, u64, bool), pf: &mut PathFinder) -> Value {
+    let mut d = Duel::new(s, seed, real);
     let emit = |o: &mut Orders, c: &Thing, v: &View| o.act(c, v);
     while d.t < ticks && {
         d = fork(&d);
         d.tick(&mut d.engine(), pf, [&emit, &emit])
     } {}
-    json!({ "same": d.result() == super::duel(s, ticks, seed, pf) })
+    json!({ "same": d.result() == super::duel(s, ticks, seed, real, pf) })
 }
 
 /// Whom a body fires on, and the goals it steps toward, or away from when `flee`.
@@ -150,8 +150,8 @@ pub struct Search {
     pub rollout: u64,
     pub replan: u64,
     pub rounds: u64,
-    /// Whether each side, by `Side`, searches; one that does not keeps the emitter.
-    pub sides: [bool; 2],
+    /// Whether his side searches; one that does not keeps the emitter.
+    pub theirs: bool,
 }
 
 impl Orders<'_> {
@@ -193,26 +193,21 @@ impl Orders<'_> {
     }
 }
 
-/// Each side's bodies, by their place in its first roll, and the script each plays.
-type Assignment = [(Vec<String>, Vec<Script>); 2];
+/// His bodies, by their place in his first roll, and the script each plays.
+type Assignment = (Vec<String>, Vec<Script>);
 
 impl Duel {
     fn tick_assigned(&mut self, pf: &mut PathFinder, assignment: &Assignment) -> bool {
-        let side = |side: Side| {
-            move |o: &mut Orders, c: &Thing, v: &View| {
-                let (ids, scripts) = &assignment[side as usize];
-                let at = ids
-                    .iter()
-                    .position(|id| *id == c.id)
-                    .expect("one of the side's");
-                o.play(scripts[at], c, v);
-            }
+        let emit = |o: &mut Orders, c: &Thing, v: &View| o.act(c, v);
+        let theirs = |o: &mut Orders, c: &Thing, v: &View| {
+            let (ids, scripts) = assignment;
+            let at = ids
+                .iter()
+                .position(|id| *id == c.id)
+                .expect("one of the side's");
+            o.play(scripts[at], c, v);
         };
-        self.tick(
-            &mut self.engine(),
-            pf,
-            [&side(Side::Ours), &side(Side::Theirs)],
-        )
+        self.tick(&mut self.engine(), pf, [&emit, &theirs])
     }
 
     /// Each side's mean body worth, a living body half its share and the rest its hits left; ours less theirs.
@@ -224,15 +219,6 @@ impl Duel {
         };
         side(Side::Ours) - side(Side::Theirs)
     }
-
-    /// Our living bodies by their place in the first roll, none before contact.
-    fn engaged(&self) -> impl Iterator<Item = usize> + '_ {
-        let ours = self.first[Side::Ours as usize].keys().enumerate();
-        let alive = ours.filter(|(_, id)| {
-            self.contact.is_some() && self.now[Side::Ours as usize].contains_key(*id)
-        });
-        alive.map(|(k, _)| k)
-    }
 }
 
 fn rollout(d: &Duel, pf: &mut PathFinder, assignment: &Assignment, horizon: u64) -> f64 {
@@ -242,23 +228,20 @@ fn rollout(d: &Duel, pf: &mut PathFinder, assignment: &Assignment, horizon: u64)
     d.worth()
 }
 
-/// `side`'s best assignment found from the one it plays, the other's held, and the rollouts it took.
+/// His best assignment found from the one he plays, worst for us, and the rollouts it took.
 fn improve(
     d: &Duel,
     pf: &mut PathFinder,
     assignment: &Assignment,
-    side: Side,
     search: &Search,
     ticks: u64,
 ) -> (Vec<Script>, u64) {
     let horizon = (d.t + search.rollout).min(ticks);
-    let sign = if side == Side::Ours { 1.0 } else { -1.0 };
     let mut score = |s: &[Script]| {
-        let mut tried = assignment.clone();
-        tried[side as usize].1 = s.to_vec();
-        sign * rollout(d, pf, &tried, horizon)
+        let tried = (assignment.0.clone(), s.to_vec());
+        -rollout(d, pf, &tried, horizon)
     };
-    let last = &assignment[side as usize].1;
+    let last = &assignment.1;
     let mut best = (score(last), last.clone());
     let mut rollouts = 1;
     let mut better = |best: &mut (f64, Vec<Script>), s: Vec<Script>, rollouts: &mut u64| {
@@ -286,28 +269,26 @@ fn improve(
     (best.1, rollouts)
 }
 
-/// Adds to the duel's result the ticks each of our bodies ran each script after contact, the
-/// assignments as they changed, the decisions, the rollouts and their milliseconds.
-pub fn duel(s: &Sample, ticks: u64, seed: u64, pf: &mut PathFinder, search: &Search) -> Value {
-    let mut d = Duel::new(s, seed);
-    let mut assignment: Assignment = [Side::Ours, Side::Theirs].map(|side| {
-        let ids: Vec<String> = d.first[side as usize].keys().cloned().collect();
-        let scripts = vec![PORTFOLIO[0]; ids.len()];
-        (ids, scripts)
-    });
+/// Adds to the duel's result his assignments as they changed, the decisions, the rollouts and
+/// their milliseconds.
+pub fn duel(
+    s: &Sample,
+    (ticks, seed, real): (u64, u64, bool),
+    pf: &mut PathFinder,
+    search: &Search,
+) -> Value {
+    let mut d = Duel::new(s, seed, real);
+    let ids: Vec<String> = d.first[Side::Theirs as usize].keys().cloned().collect();
+    let mut assignment: Assignment = (ids.clone(), vec![PORTFOLIO[0]; ids.len()]);
     // The engine's AI drives an Invader: no script of theirs to search.
-    let invaded = s.theirs.bodies.iter().any(|b| b.invader);
-    let searches = |k: &Side| search.sides[*k as usize] && !(invaded && *k == Side::Theirs);
-    let sides = [Side::Theirs, Side::Ours].into_iter().filter(searches);
-    let sides: Vec<Side> = sides.collect();
-    let mut ran: BTreeMap<String, BTreeMap<String, u64>> = BTreeMap::new();
+    let searches = search.theirs && !s.theirs.bodies.iter().any(|b| b.invader);
     let (mut decisions, mut rollouts, mut ms, mut changes) = (0, 0, 0.0, Vec::new());
     while d.t < ticks {
         if d.t.is_multiple_of(search.replan) {
             let began = Instant::now();
-            for &side in &sides {
-                let (best, n) = improve(&d, pf, &assignment, side, search, ticks);
-                (assignment[side as usize].1, rollouts) = (best, rollouts + n);
+            if searches {
+                let (best, n) = improve(&d, pf, &assignment, search, ticks);
+                (assignment.1, rollouts) = (best, rollouts + n);
             }
             decisions += 1;
             ms += began.elapsed().as_secs_f64() * 1000.0;
@@ -318,20 +299,13 @@ pub fn duel(s: &Sample, ticks: u64, seed: u64, pf: &mut PathFinder, search: &Sea
         if !d.tick_assigned(pf, &assignment) {
             break;
         }
-        for k in d.engaged() {
-            *ran.entry(k.to_string())
-                .or_default()
-                .entry(assignment[Side::Ours as usize].1[k].0.to_string())
-                .or_default() += 1;
-        }
     }
     let mut out = d.result();
-    out["scripts"] = json!(ran);
     let named = |s: &[Script]| s.iter().map(|s| s.0).collect::<Vec<_>>();
     out["plans"] = json!(
         changes
             .iter()
-            .map(|(t, p)| json!([t, named(&p[0].1), named(&p[1].1)]))
+            .map(|(t, p)| json!([t, named(&p.1)]))
             .collect::<Vec<_>>()
     );
     out["decisions"] = json!(decisions);

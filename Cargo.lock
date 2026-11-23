@@ -134,6 +134,7 @@ dependencies = [
  "fabot-base",
  "fabot-core",
  "fabot-exchange",
+ "fabot-fight",
  "fabot-layout",
  "fabot-observe",
  "fabot-tactics",
@@ -630,10 +631,13 @@ name = "sim"
 version = "0.1.0"
 dependencies = [
  "engine",
+ "fabot-atlas",
  "fabot-base",
  "fabot-core",
+ "fabot-fight",
  "fabot-layout",
  "fabot-observe",
+ "fabot-tactics",
  "mimalloc",
  "pathfinder",
  "screeps-game-api",

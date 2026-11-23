@@ -11,7 +11,9 @@ use fabot_base::grid::{self, Footprint};
 use fabot_base::tiles::Tile;
 use fabot_base::world::{self, Creep, Id, Pos, Room, RoomName, Structure, StructureType};
 use fabot_base::{engine, tiles};
-use fabot_exchange::{self as exchange, Fighter, Ground, Losses, Outcome, Side, Stance, fighter};
+use fabot_exchange::{
+    self as exchange, Fighter, Ground, Losses, Outcome, Side, Stance, Terrain, fighter,
+};
 use fabot_tactics::{self as tactics, Offer, Tactic};
 
 type CopiesOf<'a> = Box<dyn Fn(&casting::Body) -> i32 + 'a>;
@@ -702,18 +704,11 @@ impl<'a> Scene<'a> {
         let capacity = self.capacity_of(atlas, e);
         let terrain = casting::terrain_at(room, &centre);
 
-        // A home is a post the raid comes to where our ramparts stand on it;
-        // with none, or no striker to come, a Hold stands still while the raid stands off.
-        let stance = if home
+        let posted = home
             && room.is_some_and(|r| r.name == e.room)
-            && theirs.bodies.iter().any(fighter::strikes)
             && (room.iter().flat_map(|r| &r.structures))
-                .any(|s| s.kind == StructureType::Rampart && s.owner.is_ours())
-        {
-            Stance::Hold
-        } else {
-            Stance::Standoff
-        };
+                .any(|s| s.kind == StructureType::Rampart && s.owner.is_ours());
+        let stance = stance(posted, &theirs);
 
         // An outpost is worth the yield the raid's life would stand it down
         // for; a core is the razer's and holds nothing at the wave's cost.
@@ -795,20 +790,11 @@ impl<'a> Scene<'a> {
                 set.extend(casting::razer(capacity, core_hits, &priced));
 
                 let price = Priced {
-                    raid: theirs
-                        .bodies
-                        .iter()
-                        .map(|f| engine::body_cost(&f.body))
-                        .sum(),
-                    together,
-                    ranged: landed.bodies.len() > 1 && landed.bodies.iter().all(|f| f.attack == 0),
-                    holds: exchange::stance_against(stance, &landed, &theirs, terrain)
-                        == Stance::Hold,
-                    outcome,
                     set,
                     boosted,
                     cast,
                     tick_worth,
+                    ..Priced::arm(stance, (&landed, &theirs), terrain, outcome)
                 };
                 Some(price)
             })
@@ -941,28 +927,62 @@ pub(super) fn entries(
         .collect()
 }
 
-pub(super) struct Priced {
+/// A home is a post the raid comes to where our ramparts stand on it (`posted`); with none, or
+/// no striker to come, a Hold stands still while the raid stands off.
+pub fn stance(posted: bool, theirs: &Side) -> Stance {
+    if posted && theirs.bodies.iter().any(fighter::strikes) {
+        Stance::Hold
+    } else {
+        Stance::Standoff
+    }
+}
+
+pub struct Priced {
     /// What the rival spent on the bodies the engagement fights.
-    pub(super) raid: i32,
+    pub raid: i32,
     /// Its bodies land as one, as a blob walks them in.
-    pub(super) together: bool,
+    pub together: bool,
     /// The set swings nothing, so it fights as one body.
-    pub(super) ranged: bool,
-    pub(super) holds: bool,
-    pub(super) outcome: Outcome,
-    pub(super) set: Vec<casting::Body>,
-    pub(super) boosted: bool,
+    pub ranged: bool,
+    pub holds: bool,
+    pub outcome: Outcome,
+    pub set: Vec<casting::Body>,
+    pub boosted: bool,
     /// The first `cast` of `set` the outcome prices; the rest raze.
-    pub(super) cast: usize,
-    pub(super) tick_worth: i32,
+    pub cast: usize,
+    pub tick_worth: i32,
 }
 
 impl Priced {
-    pub(super) fn offers(&self, candidates: &[Tactic]) -> Vec<Offer> {
+    /// One arm as `outcome` prices `landed` against `theirs`, nothing in its set.
+    pub fn arm(
+        stance: Stance,
+        (landed, theirs): (&Side, &Side),
+        terrain: Terrain,
+        outcome: Outcome,
+    ) -> Priced {
+        Priced {
+            raid: theirs
+                .bodies
+                .iter()
+                .map(|f| engine::body_cost(&f.body))
+                .sum(),
+            together: landed.together,
+            ranged: landed.bodies.len() > 1 && landed.bodies.iter().all(|f| f.attack == 0),
+            holds: exchange::stance_against(stance, landed, theirs, terrain) == Stance::Hold,
+            outcome,
+            set: Vec::new(),
+            boosted: false,
+            cast: 0,
+            tick_worth: 0,
+        }
+    }
+
+    pub fn offers(&self, candidates: &[Tactic]) -> Vec<Offer> {
         candidates.iter().filter_map(|t| self.offer(*t)).collect()
     }
 
-    pub(super) fn offer(&self, tactic: Tactic) -> Option<Offer> {
+    pub fn offer(&self, tactic: Tactic) -> Option<Offer> {
         let (won, ticks) = (self.outcome.is_win(), self.outcome.ticks());
         let (value, ticks) = match (tactic, self.together) {
             // A post spends no ticks of the room: the raid comes to it.

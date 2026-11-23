@@ -1,11 +1,14 @@
 // The exchange's generated set (ARCHITECTURE.md §10.1): random hostile
 // compositions (bodies, boosts, count, terrain, our towers) against fixed
 // defending sides, each duel run on krebs (`sim duel`, a world a duel)
-// and set against what `Exchange.outcome` predicted for it.
+// and set against what `Exchange.outcome` predicted for it, on the arm of the
+// tactic a home's Defend fields.
 //
-// Usage: npm run exchange -- [--count N] [--seed N] [--ticks N]
+// Usage: npm run exchange -- [--count N] [--seed N] [--ticks N] [--real 1] [--rollout R --theirs 1]
 //   --count  duels (default 200)      --seed   the draw and the engine's (default 1)
 //   --ticks  the longest a duel runs (default 400)
+//   --real   our side runs the bot's tactics, the one its Defend fields
+//   --rollout R --theirs 1   their side searches its scripts (`sim duel`'s PGS)
 //
 // Writes build/exchange/seed<N>/: samples.json, predictions.json,
 // results.json, report.txt. A predicted Win or Kite that lost is an Exchange
@@ -20,13 +23,13 @@ import { bugs, misses, outcome, report, stood } from "./prediction.mjs";
 import { simBinary } from "./run.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const usage = "usage: npm run exchange -- [--count N] [--seed N] [--ticks N]";
+const usage = "usage: npm run exchange -- [--count N] [--seed N] [--ticks N] [--real 1] [--rollout R --theirs 1]";
 const fail = (message) => {
   console.error(message);
   process.exit(1);
 };
 
-const flags = { "--count": 200, "--seed": 1, "--ticks": 400 };
+const flags = { "--count": 200, "--seed": 1, "--ticks": 400, "--real": 0, "--rollout": 0, "--theirs": 0 };
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i += 2) {
   if (!(argv[i] in flags) || !/^\d+$/.test(argv[i + 1] ?? "")) fail(usage);
@@ -141,8 +144,8 @@ writeFileSync(join(out, "samples.json"), JSON.stringify(samples));
 // ---- the predictions and the duels -----------------------------------------
 const built = spawnSync("cargo", ["build", "--release", "--quiet", "--features", "tools", "--bin", "exchange", "--manifest-path", join(REPO, "Cargo.toml")], { stdio: ["ignore", "ignore", "inherit"] });
 if (built.status !== 0) fail("the exchange tool did not build");
-const run = (bin, args = []) => {
-  const res = spawnSync(bin, args, { input: JSON.stringify(samples), encoding: "utf8", maxBuffer: 1 << 28 });
+const run = (bin, args = [], input = samples) => {
+  const res = spawnSync(bin, args, { input: JSON.stringify(input), encoding: "utf8", maxBuffer: 1 << 28 });
   if (res.status !== 0) fail(`${bin} ${args.join(" ")} failed: ${res.stderr}`);
   return JSON.parse(res.stdout);
 };
@@ -150,7 +153,9 @@ const predictions = Object.fromEntries(run(join(REPO, "target/release/exchange")
 writeFileSync(join(out, "predictions.json"), JSON.stringify(predictions));
 const sim = simBinary();
 const began = performance.now();
-const actual = run(sim, ["duel", "--ticks", String(ticks), "--seed", String(seed)]);
+const forwarded = ["--real", "--rollout", "--theirs"].flatMap((f) => (flags[f] ? [f, String(flags[f])] : []));
+const fielded = samples.map((s) => ({ ...s, tactic: predictions[s.id].tactic }));
+const actual = run(sim, ["duel", "--ticks", String(ticks), "--seed", String(seed), ...forwarded], fielded);
 const ms = performance.now() - began;
 console.error(`${count} duels in ${Math.round(ms)} ms: ${(ms / count).toFixed(2)} ms a duel, ${Math.round((count * 60000) / ms)} a minute`);
 writeFileSync(join(out, "results.json"), JSON.stringify(actual));
@@ -159,10 +164,11 @@ writeFileSync(join(out, "results.json"), JSON.stringify(actual));
 const rows = samples.map((s) => ({ s, p: predictions[s.id], a: actual[s.id] }));
 const describe = ({ s, p, a }) =>
   `  ${s.id} ${s.kind}: ${s.theirs.bodies.map((b) => b.parts.length + (b.boosts.some(Boolean) ? "*" : "") + b.parts.filter((x) => x !== "move").map((x) => x[0]).join("")).join(" ")}` +
-  ` ${s.owner === "ours" ? "" : "their room, "}${s.theirs.bodies[0].invader ? "Invader, " : ""}towers ${s[s.owner].towers.length}, ramparts ${s[s.owner].ramparts.length}; predicted ${p.kind} ${p.ticks}t, ${outcome(a)}${a.ticks === null ? "" : ` ${a.ticks}t`}`;
+  ` ${s.owner === "ours" ? "" : "their room, "}${s.theirs.bodies[0].invader ? "Invader, " : ""}towers ${s[s.owner].towers.length}, ramparts ${s[s.owner].ramparts.length}; ${p.tactic}, predicted ${p.kind} ${p.ticks}t, ${outcome(a)}${a.ticks === null ? "" : ` ${a.ticks}t`}`;
 const lines = [
-  `exchange generated set: ${count} duels, seed ${seed}, ${ticks} ticks at most`,
+  `exchange generated set: ${count} duels, seed ${seed}, ${ticks} ticks at most${forwarded.length ? `, ${forwarded.join(" ")}` : ""}`,
   ...report(rows),
+  `predicted Lose by the tactic fielded: ${Object.entries(Object.groupBy(rows.filter(({ p }) => p.kind === "lose"), ({ p, a }) => `lose→${p.tactic} ${outcome(a)}`)).sort().map(([k, xs]) => `${k} ${xs.length}`).join(", ")}`,
   "bugs:",
   ...bugs(rows).map(describe),
   "predicted Win/Kite that timed out:",

@@ -38,13 +38,15 @@ crate-type = ["cdylib", "rlib"]
 fabot-base.workspace = true
 fabot-exchange = { workspace = true, optional = true }
 fabot-layout = { workspace = true, optional = true }
+fabot-fight = { workspace = true, optional = true }
+fabot-tactics = { workspace = true, optional = true }
 screeps-game-api.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
 # The soak's node plan and the generated set's predictions, built natively.
 [features]
-tools = ["dep:fabot-exchange", "dep:fabot-layout", "fabot-base/tools", "fabot-layout/tools"]
+tools = ["dep:fabot-exchange", "dep:fabot-layout", "dep:fabot-fight", "dep:fabot-tactics", "fabot-base/tools", "fabot-layout/tools"]
 
 [[bin]]
 name = "plan"

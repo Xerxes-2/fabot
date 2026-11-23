@@ -1,18 +1,20 @@
 //! `sim duel`: the generated set's duels (`npm run exchange`), one world a
 //! duel. Reads `exchange`'s samples on stdin plus each one's `ground` and
-//! `owner`; both sides run the simplest Close/Kite emitter, not the bot's
-//! tactics, an Invader the engine's own AI. Writes `{ id: { won, ticks, dead,
-//! hits } }`: `won` null where both stand, ticks from first contact (two
-//! bodies within three, else the first hit) to the end, our bodies dead and
-//! our hits lost (a dead body's whole).
+//! `owner`; both sides run the simplest Close/Kite emitter, or with `--real 1`
+//! ours the bot's tactics (`real`); an Invader runs the engine's own AI. Writes
+//! `{ id: { won, ticks, dead, hits } }`: `won` null where both stand, ticks from
+//! first contact (two bodies within three, else the first hit) to the end, our
+//! bodies dead and our hits lost (a dead body's whole).
 //!
-//! Usage: sim duel [--ticks N] [--seed N] [`pgs::FLAGS`]
+//! Usage: sim duel [--ticks N] [--seed N] [--real 1] [`pgs::FLAGS`]
 mod pgs;
+mod real;
 
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use fabot_tactics::Tactic;
 use krebs::atom;
 use krebs::cron::JOBS;
 use krebs::doc::{Id, Val};
@@ -82,6 +84,8 @@ struct Sample {
     controller: At,
     ours: Army,
     theirs: Army,
+    /// The tactic our side fields.
+    tactic: Tactic,
 }
 
 #[derive(PartialEq)]
@@ -361,13 +365,14 @@ struct Duel {
     struck: Option<u64>,
     end: Option<u64>,
     won: Option<bool>,
+    real: Option<real::Real>,
 }
 
 /// How a side's bodies act in a tick.
 type Act<'p> = &'p dyn Fn(&mut Orders, &Thing, &View);
 
 impl Duel {
-    fn new(s: &Sample, seed: u64) -> Self {
+    fn new(s: &Sample, seed: u64, real: bool) -> Self {
         let world = stand(s, seed);
         let begun = things(&world);
         let first = [hits(&begun, Side::Ours), hits(&begun, Side::Theirs)];
@@ -380,6 +385,7 @@ impl Duel {
             struck: None,
             end: None,
             won: None,
+            real: real.then(|| real::Real::new(s.tactic)),
         }
     }
 
@@ -433,6 +439,11 @@ impl Duel {
                 terrain: self.world.terrain.raw(0),
                 stored: Stored::default(),
             };
+            let real = (self.real.as_mut()).filter(|_| user == US);
+            let ours = real.is_some();
+            if let Some(real) = real {
+                orders.stored = real.orders(&self.world);
+            }
             let (allies, foes) = creeps.iter().partition(|c| c.user == user);
             let theirs = (all.iter())
                 .filter(|o| o.kind != Kind::Creep && o.user != user)
@@ -450,7 +461,7 @@ impl Duel {
                     orders.put(tower, "attack", json!({ "id": target.id }));
                 }
             }
-            for c in &view.allies {
+            for c in view.allies.iter().filter(|_| !ours) {
                 act(&mut orders, c, &view);
             }
             users.extend(
@@ -480,8 +491,8 @@ impl Duel {
     }
 }
 
-fn duel(s: &Sample, ticks: u64, seed: u64, pf: &mut PathFinder) -> Value {
-    let mut d = Duel::new(s, seed);
+fn duel(s: &Sample, ticks: u64, seed: u64, real: bool, pf: &mut PathFinder) -> Value {
+    let mut d = Duel::new(s, seed, real);
     let mut engine = d.engine();
     let emit = |o: &mut Orders, c: &Thing, v: &View| o.act(c, v);
     while d.t < ticks && d.tick(&mut engine, pf, [&emit, &emit]) {}
@@ -489,7 +500,8 @@ fn duel(s: &Sample, ticks: u64, seed: u64, pf: &mut PathFinder) -> Value {
 }
 
 pub fn main() {
-    let mut flags = BTreeMap::from([("--ticks".to_string(), 400), ("--seed".to_string(), 1)]);
+    let flags = [("--ticks", 400), ("--seed", 1), ("--real", 0)].map(|(f, v)| (f.to_string(), v));
+    let mut flags = BTreeMap::from(flags);
     flags.extend(pgs::FLAGS.map(|(f, v)| (f.to_string(), v)));
     let usage: String = flags.keys().map(|f| format!(" [{f} N]")).collect();
     let mut argv = std::env::args().skip(2);
@@ -497,17 +509,17 @@ pub fn main() {
         let slot = (flags.get_mut(&flag)).unwrap_or_else(|| panic!("usage: sim duel{usage}"));
         *slot = value.parse().expect("a number");
     }
-    let (ticks, seed) = (flags["--ticks"], flags["--seed"]);
+    let (ticks, seed, real) = (flags["--ticks"], flags["--seed"], flags["--real"] > 0);
     let search = (flags["--rollout"] > 0).then(|| pgs::Search {
         rollout: flags["--rollout"],
         replan: flags["--replan"],
         rounds: flags["--rounds"],
-        sides: [flags["--ours"] > 0, flags["--theirs"] > 0],
+        theirs: flags["--theirs"] > 0,
     });
     let run = |s: &Sample, pf: &mut PathFinder| match &search {
-        Some(search) => pgs::duel(s, ticks, seed, pf, search),
-        None if flags["--check-fork"] > 0 => pgs::check_fork(s, ticks, seed, pf),
-        None => duel(s, ticks, seed, pf),
+        Some(search) => pgs::duel(s, (ticks, seed, real), pf, search),
+        None if flags["--check-fork"] > 0 => pgs::check_fork(s, (ticks, seed, real), pf),
+        None => duel(s, ticks, seed, real, pf),
     };
     let mut text = String::new();
     std::io::stdin()

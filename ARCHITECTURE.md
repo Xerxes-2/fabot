@@ -759,6 +759,10 @@ Two engines complement each other:
   and `xxscreeps` disagree, `@screeps/engine` / `@screeps/backend` settles it.
   `npm run exchange` plays its duels on `sim` too (`sim duel`,
   `sim/src/duel/`), so the prediction error is read over thousands of duels.
+  With `--real 1` our side runs the bot's tactics, the one its Defend fields;
+  the rival stays a stand-in (the emitter, or with `--rollout R --theirs 1` a
+  stress test: his worst reaction his bodies allow), as no rival's strategy can
+  be simulated and each differs.
   - `❓` Still on `xxscreeps` (`SIM_START`/`SIM_MEASURES` in `scripts/sim/run.mjs`):
     active rival bots/raids, resumed worlds (`at`/`bundle`), capture intel
     segments, and unported measures (`decay.jsonl`, `waves`, `lost`).

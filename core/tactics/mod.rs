@@ -476,6 +476,23 @@ pub fn step_back(
     found.map_or_else(|| hold(sight, creep), |t| step_to(creep, t))
 }
 
+pub fn engage(
+    sight: &mut Sight,
+    (tactic, order): (Tactic, &[Id]),
+    (centre, enter): (&Pos, bool),
+    (members, fighters): (&[&Creep], &[&Creep]),
+    c: &Creep,
+) -> Wish {
+    match (tactic, c.swings()) {
+        (Tactic::BlobClose, false) if exposed(sight, centre.room, members, c) => {
+            step_back(sight, centre.room, members, c)
+        }
+        (Tactic::Kite | Tactic::BlobKite, false) => kite(sight, order, centre, enter, c),
+        (Tactic::Hold, _) => rampart(sight, fighters, c),
+        _ => close(sight, order, centre, enter, c),
+    }
+}
+
 pub fn blob(
     sight: &mut Sight,
     centre: &Pos,
