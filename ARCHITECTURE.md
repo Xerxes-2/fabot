@@ -572,6 +572,9 @@ and `cheapest_win` (adds only to already-standing `ours`).
 - `❓` Exchange pools every mate's heal onto the focus whatever the ground, but
   a body pinned by terrain gets only its adjacent mates' heal; a geometry-aware
   heal model or a tactic that avoids pinning fixes it.
+- `❓` Our set's hit-back on the raid scales with the swing all its living
+  bodies keep, whatever their range, and a body worn down off the focus ends
+  no pricing window.
 - `❓` (after zone-control defence) Exchange's Kite arm prices a self-healing
   healer, or a raid our rangers could kite off a post, as Lose where kiting
   wins.
@@ -588,6 +591,10 @@ and `cheapest_win` (adds only to already-standing `ours`).
   redesign.
 - **Focus:** the Exchange prices the kill our bodies strike: both rank the
   raid by `fighter::kill_rank`.
+- **Parts:** our bodies strike, heal and hit back only with the parts their
+  remaining hits keep alive, head first; the raid is priced whole until it
+  dies, since pricing its parts too let rivals that rotate hurt bodies out
+  beat a predicted Win (owner, 2026-11-24; bugs 36 → 46).
 - **Losses:** a set's cost charges every body of ours the outcome loses,
   standing or cast, once at its body cost (a survivor at the share of hits it
   lost, never its cast: it fights the next raid), so a death never prices

@@ -384,10 +384,17 @@ fn out_heals(price: &Price, our_damage: i32) -> bool {
     our_damage > price.healing && (price.tough == 0 || our_damage > price.tough_healing)
 }
 
-#[derive(Clone, Copy, Debug)]
-struct Focused {
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Acts {
     deals: i32,
     heals: i32,
+    swing: i32,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Focused<'a> {
+    /// Its `Acts` by its live parts: the engine breaks them head first.
+    by_live: &'a [Acts],
     hits: i32,
     full: i32,
     cost: i32,
@@ -397,6 +404,28 @@ struct Focused {
     lands: f64,
     /// The tick from which it strikes and heals: struck in place, it may still walk to its reach.
     acts: f64,
+}
+
+impl Focused<'_> {
+    fn live(&self, left: f64) -> usize {
+        ((left / f64::from(engine::PART_HITS)).ceil() as usize).min(self.by_live.len() - 1)
+    }
+
+    fn at(&self, left: f64) -> Acts {
+        self.by_live[self.live(left)]
+    }
+
+    fn weakens(&self, left: f64) -> f64 {
+        let now = self.live(left);
+        let weaker = self.by_live[..now]
+            .iter()
+            .rposition(|a| *a != self.by_live[now]);
+        weaker.map_or(0.0, |k| f64::from(engine::PART_HITS * k as i32))
+    }
+
+    fn taken(&self, left: f64) -> i32 {
+        self.back * self.at(left).swing / self.at(f64::from(self.hits)).swing.max(1)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -445,16 +474,21 @@ fn spend(price: &Price, dealt: i32, span: f64, layers: &[f64]) -> Result<f64, Ve
 /// kills ours one at a time, fewest hits first; ours fight with those landed.
 fn focused_against(
     price: &Price,
-    beside: i32,
-    bodies: &[Focused],
+    (beside, struck): (i32, i32),
+    bodies: &[Focused<'_>],
     (our_shield, broken): (i32, i32),
     (towers, approach): (i32, f64),
 ) -> Fight {
-    let dealt = |alive: &[(Focused, f64)]| -> i32 {
-        beside + alive.iter().map(|(b, _)| b.deals).sum::<i32>()
+    let whole: Vec<(Focused, f64)> = bodies.iter().map(|b| (*b, f64::from(b.hits))).collect();
+    let sum = |xs: &[(Focused, f64)], of: fn(Acts) -> i32| -> i64 {
+        xs.iter().map(|(b, left)| i64::from(of(b.at(*left)))).sum()
+    };
+    let dealt = |acting: &[(Focused, f64)], alive: &[(Focused, f64)]| -> i32 {
+        let swing = |a: Acts| a.swing;
+        let struck = i64::from(struck) * sum(alive, swing) / sum(&whole, swing).max(1);
+        (i64::from(beside) + struck + sum(acting, |a| a.deals)) as i32
     };
 
-    let whole: Vec<(Focused, f64)> = bodies.iter().map(|b| (*b, f64::from(b.hits))).collect();
     let total = price.damage + bodies.iter().map(|b| b.back).sum::<i32>();
 
     let mut price = price.clone();
@@ -507,14 +541,15 @@ fn focused_against(
             let focus = (alive.iter().position(|(b, _)| b.lands <= elapsed)).filter(|_| !walled);
             let (rate, layer) = match focus {
                 None if walled => {
-                    let rate =
-                        price.damage + broken + landed.iter().map(|(b, _)| b.back).sum::<i32>();
+                    let rate = price.damage
+                        + broken
+                        + landed.iter().map(|(b, left)| b.taken(*left)).sum::<i32>();
                     (f64::from(rate), shield)
                 }
                 Some(at) => {
-                    let heals = acting.iter().map(|(b, _)| b.heals).sum::<i32>();
+                    let heals = sum(&acting, |a| a.heals) as i32;
                     (
-                        f64::from(price.damage + alive[at].0.back - heals),
+                        f64::from(price.damage + alive[at].0.taken(alive[at].1) - heals),
                         alive[at].1,
                     )
                 }
@@ -525,24 +560,28 @@ fn focused_against(
             } else {
                 layer / rate
             };
-            let window = span.min(gap);
+            let weakens = match focus {
+                Some(at) if rate > 0.0 => (alive[at].1 - alive[at].0.weakens(alive[at].1)) / rate,
+                _ => f64::INFINITY,
+            };
+            let window = span.min(gap).min(weakens);
             let after = |t: f64| -> Vec<(Focused, f64)> {
                 (alive.iter().enumerate())
                     .map(|(i, (b, left))| match b.lands <= elapsed {
                         true if Some(i) == focus => (*b, left - t * rate.max(0.0)),
-                        true => (*b, (left - f64::from(b.back) * t).max(0.0)),
+                        true => (*b, (left - f64::from(b.taken(*left)) * t).max(0.0)),
                         false => (*b, *left),
                     })
                     .collect()
             };
 
-            match spend(&price, dealt(&acting), window, &layers) {
+            match spend(&price, dealt(&acting, &alive), window, &layers) {
                 Ok(t) if walled => return ends(true, Some(elapsed + t), dead, &alive),
                 Ok(t) => return ends(true, Some(elapsed + t), dead, &after(t)),
                 Err(_) if window.is_infinite() => return ends(false, None, dead, &alive),
                 Err(rest) => {
                     layers = rest;
-                    let falls = span <= gap;
+                    let falls = span <= window;
                     alive = after(window);
 
                     if walled {
@@ -552,9 +591,9 @@ fn focused_against(
                         dead += 1;
                     }
 
-                    elapsed = match next.filter(|_| !falls) {
+                    elapsed = match next.filter(|next| !falls && *next - elapsed <= window) {
                         Some(next) => next,
-                        None => elapsed + span,
+                        None => elapsed + window,
                     };
                 }
             }
@@ -577,7 +616,7 @@ fn focused_against(
 
     if total == 0 {
         Fight {
-            won: !price.breaches || out_heals(&price, dealt(&whole)),
+            won: !price.breaches || out_heals(&price, dealt(&whole, &whole)),
             ..fight
         }
     } else {
@@ -1177,10 +1216,21 @@ fn exchange(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> Out
         (false, true) => joins,
     };
 
-    let bodies: Vec<Focused> = (pairs.iter().zip(walks.iter().zip(&struck)))
-        .map(|((f, (range, heal_range)), (walk, struck))| Focused {
-            deals: fighter::damage_at(f, *range),
-            heals: fighter::heal_at(f, *heal_range),
+    let by_live: Vec<Vec<Acts>> = (pairs.iter())
+        .map(|(f, (range, heal_range))| {
+            (0..=f.body.len() as i32)
+                .map(|live| fighter::of_parts(&f.body, &f.boosts, engine::PART_HITS * live, None))
+                .map(|at| Acts {
+                    deals: fighter::damage_at(&at, *range),
+                    heals: fighter::heal_at(&at, *heal_range),
+                    swing: at.strikes_back.min(f.strikes_back),
+                })
+                .collect()
+        })
+        .collect();
+    let bodies: Vec<Focused> = (pairs.iter().zip(&by_live).zip(walks.iter().zip(&struck)))
+        .map(|(((f, _), by_live), (walk, struck))| Focused {
+            by_live,
             hits: f.hits,
             full: engine::PART_HITS * f.body.len() as i32,
             cost: engine::body_cost(&f.body),
@@ -1190,7 +1240,8 @@ fn exchange(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> Out
         })
         .collect();
 
-    let dealt = towers + bodies.iter().map(|b| b.deals).sum::<i32>();
+    let dealt: i32 = bodies.iter().map(|b| b.at(f64::from(b.hits)).deals).sum();
+    let dealt = towers + dealt;
     let approach = approach_of(terrain, stance, &fighters, &theirs.bodies);
 
     let settle = |horizon: i32, price: &Price| -> (Outcome, i32) {
@@ -1218,7 +1269,7 @@ fn exchange(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> Out
 
         let fight = focused_against(
             price,
-            towers + struck,
+            (towers, struck),
             &bodies,
             shield,
             (walking_in, approach),
