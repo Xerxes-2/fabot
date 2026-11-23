@@ -1,5 +1,5 @@
 mod act;
-pub use price::{Priced, casting, stance};
+pub use price::{Priced, arms, casting, picked};
 pub mod kinds;
 mod price;
 pub mod run;

@@ -14,7 +14,6 @@ use fabot_base::vocabulary::Part;
 use fabot_base::world::{Pos, RoomName};
 use fabot_exchange::{self as exchange, Outcome, Side, Terrain, Tower, fighter};
 use fabot_fight::{Priced, kinds::defend};
-use fabot_tactics::Offer;
 use serde_json::{Value, json};
 
 fn int(e: &Value, key: &str) -> i32 {
@@ -68,32 +67,26 @@ fn predict(sample: &Value) -> Value {
         run_off: int(terrain, "runOff"),
     };
     let (ours, theirs) = (side(&sample["ours"]), side(&sample["theirs"]));
-    let stance = fabot_fight::stance(!ours.ramparts.is_empty(), &theirs);
+    let posted = !ours.ramparts.is_empty();
     let set: Vec<Vec<Part>> = ours.bodies.iter().map(|f| f.body.clone()).collect();
-    let arms = [false, true].map(|together| {
-        let ours = Side {
-            together,
-            ..ours.clone()
-        };
-        let outcome = exchange::outcome(stance, &ours, &theirs, terrain);
-        let arm = Priced::arm(stance, (&ours, &theirs), terrain, outcome);
-        Priced {
-            set: set.clone(),
-            cast: set.len(),
-            ..arm
-        }
-    });
-    let offers: Vec<Offer> = arms
-        .iter()
-        .flat_map(|p| p.offers(defend::CANDIDATES))
+    let arms: Vec<Priced> = fabot_fight::arms(posted, &theirs)
+        .map(|(stance, together)| {
+            let ours = Side {
+                together,
+                ..ours.clone()
+            };
+            let outcome = exchange::outcome(stance, &ours, &theirs, terrain);
+            let arm = Priced::arm(stance, (&ours, &theirs), terrain, outcome);
+            Priced {
+                set: set.clone(),
+                cast: set.len(),
+                ..arm
+            }
+        })
         .collect();
-    let tactic = fabot_tactics::select(&offers, None)
-        .expect("an arm offers")
-        .tactic;
-    let outcome = arms
-        .iter()
-        .find_map(|p| p.offer(tactic).map(|_| p.outcome))
-        .unwrap();
+    let (_, chosen) = fabot_fight::picked(&arms, defend::CANDIDATES, None);
+    let (tactic, arm) = chosen.expect("an arm offers");
+    let outcome = arm.outcome;
     let (kind, ticks, losses) = match outcome {
         Outcome::Win(ticks, losses) => ("win", ticks, losses),
         Outcome::Kite(ticks) => ("kite", ticks, Default::default()),

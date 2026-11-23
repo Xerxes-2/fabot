@@ -515,7 +515,14 @@ rotation declaring room minable), `PowerBank` (break → declare `Pickup`),
 and `cheapest_win` (adds only to already-standing `ours`).
 
 - **Stance:** under `Hold`, raids come to our post; raids out-ranging our
-  strikers and outlasting towers price as `Standoff`.
+  strikers and outlasting towers price as `Standoff`. A home with ramparts
+  prices `Standoff` beside `Hold`, and a `Hold` that loses is worth nothing:
+  a post is kept only where it is the cheaper consequence.
+- `❓` (after zone-control defence) Exchange does not price a ranged rival
+  shooting off our kiter's MOVE so a full-speed melee catches it.
+- `❓` (after zone-control defence) Exchange's Kite arm prices a self-healing
+  healer, or a raid our rangers could kite off a post, as Lose where kiting
+  wins.
 - **Arrival:** a body counts from the tick it lands (a cast's spawn time and
   walk included), so a set fed in one at a time prices worse than one walked
   in `together`, which pays the wait in ticks instead (a body already in the

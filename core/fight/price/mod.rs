@@ -708,7 +708,6 @@ impl<'a> Scene<'a> {
             && room.is_some_and(|r| r.name == e.room)
             && (room.iter().flat_map(|r| &r.structures))
                 .any(|s| s.kind == StructureType::Rampart && s.owner.is_ours());
-        let stance = stance(posted, &theirs);
 
         // An outpost is worth the yield the raid's life would stand it down
         // for; a core is the razer's and holds nothing at the wave's cost.
@@ -760,9 +759,8 @@ impl<'a> Scene<'a> {
             casting::walking(capacity)
         };
 
-        let arms: Vec<Priced> = [false, true]
-            .into_iter()
-            .filter_map(|together| {
+        let arms: Vec<Priced> = arms(posted, &theirs)
+            .filter_map(|(stance, together)| {
                 let side = Side {
                     together,
                     cast_walk: colony,
@@ -801,9 +799,7 @@ impl<'a> Scene<'a> {
             .collect();
 
         let (candidates, pin) = self.ruled(e, defend::CANDIDATES);
-        let offers: Vec<Offer> = arms.iter().flat_map(|p| p.offers(&candidates)).collect();
-        let chosen = (tactics::select(&offers, pin).map(|o| o.tactic))
-            .and_then(|t| Some((t, arms.iter().find(|p| p.offer(t).is_some())?)));
+        let (offers, chosen) = picked(&arms, &candidates, pin);
 
         let starved =
             arms.is_empty() && (e.unanswered || e.ours.is_empty() && asked_fighters.is_empty());
@@ -857,7 +853,7 @@ impl<'a> Scene<'a> {
                     .collect();
 
                 if casting::wins(
-                    stance,
+                    price.stance,
                     &casting::side_in(&self.world.rules, room, standing),
                     &theirs,
                     terrain,
@@ -927,14 +923,35 @@ pub(super) fn entries(
         .collect()
 }
 
-/// A home is a post the raid comes to where our ramparts stand on it (`posted`); with none, or
-/// no striker to come, a Hold stands still while the raid stands off.
-pub fn stance(posted: bool, theirs: &Side) -> Stance {
-    if posted && theirs.bodies.iter().any(fighter::strikes) {
-        Stance::Hold
-    } else {
-        Stance::Standoff
-    }
+/// Each arm a Defend prices, a stance and whether its bodies walk in together: a home is a
+/// post the raid comes to where our ramparts stand on it (`posted`), priced beside the standoff
+/// a set fights off it and walking no blob in; with none, or no striker to come, a Hold stands
+/// still while the raid stands off.
+pub fn arms(posted: bool, theirs: &Side) -> impl Iterator<Item = (Stance, bool)> {
+    let held = posted && theirs.bodies.iter().any(fighter::strikes);
+    let stances = [Stance::Hold, Stance::Standoff]
+        .into_iter()
+        .filter(move |s| held || *s == Stance::Standoff);
+    stances
+        .flat_map(|s| [(s, false), (s, true)])
+        .filter(|(s, together)| *s == Stance::Standoff || !together)
+}
+
+/// Every arm's offers, and the selected one's tactic and arm: two stances may offer one tactic.
+pub fn picked<'a>(
+    arms: &'a [Priced],
+    candidates: &[Tactic],
+    pin: Option<Tactic>,
+) -> (Vec<Offer>, Option<(Tactic, &'a Priced)>) {
+    let offers: Vec<Offer> = arms.iter().flat_map(|p| p.offers(candidates)).collect();
+    let pick = |o: &Offer| {
+        Some((
+            o.tactic,
+            arms.iter().find(|p| p.offer(o.tactic) == Some(*o))?,
+        ))
+    };
+    let chosen = tactics::select(&offers, pin).and_then(pick);
+    (offers, chosen)
 }
 
 pub struct Priced {
@@ -944,6 +961,7 @@ pub struct Priced {
     pub together: bool,
     /// The set swings nothing, so it fights as one body.
     pub ranged: bool,
+    pub stance: Stance,
     pub holds: bool,
     pub outcome: Outcome,
     pub set: Vec<casting::Body>,
@@ -969,6 +987,7 @@ impl Priced {
                 .sum(),
             together: landed.together,
             ranged: landed.bodies.len() > 1 && landed.bodies.iter().all(|f| f.attack == 0),
+            stance,
             holds: exchange::stance_against(stance, landed, theirs, terrain) == Stance::Hold,
             outcome,
             set: Vec::new(),
@@ -986,7 +1005,8 @@ impl Priced {
         let (won, ticks) = (self.outcome.is_win(), self.outcome.ticks());
         let (value, ticks) = match (tactic, self.together) {
             // A post spends no ticks of the room: the raid comes to it.
-            (Tactic::Hold, false) if self.holds => (self.raid, 0),
+            (Tactic::Hold, false) if self.holds => (if won { self.raid } else { 0 }, 0),
+            _ if self.stance == Stance::Hold => return None,
             (Tactic::Close, false) if won && !self.ranged => (self.raid, ticks),
             (Tactic::Kite, false) if !won && !self.ranged => (0, ticks),
             (Tactic::BlobClose, true) if won => (self.raid, ticks),
