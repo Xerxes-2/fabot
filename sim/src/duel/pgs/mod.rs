@@ -2,7 +2,6 @@
 //! Portfolio Greedy Search (Churchill & Buro 2013) over each of his bodies'
 //! scripts, the duel's own world the forward model, a rollout scored by each
 //! side's living bodies and hits left. Ours keep their side's play.
-use std::time::Instant;
 
 use krebs::world::{RoomsMeta, TerrainStore, World};
 use krebs_pathfinder::PathFinder;
@@ -285,13 +284,13 @@ pub fn duel(
     let (mut decisions, mut rollouts, mut ms, mut changes) = (0, 0, 0.0, Vec::new());
     while d.t < ticks {
         if d.t.is_multiple_of(search.replan) {
-            let began = Instant::now();
+            let began = crate::view::now();
             if searches {
                 let (best, n) = improve(&d, pf, &assignment, search, ticks);
                 (assignment.1, rollouts) = (best, rollouts + n);
             }
             decisions += 1;
-            ms += began.elapsed().as_secs_f64() * 1000.0;
+            ms += crate::view::now() - began;
             if changes.last().is_none_or(|(_, last)| *last != assignment) {
                 changes.push((d.t, assignment.clone()));
             }

@@ -653,6 +653,7 @@ dependencies = [
  "fabot-layout",
  "fabot-observe",
  "fabot-tactics",
+ "libc",
  "mimalloc",
  "pathfinder",
  "screeps-game-api",

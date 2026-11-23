@@ -24,7 +24,6 @@ mod world;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Write;
-use std::time::Instant;
 
 use krebs::cron::{CronCtx, JOBS};
 use krebs::hooks::ProcessorHooks;
@@ -33,7 +32,7 @@ use krebs::processor::{self, TickCtx, global::GlobalCtx};
 use krebs::world::World as Krebs;
 use serde_json::{Value, json};
 
-use view::{View, ms};
+use view::View;
 
 #[global_allocator]
 static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -260,13 +259,13 @@ fn main() {
         processed: 0,
     };
     let (mut engine_ms, mut sample_ms) = (0.0, 0.0);
-    let began = Instant::now();
+    let began = std::time::Instant::now();
 
     // One view a tick: the sampler reads tick t - 1's end, which tick t's bot reads too.
     for t in 0..=args.ticks {
         let mut v = View::of(&k);
         if let Some(t) = t.checked_sub(1) {
-            let at = Instant::now();
+            let at = view::now();
             for (p, uid) in players.iter_mut().zip(&uids) {
                 v.us = uid;
                 p.sampler.account(&v);
@@ -287,7 +286,7 @@ fn main() {
                 }
             }
             v.us = &uids[0];
-            sample_ms += ms(at);
+            sample_ms += view::now() - at;
         }
         if t == args.ticks {
             break;
@@ -304,7 +303,7 @@ fn main() {
         intents.extend(rivals.intents(&v, t));
         drop(v);
 
-        let at = Instant::now();
+        let at = view::now();
         engine.step(&mut k, intents);
         for (_, room, due) in args.npc.iter().filter(|n| n.0 == t) {
             match due {
@@ -316,7 +315,7 @@ fn main() {
             }
         }
         rivals.stand(&mut k, t, &room, || engine.next());
-        engine_ms += ms(at);
+        engine_ms += view::now() - at;
         watch.iter_mut().for_each(|w| w.tick(&k, &players));
     }
 

@@ -18,6 +18,7 @@ krebs = { package = "engine", git = "https://github.com/DefaultO/krebs", rev = "
 krebs-backend = { package = "backend", git = "https://github.com/DefaultO/krebs", rev = "04a5394d00b05bbff4e472e07e0bf07ac811c315" }
 krebs-pathfinder = { package = "pathfinder", git = "https://github.com/DefaultO/krebs", rev = "04a5394d00b05bbff4e472e07e0bf07ac811c315" }
 krebs-util = { package = "util", git = "https://github.com/DefaultO/krebs", rev = "04a5394d00b05bbff4e472e07e0bf07ac811c315" }
+libc = "0.2"
 mimalloc = "0.1.52"
 screeps-game-api.workspace = true
 serde.workspace = true

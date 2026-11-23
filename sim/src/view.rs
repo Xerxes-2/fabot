@@ -42,8 +42,11 @@ pub fn xy(o: &Obj) -> (i64, i64) {
     (num(o, atom!("x")) as i64, num(o, atom!("y")) as i64)
 }
 
-pub fn ms(at: std::time::Instant) -> f64 {
-    at.elapsed().as_secs_f64() * 1000.0
+/// This thread's CPU time in ms: live's `getUsed`, unlike wall clock, skips descheduled time.
+pub fn now() -> f64 {
+    let mut t: libc::timespec = unsafe { std::mem::zeroed() };
+    unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &raw mut t) };
+    t.tv_sec as f64 * 1000.0 + t.tv_nsec as f64 / 1e6
 }
 
 pub struct Event<'a> {

@@ -2,7 +2,6 @@
 //! values, the heap (`ARCHITECTURE.md` §4) kept across ticks until `reset`.
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
-use std::time::Instant;
 
 use fabot_base::declarations::Declarations;
 use fabot_base::intel::Intel;
@@ -16,7 +15,7 @@ use krebs::intents::RoomIntents;
 use screeps::LocalRoomTerrain;
 use serde_json::{Value, json};
 
-use crate::view::{View, ms};
+use crate::view::{View, now};
 use crate::{act, read, reset};
 
 /// Every room's terrain, read once: the world never changes it.
@@ -69,8 +68,7 @@ impl<W: Write> Driver<W> {
         t: u64,
         ledger: &dyn Fn() -> Value,
     ) -> Vec<(usize, RoomIntents)> {
-        let began = Instant::now();
-        let clock = || ms(began);
+        let began = now();
         let mut memory = Memory::of_text(std::mem::take(&mut self.memory));
         let mut written = None;
         let mut stored = None;
@@ -78,10 +76,10 @@ impl<W: Write> Driver<W> {
         let seam = drive::Seam {
             read: |declarations: &Declarations, _drain, (start, phases, _): drive::Clocked| {
                 let mut world = read::world(v, declarations);
-                let mapping = clock();
+                let mapping = now();
                 phases.push(("decode".to_string(), mapping - start));
                 world.closed = maps.1.clone();
-                let mapped = clock();
+                let mapped = now();
                 phases.push(("map".to_string(), mapped - mapping));
                 (world, maps as &dyn Terrains, (), mapped)
             },
@@ -97,7 +95,7 @@ impl<W: Write> Driver<W> {
         let ran = drive::run(
             heap,
             (&mut memory, intel, metrics),
-            (&clock, &mut phases, false),
+            (&now, &mut phases, false),
             seam,
         );
         self.memory = written.unwrap_or(memory.text);
@@ -106,7 +104,7 @@ impl<W: Write> Driver<W> {
             .filter(|(p, _)| !matches!(p.as_str(), "decode" | "map" | "execute" | "metrics"));
         let decide_ms = decided.map(|(_, cpu)| cpu).sum::<f64>();
         self.decide_ms += decide_ms;
-        self.adapter_ms += ms(began) - decide_ms;
+        self.adapter_ms += now() - began - decide_ms;
 
         let [faults, cpu, windows] = &mut self.out;
         for (module, message) in ran.faults {
