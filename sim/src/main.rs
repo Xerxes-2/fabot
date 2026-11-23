@@ -4,6 +4,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod act;
+mod badge;
 mod driver;
 mod duel;
 mod engaged;
@@ -57,6 +58,8 @@ struct Args {
     npc: Vec<npc::Due>,
     /// `--watch`'s port and tick in ms.
     watch: Option<(u16, u64)>,
+    /// Our badge as the official `{type, color1, color2, color3, param, flip}`.
+    badge: Option<serde_json::Value>,
     generated: Option<generated::Spec>,
 }
 
@@ -71,7 +74,7 @@ fn args() -> Args {
         };
         flags.insert(flag, value);
     }
-    let usage = "usage: sim (--world <world.json> --room <name> | --gen <seed> [--sectors WxH]) --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--follow A,B] [--npc <[[tick, room, bodies or null for a core]]>] [--ended] [--check] [--reset-every N] [--watch [--port N] [--tick-ms N]]";
+    let usage = "usage: sim (--world <world.json> --room <name> | --gen <seed> [--sectors WxH]) --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--follow A,B] [--npc <[[tick, room, bodies or null for a core]]>] [--ended] [--check] [--reset-every N] [--watch [--port N] [--tick-ms N] [--badge <json>]]";
     let need = |flag: &str| (flags.get(flag).cloned()).unwrap_or_else(|| panic!("{flag}: {usage}"));
     let number = |flag: &str, or: u64| {
         (flags.get(flag)).map_or(or, |v| {
@@ -97,6 +100,7 @@ fn args() -> Args {
             .collect(),
         watch: (flags.contains_key("--watch"))
             .then(|| (number("--port", 21025) as u16, number("--tick-ms", 50))),
+        badge: (flags.get("--badge")).map(|b| serde_json::from_str(b).expect(usage)),
         npc: serde_json::from_str(flags.get("--npc").map_or("[]", String::as_str)).expect(usage),
     }
 }
@@ -210,7 +214,7 @@ fn main() {
     let read = || (world::read(&args.world), args.room.clone());
     let (map, room) = (args.generated.as_ref()).map_or_else(read, generated::Spec::world);
     eprintln!("colony: {room}; output {}", args.out);
-    let mut k = map.stand(&room, args.seed, args.ended);
+    let mut k = map.stand(&room, args.seed, args.ended, args.badge.clone());
     let mut watch = (args.watch).map(|(port, every)| watch::Watch::open(&k, &room, port, every));
     let terrains = (map.rooms.iter())
         .filter_map(|(name, t)| {

@@ -106,7 +106,7 @@ impl Map {
 
     /// Our user, the room's controller ours (at level 1 unless the world's already is), in safe mode
     /// unless `ended` or the world says, and Spawn1 on Layout's tile unless a spawn stands.
-    pub fn stand(&self, room: &str, seed: u64, ended: bool) -> World {
+    pub fn stand(&self, room: &str, seed: u64, ended: bool, badge: Option<Value>) -> World {
         let t = self.time;
         let mut objects: Vec<Value> = Vec::new();
         for o in &self.objects {
@@ -140,7 +140,7 @@ impl Map {
             "name": "Spawn1", "user": US, "store": { "energy": SPAWN_ENERGY_START }, "storeCapacityResource": { "energy": SPAWN_ENERGY_CAPACITY },
             "hits": SPAWN_HITS, "hitsMax": SPAWN_HITS, "spawning": null, "notifyWhenAttacked": true }));
         }
-        let mut us = user(US, USERNAME);
+        let mut us = crate::badge::ours(user(US, USERNAME), badge);
         let homes = objects
             .iter()
             .filter(|o| o["type"] == "controller" && o["user"] == US);
@@ -162,8 +162,10 @@ impl Map {
 }
 
 pub fn user(id: &str, name: &str) -> Value {
-    json!({ "_id": id, "username": name, "usernameLower": name.to_lowercase(),
-    "cpu": 100, "gcl": 0, "cpuAvailable": 10000, "active": 10000, "rooms": [], "money": 0, "power": 0 })
+    crate::badge::put(
+        json!({ "_id": id, "username": name, "usernameLower": name.to_lowercase(),
+    "cpu": 100, "gcl": 0, "cpuAvailable": 10000, "active": 10000, "rooms": [], "money": 0, "power": 0 }),
+    )
 }
 
 pub fn krebs(db: Value, seed: u64, t: i64) -> World {
@@ -180,21 +182,23 @@ pub fn krebs(db: Value, seed: u64, t: i64) -> World {
     });
     // An import derives no presence: until a room is processed nobody sees it.
     for r in 0..w.rooms.len() {
-        let s = &w.rooms[r];
-        let (info, objects, flags) = (s.info.clone(), s.objects.to_vec(), s.flags.clone());
-        let seen = RoomSnapshot::from_docs(
-            info,
-            objects,
-            flags,
-            s.event_log.clone(),
-            s.map_view.clone(),
-            s.processed_at,
-            &w.user_ids,
-        );
-        w.rooms[r] = Arc::new(seen);
+        w.rooms[r] = rebuilt(&w, r, w.rooms[r].objects.to_vec());
         w.active.insert(r as u32);
     }
     w
+}
+
+pub fn rebuilt(k: &World, r: usize, objects: Vec<krebs::doc::DocRef>) -> Arc<RoomSnapshot> {
+    let s = &k.rooms[r];
+    Arc::new(RoomSnapshot::from_docs(
+        s.info.clone(),
+        objects,
+        s.flags.clone(),
+        s.event_log.clone(),
+        s.map_view.clone(),
+        s.processed_at,
+        &k.user_ids,
+    ))
 }
 
 /// A `rooms` doc as the official world generator lays it out: a highway a

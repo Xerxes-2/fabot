@@ -18,7 +18,7 @@ use krebs::doc::DocRef;
 use krebs::room_name::RoomXY;
 use krebs::world::{World as Krebs, WorldView};
 use krebs_backend::http::{Request, Response, obj, url_decode};
-use krebs_backend::{ApiCtx, Published, api, png, server, socket, str_field, ws};
+use krebs_backend::{ApiCtx, Published, api, field, png, server, socket, str_field, ws};
 use krebs_util::json::Json;
 use serde_json::{Map, Value, json};
 
@@ -207,11 +207,16 @@ impl Conn {
                 return;
             };
             if let Some(first) = socket::rooms::room(us(view), channel, view) {
-                self.send(channel, &first.stringify());
-                let users = match first.get("users") {
-                    Some(Json::Obj(users)) => users.iter().map(|(id, _)| id.clone()).collect(),
-                    _ => HashSet::new(),
-                };
+                // krebs writes the NPCs' entries without the badge their docs hold.
+                let mut first: Value = serde_json::from_str(&first.stringify()).unwrap_or_default();
+                let mut users = HashSet::new();
+                if let Some(Value::Object(all)) = first.get_mut("users") {
+                    for (id, user) in all.iter_mut() {
+                        *user = brief(view, id);
+                        users.insert(id.clone());
+                    }
+                }
+                self.send(channel, &first.to_string());
                 let shown = (view.rooms[r].objects.clone(), users);
                 self.rooms.insert(room.to_string(), shown);
             }
@@ -269,7 +274,12 @@ impl Conn {
 
 fn brief(view: &WorldView, id: &str) -> Value {
     let user = view.users.iter().find(|u| u.id.as_str() == id);
-    json!({ "_id": id, "username": user.and_then(|u| str_field(&u.doc, "username")) })
+    let mut brief =
+        json!({ "_id": id, "username": user.and_then(|u| str_field(&u.doc, "username")) });
+    if let Some(badge) = user.and_then(|u| field(&u.doc, "badge")) {
+        brief["badge"] = serde_json::from_str(&badge.to_json().stringify()).unwrap_or_default();
+    }
+    brief
 }
 
 fn id_of(d: &DocRef) -> &str {

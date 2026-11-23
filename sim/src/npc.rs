@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use krebs::constants::{INVADER_CORE_HITS, OBSTACLE_OBJECT_TYPES};
 use krebs::doc::{Doc, Val};
-use krebs::world::{RoomSnapshot, World};
+use krebs::world::World;
 use krebs_util::json::Json;
 use serde_json::{Value, json};
 
@@ -16,8 +16,7 @@ use crate::world::INVADER;
 pub type Due = (u64, String, Option<Vec<Vec<String>>>);
 
 fn insert(k: &mut World, r: usize, docs: Vec<Value>) {
-    let prev = k.rooms[r].clone();
-    let mut objects = prev.objects.to_vec();
+    let mut objects = k.rooms[r].objects.to_vec();
     for mut doc in docs {
         doc["_id"] = json!(k.ids.next().as_str());
         if let Val::Obj(o) = Val::from_json(&Json::parse(&doc.to_string()).expect("JSON")) {
@@ -25,14 +24,8 @@ fn insert(k: &mut World, r: usize, docs: Vec<Value>) {
             k.next_seq += 1;
         }
     }
-    let (log, view, users) = (
-        prev.event_log.clone(),
-        prev.map_view.clone(),
-        k.user_ids.clone(),
-    );
-    let (info, flags, at) = (prev.info.clone(), prev.flags.clone(), prev.processed_at);
-    let next = RoomSnapshot::from_docs(info, objects, flags, log, view, at, &users);
-    k.set_room(r as u32, Arc::new(next));
+    let next = crate::world::rebuilt(k, r, objects);
+    k.set_room(r as u32, next);
     k.active.insert(r as u32);
 }
 
