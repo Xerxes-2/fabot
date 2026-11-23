@@ -83,11 +83,7 @@ fn args() -> Args {
     }
     let usage = "usage: sim (--world <world.json> --room <name> | --gen <seed> [--sectors WxH]) --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--follow A,B] [--npc <[[tick, room, bodies, [a stronghold's level, deploy] or null for a core]]>] [--rivals <[rival::Rival]>] [--players <[{name, room, declarations}]>, each after the first out in <dir>/<name>] [--ended] [--check] [--reset-every N] [--capture a-b[,c-d]] [--watch [--port N] [--tick-ms N] [--badge <json>]]";
     let need = |flag: &str| (flags.get(flag).cloned()).unwrap_or_else(|| panic!("{flag}: {usage}"));
-    let number = |flag: &str, or: u64| {
-        (flags.get(flag)).map_or(or, |v| {
-            v.parse().unwrap_or_else(|_| panic!("{flag}: {usage}"))
-        })
-    };
+    let number = |flag: &str, or: u64| (flags.get(flag)).map_or(or, |v| v.parse().expect(usage));
     Args {
         generated: generated::Spec::of(&flags),
         capture: flags.get("--capture").cloned(),
@@ -302,6 +298,8 @@ fn main() {
                 let mut row = sampler.sample(&v, t, &map);
                 row["faults"] = json!(driver.faults.len());
                 row["strongholds"] = npc::strongholds(&v, &driver.kept.intel);
+                let seen = (driver.kept.intel.iter()).map(|(r, w)| (r.to_string(), w.seen));
+                row["seen"] = json!(seen.collect::<BTreeMap<_, _>>());
                 let _ = writeln!(samples, "{row}");
                 eprintln!("t{t} rcl{rcl} {} creeps {}", row["progress"], row["creeps"]);
                 (players.iter().skip(1)).for_each(|p| eprintln!("  {}", p.standing(&v)));

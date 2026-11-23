@@ -1,0 +1,16 @@
+{
+  "why": "unseen rooms in three observers' reach, one declared and beside no seen room: an observer, not a scout, looks at each (the one left unlooked by name order cast a scout)",
+  "modules": ["strategy"],
+  "start": {
+    "world": "scripts/scenario/worlds/young-among-colonies.json",
+    "seed": 1,
+    "declarations": {
+      "outposts": [{ "room": "W3S4", "controller": { "id": "d0014c", "x": 23, "y": 30 }, "sources": [{ "id": "d0014b", "x": 38, "y": 29 }] }]
+    }
+  },
+  "ticks": 300,
+  "assert": [
+    { "measure": "scoutsCast", "max": 0 },
+    { "measure": "seenAt", "room": "W3S4", "max": 1 }
+  ]
+}

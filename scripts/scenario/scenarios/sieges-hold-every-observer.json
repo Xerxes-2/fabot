@@ -1,0 +1,11 @@
+{
+  "why": "every observer held by a siege every tick: the unseen rooms they reach but never look at are scouted",
+  "modules": ["strategy"],
+  "start": {
+    "world": "scripts/scenario/worlds/young-among-colonies.json",
+    "seed": 1,
+    "declarations": { "sieges": ["W8S4", "W1S4", "W9S9"] }
+  },
+  "ticks": 300,
+  "assert": [{ "measure": "scoutsCast", "min": 1 }]
+}

@@ -223,6 +223,7 @@ export const measures = {
   // Signs our bodies sent (sim only), and whether `room` ends the window signed by us since the run's first
   // tick, which the first sample follows.
   signsSent: (samples, a) => (at(samples, a.to ?? Infinity).signsSent ?? 0) - (a.from ? (at(samples, a.from).signsSent ?? 0) : 0),
+  seenAt: (samples, a) => (at(samples, a.to ?? Infinity).seen?.[a.room] ?? Infinity) - offsetOf(samples),
   signedInRun: (samples, a) => Number(at(samples, a.to ?? Infinity).rooms[a.room]?.signed >= offsetOf(samples) - 1),
   bounced: (samples, a) => at(samples, a.to ?? Infinity).bounced - at(samples, a.from ?? 0).bounced,
   // Sent to `room`: energy, or `resource` if one is named.

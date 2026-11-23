@@ -7,7 +7,7 @@ use fabot_base::intel::{Intel, Row, STALE, Scout, Stronghold};
 use fabot_base::intents::Action;
 use fabot_base::tiles;
 use fabot_base::vocabulary::Part;
-use fabot_base::world::{Owner, RoomName, StructureType, World};
+use fabot_base::world::{Owner, RoomName, Structure, StructureType, World};
 
 /// `Owner::of_user`'s inverse: a row outlives the stance it was seen under.
 fn user(me: &str, owner: &Owner) -> Option<String> {
@@ -126,7 +126,11 @@ pub fn threat_radius(
         })
 }
 
-/// Every declared or threat-radius room no observer covers is scouted (§7.1).
+fn sees(observer: RoomName, room: RoomName) -> bool {
+    tiles::rooms_apart(observer, room) <= engine::OBSERVER_RANGE
+}
+
+/// Every declared or threat-radius room no free observer reaches is scouted (§7.1).
 pub fn sight(
     world: &World,
     atlas: &Atlas,
@@ -147,18 +151,16 @@ pub fn sight(
         .collect();
     stale.sort();
 
-    let mut observe = |room: &RoomName| -> Option<Action> {
+    let observe = |free: &mut Vec<&Structure>, room: &RoomName| -> Option<Action> {
         if !atlas.has_terrain(*room) {
             return None;
         }
-        let (at, observer) = free
+        let (at, _) = free
             .iter()
             .enumerate()
-            .filter(|(_, o)| tiles::rooms_apart(o.pos.room, *room) <= engine::OBSERVER_RANGE)
+            .filter(|(_, o)| sees(o.pos.room, *room))
             .min_by_key(|(_, o)| (tiles::rooms_apart(o.pos.room, *room), o.id))?;
-        let id = observer.id;
-        free.remove(at);
-        Some(Action::Observe(id, *room))
+        Some(Action::Observe(free.remove(at).id, *room))
     };
 
     // A sweep's choice needs a look while no fight body hunts a candidate,
@@ -166,18 +168,20 @@ pub fn sight(
     let looked = (preyed.iter()).any(|r| intel.get(r).is_some_and(|row| row.seen >= world.time));
     let hunting = (world.creeps.iter())
         .any(|c| declarations::fights(&c.name) && preyed.contains(&c.pos.room));
-    let mut observed: Vec<Action> = (declarations.sieges.iter())
-        .chain(preyed.first().filter(|_| !hunting && !looked))
-        .filter_map(&mut observe)
-        .collect();
+    let sieges = declarations.sieges.iter();
+    let mut observed: Vec<Action> = sieges.filter_map(|r| observe(&mut free, r)).collect();
+    // An observer a siege holds every tick reaches nothing else.
+    let eyes: Vec<RoomName> = free.iter().map(|o| o.pos.room).collect();
+    let sweep = preyed.first().filter(|_| !hunting && !looked);
+    observed.extend(sweep.and_then(|r| observe(&mut free, r)));
     let covered = |observed: &[Action], room: &RoomName| {
-        observed
-            .iter()
-            .any(|i| matches!(i, Action::Observe(_, r) if r == room))
+        (observed.iter()).any(|i| matches!(i, Action::Observe(_, r) if r == room))
     };
-    for (_, room) in stale {
+    // A declared room no row neighbours never joins the frontier, and no scout is cast to it.
+    let unseen = declared(declarations).filter(|r| !intel.contains_key(*r));
+    for room in unseen.chain(stale.into_iter().map(|(_, r)| r)) {
         if !covered(&observed, room)
-            && let Some(intent) = observe(room)
+            && let Some(intent) = observe(&mut free, room)
         {
             observed.push(intent);
         }
@@ -188,12 +192,12 @@ pub fn sight(
         .flat_map(|room| [(1, 0), (-1, 0), (0, 1), (0, -1)].map(|(dx, dy)| room.offset(dx, dy)))
         .flatten()
         .filter(|room| !intel.contains_key(room))
-        .collect::<std::collections::BTreeSet<_>>()
+        .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
     let n = frontier.len().max(1);
     frontier.rotate_left(world.time as usize % n);
-    observed.extend(frontier.iter().filter_map(&mut observe));
+    observed.extend(frontier.iter().filter_map(|r| observe(&mut free, r)));
 
     let seen = |room: &RoomName| intel.get(room).map(|r| r.seen);
     // Rings nearest first: a nearer rival raids sooner, and age alone strays.
@@ -207,6 +211,7 @@ pub fn sight(
     let mut rooms: Vec<&RoomName> = declared(declarations)
         .chain(near)
         .filter(|room| !covered(&observed, room))
+        .filter(|room| !(atlas.has_terrain(**room) && eyes.iter().any(|e| sees(*e, **room))))
         .collect();
     rooms.sort_by_cached_key(|room| (seen(room), *room));
     rooms.dedup();
