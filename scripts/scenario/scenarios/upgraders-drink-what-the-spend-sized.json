@@ -1,0 +1,9 @@
+{
+  "why": "the controller's feed carries the drink the spend sized its upgraders to: a stocked RCL7 hub-fed node keeps its controller link stocked, not booked for tens of ticks by a carrier still walking home from an outpost",
+  "modules": ["economy"],
+  "start": { "room": "W8N3", "seed": 1, "node": "N6" },
+  "ticks": 5000,
+  "assert": [
+    { "measure": "upgrade", "from": 2000, "min": 120000 }
+  ]
+}

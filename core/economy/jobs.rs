@@ -479,6 +479,9 @@ impl<'a> Jobs<'a> {
                 (3 + low - high, 100 * lacks / engine::LAB_MINERAL_CAPACITY)
             }
             Of::Terminal { fee } => (4 - i32::from(fee), s.amount),
+            // A booking from afar holds the hub through the walk home; an outpost
+            // load banks in the storage beside it.
+            Of::Hub if s.pos.room != body.pos.room => return None,
             Of::Feed { drink, capacity } => {
                 let need = s.amount + drink * range;
                 if need <= 0 {
