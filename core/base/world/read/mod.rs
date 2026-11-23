@@ -219,17 +219,20 @@ impl<'a> Reader<'a> {
         })
     }
 
-    /// Only our own fallen creep is written.
+    /// Our own fallen creep whole, another's by its id.
     fn remains(&mut self) -> Remains {
+        let (id, pos, store) = (self.id(), self.pos(), self.store());
+        let creep = self.n();
         Remains {
-            id: self.id(),
-            pos: self.pos(),
-            store: self.store(),
-            fallen: self.flag().then(|| Fallen {
+            id,
+            pos,
+            store,
+            fallen: (creep == 1).then(|| Fallen {
                 body: self.list(|r| r.word().parse().unwrap_or(Part::Tough)),
                 ticks_to_live: self.n(),
                 died: self.n(),
             }),
+            theirs: (creep == 2).then(|| self.id()),
         }
     }
 

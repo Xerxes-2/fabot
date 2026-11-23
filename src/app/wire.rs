@@ -6,6 +6,7 @@ use wasm_bindgen::{JsCast, JsValue};
 
 use fabot_base::intel::{self, Intel};
 use fabot_core::memory::Memory;
+use fabot_observe::engagements::Log;
 use fabot_observe::metrics::Metrics;
 use fabot_tactics::Offer;
 
@@ -13,6 +14,7 @@ use fabot_tactics::Offer;
 pub const OBSERVE_SEGMENT: u8 = 1;
 const INTEL_SEGMENT: u8 = 2;
 pub const METRICS_SEGMENT: u8 = 3;
+pub const ENGAGEMENTS_SEGMENT: u8 = 4;
 
 pub fn read_memory() -> Memory {
     Memory::of_text(String::from(raw_memory::get()))
@@ -106,7 +108,7 @@ pub fn write_observe(o: &Observed) {
 /// loaded segment counts against the ten saved per tick.
 pub fn read_intel(asked: bool) -> Option<Intel> {
     if !asked {
-        raw_memory::set_active_segments(&[INTEL_SEGMENT, METRICS_SEGMENT]);
+        raw_memory::set_active_segments(&[INTEL_SEGMENT, METRICS_SEGMENT, ENGAGEMENTS_SEGMENT]);
     }
     let text = raw_memory::segments().get(INTEL_SEGMENT);
     (asked || text.is_some()).then(|| text.map_or_else(Intel::new, |text| intel::of_text(&text)))
@@ -116,6 +118,11 @@ pub fn read_intel(asked: bool) -> Option<Intel> {
 pub fn read_metrics() -> Metrics {
     let text = raw_memory::segments().get(METRICS_SEGMENT);
     text.map_or_else(Metrics::default, |text| Metrics::of_text(&text))
+}
+
+pub fn read_log() -> Log {
+    let text = raw_memory::segments().get(ENGAGEMENTS_SEGMENT);
+    text.map_or_else(Log::default, |text| Log::of_text(&text))
 }
 
 pub fn write_intel(rows: &Intel) {

@@ -29,6 +29,7 @@ export const SIM_MEASURES = new Set([
   "spawnStuck", "scoutsCast", "scoutStill", "scoutTicksIn", "reserverOnPost", "castIn", "bodiesOut", "bodiesStruck", "struckOn",
   "deathsError", "attackersAtEnd", "creepsLostBeforeSafeMode", "predictedWinsLost", "engagements", "oscillation", "bodiesLost",
   "closedOnCore", "heldPastWave", "idleMost", "answeredMost", "sentTo", "sentBack", "draftedAfterOthers", "arrivedApart", "signsSent", "signedInRun",
+  "liveEngagements", "liveAstray", "liveEnergy",
 ]);
 
 /** Whether a `worlds/`-shaped world holds a spawn of ours: a capture, not a map. */
@@ -132,7 +133,7 @@ function npc(invaders = "", wave, core = "", ticks) {
   return [...waves, ...core.split(",").filter(Boolean).map((c) => [Number(c.split(":")[1]), c.split(":")[0], null])];
 }
 
-/** `engagements.jsonl` off the ticks sim wrote to `fight.jsonl`, as soak-step writes it on xxscreeps. */
+/** `engagements.jsonl` off the ticks sim wrote to `fight.jsonl`, as soak-step writes it on xxscreeps, and `segment4.jsonl` off `cpu.jsonl`. */
 async function engaged(out) {
   const rows = [];
   // Every room's objects of the tick being fed: an engagement closes inside `fights.tick`.
@@ -144,6 +145,9 @@ async function engaged(out) {
   }
   await fights.end();
   writeFileSync(join(out, "engagements.jsonl"), rows.join(""));
+  // The bot's own `engagements.log` rows (segment 4), as each tick closed them.
+  const closed = readFileSync(join(out, "cpu.jsonl"), "utf8").split("\n").filter(Boolean).flatMap((l) => JSON.parse(l).closed ?? []);
+  writeFileSync(join(out, "segment4.jsonl"), closed.map((r) => r + "\n").join(""));
 }
 
 /** This tree's sim (`npm run build:sim`), its path; null when it did not build. */

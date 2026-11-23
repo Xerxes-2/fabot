@@ -807,6 +807,8 @@ fs.writeFileSync(join(out, "levels.json"), JSON.stringify(levels) + "\n");
 fs.writeFileSync(join(out, "slow.json"), JSON.stringify(slowTicks) + "\n");
 abandoned();
 fs.writeFileSync(join(out, "lost.json"), JSON.stringify([...lost].sort((a, b) => a - b)) + "\n");
+// `engagements.log` as the bot left it, as sim writes it.
+fs.writeFileSync(join(out, "segment4.jsonl"), (await segmentText(4)) ?? "");
 console.log(JSON.stringify({ ticks, ms: Date.now() - started }));
 
 if (!watchMs) await svc.publish({ type: "shutdown" });

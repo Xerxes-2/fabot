@@ -8,8 +8,10 @@ import { gunzipSync } from "node:zlib";
 import { connect, fail } from "./screeps-api.mjs";
 import { METRICS, windows } from "./metrics.mjs";
 import { replay, views } from "./observe-views.mjs";
+import { outcome, report, tested } from "./sim/prediction.mjs";
 
 const OBSERVE = 1;
+const ENGAGEMENTS = 4;
 const USAGE = `usage: npm run observe -- <command>
   health             tick, version, bucket, CPU, faults, refusals, modules off, metrics past their threshold
   metrics [room] [--since <tick>]
@@ -30,19 +32,36 @@ const USAGE = `usage: npm run observe -- <command>
   battle <room> <from> <to>
                      the room's history: every body's blood, each tower's shots, the razes, his garrison
   wait --ticks N     return after N game ticks
+  exchange [segment4.jsonl]
+                     the closed engagements of segment 4 (or a run's copy, sim's \`segment4.jsonl\`): \`npm run exchange\`'s table, then each rival's outcomes by tactic
   engagements        each open engagement: members, plan order, offers, target, prediction; pending casts
   room <room>        controller, structures, creeps, tombstones, sites, as the server holds them
   creep <name>       one of our creeps and its assignment
   regions <room>     walkable regions past rival ramparts: exits per side, owned structures beside
   replay <capture.jsonl> [--trace <creep>]
                      dist/main.js run on the captured ticks, offline: intents, refusals, tile scores`;
-const LIVE = ["metrics", "health", "cpu", "faults", "switches", "switch", "declare", "capture", "tap", "battle", "wait", "engagements", "room", "creep", "regions"];
+const LIVE = ["metrics", "health", "cpu", "faults", "switches", "switch", "declare", "capture", "tap", "battle", "wait", "engagements", "exchange", "room", "creep", "regions"];
+
+// The rows of `engagements.log` as `report` reads them, then the outcomes per rival (`npc`: none named) and tactic.
+function exchange(text) {
+  const rows = tested((text ?? "").split("\n").filter(Boolean).map((l) => JSON.parse(l)));
+  for (const line of [`${rows.length} engagements`, ...report(rows)]) console.log(line);
+  const by = Map.groupBy(rows, (r) => `${r.rivals.join(",") || "npc"} ${r.tactic}`);
+  for (const [key, of] of [...by].sort()) {
+    const counts = Object.entries(Object.groupBy(of, (r) => `${r.p.kind}→${outcome(r.a)}`)).sort();
+    console.log(`${key}: ${counts.map(([k, n]) => `${k} ${n.length}`).join(", ")}`);
+  }
+}
 
 const [cmd, ...args] = process.argv.slice(2);
 if (cmd === "replay") {
   const traced = args.includes("--trace") ? args[args.indexOf("--trace") + 1] : undefined;
   if (!args[0] || (args.includes("--trace") && !traced)) fail("usage: observe replay <capture.jsonl> [--trace <creep>]");
   replay(args[0], traced);
+  process.exit(0);
+}
+if (cmd === "exchange" && args[0]) {
+  exchange(readFileSync(args[0], "utf8"));
   process.exit(0);
 }
 if (!LIVE.includes(cmd)) fail(USAGE);
@@ -178,6 +197,9 @@ switch (cmd) {
     console.log(`tick ${until} reached`);
     break;
   }
+  case "exchange":
+    exchange(await raw(ENGAGEMENTS));
+    break;
   case "engagements":
     await view.engagements();
     break;

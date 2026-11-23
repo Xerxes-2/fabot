@@ -252,8 +252,12 @@ dependencies = [
  "fabot-atlas",
  "fabot-base",
  "fabot-economy",
+ "fabot-exchange",
  "fabot-fight",
+ "fabot-tactics",
  "proptest",
+ "serde",
+ "serde_json",
  "strum",
 ]
 

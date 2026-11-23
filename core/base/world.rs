@@ -526,6 +526,8 @@ pub struct Remains {
     pub pos: Pos,
     pub store: Store,
     pub fallen: Option<Fallen>,
+    /// The id of another's creep its tombstone keeps: the engine's word it died.
+    pub theirs: Option<Id>,
 }
 
 #[derive(Clone, Debug)]
@@ -1001,6 +1003,14 @@ pub fn cast(body: &[impl Borrow<Part>], kind: Part) -> i32 {
 }
 
 impl World<'_> {
+    /// The engine's word of a death last tick: another's tombstone, or a structure destroyed.
+    pub fn fallen(&self) -> BTreeSet<Id> {
+        let tombs = (self.rooms.iter()).flat_map(|r| r.remains.iter().filter_map(|t| t.theirs));
+        tombs
+            .chain(self.destroyed.iter().map(|(_, id, _)| *id))
+            .collect()
+    }
+
     #[inline]
     pub fn room(&self, name: RoomName) -> Option<&Room<'_>> {
         self.rooms.iter().find(|r| r.name == name)

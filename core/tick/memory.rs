@@ -64,6 +64,7 @@ impl Memory {
                 engagements: list(fight, "engagements"),
                 casts: list(fight, "casts"),
                 due: list(fight, "due"),
+                closed: Vec::new(),
             },
             strategy: StrategyState {
                 expansion: Deserialize::deserialize(&v2["expansion"]).unwrap_or_default(),

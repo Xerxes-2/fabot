@@ -1,21 +1,29 @@
 // The prediction error (ARCHITECTURE.md §10.1), one set of definitions for
 // `npm run exchange`'s duels and the scenarios' engagements. A row is
 // { p: what Exchange predicted, { kind: win|kite|lose, ticks, dead, hits },
-// a: what happened, { won: true, false or null (both stood), unresolved?, ticks, dead, hits } }.
-export const outcome = (a) => (a.won === true ? "won" : a.won === false ? "lost" : a.unresolved ? "unresolved" : "stood");
+// a: what happened, { won: true, false or null (both stood, or its rival left), left?, unresolved?, ticks, dead, hits } }.
+export const outcome = (a) => (a.won === true ? "won" : a.won === false ? "lost" : a.left ? "left" : a.unresolved ? "unresolved" : "stood");
 
-// An engagement's outcome, off the facts `engine/soak-step.mjs` writes. Won:
-// its group dead at the close. Lost: after contact it disengaged, or gave up
-// (a home's turned unanswered after it was answered), whatever came after; one
-// that quit before contact, none of ours dead, tested no prediction. Unresolved:
-// still open and answered when the run ended. Ticks from first contact to
-// the group's last sighting, as `sim duel` reads a duel.
+// An engagement's outcome, off the facts `engine/soak-step.mjs` or the bot's
+// `engagements.log` writes. Won: its rival dead at the close. Left: closed
+// while its rival stands (`outlived`), or with a rival body not seen to die
+// (`left`, the bot's): no evidence for a Win. Lost: after contact it disengaged, or
+// gave up (a home's turned unanswered after it was answered), whatever came
+// after; one that quit before contact, none of ours dead, tested no
+// prediction. Unresolved: still open and answered when the run ended. Ticks
+// from first contact to the rival's last sighting, as `sim duel` reads a duel.
 export function engagement(e) {
   const quit = e.disengaged || e.gaveUp;
-  const won = quit ? (e.contact === null && e.dead === 0 ? null : false) : e.closed !== null && !e.outlived ? true : null;
+  const left = !quit && e.closed !== null && Boolean(e.outlived || e.left);
+  const won = quit ? (e.contact === null && e.dead === 0 ? null : false) : e.closed !== null && !left ? true : null;
   const end = won === true ? e.seen + 1 : e.closed;
-  return { won, unresolved: won === null && e.closed === null && e.answered, ticks: won === null || e.contact === null || end === null ? null : end - e.contact, dead: e.dead };
+  return { won, left, unresolved: won === null && e.closed === null && e.answered, ticks: won === null || e.contact === null || end === null ? null : end - e.contact, dead: e.dead };
 }
+
+// The rows a run's engagements or the live `engagements.log` (segment 4) hold,
+// as `report` reads them: one never priced predicted nothing.
+export const tested = (rows) =>
+  rows.filter((e) => e.predicted).map((e) => ({ id: e.id, p: e.predicted, a: engagement(e), room: e.room, opened: e.opened, closed: e.closed, tactic: e.tactic, rivals: e.rivals, energy: e.energy }));
 
 // A predicted Win or Kite that lost is an Exchange bug; one that timed out, a miss.
 export const bugs = (rows) => rows.filter(({ p, a }) => p.kind !== "lose" && a.won === false);

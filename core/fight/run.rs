@@ -526,6 +526,9 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
     }
 
     scene.boost_hold(&engagements, &mut decided);
+    let facts = (&scene, &state.groups[..], &world.fallen());
+    super::price::account(facts, &state.engagements, &mut decided);
+    let closed = super::price::closed(facts, &engagements, &decided);
     let kept: BTreeSet<i32> = decided
         .iter()
         .filter(|e| !(e.phase == Phase::Disengaging || scene.spent(e)))
@@ -569,6 +572,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
     state.engagements.sort_by_key(|e| e.id);
     state.casts = casts;
     state.due = asked.due;
+    state.closed = closed;
     out
 }
 

@@ -9,6 +9,7 @@ use fabot_base::declarations::Declarations;
 use fabot_base::intel::{self, Intel};
 use fabot_base::world::{World, read};
 use fabot_core::drive;
+use fabot_observe::engagements::Log;
 use fabot_observe::metrics::{self, Metrics};
 
 const FAULTS_KEPT: usize = 20;
@@ -26,6 +27,10 @@ struct Heap {
     intel_asked: bool,
     /// `None` until its segment is read, with intel's.
     metrics: Option<Metrics>,
+    /// `None` until its segment is read, with intel's.
+    log: Option<Log>,
+    /// Rows closed before it was read, written with the first after.
+    pending: Vec<String>,
 }
 
 thread_local! {
@@ -38,6 +43,8 @@ thread_local! {
         intel: None,
         intel_asked: false,
         metrics: None,
+        log: None,
+        pending: Vec::new(),
     });
 }
 
@@ -55,20 +62,24 @@ fn run_tick() {
     let clock = || game_cpu::get_used();
     let mut phases: Vec<(String, f64)> = Vec::new();
 
-    let (mut kept, mut faults, mut maps, mut buffers, held, asked, metrics) = HEAP.with(|heap| {
-        let mut heap = heap.borrow_mut();
-        (
-            std::mem::take(&mut heap.drive),
-            std::mem::take(&mut heap.faults),
-            std::mem::take(&mut heap.maps),
-            std::mem::take(&mut heap.buffers),
-            heap.intel.take(),
-            std::mem::replace(&mut heap.intel_asked, true),
-            heap.metrics.take(),
-        )
-    });
+    let (mut kept, mut faults, mut maps, mut buffers, held, asked, metrics, log, mut pending) =
+        HEAP.with(|heap| {
+            let mut heap = heap.borrow_mut();
+            (
+                std::mem::take(&mut heap.drive),
+                std::mem::take(&mut heap.faults),
+                std::mem::take(&mut heap.maps),
+                std::mem::take(&mut heap.buffers),
+                heap.intel.take(),
+                std::mem::replace(&mut heap.intel_asked, true),
+                heap.metrics.take(),
+                heap.log.take(),
+                std::mem::take(&mut heap.pending),
+            )
+        });
     let mut intel = held.or_else(|| wire::read_intel(asked));
     let mut metrics = metrics.or_else(|| intel.is_some().then(wire::read_metrics));
+    let mut log = log.or_else(|| intel.is_some().then(wire::read_log));
 
     let start = clock();
     let mut memory = wire::read_memory();
@@ -132,6 +143,7 @@ fn run_tick() {
         off,
         offers,
         traces,
+        closed,
     } = ran;
     for (creep, scored) in traces {
         let tiles: Vec<String> = scored
@@ -153,6 +165,16 @@ fn run_tick() {
         && world.time % metrics::WINDOW == 0
     {
         wire::write_segment(wire::METRICS_SEGMENT, m.text());
+    }
+
+    pending.extend(closed);
+    if let Some(log) = log.as_mut()
+        && !pending.is_empty()
+    {
+        wire::write_segment(
+            wire::ENGAGEMENTS_SEGMENT,
+            log.push(std::mem::take(&mut pending)),
+        );
     }
 
     let observed = wire::Observed {
@@ -179,6 +201,8 @@ fn run_tick() {
         heap.buffers = buffers;
         heap.intel = intel;
         heap.metrics = metrics;
+        heap.log = log;
+        heap.pending = pending;
     });
 }
 

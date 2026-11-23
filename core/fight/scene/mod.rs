@@ -798,6 +798,7 @@ pub(super) fn fresh(
         ignored: 0,
         capacity: 0,
         predicted: None,
+        actual: Default::default(),
     }
 }
 

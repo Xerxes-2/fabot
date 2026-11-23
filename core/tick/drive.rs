@@ -16,6 +16,7 @@ use fabot_base::world::Pos;
 use fabot_base::world::{RoomName, Sightings, World};
 use fabot_fight::shape::Phase;
 use fabot_layout::shape::Standing;
+use fabot_observe::engagements;
 use fabot_observe::metrics::{self, Metrics};
 use fabot_tactics::Offer;
 
@@ -36,6 +37,8 @@ pub struct Ran<'t> {
     pub off: Vec<String>,
     pub offers: Vec<(i32, Vec<Offer>)>,
     pub traces: Vec<(String, Vec<(Pos, i64)>)>,
+    /// `engagements.log`'s rows of the engagements closed this tick.
+    pub closed: Vec<String>,
 }
 
 /// The terrain a driver has read: a room's, and every room's for the Atlas.
@@ -112,6 +115,7 @@ where
         (&|room| maps.terrain(room), maps.terrains()),
     );
 
+    let closed = engagements::rows(&decided.result.state.fight.closed, world.time);
     let mut faults = Vec::new();
     if misread > 0 {
         faults.push(("world", format!("{misread} objects' ids not hex: dropped")));
@@ -180,5 +184,6 @@ where
             .map(|e| (e.id, e.plan.offers.clone()))
             .collect(),
         traces: result.telemetry.traces,
+        closed,
     }
 }

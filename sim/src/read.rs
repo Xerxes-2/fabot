@@ -180,7 +180,7 @@ impl Reader<'_> {
         }
     }
 
-    /// A tombstone keeps our creep's body and life left; a ruin, and theirs, none.
+    /// A tombstone keeps our creep's body and life left, another's its id; a ruin none.
     fn remains(&self, room: RoomName, o: &Obj, tombstone: bool) -> Remains {
         let fallen = (tombstone && self.owner(o).is_ours()).then(|| Fallen {
             body: match o.get(Atom::intern("creepBody")) {
@@ -196,6 +196,8 @@ impl Reader<'_> {
             id: Id::of_engine(text(o, atom!("_id"))),
             pos: self.pos(room, o),
             store: Reader::store(o),
+            theirs: (tombstone && fallen.is_none())
+                .then(|| Id::of_engine(text(o, Atom::intern("creepId")))),
             fallen,
         }
     }

@@ -96,31 +96,18 @@ fn clusters<'a>(owned: &BTreeSet<RoomName>, hostiles: &'a [Creep]) -> Vec<Vec<&'
 }
 
 /// The member nearest the members' mean, so the centre always stands in a seen room.
-fn centre(members: &[&Creep]) -> Pos {
+fn centre<'a>(members: &[&'a Creep]) -> Pos {
     let n = members.len() as i32;
-    let mut sx = 0;
-    let mut sy = 0;
-
-    for m in members {
+    let (sx, sy) = (members.iter()).fold((0, 0), |(sx, sy), m| {
         let (x, y) = world_of(&m.pos);
-        sx += x;
-        sy += y;
-    }
-
-    let mut best = members[0].pos;
-    let mut best_d = i32::MAX;
-
-    for m in members {
+        (sx + x, sy + y)
+    });
+    let off = |m: &Creep| {
         let (x, y) = world_of(&m.pos);
-        let d = (n * x - sx).abs().max((n * y - sy).abs());
-
-        if d < best_d {
-            best = m.pos;
-            best_d = d;
-        }
-    }
-
-    best
+        (n * x - sx).abs().max((n * y - sy).abs())
+    };
+    let nearer = |a: &'a Creep, b: &'a Creep| if off(b) < off(a) { b } else { a };
+    (members.iter().copied()).fold(members[0], nearer).pos
 }
 
 /// `held`: the highest group id an engagement holds; a new id is past it and

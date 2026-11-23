@@ -1,10 +1,13 @@
 {
-  "why": "An outpost Defend's pair lands together and wins the raid the Exchange priced it to win: W7N3's boosted melee and healer at t10384 draft a free body standing in W8N3 beside a new cast, priced Win, 1 dead. main walked them in 14 ticks apart, struck the healer first and closed each swinger on its own across a swamp, and lost both",
+  "why": "An outpost Defend wins the raid the Exchange priced it to win: W8N2's raid at t9944 is answered by a cast body, which then stands free and is drafted, uncast, against W7N3's at t10208; both priced Win, both won, none of ours dead. Each body reaches its raid with the rest, each live row is classed as the engine's, and the run books the energy cast. Before this run's start shifted, W7N3's pair (a free body beside a new cast) was walked in 14 ticks apart and lost both",
   "modules": ["fight", "exchange"],
   "start": { "room": "W8N3", "seed": 1, "late": 7 },
   "ticks": 10560,
   "assert": [
-    { "measure": "arrivedApart", "room": "W7N3", "from": 10300, "max": 4 },
-    { "measure": "predictedWinsLost", "room": "W7N3", "from": 10300, "max": 0 }
+    { "measure": "engagements", "from": 9900, "min": 2 },
+    { "measure": "arrivedApart", "from": 9900, "max": 4 },
+    { "measure": "predictedWinsLost", "from": 9900, "max": 0 },
+    { "measure": "liveAstray", "from": 9900, "max": 0 },
+    { "measure": "liveEnergy", "min": 1 }
   ]
 }

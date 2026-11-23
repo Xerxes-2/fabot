@@ -132,11 +132,12 @@ globalThis.__fabotRead = (() => {
     if (type === "invaderCore") collapse(st), n(st.level);
     if (type === "rampart") n(st.isPublic === true);
   };
-  // Only what `world.rs` `Fallen` keeps.
+  // Only what `world.rs` `Fallen` keeps, or another's creep's id.
   const remains = (r) => {
     s(r.id), pos(r.pos), store(r.store);
     const c = r.creep;
-    if (absent(c) || c.my !== true) return n(0);
+    if (absent(c)) return n(0);
+    if (c.my !== true) return (n(2), s(c.id));
     n(1), (parts += list(Array.isArray(c.body) ? c.body : [], (p) => w(p.type))), n(c.ticksToLive), n(r.deathTime);
   };
   const room = (r) => {
@@ -248,7 +249,9 @@ globalThis.__fabotRead = (() => {
       (r) =>
         (r.find[118] = find((o) => {
           pos(o), store(o);
-          if (n()) (o.creep = { my: true, body: list(() => ({ type: w() })), ticksToLive: n() }), (o.deathTime = n());
+          const creep = n();
+          if (creep === 1) (o.creep = { my: true, body: list(() => ({ type: w() })), ticksToLive: n() }), (o.deathTime = n());
+          if (creep === 2) o.creep = { my: false, id: s() };
           return o.id;
         })),
       (r) => (r.find[103] = find(creep)),

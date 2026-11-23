@@ -6,6 +6,8 @@ use fabot_base::vocabulary::Part;
 use fabot_base::world::{Id, Pos, RoomName};
 use fabot_tactics::{Offer, Tactic};
 
+pub use crate::price::{Actual, Closed};
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FightState {
     pub groups: Vec<Group>,
@@ -13,6 +15,8 @@ pub struct FightState {
     pub casts: Vec<Cast>,
     /// The colonies a siege successor falls due at within a body's spawn time.
     pub due: BTreeSet<RoomName>,
+    /// This tick's only, for `engagements.log`.
+    pub closed: Vec<Closed>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -138,6 +142,8 @@ pub struct Engagement {
     /// unanswered (at open, or a given-up home's re-answered), set against
     /// what happened (§10.1); None while it never was.
     pub predicted: Option<fabot_exchange::Outcome>,
+    #[serde(default, skip_serializing_if = "Actual::is_empty")]
+    pub actual: Actual,
 }
 
 /// A body's place in its set, which its successor takes (§6.2's rotation).

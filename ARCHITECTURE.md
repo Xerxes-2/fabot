@@ -187,13 +187,14 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
   text is written back as `{"v2":…}` alone, so any other top-level key is
   gone after our first write). Holds only per-tick essential state.
 - **Segments (`RawMemory.segments`):** `1` observe, `2` intel, `3` metrics,
-  `10–14` recorder ring. Used for infrequent, large, or operator-facing data.
+  `4` engagements log, `10–14` recorder ring. Used for infrequent, large, or
+  operator-facing data.
 - **Heap:** rebuildable caches only (§1 cold start).
 
 | Store | Shape | Owner | Lives in | Why |
 |---|---|---|---|---|
 | `assignments` | creep → `Assignment` (slot, task; `slot\|task` text only in `memory.rs`) | Economy | Memory | sticky slot + task across ticks |
-| `fight.engagements` | list of `Engagement` (§6.2), with open tick (never moved), each body's slot, and the plan's boosted slots with the colony each is cast and boosted at (`Plan.boosts`, written when the set is priced and cast) | Fight | Memory | active combat commitments (without heap-only `offers`); a home's deaths since open are its raid's; a body is boosted only as its price chose, at the colony that cast it, which no tick can re-derive (owner; old Memory without it reads as no boosts) |
+| `fight.engagements` | list of `Engagement` (§6.2), with open tick (never moved), each body's slot, and the plan's boosted slots with the colony each is cast and boosted at (`Plan.boosts`, written when the set is priced and cast) | Fight | Memory | active combat commitments (without heap-only `offers`); a home's deaths since open are its raid's; a body is boosted only as its price chose, at the colony that cast it, which no tick can re-derive (owner; old Memory without it reads as no boosts); `actual` (first contact, the last sighting of a rival whose death was seen, whether one left sight unseen dying, rivals at contact, energy cast, gave up), set on those events while open, read only into `engagements.log` and never decided on (owner) |
 | `fight.groups` | list of `Group` (§6.1) | Fight | Memory | hostile cluster identity across ticks |
 | `fight.casts` | pending casts by engagement and slot | Fight | Memory | prevent double-casting while spawning |
 | `fight.due` | colonies with imminent siege successor | Fight | Memory | feeds `ColonyPlan.owes` and `.fights` (§5) |
@@ -205,7 +206,7 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
 | `intel.rooms` | per-room snapshot (seen tick, owner/level, reservation, worker (another player's WORK body, never an Invader), keeper posts, controller/sources/containers, mineral, stronghold; by username, never stance) | Strategy | heap + segment 2 (every 100 ticks) | serve out-of-sight rooms; price outposts & expansion |
 | `metrics.windows` | 100-tick aligned windows (per-room + world, up to 150 windows) | Observe | segment 3 | `observe metrics` & soak `metrics.jsonl` (§10.5) |
 | `recorder` | deflated `read.js` pass + Memory + intel ring | Main | segments 10–14 | live capture for benchmark & replay (§9.1) |
-| `engagements.log` | closed engagements (`Predicted` vs `Actual`) | Observe | segment `❓` | live `Exchange` error tracking (§10.1) |
+| `engagements.log` | the last 200 priced engagements closed, a JSON row a line: id, kind, room, rivals, tactic, opened, contact, seen, closed, `predicted`, our dead, energy cast, and how it ended (`disengaged`, `gaveUp`, `left`, `safe`; none: its rival's death seen) | Observe (rows Fight's closes) | segment 4, written on a close (rows closed before a reset's first read wait in heap) | live `Exchange` error tracking (§10.1): an engagement's prediction goes with it, and 200 rows (~230 B each) fit one segment |
 | `metrics` | open window sums & per-creep/site/room deltas | Observe | heap | incremental tick deltas |
 | `standing.layout` | per-room layout plan & incremental drawing state + ground key + `cold` (drawn with no standing held: a reset or a new colony) | Layout | heap | rebuilds at 4 variations/tick after reset; `cold` marks the first plan `piles` is checked against |
 | `scouts` | scout targets | Strategy | heap (this tick) | derived from intel for Economy |
@@ -762,8 +763,13 @@ arithmetic and invariants.
 Every engagement records `Predicted` at open and compares against actual
 outcome at close. Offline, `npm run exchange` and fight scenarios evaluate
 predictions via `scripts/sim/prediction.mjs`; `predictedWinsLost` fails a
-scenario as an `Exchange` bug. `❓` Live `engagements.log` segment and
-`observe exchange`.
+scenario as an `Exchange` bug. Live, each priced engagement's row lands in
+`engagements.log` (§4) as it closes, and `npm run observe -- exchange` prints
+the same table, then each rival's outcomes by tactic; `liveAstray` holds those
+rows to the engine's classification in scenarios. A rival that leaves alive is
+**left**, neither won nor lost (owner): live, a close where some rival body
+was not seen to die (the engine's word: its tombstone, or a siege target's
+raze), offline one it outlived.
 
 ### 10.2 The engines
 
@@ -934,5 +940,5 @@ on a live-sized world.
 - `Atlas` room graph ignores `Footprint` (2×2 Quad routing through 1-wide gaps);
   boosted `CARRY` priced unboosted.
 - `Economy` cross-room travel prices intermediate rooms at one room width.
-- Planned fight kinds (`KeeperDuty`, `PowerBank`, `Stronghold`), live
-  `engagements.log`, deploy canary, and remaining `sim/` features (§10.2).
+- Planned fight kinds (`KeeperDuty`, `PowerBank`, `Stronghold`), deploy canary,
+  and remaining `sim/` features (§10.2).

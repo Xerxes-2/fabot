@@ -115,7 +115,7 @@ impl<W: Write> Driver<W> {
                 let _ = writeln!(faults, "{fault}");
             }
         }
-        let mut row = json!({ "t": t, "time": ran.world.time, "cpu": decide_ms, "phases": phases, "counts": ran.counts });
+        let mut row = json!({ "t": t, "time": ran.world.time, "cpu": decide_ms, "phases": phases, "counts": ran.counts, "closed": ran.closed });
         for r in &ran.refusals {
             let r = format!("{} {}", r.act, r.code);
             row["refused"][&r] = json!(row["refused"][&r].as_u64().unwrap_or(0) + 1);

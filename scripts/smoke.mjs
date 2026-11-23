@@ -146,7 +146,8 @@ const [recorded] = unpack(RECORDER.map((id) => segments[id]));
 if (recorded?.time !== 103) fail(`recorder wrote no tick 103: ${recorded?.time}`);
 if (!recorded.intel.startsWith("W1N1 103 ")) fail(`recorder's intel lost the room: ${recorded.intel}`);
 if (recorded.memory !== before) fail("recorder's Memory is not the tick's");
-if (!recorded.objects.b0.creep || recorded.objects.b1.creep) fail(`a tombstone's creep is read unless ours: ${JSON.stringify([recorded.objects.b0, recorded.objects.b1])}`);
+if (!recorded.objects.b0.creep?.body || recorded.objects.b1.creep?.body || recorded.objects.b1.creep?.id !== "e1")
+  fail(`a tombstone's creep is read whole when ours, else by its id: ${JSON.stringify([recorded.objects.b0, recorded.objects.b1])}`);
 const stored = JSON.parse(memory);
 if (stored.fabot !== undefined) fail(`v1's Memory was kept: ${JSON.stringify(stored.fabot)}`);
 if (stored.creeps !== undefined) fail(`a dead creep's Memory was kept: ${JSON.stringify(stored.creeps)}`);
@@ -178,7 +179,7 @@ Game.time = 105;
 main.loop();
 const after = JSON.parse(segments[1]);
 if (after.tick !== 105 || after.faults.length !== 0) fail(`the tick after a trap: ${JSON.stringify(after).slice(0, 200)}`);
-if (JSON.stringify(active) !== "[[2,3]]") fail(`a cold heap set the active segments to ${JSON.stringify(active)}`);
+if (JSON.stringify(active) !== "[[2,3,4]]") fail(`a cold heap set the active segments to ${JSON.stringify(active)}`);
 Game.time = 106;
 main.loop();
 if (!segments[2].includes("W9N9 50 ")) fail(`intel was not read after a reset: ${segments[2]}`);
@@ -203,7 +204,7 @@ if (!aborted) fail("a spinning read did not time out");
 active.length = 0;
 Game.time = 202;
 main.loop();
-if (JSON.stringify(active) !== "[[2,3]]") fail(`the tick after a timeout ran on a warm heap: ${JSON.stringify(active)}`);
+if (JSON.stringify(active) !== "[[2,3,4]]") fail(`the tick after a timeout ran on a warm heap: ${JSON.stringify(active)}`);
 
 // Refusals as the executor names them, the world changed between read and execute.
 const exec = globalThis.__fabotExec;

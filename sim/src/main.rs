@@ -315,12 +315,9 @@ fn main() {
     let write = |name: &str, value: serde_json::Value| {
         fs::write(format!("{}/{name}", args.out), format!("{value}\n")).expect("an output file");
     };
-    let bodies = sampler.lives.close();
-    fs::write(
-        format!("{}/bodies.jsonl", args.out),
-        bodies.iter().map(|b| format!("{b}\n")).collect::<String>(),
-    )
-    .expect("an output file");
+    let lives = sampler.lives.close();
+    let bodies: String = lives.iter().map(|b| format!("{b}\n")).collect();
+    fs::write(format!("{}/bodies.jsonl", args.out), bodies).expect("an output file");
     write("levels.json", json!(levels));
     write("refusals.json", json!(driver.refused));
     let per = |total: f64| total / args.ticks as f64;

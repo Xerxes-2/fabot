@@ -2,25 +2,20 @@
 // these per scenario, and `npm run soak` and soak:many hold `invariants`.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { bugs, engagement } from "../sim/prediction.mjs";
+import { bugs, outcome, tested } from "../sim/prediction.mjs";
 
 // Ticks are counted from the bot's first, so a window means the same on every start.
-// Each engagement the run priced, as `prediction.mjs` reads a row; one never
-// priced predicted nothing.
-const rowsOf = (dir) =>
-  readFileSync(join(dir, "engagements.jsonl"), "utf8")
+const linesOf = (path) =>
+  readFileSync(path, "utf8")
     .split("\n")
     .filter(Boolean)
     .map((l) => JSON.parse(l));
-export const engagementsOf = (dir) =>
-  rowsOf(dir)
-    .filter((e) => e.predicted)
-    .map((e) => ({ p: e.predicted, a: engagement(e), room: e.room, opened: e.opened }));
-const livesOf = (dir) =>
-  readFileSync(join(dir, "bodies.jsonl"), "utf8")
-    .split("\n")
-    .filter(Boolean)
-    .map((l) => JSON.parse(l));
+const rowsOf = (dir) => linesOf(join(dir, "engagements.jsonl"));
+export const engagementsOf = (dir) => tested(rowsOf(dir));
+// The bot's own rows (segment 4, sim's `segment4.jsonl`) of `room` (any, unnamed).
+const liveOf = (dir, a) => tested(linesOf(join(dir, "segment4.jsonl"))).filter((r) => !a.room || r.room === a.room);
+const classed = (r) => r && `${r.p.kind}→${outcome(r.a)}`;
+const livesOf = (dir) => linesOf(join(dir, "bodies.jsonl"));
 // Each named body's cost once, however many times it left and came back.
 const costOf = (lives) => [...new Map(lives.map((b) => [b.name, b.cost])).values()].reduce((n, c) => n + c, 0);
 // A body's game tick less this, the run's tick.
@@ -273,6 +268,16 @@ export const measures = {
   },
   // Engagements opened in `room` from `from` to `to` whose predicted Win or Kite was lost (§10.1).
   predictedWinsLost: (_, a, dir) => bugs(engagementsOf(dir).filter(openedIn(a))).length,
+  liveEngagements: (_, a, dir) => liveOf(dir, a).length,
+  liveEnergy: (_, a, dir) => liveOf(dir, a).reduce((n, r) => n + r.energy, 0),
+  // Each engagement the engine saw close, missing from the bot's log or classed
+  // apart from it there. An id is reused once closed; the bot's tick is the
+  // game's, a tick or so off the run's.
+  liveAstray: (samples, a, dir) => {
+    const live = liveOf(dir, a);
+    const near = (r) => live.find((l) => l.id === r.id && Math.abs(l.closed - offsetOf(samples) - r.closed) <= 2);
+    return engagementsOf(dir).filter((r) => r.closed !== null && openedIn(a)(r) && classed(near(r)) !== classed(r)).length;
+  },
   // The tick `room`'s Defends first drew a body, less the first another
   // room's did: a home raided beside its outposts is drafted before every
   // one of them (§7.3). One never drafted: Infinity.
@@ -288,7 +293,8 @@ export const measures = {
     return waits.length ? Math.max(...waits) : Infinity;
   },
   // Engagements opened: an attack the bot never answered tests nothing.
-  engagements: (_, __, dir) => engagementsOf(dir).length,
+  // The priced engagements opened in `room` in [from, to): a window bounding others matches some.
+  engagements: (_, a, dir) => engagementsOf(dir).filter(openedIn(a)).length,
   // Acts the engine refused (the soak's refusals.json) that `counted` counts.
   refusals: (_, __, dir) =>
     Object.entries(JSON.parse(readFileSync(join(dir, "refusals.json"), "utf8")))
