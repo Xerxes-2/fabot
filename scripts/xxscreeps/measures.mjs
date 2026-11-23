@@ -21,6 +21,12 @@ const livesOf = (dir) =>
     .split("\n")
     .filter(Boolean)
     .map((l) => JSON.parse(l));
+// Each named body's cost once, however many times it left and came back.
+const costOf = (lives) => [...new Map(lives.map((b) => [b.name, b.cost])).values()].reduce((n, c) => n + c, 0);
+// A body's game tick less this, the run's tick.
+const offsetOf = (samples) => samples[0].time - samples[0].t;
+const defendsIn = (dir, a) => rowsOf(dir).filter((e) => e.kind === "defend" && openedIn(a)(e));
+const drawnBy = (dir, a) => new Set(defendsIn(dir, a).flatMap((e) => e.drew));
 const scoutsOf = (dir) => livesOf(dir).filter((b) => b.ours && b.name.startsWith("scout-"));
 export const samplesOf = (dir) => readFileSync(join(dir, "samples.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
 // soak:many's columns beside worth, off a run's metrics and its last sample:
@@ -185,7 +191,7 @@ export const measures = {
   },
   // Our `name`-prefixed bodies cast in the run from a spawn in `room`.
   castIn: (samples, a, dir) =>
-    new Set(livesOf(dir).filter((b) => b.ours && b.name.startsWith(a.name) && b.first > samples[0].time - samples[0].t && b.entered?.[0]?.[0] === a.room).map((b) => b.name)).size,
+    new Set(livesOf(dir).filter((b) => b.ours && b.name.startsWith(a.name) && b.first > offsetOf(samples) && b.entered?.[0]?.[0] === a.room).map((b) => b.name)).size,
   claimersCast: (samples, a) => new Set(within(samples, a).flatMap((s) => s.bodies.filter((b) => b.startsWith("claimer-")).map((b) => b.split("@")[0]))).size,
   claimSpawned: (samples) => firstClaimed(samples, (c) => c.spawns > 0),
   // The most of a compound (`resource`) stood at once, in `room` if one is named.
@@ -281,7 +287,25 @@ export const measures = {
   // over the engagements of `kind` (none named: every one); none seen: 0.
   oscillation: (_, a, dir) =>
     Math.max(0, ...rowsOf(dir).filter((e) => !a.kind || e.kind === a.kind).flatMap((e) => Object.values(e.swung).map((s) => Math.round((100 * s.swings) / Math.max(1, s.ticks))))),
-  bodiesLost: (_, __, dir) => rowsOf(dir).reduce((n, e) => n + (e.dead ?? 0), 0),
+  bodiesLost: (_, a, dir) => rowsOf(dir).filter(openedIn(a)).reduce((n, e) => n + (e.dead ?? 0), 0),
+  defendsOpened: (_, a, dir) => defendsIn(dir, a).length,
+  // The cost of the bodies of ours `room`'s Defends drew, each once.
+  defendSpent: (_, a, dir) => costOf(livesOf(dir).filter((b) => b.ours && drawnBy(dir, a).has(b.name))),
+  // The cost of an opponent's bodies its `name` role cast in the window.
+  rivalSpent: (samples, a, dir) => {
+    const t = (b) => b.first - offsetOf(samples);
+    return costOf(livesOf(dir).filter((b) => !b.ours && b.name.startsWith(`${a.name}-`) && t(b) >= (a.from ?? 0) && t(b) < (a.to ?? Infinity)));
+  },
+  // From a `name` body's first entry into `room` to the first body of a Defend
+  // there entering after it: none arrived, 0; never answered, Infinity.
+  answeredAfter: (samples, a, dir) => {
+    const lives = livesOf(dir);
+    const entries = (b) => (b.entered ?? []).map(([r, at]) => [r, at - offsetOf(samples)]).filter(([r, t]) => r === a.room && t >= (a.from ?? 0) && t < (a.to ?? Infinity)).map(([, t]) => t);
+    const arrived = Math.min(...lives.filter((b) => !b.ours && b.name.startsWith(`${a.name}-`)).flatMap(entries));
+    if (arrived === Infinity) return 0;
+    const drawn = drawnBy(dir, a);
+    return Math.min(...lives.filter((b) => b.ours && drawn.has(b.name)).flatMap(entries).filter((t) => t >= arrived)) - arrived;
+  },
   // The most ticks one engagement's bodies reached its raid apart (engaged.mjs), of those opened
   // as `predictedWinsLost` reads: a set fed in one at a time.
   arrivedApart: (_, a, dir) => Math.max(0, ...rowsOf(dir).filter(openedIn(a)).map((e) => e.apart ?? 0)),
@@ -324,7 +348,7 @@ export const measures = {
   safeModeAfterCull: (samples, a, dir) => {
     const lives = livesOf(dir);
     const end = Math.max(...lives.map((b) => b.last));
-    const offset = samples[0].time - samples[0].t;
+    const offset = offsetOf(samples);
     const kills = lives
       .filter((b) => b.ours && b.at.startsWith(`${a.room} `) && b.last < end && b.ttl > AGED && b.last - b.struckAt <= STRUCK_LATELY)
       .filter((b) => /^[wcm]+$/.test(b.body) && /[wc]/.test(b.body))

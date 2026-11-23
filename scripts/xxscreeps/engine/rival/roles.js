@@ -1,7 +1,14 @@
 // A rival's behaviour lists, one per `opponent.js` role (§10.2).
 const FILL = [STRUCTURE_TOWER, STRUCTURE_SPAWN, STRUCTURE_EXTENSION];
-const step = (creep, goals, flee) => {
-  const path = PathFinder.search(creep.pos, goals, { flee, maxRooms: 1 }).path;
+// `edges`: "closed", a flight never crosses a border; "crossed", it may step
+// into the next room; else it stays in the room unless an edge tile ends it.
+const step = (creep, goals, flee, edges) => {
+  const roomCallback = () => {
+    const costs = new PathFinder.CostMatrix();
+    for (let i = 0; i < 50; i++) for (const [x, y] of [[i, 0], [i, 49], [0, i], [49, i]]) costs.set(x, y, 255);
+    return costs;
+  };
+  const path = PathFinder.search(creep.pos, goals, { flee, maxRooms: edges === "crossed" ? 2 : 1, ...(edges === "closed" && { roomCallback }) }).path;
   if (path.length > 0) creep.move(creep.pos.getDirectionTo(path[0]));
 };
 
@@ -91,4 +98,37 @@ function raid(config) {
 
 const toward = (creep, room) => creep.moveTo(new RoomPosition(25, 25, room), { reusePath: 0 });
 
-module.exports = { keep, raid };
+// harass: remote denial by a cheap kiter. { count } bodies of { body }
+// (default 1A1M), cast from { first } ticks on and recast as they die, hover
+// within HOVER of { target }'s source farthest from our armed bodies, strike
+// what stands beside them, and keep out of any armed body's reach, giving up
+// the source rather than the room unless { cross }. A gun holds off swings
+// alone: it fights.
+const HOVER = 2;
+function harass(config) {
+  Memory.began ??= Game.time;
+  const mine = Object.values(Game.creeps);
+  const spawn = Object.values(Game.spawns).find((s) => !s.spawning);
+  if (spawn && Game.time - Memory.began >= (config.first ?? 0) && mine.length < (config.count ?? 1)) spawn.spawnCreep(config.body ?? [ATTACK, MOVE], `${config.role}-${Game.time}`);
+  for (const creep of mine) if (!creep.spawning) harasser(creep, config);
+}
+
+function harasser(creep, { target, cross }) {
+  const foes = creep.room.find(FIND_HOSTILE_CREEPS);
+  const armed = foes.filter((f) => active(f, ATTACK) || active(f, RANGED_ATTACK));
+  // Its weapon's range and a step each.
+  const reach = (f) => (active(f, RANGED_ATTACK) ? 3 : 1) + 2;
+  const prey = creep.pos.findClosestByRange(foes);
+  if (prey && creep.pos.isNearTo(prey) && active(creep, ATTACK)) creep.attack(prey);
+  else if (prey && creep.pos.inRangeTo(prey, 3) && active(creep, RANGED_ATTACK)) creep.rangedAttack(prey);
+  const near = armed.filter((f) => creep.pos.getRangeTo(f) <= reach(f));
+  if (near.length) return step(creep, near.map((f) => ({ pos: f.pos, range: reach(f) + 1 })), true, cross ? "crossed" : "closed");
+  if (creep.room.name !== target) return toward(creep, target);
+  const safest = (s) => Math.min(50, ...armed.map((f) => s.pos.getRangeTo(f)));
+  const source = creep.room.find(FIND_SOURCES).sort((a, b) => safest(b) - safest(a) || creep.pos.getRangeTo(a) - creep.pos.getRangeTo(b))[0];
+  const unarmed = foes.filter((f) => !armed.includes(f) && f.pos.inRangeTo(source, HOVER + 1));
+  if (unarmed.length) step(creep, unarmed.map((f) => ({ pos: f.pos, range: 1 })), false);
+  else if (!creep.pos.inRangeTo(source, HOVER)) step(creep, [{ pos: source.pos, range: HOVER }], false);
+}
+
+module.exports = { harass, keep, raid };

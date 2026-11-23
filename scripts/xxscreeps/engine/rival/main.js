@@ -1,6 +1,6 @@
 // A scripted rival, one of §10.2's fixed opponents (ARCHITECTURE.md):
 // `opponent.js`'s { role } picks its behaviour list in `roles.js` (keep,
-// raid) and its other keys are that role's own.
+// raid, harass) and its other keys are that role's own.
 let config = {};
 try {
   config = require("opponent");
