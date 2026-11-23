@@ -306,6 +306,15 @@ pub fn pocketed() -> Ground {
     }
 }
 
+/// `pocketed` with its ore in a nook: the post its one open side.
+pub fn nook() -> Ground {
+    let mut ground = pocketed();
+    for (x, y) in [(24, 32), (25, 32), (26, 33)] {
+        ground.terrain[tiles::index(x, y)] = 1;
+    }
+    ground
+}
+
 pub fn distinct<T: PartialEq + Copy>(values: &[T]) -> Vec<T> {
     let mut out: Vec<T> = Vec::new();
     for v in values {

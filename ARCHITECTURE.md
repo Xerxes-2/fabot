@@ -361,7 +361,8 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   source container before extensions; no
   labs below RCL8; nuker last; unreachable cut pockets kept unroaded; source
   links never split a 1-wide post; a quad or decorative wall closing a
-  structure in gives way, and a pocket of roads and ramparts no walk reaches
+  structure in gives way, as does one closing in what only an ore's post
+  leads to (its digger yields only to a chain two weights heavier), and a pocket of roads and ramparts no walk reaches
   is dropped (Hivemind checks neither, and our kept cut pockets get sealed).
   `❓` The plan is chaotic under any builder or pathfinder change: each
   variation's greedy build carries every road into its later steps (spawn,

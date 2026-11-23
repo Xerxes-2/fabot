@@ -1,0 +1,9 @@
+{
+  "why": "an ore's post is never the only way through: where the ring's walls left the digger's container the one tile between the core and an outpost's exit (sim --gen 1919810, E9S5), they give way round it, so no economy body waits on the digger once the node's first casts are out (main: 6 wedged, outpost haulers loaded 635-829 ticks beside the post)",
+  "modules": ["atlas", "economy", "layout", "mv"],
+  "start": { "world": "scripts/scenario/worlds/ore-post-e9s5.json", "room": "E9S5", "seed": 1, "node": "N7" },
+  "ticks": 4000,
+  "assert": [
+    { "metric": "move.wedged", "from": 1000, "total": true, "max": 0 }
+  ]
+}

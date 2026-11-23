@@ -536,9 +536,13 @@ impl Atlas {
     }
 
     /// Farthest from the controller first, so a controller container on a seat
-    /// is no post.
+    /// is no post; a rock's own before one beside another, so an ore's digger
+    /// never seats on a source's post.
     pub fn post_of(room: &Room, source: &Pos) -> Option<(Pos, Option<Id>)> {
         let from_controller = |p: &Pos| Atlas::from_controller(room, p);
+        let rocks =
+            (room.sources.iter().map(|s| &s.pos)).chain(room.minerals.iter().map(|m| &m.pos));
+        let shared = |p: &Pos| rocks.clone().any(|r| r != source && p.within(1, r));
         let built = (room.structures.iter())
             .filter(|s| s.kind == StructureType::Container)
             .map(|s| (s.pos, Some(s.id)));
@@ -547,7 +551,7 @@ impl Atlas {
             .map(|s| (s.pos, None));
         (built.chain(sites))
             .filter(|(p, _)| p.within(1, source) && p != source)
-            .min_by_key(|(p, built)| (-from_controller(p), built.is_none(), tiles::of_pos(p)))
+            .min_by_key(|(p, built)| (shared(p), -from_controller(p), built.is_none(), p.y, p.x))
     }
 
     pub fn bare_post(room: &Room, seats: Vec<Pos>) -> Option<Pos> {
@@ -575,9 +579,9 @@ impl Atlas {
     /// A link buffer's upgrader tiles stay open: held, they priced every walk
     /// past the controller dearer.
     pub fn work_seats(room: &Room) -> Vec<Tile> {
-        let mut seats: Vec<Tile> = (Atlas::source_posts(room).iter())
-            .map(tiles::of_pos)
-            .collect();
+        let ore = (room.minerals.iter()).filter_map(|m| Some(Atlas::post_of(room, &m.pos)?.0));
+        let posts = Atlas::source_posts(room).into_iter().chain(ore);
+        let mut seats: Vec<Tile> = posts.map(|p| tiles::of_pos(&p)).collect();
         if let Some(b) = Atlas::buffer(room)
             && b.kind == StructureType::Container
         {
