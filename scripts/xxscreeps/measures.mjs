@@ -333,6 +333,12 @@ export const measures = {
     const end = Math.max(...lives.map((b) => b.last));
     return new Set(lives.filter((b) => b.ours && b.last < end && b.ttl > 1).map((b) => b.name)).size;
   },
+  // Our bodies that fell in `room` with life left.
+  diedIn: (_, a, dir) => {
+    const lives = livesOf(dir);
+    const end = Math.max(...lives.map((b) => b.last));
+    return lives.filter((b) => b.ours && b.last < end && b.ttl > 1 && b.at?.startsWith(`${a.room} `)).length;
+  },
   // Our bodies gone below full hits, with life left and no strike lately: recycled
   // wounded, since no other end leaves a body unstruck before its age.
   recycledWounded: (_, __, dir) => {

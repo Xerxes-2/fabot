@@ -5,12 +5,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::kinds::{defend, raid, siege, sweep};
 use super::scene::{Hunting, Scene, fresh};
 use super::shape::{Cast, Engagement, FightState, Group, Objective, Phase};
-use super::{casting, tracker};
+use super::{casting, open, tracker};
 use fabot_atlas::{self as atlas, Atlas, Context};
 use fabot_base::declarations::{self, OpKind};
 use fabot_base::engine;
 use fabot_base::intents::{Ask, ModuleOutput, Rank};
-use fabot_base::world::{Creep, Id, Pos, RoomName, StructureType, hostiles, sightings};
+use fabot_base::world::{Creep, Id, Pos, RoomName, StructureType, sightings};
 use fabot_tactics::{self as tactics, Tactic};
 
 /// A merge keeps the older group's id; two engagements on one group are one,
@@ -142,49 +142,16 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
 
     let (mut engagements, casts) = merged(&events, &state.engagements, &state.casts);
 
-    // An outpost has no towers to answer a body that works it (§7.2).
-    let outpost = |r: &RoomName| worked.contains(r) && !homes.contains(r);
-    let works = |h: &Creep| outpost(&h.pos.room) && hostiles::works(h);
-    let armed: BTreeSet<Id> = (hostiles.iter())
-        .filter(|h| hostiles::foe(h))
-        .filter(|h| cores.contains(&h.id) || hostiles::armed(owned, &hostiles, h) || works(h))
-        .map(|h| h.id)
-        .collect();
-
-    // A Defend left open holds its room: a newcomer inside it is its target
-    // now, with a fresh budget, where its own group is not there (a home's,
-    // so a second raid is not left to towers) or was lost from sight.
-    for e in &mut engagements {
-        if !matches!(e.objective, Objective::Defend) || e.phase == Phase::Disengaging {
-            continue;
-        }
-
-        let in_room =
-            |id| (by_id.get(&id)).is_some_and(|g| g.room() == e.room && g.last_seen == world.time);
-
-        let gone = if homes.contains(&e.room) {
-            !in_room(e.group)
-        } else {
-            !by_id.contains_key(&e.group)
-        };
-
-        let newcomer = events.iter().find_map(|event| match event {
-            tracker::Event::Newcomer(id)
-                if gone && in_room(*id) && by_id[id].members.iter().any(|m| armed.contains(m)) =>
-            {
-                Some(*id)
-            }
-            _ => None,
-        });
-
-        if let Some(id) = newcomer {
-            e.group = id;
-            e.opened = world.time;
-            e.budget = e.lost;
-            e.unanswered = true;
-            e.predicted = None;
-        }
-    }
+    let (armed, opens) =
+        open::armed_and_opening(world, owned, (&worked, &homes), &hostiles, &cores);
+    open::newcomers(
+        &mut engagements,
+        &events,
+        &by_id,
+        &homes,
+        &opens,
+        world.time,
+    );
 
     let alive: BTreeSet<i32> = engagements.iter().map(|e| e.id).collect();
 
@@ -387,7 +354,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
 
     let opened: Vec<(Engagement, bool)> = defend::opens(
         |room| declarations.priority(OpKind::Defend, room),
-        |id| scene.armed.contains(id),
+        |id| opens.contains(id),
         world.time,
         &targeted,
         &groups,

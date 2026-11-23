@@ -172,7 +172,8 @@ by `npm run ceiling` and `npm run scenario`). `core/fight/price` (offers, set
 shapes, casting) holds its own ceiling apart from the rest of `core/fight`:
 fight kept hitting one ceiling, and pricing is the part that changes on its own.
 `core/fight/scene` (the per-tick read and casting) was split the same way
-when boosts were priced (owner).
+when boosts were priced, and `core/fight/open` (what opens a Defend) when a
+stronghold's garrison stopped opening one (owner).
 
 ## 4. State
 
