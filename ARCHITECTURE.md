@@ -142,7 +142,7 @@ segments over multiple ticks (economy first); a cold tick never spends more than
 | `Bindings` / `app` | `fabot` | Screeps JS API seam, packed `read.js`, `driver.rs` | `Game`, `RawMemory` | `Game`, `RawMemory`, segments |
 | `Engine` | `fabot-base` | Game formulas & non-global server constants (vanilla tables from `screeps-game-api`) | — | — |
 | `World` | `fabot-base` | Single-pass tick snapshot, event-log strikes/destroys, per-tick `rules` (`CONTROLLER_STRUCTURES`) | `Game` | — |
-| `Atlas` | `fabot-atlas` | Room graph (region nodes, border-stretch crossings, keeper-strike avoidance, blind keeper & stronghold penalty) and per-room tile grid (creep-free weights, reverse floods, seats, footprint queries; a hostile's tile is walled only in this tick's step floods and passability, never in a kept flood, so one moving redoes no flood, tree or walk); out-of-sight grids hold what stood when last seen (else terrain) struck where intel places the keepers (`atlas.unseen`) | `World`, `terrain`, `intel.rooms`, `Declarations` (colony plans, for `server`) | flood table, `atlas.carried` |
+| `Atlas` | `fabot-atlas` | Room graph (region nodes, border-stretch crossings, keeper-strike avoidance, blind keeper penalty, stronghold rooms never crossed) and per-room tile grid (creep-free weights, reverse floods, seats, footprint queries; a hostile's tile is walled only in this tick's step floods and passability, never in a kept flood, so one moving redoes no flood, tree or walk); out-of-sight grids hold what stood when last seen (else terrain) struck where intel places the keepers (`atlas.unseen`) | `World`, `terrain`, `intel.rooms`, `Declarations` (colony plans, for `server`) | flood table, `atlas.carried` |
 | `Economy` | `fabot-economy` | Slots, casts, sticky tasks, logistics dispatcher, links, labs, terminals, abandon | `Derived`, `Atlas`, `declarations`, `EconomyState`, Strategy's `scouts` | tasks, casts, `assignments` |
 | `Layout` | `fabot-layout` | Colony placement plan (Hivemind planner + xxscreeps JPS), rampart ring, construction sites, buried-road destroy, tower firing | `Derived`, `Atlas`, `declarations` | sites, destroys, tower actions, `standing.layout` |
 | `Exchange` | `fabot-exchange` | Pure combat arithmetic (`outcome`, `cheapest_win`, breach planning) | fighters, terrain | — |
@@ -634,6 +634,8 @@ expansion, and operation priorities.
   skipped except declared sieges.
 - `❓` Grow intel rows with towers/sources on first reader and derive avoided
   rooms from them.
+- `❓` A stronghold room is never crossed (Atlas), but an outpost or claim in
+  one, or reachable only through one, is not yet refused by name as v1 did.
 
 ### 7.2 Expansion and declarations
 

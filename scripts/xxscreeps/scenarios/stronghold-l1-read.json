@@ -1,11 +1,12 @@
 {
-  "why": "a level-1 stronghold deployed beside a colony is read as it stands (level, deploy, collapse) from its first sight on; its garrison is no raid, so no body is fed to it: the base for the Stronghold engagement",
+  "why": "a level-1 stronghold deployed beside a colony is read as it stands (level, deploy, collapse) from its first sight on; its garrison is no raid and its room is never crossed, so no body is fed to it: the base for the Stronghold engagement",
   "modules": ["atlas", "fight", "strategy"],
   "start": { "room": "W8N3", "seed": 1, "node": "E1", "stronghold": "W8N2:1:1" },
   "ticks": 3000,
   "assert": [
     { "measure": "strongholdMisread", "from": 400, "max": 0 },
     { "measure": "bodiesLost", "room": "W8N2", "max": 0 },
+    { "measure": "diedIn", "room": "W8N2", "max": 1 },
     { "measure": "faults", "max": 0 }
   ]
 }

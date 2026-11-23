@@ -818,6 +818,29 @@ fn a_route_goes_round_a_stronghold_where_another_way_stands() {
 }
 
 #[test]
+fn a_stronghold_is_never_crossed_but_still_reached() {
+    let rooms: Vec<Room> = (0..3)
+        .map(|x| room_of(RoomName::new(x, 0), vec![0; tiles::COUNT], Vec::new()))
+        .collect();
+    let world = world_of_rooms(rooms);
+    let (from, core, beyond) = (
+        RoomName::new(0, 0),
+        RoomName::new(1, 0),
+        RoomName::new(2, 0),
+    );
+    let atlas = Atlas::following(Atlas::default(), &world, [(core, None, true)], []);
+    assert_eq!(atlas.route(&BTreeSet::new(), 2, from, beyond), None);
+    assert_eq!(
+        atlas.route(&BTreeSet::new(), 4, from, core),
+        Some(vec![from, core])
+    );
+    assert_eq!(
+        atlas.route(&BTreeSet::new(), 4, core, from),
+        Some(vec![core, from])
+    );
+}
+
+#[test]
 fn an_unseen_keeper_room_reads_as_its_intel_once_intel_arrives() {
     let (from, keeper, onto) = (
         RoomName::new(3, 4),

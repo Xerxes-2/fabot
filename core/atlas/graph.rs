@@ -329,7 +329,7 @@ pub fn search(
                 if there == start
                     || node.hops >= max_hops
                     || atlas.closed.contains(&there)
-                    || (avoid.contains(&there) && !ends.contains(&there))
+                    || (avoid.contains(&there) || atlas.stronghold(there)) && !ends.contains(&there)
                 {
                     continue;
                 }

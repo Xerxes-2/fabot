@@ -64,8 +64,7 @@ pub struct RoomGrid {
     seen: bool,
     /// A keeper room out of sight whose lairs no intel places: crossed last.
     blind: bool,
-    /// Intel saw an Invader stronghold here: its towers cover the room, so it
-    /// is crossed last, as a blind keeper room is.
+    /// Intel saw an Invader stronghold here, its collapse still to come.
     stronghold: bool,
 }
 
@@ -383,7 +382,7 @@ type WalkKey = (Mover, Target, Option<TileSet>, Pos, usize);
 
 /// Weights by address: an unchanged room keeps its `Rc`.
 #[derive(Clone, Debug)]
-struct RoomRead(Option<Rc<Table<Weight>>>, Option<Rc<TileSet>>, [bool; 3]);
+struct RoomRead(Option<Rc<Table<Weight>>>, Option<Rc<TileSet>>, [bool; 4]);
 
 impl PartialEq for RoomRead {
     fn eq(&self, other: &RoomRead) -> bool {
@@ -1053,10 +1052,15 @@ impl Atlas {
 
     const EXITS: [i32; 4] = [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT];
 
-    /// A keeper room whose lairs no intel places, or a stronghold's.
+    /// A stronghold's towers cover its room: a walk ends there or goes round it, never through.
+    fn stronghold(&self, c: Coords) -> bool {
+        self.rooms.get(&c).is_some_and(|grid| grid.stronghold)
+    }
+
+    /// A keeper room whose lairs no intel places.
     fn crossed_last(&self, c: Coords) -> bool {
         match self.rooms.get(&c) {
-            Some(grid) => grid.blind || grid.stronghold,
+            Some(grid) => grid.blind,
             None => self
                 .lairs
                 .get(&c)
@@ -1080,8 +1084,14 @@ impl Atlas {
                 })
                 .map(|c| {
                     let grid = self.rooms.get(&c);
-                    let seen = grid.is_some_and(|g| g.seen);
-                    let flags = [seen, self.crossed_last(c), self.closed.contains(&c)];
+                    let (seen, stronghold) =
+                        grid.map_or((false, false), |g| (g.seen, g.stronghold));
+                    let flags = [
+                        seen,
+                        self.crossed_last(c),
+                        stronghold,
+                        self.closed.contains(&c),
+                    ];
                     RoomRead(
                         grid.map(|g| g.weights.clone()),
                         grid.and_then(|g| g.struck.clone()),
