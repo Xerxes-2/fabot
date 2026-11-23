@@ -109,7 +109,7 @@ impl std::fmt::Debug for Id {
 }
 
 /// A room by its world coordinates (W0 is x = -1, N0 is y = -1); `sim` is W127N127, on no map.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RoomName(screeps::RoomName);
 
 impl RoomName {
@@ -166,19 +166,6 @@ impl std::fmt::Display for RoomName {
             Some(room) => room.fmt(f),
             None => f.write_str("sim"),
         }
-    }
-}
-
-impl PartialOrd for RoomName {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-/// West to east, then north to south, `sim` first: the crate's own order is `y` first.
-impl Ord for RoomName {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.0.packed_repr().cmp(&other.0.packed_repr())
     }
 }
 
