@@ -152,6 +152,7 @@ version = "0.1.0"
 dependencies = [
  "fabot-base",
  "fabot-layout",
+ "proptest",
 ]
 
 [[package]]
@@ -179,6 +180,7 @@ dependencies = [
  "fabot-observe",
  "fabot-strategy",
  "fabot-tactics",
+ "proptest",
  "screeps-game-api",
  "serde",
  "serde_json",
@@ -230,6 +232,7 @@ version = "0.1.0"
 dependencies = [
  "fabot-atlas",
  "fabot-base",
+ "proptest",
 ]
 
 [[package]]

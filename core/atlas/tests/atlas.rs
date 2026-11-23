@@ -7,16 +7,20 @@ use fabot_base::engine;
 use fabot_base::grid::{
     FatigueFactor, Footprint, empty_factor, factor_of, loaded_factor, on_edge, step_ticks,
 };
-use fabot_base::testing::Dice;
 use fabot_base::tiles::{self, Tile, TileSet};
 use fabot_base::vocabulary::{ALL_BODY_PARTS, Part, ResourceType};
 use fabot_base::world::{
     BodyPart, Creep, Mineral, Owner, Pos, Room, RoomName, Source, Store, Structure, StructureType,
     World, read, terrain,
 };
+use proptest::bool::weighted;
+use proptest::collection::vec;
+use proptest::prelude::*;
+use proptest::sample::{Index, select};
+use proptest::test_runner::FileFailurePersistence;
 
 const ROOM: RoomName = RoomName::W1N1;
-const CASES: u64 = 100;
+const CASES: u32 = 256;
 
 fn structure(kind: StructureType, walkable: bool, x: i32, y: i32) -> Structure {
     Structure {
@@ -36,7 +40,7 @@ fn structure(kind: StructureType, walkable: bool, x: i32, y: i32) -> Structure {
 }
 
 /// One generated room: raw terrain, roads and walls built on it.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Ground {
     terrain: Vec<u8>,
     roads: Vec<(i32, i32)>,
@@ -95,7 +99,7 @@ fn world_of(ground: &Ground) -> World<'static> {
 }
 
 /// A walk to price: the ground, a mover, a goal tile with its range, a start.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Walk {
     ground: Ground,
     mover: Mover,
@@ -104,49 +108,51 @@ struct Walk {
     start: Tile,
 }
 
-fn tile(dice: &mut Dice) -> Tile {
-    Tile::of_index(dice.below(tiles::COUNT as i32) as usize)
+fn tile() -> impl Strategy<Value = Tile> {
+    let index = prop_oneof![1 => Just(0), 1 => Just(tiles::COUNT - 1), 8 => 0..tiles::COUNT];
+    index.prop_map(Tile::of_index)
 }
 
-fn coords(dice: &mut Dice) -> Vec<(i32, i32)> {
-    let n = dice.below(60);
-    (0..n)
-        .map(|_| (dice.below(tiles::SIDE), dice.below(tiles::SIDE)))
-        .collect()
+fn coords() -> impl Strategy<Value = Vec<(i32, i32)>> {
+    vec((0..tiles::SIDE, 0..tiles::SIDE), 0..60)
 }
 
-fn ground(dice: &mut Dice) -> Ground {
+fn ground() -> impl Strategy<Value = Ground> {
     // Rooms from open to a quarter wall, so a 2×2 body finds a way often.
-    let walls = dice.between(0, 3);
-    let terrain = (0..tiles::COUNT)
-        .map(|_| match dice.below(9 + walls) {
-            0..=6 => 0,
-            7 | 8 => terrain::SWAMP,
-            _ => terrain::WALL,
-        })
-        .collect();
-    Ground {
-        terrain,
-        roads: coords(dice),
-        walls: coords(dice),
-    }
+    let draws = (0..=3).prop_flat_map(|walls| vec(0..9 + walls, tiles::COUNT));
+    (draws, coords(), coords()).prop_map(|(draws, roads, walls)| Ground {
+        terrain: (draws.into_iter())
+            .map(|d| match d {
+                0..=6 => 0,
+                7 | 8 => terrain::SWAMP,
+                _ => terrain::WALL,
+            })
+            .collect(),
+        roads,
+        walls,
+    })
 }
 
-fn parts(dice: &mut Dice, most: i32) -> Vec<Part> {
-    let n = dice.between(1, most);
-    (0..n).map(|_| dice.pick(&ALL_BODY_PARTS)).collect()
+fn parts(most: usize) -> impl Strategy<Value = Vec<Part>> {
+    vec(select(ALL_BODY_PARTS.to_vec()), 1..=most)
 }
 
-fn mover(dice: &mut Dice) -> Mover {
-    let body = parts(dice, engine::MAX_BODY_PARTS as i32);
-    Mover {
-        factor: if dice.chance(2) {
-            loaded_factor(&body)
-        } else {
-            empty_factor(&body)
+fn mover() -> impl Strategy<Value = Mover> {
+    let footprint = select(vec![Footprint::One, Footprint::Quad]);
+    (parts(engine::MAX_BODY_PARTS), any::<bool>(), footprint).prop_map(
+        |(body, loaded, footprint)| Mover {
+            factor: if loaded {
+                loaded_factor(&body)
+            } else {
+                empty_factor(&body)
+            },
+            footprint,
         },
-        footprint: dice.pick(&[Footprint::One, Footprint::Quad]),
-    }
+    )
+}
+
+fn exit() -> impl Strategy<Value = i32> {
+    select(vec![tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT])
 }
 
 fn creep(owner: Owner, pos: Pos) -> Creep {
@@ -164,19 +170,16 @@ fn creep(owner: Owner, pos: Pos) -> Creep {
     }
 }
 
-fn walk(dice: &mut Dice) -> Walk {
-    Walk {
-        ground: ground(dice),
-        mover: mover(dice),
-        goal: tile(dice),
-        range: dice.between(0, 3),
-        start: tile(dice),
-    }
-}
-
-fn walks(seed: u64) -> impl Iterator<Item = (Walk, Dice)> {
-    let mut dice = Dice::new(seed);
-    (0..CASES).map(move |i| (walk(&mut dice), Dice::new(seed * 1_000 + i)))
+fn walk() -> impl Strategy<Value = Walk> {
+    (ground(), mover(), tile(), 0..=3, tile()).prop_map(|(ground, mover, goal, range, start)| {
+        Walk {
+            ground,
+            mover,
+            goal,
+            range,
+            start,
+        }
+    })
 }
 
 fn target_of(room: RoomName, walk: &Walk) -> Target {
@@ -343,11 +346,70 @@ fn a_steps_ticks_are_the_ceiling_of_its_fatigue_over_the_moves_pay() {
     }
 }
 
-#[test]
-fn a_loaded_body_weighs_at_least_its_empty_self_and_a_creep_reads_as_its_parts() {
-    let mut dice = Dice::new(5);
-    for _ in 0..CASES {
-        let kinds = parts(&mut dice, 60);
+fn inner_tile() -> impl Strategy<Value = Tile> {
+    (1..=48, 1..=48).prop_map(|(x, y)| tiles::index(x, y))
+}
+
+fn inner_room() -> impl Strategy<Value = RoomName> {
+    (0..3, 0..3).prop_map(|(x, y)| RoomName::new(x, y))
+}
+
+/// Three rooms square, each open inside and to the next only where both
+/// open a stretch of their shared border, ringed by closed rooms; a stretch
+/// is walled on one side at times, a dead end only its terrain shows.
+fn walled_rooms() -> impl Strategy<Value = World<'static>> {
+    let side = (0..40, weighted(0.25), weighted(1.0 / 3.0), 0..8);
+    (vec(side, 36), vec(weighted(0.2), 9 * tiles::COUNT)).prop_map(|(sides, swamps)| {
+        let (mut sides, mut swamps) = (sides.into_iter(), swamps.into_iter());
+        let mut rooms = Vec::new();
+        let mut borders: std::collections::BTreeMap<(i32, i32, i32), std::ops::Range<i32>> =
+            Default::default();
+        for x in 0..3 {
+            for y in 0..3 {
+                let mut terrain = vec![0u8; tiles::COUNT];
+                let around = [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT];
+                for (side, (from, shut, unopened, long)) in around.into_iter().zip(&mut sides) {
+                    let back = (x + tiles::dx(side), y + tiles::dy(side), (side + 3) % 8 + 1);
+                    let open = match borders.get(&back) {
+                        Some(_) if shut => 0..0,
+                        Some(open) => open.clone(),
+                        None if unopened => 0..0,
+                        None => from..from + 1 + long,
+                    };
+                    borders.insert((x, y, side), open.clone());
+                    for (i, &t) in tiles::exit_tiles(side).iter().enumerate() {
+                        if !open.contains(&(i as i32)) {
+                            terrain[t] = terrain::WALL;
+                        }
+                    }
+                }
+                for (t, swamp) in terrain.iter_mut().zip(&mut swamps) {
+                    if *t == 0 && swamp {
+                        *t = terrain::SWAMP;
+                    }
+                }
+                rooms.push(room_of(RoomName::new(x, y), terrain, Vec::new()));
+            }
+        }
+        let mut world = world_of_rooms(rooms);
+        let ring = (-1..=3).flat_map(|x| (-1..=3).map(move |y| (x, y)));
+        world.closed = ring
+            .filter(|&(x, y)| !(0..3).contains(&x) || !(0..3).contains(&y))
+            .map(|(x, y)| RoomName::new(x, y))
+            .collect();
+        world
+    })
+}
+
+proptest! {
+    // Beside this file: no `lib.rs` above it for the default to find.
+    #![proptest_config(ProptestConfig {
+        failure_persistence: Some(Box::new(FileFailurePersistence::WithSource("proptest-regressions"))),
+        ..ProptestConfig::with_cases(CASES)
+    })]
+
+    #[test]
+    fn a_loaded_body_weighs_at_least_its_empty_self_and_a_creep_reads_as_its_parts(kinds in parts(60)) {
         let (empty, loaded) = (empty_factor(&kinds), loaded_factor(&kinds));
         let creep = Creep {
             id: "c".into(),
@@ -371,33 +433,29 @@ fn a_loaded_body_weighs_at_least_its_empty_self_and_a_creep_reads_as_its_parts()
                 capacity: 0,
             },
         };
-        assert!(loaded.weight >= empty.weight, "{kinds:?}");
-        assert_eq!(loaded.moves, empty.moves, "{kinds:?}");
+        prop_assert!(loaded.weight >= empty.weight, "{:?}", kinds);
+        prop_assert_eq!(loaded.moves, empty.moves, "{:?}", kinds);
         let unloaded = Creep {
             store: Store::empty(),
             ..creep.clone()
         };
-        assert_eq!(factor_of(&unloaded), empty, "{kinds:?}");
-        assert_eq!(factor_of(&creep), loaded, "{kinds:?}");
+        prop_assert_eq!(factor_of(&unloaded), empty, "{:?}", kinds);
+        prop_assert_eq!(factor_of(&creep), loaded, "{:?}", kinds);
     }
-}
 
-#[test]
-fn a_walk_takes_at_least_a_tick_a_tile_of_range_it_must_close() {
-    for (walk, _) in walks(11) {
+    #[test]
+    fn a_walk_takes_at_least_a_tick_a_tile_of_range_it_must_close(walk in walk()) {
         let atlas = Atlas::of_world(&world_of(&walk.ground));
         let target = target_of(ROOM, &walk);
         if let Some(ticks) =
             atlas.travel_ticks(walk.mover, &target, &tiles::to_pos(ROOM, walk.start))
         {
-            assert!(ticks >= reach(walk.mover.footprint, walk.start, walk.goal) - walk.range);
+            prop_assert!(ticks >= reach(walk.mover.footprint, walk.start, walk.goal) - walk.range);
         }
     }
-}
 
-#[test]
-fn each_first_step_lands_where_the_walk_is_shorter_on_open_ground_to_a_seat() {
-    for (walk, _) in walks(12) {
+    #[test]
+    fn each_first_step_lands_where_the_walk_is_shorter_on_open_ground_to_a_seat(walk in walk()) {
         let atlas = Atlas::of_world(&world_of(&walk.ground));
         let target = target_of(ROOM, &walk);
         let path = followed(&atlas, &walk, &target);
@@ -416,39 +474,35 @@ fn each_first_step_lands_where_the_walk_is_shorter_on_open_ground_to_a_seat() {
             .map(tiles::of_pos)
             .collect();
         for pair in path.windows(2) {
-            assert!(pair[1].1 < pair[0].1, "descending");
-            assert!(open(pair[1].0), "open ground");
+            prop_assert!(pair[1].1 < pair[0].1, "descending");
+            prop_assert!(open(pair[1].0), "open ground");
         }
         match path.last() {
-            Some(&(tile, 0)) => assert!(seats.contains(&tile), "on a seat"),
+            Some(&(tile, 0)) => prop_assert!(seats.contains(&tile), "on a seat"),
             Some(_) => panic!("the walk stopped short of a seat"),
             None => (),
         }
     }
-}
 
-#[test]
-fn a_seat_is_open_ground_off_the_ring_within_range() {
-    for (walk, _) in walks(13) {
+    #[test]
+    fn a_seat_is_open_ground_off_the_ring_within_range(walk in walk()) {
         let atlas = Atlas::of_world(&world_of(&walk.ground));
         let footprint = walk.mover.footprint;
         for pos in atlas.seats(footprint, walk.range, &tiles::to_pos(ROOM, walk.goal)) {
             let tile = tiles::of_pos(&pos);
-            assert!(reach(footprint, tile, walk.goal) <= walk.range);
-            assert!(!on_edge(footprint, tile));
-            assert!(
+            prop_assert!(reach(footprint, tile, walk.goal) <= walk.range);
+            prop_assert!(!on_edge(footprint, tile));
+            prop_assert!(
                 covered(footprint, tile)
                     .iter()
                     .all(|&(x, y)| !walk.ground.blocked(x, y))
             );
         }
     }
-}
 
-#[test]
-fn no_seat_is_a_sources_a_minerals_or_a_controllers_tile() {
-    for (walk, mut dice) in walks(14) {
-        let at = Pos::new(ROOM, dice.between(1, 48), dice.between(1, 48));
+    #[test]
+    fn no_seat_is_a_sources_a_minerals_or_a_controllers_tile(walk in walk(), x in 1..=48, y in 1..=48) {
+        let at = Pos::new(ROOM, x, y);
         let across = Pos::new(ROOM, 49 - at.x, at.y);
         let mut world = world_of(&walk.ground);
         world.rooms[0].sources = vec![Source {
@@ -466,71 +520,55 @@ fn no_seat_is_a_sources_a_minerals_or_a_controllers_tile() {
         }];
         let atlas = Atlas::of_world(&world);
         for obstacle in [at, across] {
-            assert!(
+            prop_assert!(
                 !atlas
                     .seats(Footprint::One, 1, &obstacle)
                     .contains(&obstacle)
             );
         }
     }
-}
 
-#[test]
-fn a_memoised_answer_is_a_fresh_atlass_answer() {
-    let mut befores = walks(16);
-    for (walk, mut dice) in walks(15) {
-        let (before, _) = befores.next().unwrap();
-        let kept = dice.chance(2);
+    #[test]
+    fn a_memoised_answer_is_a_fresh_atlass_answer(walk in walk(), before in ground(), kept in any::<bool>()) {
         let world = world_of(&walk.ground);
         let target = target_of(ROOM, &walk);
         let start = tiles::to_pos(ROOM, walk.start);
-        let stale = Atlas::of_world(&world_of(if kept { &walk.ground } else { &before.ground }));
+        let stale = Atlas::of_world(&world_of(if kept { &walk.ground } else { &before }));
         stale.travel_ticks(walk.mover, &target, &start);
         let warm = Atlas::following(stale, &world, [], []);
         let first = warm.travel_ticks(walk.mover, &target, &start);
         let again = warm.travel_ticks(walk.mover, &target, &start);
         let step = warm.first_step(walk.mover, &target, &start);
         let fresh = Atlas::of_world(&world);
-        assert_eq!(first, again);
-        assert_eq!(first, fresh.travel_ticks(walk.mover, &target, &start));
-        assert_eq!(step, fresh.first_step(walk.mover, &target, &start));
+        prop_assert_eq!(first, again);
+        prop_assert_eq!(first, fresh.travel_ticks(walk.mover, &target, &start));
+        prop_assert_eq!(step, fresh.first_step(walk.mover, &target, &start));
         if walk.mover.factor.moves != 0 {
-            assert_eq!(warm.misses(), i32::from(!kept));
+            prop_assert_eq!(warm.misses(), i32::from(!kept));
         }
     }
-}
 
-#[test]
-fn toward_another_room_the_walk_ends_on_an_exit() {
-    for (walk, mut dice) in walks(17) {
-        let toward = dice.pick(&[tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT]);
+    #[test]
+    fn toward_another_room_the_walk_ends_on_an_exit(walk in walk(), toward in exit()) {
         let onto = tiles::room_toward(ROOM, toward).unwrap();
         let atlas = Atlas::of_world(&world_of(&walk.ground));
         let target = target_of(onto, &walk);
         if let Some(&(tile, ticks)) = followed(&atlas, &walk, &target).last() {
-            assert_eq!(ticks, 0);
+            prop_assert_eq!(ticks, 0);
             let edge = covered(walk.mover.footprint, tile);
-            assert!(
+            prop_assert!(
                 edge.iter()
                     .any(|&(x, y)| tiles::exit_of(tiles::index(x, y)) != 0)
             );
         }
     }
-}
 
-#[test]
-fn a_route_read_off_its_targets_tree_is_the_route_searched() {
-    let mut dice = Dice::new(18);
-    for _ in 0..CASES {
-        let walled: Vec<(i32, i32, i32)> = (0..dice.below(20))
-            .map(|_| {
-                (
-                    dice.between(-128, 127),
-                    dice.between(-128, 127),
-                    dice.below(256),
-                )
-            })
-            .collect();
+    #[test]
+    fn a_route_read_off_its_targets_tree_is_the_route_searched(
+        walled in vec((-128..=127, -128..=127, 0..256), 0..20),
+        hops in 1..=4,
+        (ox, oy) in (-128..=127, -128..=127),
+    ) {
         let mut rooms = Vec::new();
         for x in -2..=2 {
             for y in -2..=2 {
@@ -546,93 +584,85 @@ fn a_route_read_off_its_targets_tree_is_the_route_searched() {
             }
         }
         let atlas = Atlas::of_world(&world_of_rooms(rooms));
-        let hops = 1 + dice.below(4);
         let from = RoomName::new(0, 0);
-        let onto = RoomName::new(dice.between(-128, 127) % 3, dice.between(-128, 127) % 3);
+        let onto = RoomName::new(ox % 3, oy % 3);
         let tree = atlas.tree(&BTreeSet::new(), hops, onto);
         let routed = atlas.route(&BTreeSet::new(), hops, from, onto);
-        assert_eq!(tree.route(from, onto), routed);
+        prop_assert_eq!(&tree.route(from, onto), &routed);
         let crossed = routed.map(|r| r.len() as i32 - 1);
-        assert_eq!(tree.crossings(from, onto), crossed);
-        assert_eq!(tree.crossings(onto, from), crossed);
+        prop_assert_eq!(tree.crossings(from, onto), crossed);
+        prop_assert_eq!(tree.crossings(onto, from), crossed);
     }
-}
 
-#[test]
-fn a_route_crosses_shared_borders_around_the_avoided_by_fewest_crossings() {
-    let mut dice = Dice::new(19);
-    let atlas = Atlas::of_world(&world_of_rooms(Vec::new()));
-    for _ in 0..CASES {
-        let (dx, dy) = (dice.between(-128, 127) % 4, dice.between(-128, 127) % 4);
+    #[test]
+    fn a_route_crosses_shared_borders_around_the_avoided_by_fewest_crossings(
+        (dx, dy) in (-128..=127, -128..=127),
+        avoid in vec((-128..=127, -128..=127), 0..6),
+    ) {
+        let atlas = Atlas::of_world(&world_of_rooms(Vec::new()));
+        let (dx, dy) = (dx % 4, dy % 4);
         let onto = RoomName::new(dx, dy);
         let from = RoomName::new(0, 0);
-        let avoid: BTreeSet<RoomName> = (0..dice.below(6))
-            .map(|_| RoomName::new(dice.between(-128, 127) % 4, dice.between(-128, 127) % 4))
+        let avoid: BTreeSet<RoomName> = (avoid.into_iter())
+            .map(|(x, y)| RoomName::new(x % 4, y % 4))
             .collect();
         let hops = dx.abs() + dy.abs();
         match atlas.route(&avoid, 12, from, onto) {
             Some(chain) => {
-                assert_eq!(chain[0], from);
-                assert_eq!(chain[chain.len() - 1], onto);
-                assert!(
+                prop_assert_eq!(chain[0], from);
+                prop_assert_eq!(chain[chain.len() - 1], onto);
+                prop_assert!(
                     chain
                         .windows(2)
                         .all(|p| tiles::exit_toward(p[0], p[1]).is_some())
                 );
-                assert!(
+                prop_assert!(
                     chain
                         .iter()
                         .all(|r| *r == from || *r == onto || !avoid.contains(r))
                 );
-                assert!(chain.len() as i32 > hops);
-                assert!(!avoid.is_empty() || chain.len() as i32 - 1 == hops);
+                prop_assert!(chain.len() as i32 > hops);
+                prop_assert!(!avoid.is_empty() || chain.len() as i32 - 1 == hops);
             }
-            None => assert!(!avoid.is_empty()),
+            None => prop_assert!(!avoid.is_empty()),
         }
     }
-}
 
-#[test]
-fn no_route_enters_a_closed_room_nor_ends_in_one() {
-    let mut dice = Dice::new(21);
-    for _ in 0..CASES {
-        let mut room = || RoomName::new(dice.between(-128, 127) % 4, dice.between(-128, 127) % 4);
-        let (from, onto) = (room(), room());
+    #[test]
+    fn no_route_enters_a_closed_room_nor_ends_in_one(rooms in vec((-128..=127, -128..=127), 6)) {
+        let rooms: Vec<RoomName> = rooms.into_iter().map(|(x, y)| RoomName::new(x % 4, y % 4)).collect();
+        let (from, onto) = (rooms[0], rooms[1]);
         let mut world = world_of_rooms(Vec::new());
-        world.closed = (0..4).map(|_| room()).filter(|r| *r != from).collect();
+        world.closed = rooms[2..].iter().copied().filter(|r| *r != from).collect();
         let atlas = Atlas::of_world(&world);
         if let Some(chain) = atlas.route(&BTreeSet::new(), 12, from, onto) {
-            assert!(chain.iter().all(|r| !world.closed.contains(r)));
+            prop_assert!(chain.iter().all(|r| !world.closed.contains(r)));
         }
     }
-}
 
-#[test]
-fn any_open_neighbour_is_one_crossing_away_keeper_room_or_not() {
-    let mut dice = Dice::new(20);
-    let atlas = Atlas::of_world(&world_of_rooms(Vec::new()));
-    for _ in 0..CASES {
-        let from = RoomName::new(dice.below(24) - 12, dice.below(24) - 12);
-        let exit = dice.pick(&[tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT]);
+    #[test]
+    fn any_open_neighbour_is_one_crossing_away_keeper_room_or_not(x in -12..12, y in -12..12, exit in exit()) {
+        let atlas = Atlas::of_world(&world_of_rooms(Vec::new()));
+        let from = RoomName::new(x, y);
         let onto = tiles::room_toward(from, exit).unwrap();
-        assert_eq!(
+        prop_assert_eq!(
             atlas.route(&BTreeSet::new(), 1, from, onto),
             Some(vec![from, onto])
         );
     }
-}
 
-#[test]
-fn every_tile_a_keeper_strikes_is_walled_and_a_room_of_keepers_not_due_walls_none() {
-    let mut dice = Dice::new(21);
-    for _ in 0..CASES {
-        let ground = ground(&mut dice);
+    #[test]
+    fn every_tile_a_keeper_strikes_is_walled_and_a_room_of_keepers_not_due_walls_none(
+        ground in ground(),
+        (lair, rock, at) in (tile(), tile(), tile()),
+        spawn in prop_oneof![1 => Just(Atlas::CROSSING_TICKS), 1 => Just(Atlas::CROSSING_TICKS + 1), 8 => -1..=2 * Atlas::CROSSING_TICKS],
+        alive in any::<bool>(),
+    ) {
         let mut world = world_of(&ground);
-        let (lair, rock, at) = (tile(&mut dice), tile(&mut dice), tile(&mut dice));
         let pos = |t: Tile| tiles::to_pos(ROOM, t);
         let room = &mut world.rooms[0];
         let mut lair_of = structure(StructureType::KeeperLair, false, pos(lair).x, pos(lair).y);
-        lair_of.spawn = Some(dice.between(-1, 2 * Atlas::CROSSING_TICKS)).filter(|t| *t >= 0);
+        lair_of.spawn = Some(spawn).filter(|t| *t >= 0);
         let spawns = lair_of.spawn.is_some_and(|t| t <= Atlas::CROSSING_TICKS);
         room.structures.push(lair_of);
         room.sources.push(Source {
@@ -642,7 +672,6 @@ fn every_tile_a_keeper_strikes_is_walled_and_a_room_of_keepers_not_due_walls_non
             energy_capacity: 0,
             ticks_to_regeneration: 0,
         });
-        let alive = dice.chance(2);
         if alive {
             room.others.push(Creep {
                 body: engine::keeper_body()
@@ -664,79 +693,35 @@ fn every_tile_a_keeper_strikes_is_walled_and_a_room_of_keepers_not_due_walls_non
         let weights = Atlas::of_world(&world).held_weights(ROOM).unwrap();
         for t in tiles::all() {
             let solid = t == lair || t == rock;
-            assert!(weights[t].is_none() || (bare[t] == weights[t] && !solid));
-            assert!(weights[t].is_none() || !alive || tiles::range(at, t) > engine::RANGED_RANGE);
-            assert!(alive || spawns || weights[t] == bare[t] || solid);
+            prop_assert!(weights[t].is_none() || (bare[t] == weights[t] && !solid));
+            prop_assert!(weights[t].is_none() || !alive || tiles::range(at, t) > engine::RANGED_RANGE);
+            prop_assert!(alive || spawns || weights[t] == bare[t] || solid);
         }
     }
-}
 
-/// Three rooms square, each open inside and to the next only where both
-/// open a stretch of their shared border, ringed by closed rooms; a stretch
-/// is walled on one side at times, a dead end only its terrain shows.
-fn walled_rooms(dice: &mut Dice) -> World<'static> {
-    let mut rooms = Vec::new();
-    let mut borders: std::collections::BTreeMap<(i32, i32, i32), std::ops::Range<i32>> =
-        Default::default();
-    for x in 0..3 {
-        for y in 0..3 {
-            let mut terrain = vec![0u8; tiles::COUNT];
-            for side in [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT] {
-                let back = (x + tiles::dx(side), y + tiles::dy(side), (side + 3) % 8 + 1);
-                let from = dice.below(40);
-                let open = match borders.get(&back) {
-                    Some(_) if dice.below(4) == 0 => 0..0,
-                    Some(open) => open.clone(),
-                    None if dice.chance(3) => 0..0,
-                    None => from..from + 1 + dice.below(8),
-                };
-                borders.insert((x, y, side), open.clone());
-                for (i, &t) in tiles::exit_tiles(side).iter().enumerate() {
-                    if !open.contains(&(i as i32)) {
-                        terrain[t] = terrain::WALL;
-                    }
-                }
-            }
-            for t in &mut terrain {
-                if *t == 0 && dice.below(5) == 0 {
-                    *t = terrain::SWAMP;
-                }
-            }
-            rooms.push(room_of(RoomName::new(x, y), terrain, Vec::new()));
-        }
-    }
-    let mut world = world_of_rooms(rooms);
-    let ring = (-1..=3).flat_map(|x| (-1..=3).map(move |y| (x, y)));
-    world.closed = ring
-        .filter(|&(x, y)| !(0..3).contains(&x) || !(0..3).contains(&y))
-        .map(|(x, y)| RoomName::new(x, y))
-        .collect();
-    world
-}
-
-#[test]
-fn a_body_walking_first_steps_never_enters_a_room_twice_and_arrives_where_a_route_runs() {
-    let mut dice = Dice::new(22);
-    for _ in 0..CASES {
-        let world = walled_rooms(&mut dice);
+    #[test]
+    fn a_body_walking_first_steps_never_enters_a_room_twice_and_arrives_where_a_route_runs(
+        world in walled_rooms(),
+        body in parts(10),
+        (from, onto) in (inner_room(), inner_room()),
+        (goal, start) in (inner_tile(), inner_tile()),
+        range in 0..3,
+    ) {
         let atlas = Atlas::of_world(&world);
-        let open = |dice: &mut Dice| tiles::index(1 + dice.below(48), 1 + dice.below(48));
-        let room = |dice: &mut Dice| RoomName::new(dice.below(3), dice.below(3));
-        let mut body = parts(&mut dice, 10);
+        let mut body = body;
         body.push(Part::Move);
         let mover = Mover {
             footprint: Footprint::One,
             factor: loaded_factor(&body),
         };
-        let (from, onto) = (room(&mut dice), room(&mut dice));
         let target = Target {
             room: onto,
-            tiles: vec![open(&mut dice)],
-            range: dice.below(3),
+            tiles: vec![goal],
+            range,
             avoid: BTreeSet::new(),
             max_hops: 8,
         };
-        let mut at = tiles::to_pos(from, open(&mut dice));
+        let mut at = tiles::to_pos(from, start);
         let mut entered = vec![from];
         let mut arrived = false;
         for _ in 0..4 * tiles::COUNT {
@@ -751,7 +736,7 @@ fn a_body_walking_first_steps_never_enters_a_room_twice_and_arrives_where_a_rout
             let across = tiles::room_toward(at.room, tiles::exit_of(next));
             at = match (across, tiles::landing(next)) {
                 (Some(room), Some(landing)) => {
-                    assert!(!entered.contains(&room), "{entered:?} back into {room}");
+                    prop_assert!(!entered.contains(&room), "{:?} back into {}", entered, room);
                     entered.push(room);
                     tiles::to_pos(room, landing)
                 }
@@ -759,7 +744,60 @@ fn a_body_walking_first_steps_never_enters_a_room_twice_and_arrives_where_a_rout
             };
         }
         let routed = atlas.route(&BTreeSet::new(), 8, from, onto).is_some();
-        assert_eq!(arrived, routed, "{entered:?} toward {onto}");
+        prop_assert_eq!(arrived, routed, "{:?} toward {}", entered, onto);
+    }
+
+    #[test]
+    fn a_walk_round_a_set_never_steps_on_it(walk in walk(), set in vec(tile(), 0..200)) {
+        let atlas = Atlas::of_world(&world_of(&walk.ground));
+        let target = target_of(ROOM, &walk);
+        let mut round = TileSet::default();
+        for t in set {
+            if t != walk.start {
+                round.insert(t);
+            }
+        }
+        let start = tiles::to_pos(ROOM, walk.start);
+        for pos in atlas.walk(walk.mover, &target, Some(&round), &start, tiles::COUNT) {
+            let on = covered(walk.mover.footprint, tiles::of_pos(&pos));
+            prop_assert!(on.iter().all(|&(x, y)| !round.contains(tiles::index(x, y))));
+        }
+    }
+
+    #[test]
+    fn a_hostiles_step_redoes_no_flood_tree_or_walk_and_no_first_step_lands_on_one(
+        walk in walk(),
+        first in tile(),
+        near_at in any::<Index>(),
+    ) {
+        let hostile = |at: Tile| creep(Owner::Invader, tiles::to_pos(ROOM, at));
+        let mut world = world_of(&walk.ground);
+        let target = target_of(ROOM, &walk);
+        let start = tiles::to_pos(ROOM, walk.start);
+        let kept = |atlas: &Atlas| {
+            atlas.ticks_to(walk.mover, &target, &start);
+            atlas.walk(walk.mover, &target, None, &start, 100);
+            atlas.tree(&BTreeSet::new(), 1, ROOM);
+        };
+        world.rooms[0].others = vec![hostile(first)];
+        let mut before = Atlas::of_world(&world);
+        before.check = true;
+        kept(&before);
+        let near = tiles::around(walk.start);
+        world.rooms[0].others = vec![hostile(near[near_at.index(near.len())])];
+        let after = Atlas::following(before, &world, [], []);
+        kept(&after);
+        prop_assert_eq!(after.recomputed(), 0);
+        if walk.mover.factor.moves != 0 {
+            prop_assert_eq!(after.misses(), 0);
+        }
+        let step = after.first_step(walk.mover, &target, &start);
+        let landed = step.and_then(|d| tiles::neighbour(walk.start, d));
+        let open = landed.is_none_or(|t| {
+            (covered(walk.mover.footprint, t).iter())
+                .all(|&(x, y)| after.passable(ROOM, tiles::index(x, y)))
+        });
+        prop_assert!(open);
     }
 }
 
@@ -781,59 +819,6 @@ fn a_route_goes_round_a_stronghold_where_another_way_stands() {
     };
     assert!(route(false).contains(&core));
     assert!(!route(true).contains(&core));
-}
-
-#[test]
-fn a_walk_round_a_set_never_steps_on_it() {
-    for (walk, mut dice) in walks(23) {
-        let atlas = Atlas::of_world(&world_of(&walk.ground));
-        let target = target_of(ROOM, &walk);
-        let mut round = TileSet::default();
-        for _ in 0..dice.below(200) {
-            let t = tile(&mut dice);
-            if t != walk.start {
-                round.insert(t);
-            }
-        }
-        let start = tiles::to_pos(ROOM, walk.start);
-        for pos in atlas.walk(walk.mover, &target, Some(&round), &start, tiles::COUNT) {
-            let on = covered(walk.mover.footprint, tiles::of_pos(&pos));
-            assert!(on.iter().all(|&(x, y)| !round.contains(tiles::index(x, y))));
-        }
-    }
-}
-
-#[test]
-fn a_hostiles_step_redoes_no_flood_tree_or_walk_and_no_first_step_lands_on_one() {
-    for (walk, mut dice) in walks(24) {
-        let hostile = |at: Tile| creep(Owner::Invader, tiles::to_pos(ROOM, at));
-        let mut world = world_of(&walk.ground);
-        let target = target_of(ROOM, &walk);
-        let start = tiles::to_pos(ROOM, walk.start);
-        let kept = |atlas: &Atlas| {
-            atlas.ticks_to(walk.mover, &target, &start);
-            atlas.walk(walk.mover, &target, None, &start, 100);
-            atlas.tree(&BTreeSet::new(), 1, ROOM);
-        };
-        world.rooms[0].others = vec![hostile(tile(&mut dice))];
-        let mut before = Atlas::of_world(&world);
-        before.check = true;
-        kept(&before);
-        let near = tiles::around(walk.start);
-        world.rooms[0].others = vec![hostile(near[dice.below(near.len() as i32) as usize])];
-        let after = Atlas::following(before, &world, [], []);
-        kept(&after);
-        assert_eq!(after.recomputed(), 0);
-        if walk.mover.factor.moves != 0 {
-            assert_eq!(after.misses(), 0);
-        }
-        let step = after.first_step(walk.mover, &target, &start);
-        let landed = step.and_then(|d| tiles::neighbour(walk.start, d));
-        assert!(landed.is_none_or(|t| {
-            (covered(walk.mover.footprint, t).iter())
-                .all(|&(x, y)| after.passable(ROOM, tiles::index(x, y)))
-        }));
-    }
 }
 
 #[test]

@@ -8,9 +8,12 @@ use crate::tick::{self, Module, TickResult};
 use fabot_atlas::{self as atlas, Atlas, Context};
 use fabot_base::declarations;
 use fabot_base::intents::{Action, CreepAct, ModuleOutput};
-use fabot_base::testing::Dice;
 use fabot_base::world::World;
+use proptest::prelude::*;
+use proptest::sample::Index;
+use proptest::test_runner::FileFailurePersistence;
 
+const CASES: u32 = 256;
 const NAMES: [&str; 8] = ["m0", "m1", "m2", "m3", "m4", "m5", "m6", "m7"];
 
 /// Module `I` says its name once, as creep `cI`.
@@ -81,34 +84,33 @@ fn said(intents: &[Action]) -> Vec<(String, String)> {
         .collect()
 }
 
-#[test]
-fn every_module_is_reported_once_in_order_then_the_settling() {
-    let mut dice = Dice::new(52);
-    for _ in 0..100 {
-        let count = dice.between(0, NAMES.len() as i32) as usize;
+proptest! {
+    // Beside this file: the default files it above the crate.
+    #![proptest_config(ProptestConfig {
+        failure_persistence: Some(Box::new(FileFailurePersistence::WithSource("proptest-regressions"))),
+        ..ProptestConfig::with_cases(CASES)
+    })]
+
+    #[test]
+    fn every_module_is_reported_once_in_order_then_the_settling(count in 0..=NAMES.len()) {
         let result = run(count, State::default());
-        assert_eq!(result.reports.len(), count + 1);
-        assert_eq!(result.reports.last().map(|r| r.module), Some("settle"));
+        prop_assert_eq!(result.reports.len(), count + 1);
+        prop_assert_eq!(result.reports.last().map(|r| r.module), Some("settle"));
         for (report, name) in result.reports.iter().zip(&NAMES[..count]) {
-            assert_eq!(report.module, *name);
-            assert!(report.cpu > 0.0);
+            prop_assert_eq!(report.module, *name);
+            prop_assert!(report.cpu > 0.0);
         }
     }
-}
 
-#[test]
-fn a_switched_off_module_runs_nothing_and_spends_nothing() {
-    let mut dice = Dice::new(53);
-    for _ in 0..100 {
-        let count = dice.between(1, NAMES.len() as i32) as usize;
-        let off = dice.below(count as i32) as usize;
+    #[test]
+    fn a_switched_off_module_runs_nothing_and_spends_nothing(count in 1..=NAMES.len(), off in any::<Index>()) {
+        let off = off.index(count);
         let mut state = State::default();
         state.off.insert(NAMES[off].to_string());
         let result = run(count, state);
         let report = &result.reports[off];
-        assert_eq!(report.cpu, 0.0);
-        assert!(
-            !said(&result.settled.actions).contains(&(format!("c{off}"), NAMES[off].to_string()))
-        );
+        prop_assert_eq!(report.cpu, 0.0);
+        let spoke = (format!("c{off}"), NAMES[off].to_string());
+        prop_assert!(!said(&result.settled.actions).contains(&spoke));
     }
 }
