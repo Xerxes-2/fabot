@@ -237,6 +237,28 @@ fn a_border_body_with_danger_on_every_inner_tile_steps_in_by_the_first() {
     assert_eq!(wish.head, tiles::index(48, 40));
 }
 
+#[test]
+fn a_border_body_in_danger_on_the_exit_its_walk_leaves_by_stands_to_be_carried_out() {
+    let at = tiles::index(0, 21);
+    let shut = border_stay(at, tiles::index(0, 26), 5);
+    let mut runner = TestRunner::deterministic();
+    let (mut errand, centre, radius) = shut.new_tree(&mut runner).unwrap().current();
+    errand.target.room = "W2N1".parse().unwrap();
+    let (_, _, wish) = planned(&errand, Some(&danger_within(radius, centre)));
+    assert!(wish.moves && wish.stays());
+}
+
+#[test]
+fn a_border_body_in_danger_on_an_exit_its_walk_does_not_leave_by_steps_in() {
+    let at = tiles::index(49, 21);
+    let shut = border_stay(at, tiles::index(49, 26), 5);
+    let mut runner = TestRunner::deterministic();
+    let (mut errand, centre, radius) = shut.new_tree(&mut runner).unwrap().current();
+    errand.target.room = "W2N1".parse().unwrap();
+    let (_, _, wish) = planned(&errand, Some(&danger_within(radius, centre)));
+    assert!(!wish.stays() && !tiles::on_edge(wish.head));
+}
+
 fn resolve(crowd: &Crowd) -> Vec<(String, i32)> {
     arbitrate(|t| crowd.passable[t], &crowd.held, &crowd.wishes)
 }
@@ -545,12 +567,15 @@ proptest! {
         ],
     ) {
         let danger = danger_within(radius, centre);
-        let (atlas, _, wish) = planned(&errand, Some(&danger));
+        let (atlas, mover, wish) = planned(&errand, Some(&danger));
         let clear = |t: Tile| atlas.passable(ROOM, t) && !danger.contains(t) && !tiles::on_edge(t);
         let hemmed = tiles::on_edge(wish.at) && !around(wish.at).into_iter().any(clear);
+        // The engine carries it out by the exit its walk leaves by.
+        let leaves = errand.target.room != ROOM
+            && atlas.travel_ticks(mover, &errand.target, &tiles::to_pos(ROOM, wish.at)) == Some(0);
         if !danger.contains(wish.at) {
             prop_assert!(hemmed || wish.stays() || !danger.contains(wish.head));
-        } else if wish.moves && around(wish.at).into_iter().any(clear) {
+        } else if wish.moves && !leaves && around(wish.at).into_iter().any(clear) {
             prop_assert!(!wish.stays());
         }
     }
