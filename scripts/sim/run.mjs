@@ -171,9 +171,9 @@ export const buildPlan = () =>
 /**
  * A soak into `out` on `world` (default the template), or on the world map.js generates off seed `gen`
  * over `sectors` ("WxH"; sim picks the room); resolves to sim's exit code, -1 when it never ran or was killed (the cause on stderr). `watch` ({port, ms, badge}) serves it to lazycreep;
- * `capture` ("a-b[,c-d]") writes those ticks to `out`/capture.jsonl for `scripts/bench.mjs`.
+ * `capture` ("a-b[,c-d]") writes those ticks to `out`/capture.jsonl for `scripts/bench.mjs`; `tuning` (JSON text) is each seat's `Memory.v2.tuning` that names none.
  */
-export function runSim(bin, { world, gen, sectors, room, node, ticks, seed = 1, late = 0, ended = false, unsafe = false, follow = [], rivals = [], players, invaders, wave, core, stronghold, resetEvery = 0, watch, capture, out }) {
+export function runSim(bin, { world, gen, sectors, room, node, ticks, seed = 1, late = 0, ended = false, unsafe = false, follow = [], rivals = [], players, tuning, invaders, wave, core, stronghold, resetEvery = 0, watch, capture, out }) {
   return new Promise((done) => {
     rmSync(out, { recursive: true, force: true });
     mkdirSync(dirname(out), { recursive: true });
@@ -188,7 +188,10 @@ export function runSim(bin, { world, gen, sectors, room, node, ticks, seed = 1, 
     };
     const fail = (e) => finish(-1, e.message);
     const play = (where) => {
-      const args = [...where, "--ticks", String(ticks), "--seed", String(seed), "--late", String(late), "--every", "100", "--out", out, ...(follow.length ? ["--follow", follow.join(",")] : []), ...(ended ? ["--ended"] : []), "--reset-every", String(resetEvery), ...(capture ? ["--capture", capture] : []), "--rivals", JSON.stringify(seats(rivals)), ...(players ? ["--players", players] : []),
+      // `tuning` is each seat's that names none: the one sim seats unasked is `fabot`, in `room` off --gen.
+      const asked = players ? JSON.parse(players) : [{ name: "fabot", room }];
+      const seated = tuning ? JSON.stringify(asked.map((p) => ({ tuning: JSON.parse(tuning), ...p }))) : players;
+      const args = [...where, "--ticks", String(ticks), "--seed", String(seed), "--late", String(late), "--every", "100", "--out", out, ...(follow.length ? ["--follow", follow.join(",")] : []), ...(ended ? ["--ended"] : []), "--reset-every", String(resetEvery), ...(capture ? ["--capture", capture] : []), "--rivals", JSON.stringify(seats(rivals)), ...(seated ? ["--players", seated] : []),
         "--npc", JSON.stringify(npc(invaders, bodies(wave), core, stronghold, ticks)), ...(watch ? ["--watch", "--port", String(watch.port), "--tick-ms", String(watch.ms), ...(watch.badge ? ["--badge", watch.badge] : [])] : [])];
       const dirs = [out, ...JSON.parse(players ?? "[]").slice(1).map((p) => join(out, p.name))];
       spawn(bin, args, { stdio: watch ? "inherit" : "ignore" })

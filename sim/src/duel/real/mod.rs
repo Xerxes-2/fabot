@@ -41,7 +41,10 @@ impl Real {
     }
 
     pub fn orders(&mut self, k: &Krebs) -> Stored {
-        let (v, declarations) = (View::of(k), fabot_base::declarations::undeclared());
+        let (v, declarations) = (
+            View::of(k),
+            fabot_base::declarations::Declarations::default(),
+        );
         let terrain = LocalRoomTerrain::new_from_bits(Box::new(*k.terrain.raw(0)));
         let mut world = read::world(&v, &declarations);
         world.rooms[0].terrain = Some(&terrain);

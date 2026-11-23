@@ -537,7 +537,8 @@ pub fn spare(
         (intel, &[]),
     );
     let owners = slots::owners(atlas, (&derived, declarations));
-    let (_, spare) = slots::colonies(atlas, &derived, &owners, &state.assignments);
+    let of = (&derived, &declarations.tuning);
+    let (_, spare) = slots::colonies(atlas, of, &owners, &state.assignments);
     state.homes = Some(derived.into_homes());
     spare
 }
@@ -853,9 +854,11 @@ mod tests {
         fn decide_never_faults_and_holds_a_slot_and_a_task_it_can_read(g in arb::world()) {
             let mut atlas = Atlas::of_world(&g.world);
             let sightings = BTreeMap::new();
-            let mut declarations = declarations::undeclared();
-            declarations.outposts = g.worked.clone();
-            declarations.claims = g.claims.clone();
+            let declarations = Declarations {
+                outposts: g.worked.clone(),
+                claims: g.claims.clone(),
+                ..Declarations::default()
+            };
             let mut derived = atlas::derive(&g.world, &mut atlas);
             derived.worked = atlas::worked(&g.world, &sightings, &declarations, &derived);
 

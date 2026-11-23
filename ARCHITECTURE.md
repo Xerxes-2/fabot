@@ -196,6 +196,7 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
 | `fight.casts` | pending casts by engagement and slot | Fight | Memory | prevent double-casting while spawning |
 | `fight.due` | colonies with imminent siege successor | Fight | Memory | feeds `ColonyPlan.owes` and `.fights` (§5) |
 | `declarations` | operator overrides + per-tick `Strategy` plans (`ColonyPlan`, outposts, claims, operations, allies, enemies, sieges, avoid, tactic rules) | Strategy | Memory (operator); plans rebuilt per tick | world configuration as data |
+| `tuning` | `Tuning` (`core/base/tuning/mod.rs`): judgment constants of economy, expansion and defence economics (never Fight's), a key left out its default, an unknown or out-of-range one (each key's range beside its default) a fault and every default; carried on `Declarations` | Operator writes; Strategy and Economy read | Memory (`observe tuning`, soak's `--tuning` and a seat's `tuning`) | runtime A/B of judgment constants in self-play and soak without a rebuild |
 | `expansion` | in-flight claim, failed rooms (100k fade), abandoned colonies | Strategy | Memory | outlives travel, stock dips, and raze ticks |
 | `piles` | colony → its hub: pile tile, or built over (`Plan::pile`) | Strategy | Memory | written from the plan whenever one stands, read only while none does (a reset redraws it over ticks), so a colony banks and picks outposts on the cold tick as warm; no `--check`: a heap's first plan apart from the hub kept before it is a live fault, a warm replan updates it; dropped with its colony |
 | `switches` | module name → bool (`false` disables; `recorder: true` opts in) | Main | Memory | live kill switches |
@@ -335,11 +336,11 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   as Hivemind's is, since the haul's recasts otherwise hold every spawn.
 - **Reserve (`strategy::reserve`):** threatened colonies (rival within 3 rooms,
   home fight open, or fight cast owed) keep `towers × TOWER_ENERGY_COST ×
-  CREEP_LIFETIME × n` (`n` live-declared via `observe declare reserve`, default
-  `2`); quiet colonies keep 1/3 because a full reserve costs a quiet young
+  CREEP_LIFETIME × n` (`n` the `reserveLifetimes` tuning, default `2`); quiet
+  colonies keep 1/3 (`quietReserveDivisor`) because a full reserve costs a quiet young
   colony a lifetime of upgrading while threats come from neighbours intel sees.
   Owed fight casts and (when GCL allows expanding and `expand::may_start`, since
-  one claim flies at a time) one sponsor's 30k expansion margin + one refill
+  one claim flies at a time) one sponsor's expansion margin (`sponsorMargin`, 30k) + one refill
   (`expand::book`) are added to reserve. Builders draw
   reserve only for paying sites and ramparts (`Ground::kept_from_builders`,
   `derived::drawn_for`), because lowering the reserve itself also feeds surplus
@@ -375,7 +376,7 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   the economy holding it and safe mode answers; boosted if rival has labs), and
   `ticks held` is as long as our towers take to kill it through its quad's heals
   from the ring's far end, capped at the time a colony casts its answer twice.
-  Quiet colonies keep 10k (1/3 of full at RCL8). Core structures (spawn, tower,
+  Quiet colonies keep `rampartFloor` (10k), or 1/3 of full at RCL8 (`quietWallDivisor`). Core structures (spawn, tower,
   storage, terminal) get individual ramparts from RCL4 ahead of roads. The
   min-cut **ring** cuts rectangles 4 tiles around spawns, core structures, labs,
   power spawn, nuker, observer, and extension bays, 1 around controller, and 0
@@ -703,9 +704,9 @@ expansion, and operation priorities.
   Defend its owed casts (`ColonyPlan.owes`). Held, they add no new outposts
   and sponsor nothing, while the others keep growing.
 - **Expansion (`strategy::expand`):** automatic, one in flight. On due ticks
-  (100) while GCL allows and `bucket >= 9000`, a non-busy RCL4+ sponsor with
-  storage holding `reserve + 30k` scores free 2-source rooms ≥ 2 rooms from
-  owned/rival rooms by dig + free neighbours + mineral boost demand
+  (100) while GCL allows and `bucket >= expandBucket` (9000), a non-busy RCL4+
+  sponsor with storage holding `reserve + sponsorMargin` scores free 2-source rooms
+  ≥ 2 rooms from owned rooms and past `expandThreatRooms` (2) from rival rooms by dig + free neighbours + mineral boost demand
   (`1/(held+1)`) + `season::worth` − crossings − fading failure penalty (a
   nearby stronghold adds no cost because its creeps/towers stay at its core and
   Atlas routes around its room). The best room that passes a full `Layout` fit

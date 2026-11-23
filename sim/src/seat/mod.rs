@@ -18,7 +18,7 @@ pub struct Seat {
     pub memory: String,
 }
 
-/// `--players`' entries `{name, room?, declarations?}`, else one in `room` with the world's Memory.
+/// `--players`' entries `{name, room?, declarations?, tuning?}`, else one in `room` with the world's Memory.
 pub fn seats(
     players: Option<Vec<Value>>,
     room: &str,
@@ -38,10 +38,15 @@ pub fn seats(
             uid: format!("u{}", 2 * i + 1),
             name: p["name"].as_str().expect("a seat's name").into(),
             room,
-            memory: match &p["declarations"] {
-                Value::Null if i == 0 => memory.to_string(),
-                Value::Null => String::new(),
-                d => json!({ "v2": { "declarations": d } }).to_string(),
+            memory: match (&p["declarations"], p.get("tuning")) {
+                (Value::Null, None) if i == 0 => memory.to_string(),
+                (Value::Null, Some(t)) if i == 0 => {
+                    let mut m: Value = serde_json::from_str(memory).unwrap_or_default();
+                    m["v2"]["tuning"] = t.clone();
+                    m.to_string()
+                }
+                (Value::Null, None) => String::new(),
+                (d, t) => json!({ "v2": { "declarations": d, "tuning": t } }).to_string(),
             },
         })
         .collect()
@@ -75,11 +80,7 @@ pub fn players(
         let file = |name: &str| {
             BufWriter::new(File::create(format!("{dir}/{name}")).expect("an output file"))
         };
-        let files = [
-            file("faults.jsonl"),
-            file("cpu.jsonl"),
-            file("metrics.jsonl"),
-        ];
+        let files = ["faults.jsonl", "cpu.jsonl", "metrics.jsonl"].map(file);
         let mut driver = Driver::new(maps(), seat.memory.clone(), files);
         driver.kept = kept();
         let memory: Value = serde_json::from_str(&seat.memory).unwrap_or_default();

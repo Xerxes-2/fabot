@@ -7,6 +7,7 @@ pub mod intents;
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing;
 pub mod tiles;
+pub mod tuning;
 pub mod vocabulary;
 pub mod wire;
 pub mod wish;

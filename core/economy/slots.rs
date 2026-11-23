@@ -7,6 +7,7 @@ use fabot_atlas::{self as atlas, Atlas, Mover, Target};
 use fabot_base::declarations::{self, Declarations};
 use fabot_base::engine;
 use fabot_base::grid::{self, Footprint};
+use fabot_base::tuning::Tuning;
 use fabot_base::vocabulary::{Part, part_count_in};
 use fabot_base::world::{Controller, Id, Pos, RoomName, Spawn, StructureType};
 
@@ -381,6 +382,7 @@ impl Flows {
 struct Plan<'a> {
     atlas: &'a Atlas,
     derived: &'a Derived<'a>,
+    tuning: &'a Tuning,
     held: &'a BTreeMap<String, Assignment>,
     out: Vec<Slot>,
     spare: BTreeMap<RoomName, f64>,
@@ -469,7 +471,7 @@ impl Plan<'_> {
             mends |= own && at_risk;
             if raised {
                 // A claim without its spawn is raised by workers sent from here.
-                for k in 0..PIONEERS {
+                for k in 0..self.tuning.pioneers {
                     let cost = self.worker(ci, g.room, k, (true, false), PIONEER, MOST);
                     fixed.add(cost, cost);
                 }
@@ -590,7 +592,7 @@ impl Plan<'_> {
         for cj in (0..sponsors.len()).filter(|cj| sponsors[*cj] == Some(ci)) {
             // Past its tower's level they build: upgrading, they drank what its builders draw.
             let builds = derived.colonies[cj].controller.level >= TOWER_LEVEL;
-            for k in 0..PIONEERS {
+            for k in 0..self.tuning.pioneers {
                 let room = derived.colonies[cj].room;
                 let cost = self.worker(ci, room, k, (builds, false), PIONEER, MOST);
                 fixed.add(cost, cost);
@@ -990,7 +992,7 @@ pub fn plan(
     owners: &[Option<usize>],
     held: &BTreeMap<String, Assignment>,
 ) -> Vec<Slot> {
-    let (mut out, _) = colonies(atlas, derived, owners, held);
+    let (mut out, _) = colonies(atlas, (derived, &declarations.tuning), owners, held);
     // A stood-down outpost keeps its dig and reserver slots, never cast, so
     // its bodies hold them and come back when it reopens.
     for o in &derived.closed {
@@ -1053,7 +1055,7 @@ pub fn plan(
 
 pub fn colonies(
     atlas: &mut Atlas,
-    derived: &Derived,
+    (derived, tuning): (&Derived, &Tuning),
     owners: &[Option<usize>],
     held: &BTreeMap<String, Assignment>,
 ) -> (Vec<Slot>, BTreeMap<RoomName, f64>) {
@@ -1061,6 +1063,7 @@ pub fn colonies(
     let mut plan = Plan {
         atlas: &*atlas,
         derived,
+        tuning,
         held,
         out: Vec::new(),
         spare: BTreeMap::new(),
@@ -1103,7 +1106,6 @@ const KEPT_FLOOR: i32 = 2;
 const CREW: i32 = 8;
 /// After the sponsor's own dig and carriers, before its outposts (The International's).
 const PIONEER: i32 = 2;
-const PIONEERS: usize = 4;
 const TOWER_LEVEL: i32 = 3;
 pub const STORAGE_LEVEL: i32 = 4;
 const SPEND: i32 = 10;

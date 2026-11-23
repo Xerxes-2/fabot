@@ -65,10 +65,9 @@ pub struct Operation {
     pub priority: f64,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Declarations {
-    /// The creep lifetimes of tower fire a colony's reserve holds.
-    pub reserve_lifetimes: f64,
+    pub tuning: crate::tuning::Tuning,
     pub outposts: Vec<Outpost>,
     /// Declared as an outpost is, so a claimer walks to one unseen.
     pub claims: Vec<Outpost>,
@@ -136,21 +135,6 @@ impl Declarations {
     #[inline]
     pub fn abandoning(&self, room: RoomName) -> bool {
         (self.colonies.iter()).any(|p| p.room == room && p.stage == Stage::Abandon)
-    }
-}
-
-pub fn undeclared() -> Declarations {
-    Declarations {
-        reserve_lifetimes: 2.0,
-        outposts: Vec::new(),
-        claims: Vec::new(),
-        allies: BTreeSet::new(),
-        enemies: BTreeSet::new(),
-        sieges: Vec::new(),
-        colonies: Vec::new(),
-        avoid: BTreeSet::new(),
-        tactics: Vec::new(),
-        operations: Vec::new(),
     }
 }
 

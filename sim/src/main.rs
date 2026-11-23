@@ -60,7 +60,7 @@ struct Args {
     follow: Vec<String>,
     npc: Vec<npc::Due>,
     rivals: Vec<rival::Rival>,
-    /// Each seat our bot plays as `{name, room?, declarations?}`; one in `--room` (or `--gen`'s pick) unless given.
+    /// Each seat our bot plays as `{name, room?, declarations?, tuning?}`; one in `--room` (or `--gen`'s pick) unless given.
     players: Option<Vec<Value>>,
     /// `--watch`'s port and tick in ms.
     watch: Option<(u16, u64)>,
@@ -81,7 +81,7 @@ fn args() -> Args {
         };
         flags.insert(flag, value);
     }
-    let usage = "usage: sim (--world <world.json> --room <name> | --gen <seed> [--sectors WxH]) --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--follow A,B] [--npc <[[tick, room, bodies, [a stronghold's level, deploy] or null for a core]]>] [--rivals <[rival::Rival]>] [--players <[{name, room?, declarations?}]>, each after the first out in <dir>/<name>, a room --gen picks unless named] [--ended] [--check] [--reset-every N] [--capture a-b[,c-d]] [--watch [--port N] [--tick-ms N] [--badge <json>]]";
+    let usage = "usage: sim (--world <world.json> --room <name> | --gen <seed> [--sectors WxH]) --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--follow A,B] [--npc <[[tick, room, bodies, [a stronghold's level, deploy] or null for a core]]>] [--rivals <[rival::Rival]>] [--players <[{name, room?, declarations?, tuning?}]>, each after the first out in <dir>/<name>, a room --gen picks unless named] [--ended] [--check] [--reset-every N] [--capture a-b[,c-d]] [--watch [--port N] [--tick-ms N] [--badge <json>]]";
     let need = |flag: &str| (flags.get(flag).cloned()).unwrap_or_else(|| panic!("{flag}: {usage}"));
     let number = |flag: &str, or: u64| (flags.get(flag)).map_or(or, |v| v.parse().expect(usage));
     Args {

@@ -973,7 +973,7 @@ fn a_structure_of_a_kind_the_crate_does_not_name_only_blocks_its_tile() {
         3,
     ];
     let text = "\0aa\0ab\0W1N1\0seasonThing\0road";
-    let declared = fabot_base::declarations::undeclared();
+    let declared = fabot_base::declarations::Declarations::default();
     let mut world = read::world(&ints, text, &declared, &mut read::Buffers::default());
     let room = &mut world.rooms[0];
     room.terrain = terrain::leak(vec![0; tiles::COUNT]);

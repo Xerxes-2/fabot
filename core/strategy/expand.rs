@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use crate::season;
 use fabot_atlas::Derived;
-use fabot_base::declarations::{ColonyPlan, Declarations, Outpost, REACH_HOPS, Stage, undeclared};
+use fabot_base::declarations::{ColonyPlan, Declarations, Outpost, REACH_HOPS, Stage};
 use fabot_base::engine;
 use fabot_base::intel::{self, Intel, Row};
 use fabot_base::tiles;
@@ -45,15 +45,8 @@ pub struct Around<'a> {
 
 /// Candidates are planned on a due tick, not each tick: a plan is a Layout draw.
 const DUE: i32 = 100;
-/// The bucket fills only while the ticks run under the limit (Hivemind's
-/// CPU headroom).
-const BUCKET: i32 = 9_000;
-/// The stock past its reserve a sponsor carries a young room on.
-const MARGIN: i32 = 30_000;
 /// A storage first stands at RCL4.
 const SPONSOR_LEVEL: i32 = 4;
-/// A rival this near raids a young room before its towers stand.
-const THREAT: i32 = 2;
 /// The owner's.
 const CLAIM_DEADLINE: i32 = 5 * engine::CREEP_LIFETIME;
 /// About twice the claim to storage measured two crossings off (21k ticks).
@@ -61,9 +54,6 @@ const RAISE_DEADLINE: i32 = 40_000;
 /// A fresh failure near a room outweighs the most a room scores (its dig and
 /// four neighbours'), fading over this (Hivemind's).
 const FORGET: i32 = 100_000;
-/// Before RCL6's extractor and terminal a colony is cheap to give up for a
-/// better room; past them it holds what a new one would take a long climb to.
-const PRUNE_LEVEL: i32 = 5;
 
 /// What a room is worth holding, in energy a tick.
 pub struct Facts {
@@ -120,9 +110,15 @@ fn spare(world: &World, p: &ColonyPlan, busy: &BTreeSet<RoomName>) -> Option<i32
         .then(|| storage.store.amount_of(ResourceType::Energy) - p.reserve)
 }
 
-fn sponsors(world: &World, plans: &[ColonyPlan], busy: &BTreeSet<RoomName>) -> Vec<RoomName> {
+/// `margin`: the stock past its reserve a sponsor carries a young room on.
+fn sponsors(
+    world: &World,
+    plans: &[ColonyPlan],
+    busy: &BTreeSet<RoomName>,
+    margin: i32,
+) -> Vec<RoomName> {
     (plans.iter())
-        .filter(|p| spare(world, p, busy).is_some_and(|s| s >= MARGIN))
+        .filter(|p| spare(world, p, busy).is_some_and(|s| s >= margin))
         .map(|p| p.room)
         .collect()
 }
@@ -146,7 +142,7 @@ pub fn book(
     world: &World,
     derived: &Derived,
     plans: &mut [ColonyPlan],
-    busy: &BTreeSet<RoomName>,
+    (busy, margin): (&BTreeSet<RoomName>, i32),
     may_start: bool,
 ) {
     if derived.capped || !may_start {
@@ -156,14 +152,14 @@ pub fn book(
         .filter_map(|p| Some((spare(world, p, busy)?, std::cmp::Reverse(p.room), p)))
         .max_by_key(|(s, room, _)| (*s, *room));
     if let Some((_, _, p)) = richest {
-        p.reserve += MARGIN + world.room(p.room).map_or(0, |r| r.energy_capacity);
+        p.reserve += margin + world.room(p.room).map_or(0, |r| r.energy_capacity);
     }
 }
 
 /// Layout plans the room before it is claimed: one it cannot fit is never
 /// taken (The International's).
 fn fits(world: &World, outpost: &Outpost, intel: &Intel, terrain: &LocalRoomTerrain) -> bool {
-    let mut room = intel::blind(outpost, intel, world, &undeclared());
+    let mut room = intel::blind(outpost, intel, world, &Declarations::default());
     room.terrain = Some(terrain);
     (ground::of_room(&room).and_then(|g| plan::first_of(&world.rules, &g)))
         .is_some_and(|p| p.unfit.is_empty())
@@ -205,6 +201,7 @@ pub fn step<'t>(
         fought,
     } = *around;
     let raising = raising(derived, declarations, None).next().is_some();
+    let tuning = &declarations.tuning;
     (expansion.failed).retain(|f| world.time - f.since < FORGET);
     (expansion.abandoned).retain(|a| derived.owned.contains(&a.room));
     let given =
@@ -265,9 +262,10 @@ pub fn step<'t>(
         }
         return;
     }
+    // The bucket fills only while the ticks run under the limit (Hivemind's CPU headroom).
     if world.time % DUE != 0
         || !may_start(derived, declarations, expansion)
-        || world.bucket < BUCKET
+        || world.bucket < tuning.expand_bucket
     {
         return;
     }
@@ -282,7 +280,7 @@ pub fn step<'t>(
             .map(|f| 1.0 - f64::from(world.time - f.since) / f64::from(FORGET))
             .sum()
     };
-    let sponsors = sponsors(world, plans, busy);
+    let sponsors = sponsors(world, plans, busy, tuning.sponsor_margin);
     let apart_from_ours = |room: RoomName| {
         derived
             .owned
@@ -335,7 +333,9 @@ pub fn step<'t>(
                     || declarations.avoid.contains(&name)
                     || world.closed.contains(&name)
                     || declarations.sieges.contains(&name)
-                    || (rivals.iter()).any(|(t, _)| tiles::rooms_apart(*t, name) <= THREAT)
+                    // A rival this near raids a young room before its towers stand.
+                    || (rivals.iter())
+                        .any(|(t, _)| tiles::rooms_apart(*t, name) <= tuning.expand_threat_rooms)
                     || scored.iter().any(|(_, o)| o.room == name)
                 {
                     continue;
@@ -384,11 +384,13 @@ pub fn step<'t>(
                 .map_or(0.0, |m| mineral_worth(m, copies(m, Some(room.name)))),
         })
     };
+    // Before RCL6's extractor and terminal a colony is cheap to give up for a
+    // better room; past them it holds what a new one would take a long climb to.
     let worst = (derived.colonies.iter().filter_map(|c| world.room(*c)))
         .filter(|r| {
             r.controller
                 .as_ref()
-                .is_some_and(|c| c.level <= PRUNE_LEVEL)
+                .is_some_and(|c| c.level <= tuning.prune_level)
         })
         .filter(|r| !busy.contains(&r.name) && may_give_up(r.name, expansion))
         .map(|r| (held_score(r), r.name))

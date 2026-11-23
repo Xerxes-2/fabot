@@ -5,7 +5,8 @@ use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
 
 use super::state::State;
-use fabot_base::declarations::{ColonyPlan, Declarations, Declared, Outpost, Stage, undeclared};
+use fabot_base::declarations::{ColonyPlan, Declarations, Declared, Outpost, Stage};
+use fabot_base::tuning::Tuning;
 use fabot_base::world::{Id, Pos, RoomName};
 use fabot_economy::EconomyState;
 use fabot_economy::task::{Assignment, of_task_id, task_id};
@@ -105,14 +106,28 @@ impl Memory {
         self.v2["switches"]["recorder"].as_bool() == Some(true)
     }
 
-    pub fn declarations(&self) -> Declarations {
+    /// A tuning serde refuses or out of range is a fault, and every key keeps
+    /// its default; so is the reserve declared where it was, so no deploy
+    /// changes it unseen.
+    pub fn declarations(&self) -> (Declarations, Vec<String>) {
         let declared = &self.v2["declarations"];
         let abandon: Vec<RoomName> = list(declared, "abandon");
-        Declarations {
-            reserve_lifetimes: match declared["reserve"].as_f64() {
-                Some(n) if n >= 0.0 => n,
-                _ => undeclared().reserve_lifetimes,
-            },
+        let tuned = match &self.v2["tuning"] {
+            Value::Null => Ok(Tuning::default()),
+            t => Tuning::deserialize(t)
+                .map_err(|e| e.to_string())
+                .and_then(|t| match t.outside() {
+                    Some(key) => Err(format!("tuning.{} is out of its range", camel(key))),
+                    None => Ok(t),
+                }),
+        };
+        let (tuning, mut faults) =
+            tuned.map_or_else(|e| (Tuning::default(), vec![e]), |t| (t, Vec::new()));
+        if !declared["reserve"].is_null() {
+            faults.push("declarations.reserve is read no more: set tuning.reserveLifetimes".into());
+        }
+        let declarations = Declarations {
+            tuning,
             outposts: outposts(declared, "outposts"),
             claims: outposts(declared, "claims"),
             allies: list(declared, "allies"),
@@ -135,8 +150,19 @@ impl Memory {
             avoid: list(declared, "avoid"),
             tactics: list(declared, "tactics"),
             operations: Vec::new(),
-        }
+        };
+        (declarations, faults)
     }
+}
+
+/// `rename_all = "camelCase"`'s name of a field, as an unknown key's fault spells them.
+fn camel(snake: &str) -> String {
+    let mut words = snake.split('_');
+    let first = words.next().unwrap_or_default().to_string();
+    first
+        + &words
+            .map(|w| w[..1].to_uppercase() + &w[1..])
+            .collect::<String>()
 }
 
 fn list<T: DeserializeOwned, C: FromIterator<T> + Default>(v: &Value, key: &str) -> C {

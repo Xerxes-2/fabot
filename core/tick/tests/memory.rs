@@ -1,7 +1,7 @@
 use crate::memory::Memory;
 
 const OURS: &str = concat!(
-    r#"{"v2":{"declarations":{"reserve":1.5,"#,
+    r#"{"v2":{"tuning":{"reserveLifetimes":1.5},"declarations":{"#,
     r#""outposts":[{"room":"W2N1","controller":{"id":"c1","x":3,"y":4},"sources":[{"id":"a1","x":5,"y":6}]}],"#,
     r#""allies":["A"],"tactics":[{"rival":"R","forbid":["kite"]}]},"#,
     r#""switches":{"economy":false,"recorder":true},"assignments":{"a":"d1|w:a1:energy","b":"u1|"},"#,
@@ -52,7 +52,7 @@ fn garbled_reads_as_none() {
         let mut memory = Memory::of_text(text.to_string());
         let state = memory.state();
         assert!(state.fight.groups.is_empty() && state.economy.assignments.is_empty());
-        let declared = memory.declarations();
+        let (declared, _) = memory.declarations();
         assert!(declared.outposts.is_empty());
         let kept = text.is_empty() || text.ends_with('}');
         assert_eq!(memory.written(&state).is_some(), kept);
@@ -61,9 +61,33 @@ fn garbled_reads_as_none() {
 
 #[test]
 fn declarations_read_each_key() {
-    let declared = Memory::of_text(OURS.to_string()).declarations();
-    assert_eq!(declared.reserve_lifetimes, 1.5);
+    let (declared, faults) = Memory::of_text(OURS.to_string()).declarations();
+    assert_eq!(
+        (declared.tuning.reserve_lifetimes, faults),
+        (1.5, Vec::new())
+    );
     assert_eq!(declared.outposts[0].sources[0].pos.x, 5);
     assert_eq!(declared.tactics.len(), 1);
     assert!(declared.allies.contains("A"));
+}
+
+#[test]
+fn a_bad_tuning_faults_and_keeps_every_default() {
+    for (tuning, named) in [
+        (r#""reserveLifetimes":1.5,"nope":1"#, "nope"),
+        (r#""quietWallDivisor":0"#, "tuning.quietWallDivisor"),
+        (r#""outpostCpuShare":-1"#, "tuning.outpostCpuShare"),
+    ] {
+        let text = format!(r#"{{"v2":{{"tuning":{{{tuning}}}}}}}"#);
+        let (declared, faults) = Memory::of_text(text).declarations();
+        assert_eq!(declared.tuning, fabot_base::tuning::Tuning::default());
+        assert!(faults.len() == 1 && faults[0].contains(named));
+    }
+}
+
+#[test]
+fn the_reserve_declared_where_it_was_faults_beside_a_bad_tuning() {
+    let text = r#"{"v2":{"tuning":{"nope":1},"declarations":{"reserve":1}}}"#;
+    let (_, faults) = Memory::of_text(text.to_string()).declarations();
+    assert!(faults.len() == 2 && faults[1].contains("tuning.reserveLifetimes"));
 }

@@ -90,7 +90,8 @@ where
 {
     let start = clock();
     let mut state = memory.state();
-    let declarations: Declarations = besieging(memory.declarations(), intel);
+    let (declarations, untuned) = memory.declarations();
+    let declarations = besieging(declarations, intel);
     state.layout = std::mem::take(&mut heap.standing);
     let drain = (state.fight.engagements.iter())
         .find(|e| e.phase == Phase::Draining)
@@ -116,7 +117,7 @@ where
     );
 
     let closed = engagements::rows(&decided.result.state.fight.closed, world.time);
-    let mut faults = Vec::new();
+    let mut faults: Vec<_> = untuned.into_iter().map(|e| ("tuning", e)).collect();
     if misread > 0 {
         faults.push(("world", format!("{misread} objects' ids not hex: dropped")));
     }

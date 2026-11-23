@@ -28,6 +28,8 @@
 //   --tag    output names: soak-runs/<tag>-<bundle>-s<seed>-<room>/ (default many)
 //   --fresh  run even where the cache holds this bundle, room, seed and ticks
 //   --reset-every N  beside each bundle, its twin `<name>-reset` reset (heap lost) every N ticks
+//   --tuning {"name": {key: value}, ...}  beside each bundle, its twin `<bundle>-<name>` playing that
+//            Memory.v2.tuning (core/base/tuning/mod.rs): a parameter sweep
 // A start sim cannot stand is named under the table.
 //
 // A finished run is cached under soak-runs/.cache/ by its binary, start, seed, ticks and the soak scripts (with the
@@ -48,7 +50,7 @@ const REPO = resolve(HERE, "../..");
 const RUNS = join(REPO, "soak-runs");
 const CACHE = join(RUNS, ".cache");
 const usage =
-  "usage: npm run soak:many -- [--bot [name=]a,...] [--seed 1,2,1+7] [--room [world:]A[@N],...] [--ticks T] [--jobs J] [--tag name] [--node N] [--fresh] [--reset-every N]";
+  "usage: npm run soak:many -- [--bot [name=]a,...] [--seed 1,2,1+7] [--room [world:]A[@N],...] [--ticks T] [--jobs J] [--tag name] [--node N] [--fresh] [--reset-every N] [--tuning <{name: tuning}>]";
 const fail = (m) => {
   console.error(m);
   process.exit(1);
@@ -61,7 +63,7 @@ for (let i = 0; i < rest.length; i++) {
     flags[rest[i]] = true;
     continue;
   }
-  if (!["--room", "--ticks", "--seed", "--jobs", "--tag", "--bot", "--node", "--reset-every"].includes(rest[i])) fail(usage);
+  if (!["--room", "--ticks", "--seed", "--jobs", "--tag", "--bot", "--node", "--reset-every", "--tuning"].includes(rest[i])) fail(usage);
   const value = rest[i + 1];
   if (value === undefined || value.startsWith("--")) fail(`${rest[i]} needs a value\n${usage}`);
   flags[rest[i++]] = value;
@@ -102,7 +104,15 @@ const bundles = (flags["--bot"] ?? simBinary() ?? fail("sim did not build")).spl
   if (!existsSync(file)) fail(`--bot: no file at ${file}`);
   return { name, file, resetEvery: 0 };
 });
-const bots = bundles.flatMap((b) => (resetEvery ? [b, { ...b, name: `${b.name}-reset`, resetEvery }] : [b]));
+let tunings = {};
+try {
+  tunings = JSON.parse(flags["--tuning"] ?? "{}");
+} catch {
+  fail("--tuning: a JSON object of name → tuning");
+}
+if (Object.keys(tunings).some((n) => !/^[A-Za-z0-9-]+$/.test(n))) fail("--tuning: names are letters, digits, dashes");
+const tuned = bundles.flatMap((b) => [b, ...Object.entries(tunings).map(([n, t]) => ({ ...b, name: `${b.name}-${n}`, tuning: JSON.stringify(t) }))]);
+const bots = tuned.flatMap((b) => (resetEvery ? [b, { ...b, name: `${b.name}-reset`, resetEvery }] : [b]));
 if (new Set(bots.map((b) => b.name)).size < bots.length) fail("--bot: two bundles share a name");
 
 // The cache key: the bundle's code without its version stamp, so the same
@@ -127,7 +137,7 @@ const runs = bots.flatMap((bot) =>
       seed,
       start,
       name: `${tag}-${bot.name}-s${seed.seed}${seed.late ? `l${seed.late}` : ""}-${start.label.replace(/[:@]/g, "-")}`,
-      key: hash(bot.code, start.room, planHash + start.node, readFileSync(start.world ?? SIM_TEMPLATE), String(seed.seed), String(seed.late), String(start.ticks), scriptsHash, String(bot.resetEvery)),
+      key: hash(bot.code, start.room, planHash + start.node, readFileSync(start.world ?? SIM_TEMPLATE), String(seed.seed), String(seed.late), String(start.ticks), scriptsHash, String(bot.resetEvery), bot.tuning ?? ""),
     })),
   ),
 );
@@ -143,7 +153,7 @@ console.error(
 
 function soak(run) {
   const { room, world, node, ticks, ended } = run.start;
-  return runSim(run.bot.file, { world, room, node, ticks, seed: run.seed.seed, late: run.seed.late, ended, resetEvery: run.bot.resetEvery, out: join(RUNS, run.name) });
+  return runSim(run.bot.file, { world, room, node, ticks, seed: run.seed.seed, late: run.seed.late, ended, resetEvery: run.bot.resetEvery, tuning: run.bot.tuning, out: join(RUNS, run.name) });
 }
 
 // Built once here: parallel builds of one project collide.

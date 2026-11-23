@@ -3,7 +3,8 @@
 // Usage: npm run soak -- [--room <name>] [--world <world.json> | --gen <seed> [--sectors WxH]] [--node N] [--seed N] [--late K] [--ticks N]
 //          [--ended] [--unsafe] [--invaders room:every[:first],…] [--wave role[:size],…] [--core room:tick,…]
 //          [--capture a-b[,c-d]] [--run name] [--watch [--port N] [--tick-ms N] [--badge <json>]]
-//          [--players <[{name, room?, declarations?}]>]   our bot once per seat, the first in --room; --gen picks a room unnamed
+//          [--players <[{name, room?, declarations?, tuning?}]>]   our bot once per seat, the first in --room; --gen picks a room unnamed
+//          [--tuning <{key: value}>]   Memory.v2.tuning (core/base/tuning/mod.rs) of each seat naming none
 //        npm run watch:sim -- …   the same, --watch implied
 //   --room  default the first room by name with a controller nobody owns and two sources
 import { readFileSync } from "node:fs";
@@ -12,9 +13,9 @@ import { invariants, samplesOf } from "../scenario/measures.mjs";
 import { TEMPLATE, buildPlan, runSim, seatsUs, simBinary } from "./run.mjs";
 import { report } from "./seats.mjs";
 
-const usage = "usage: npm run soak -- [--room <name>] [--world <world.json> | --gen <seed> [--sectors WxH]] [--node N] [--seed N] [--late K] [--ticks N] [--ended] [--unsafe] [--invaders …] [--wave …] [--core …] [--capture a-b] [--players <json>] [--run name] [--watch [--port N] [--tick-ms N] [--badge <json>]]";
+const usage = "usage: npm run soak -- [--room <name>] [--world <world.json> | --gen <seed> [--sectors WxH]] [--node N] [--seed N] [--late K] [--ticks N] [--ended] [--unsafe] [--invaders …] [--wave …] [--core …] [--capture a-b] [--players <json>] [--tuning <json>] [--run name] [--watch [--port N] [--tick-ms N] [--badge <json>]]";
 const SWITCHES = ["--ended", "--unsafe", "--watch"];
-const VALUES = ["--room", "--world", "--gen", "--sectors", "--node", "--seed", "--late", "--ticks", "--invaders", "--wave", "--core", "--capture", "--players", "--run", "--port", "--tick-ms", "--badge"];
+const VALUES = ["--room", "--world", "--gen", "--sectors", "--node", "--seed", "--late", "--ticks", "--invaders", "--wave", "--core", "--capture", "--players", "--tuning", "--run", "--port", "--tick-ms", "--badge"];
 const fail = (m) => {
   console.error(`${m}\n${usage}`);
   process.exit(2);
@@ -53,7 +54,7 @@ console.error(`sim: output ${out}`);
 const code = await runSim(bin, {
   world, gen, sectors, room, node, seed: number("--seed", 1), late: number("--late", 0), ticks: number("--ticks", watch ? 1e6 : node ? 5000 : 3000),
   ended: Boolean(flags["--ended"]), unsafe: Boolean(flags["--unsafe"]), invaders: flags["--invaders"], wave: flags["--wave"], core: flags["--core"],
-  capture: flags["--capture"], players: flags["--players"], watch, out,
+  capture: flags["--capture"], players: flags["--players"], tuning: flags["--tuning"], watch, out,
 });
 if (code === 0) {
   const last = samplesOf(out).at(-1);

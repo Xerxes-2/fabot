@@ -45,7 +45,7 @@ fn run(count: usize, state: State) -> TickResult {
         rules: fabot_base::world::Rules::vanilla(),
     };
     let mut atlas = Atlas::of_world(&world);
-    let declarations = declarations::undeclared();
+    let declarations = declarations::Declarations::default();
     let sightings = BTreeMap::new();
     let derived = atlas::derive(&world, &mut atlas);
     let mut context = Context {

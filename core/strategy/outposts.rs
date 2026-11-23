@@ -8,6 +8,7 @@ use fabot_base::declarations::{
 use fabot_base::engine;
 use fabot_base::intel::Intel;
 use fabot_base::tiles;
+use fabot_base::tuning::Tuning;
 use fabot_base::vocabulary::Part;
 use fabot_base::world::{Pos, RoomName, StructureType, World};
 use fabot_fight::casting;
@@ -35,9 +36,6 @@ struct Price {
     spawn: f64,
     cpu: f64,
 }
-
-/// Spenders' parts, their draw's carriers too, an energy a tick: measured at RCL5.
-const SPEND_PARTS: f64 = 2.0;
 
 fn price(c: &Candidate, capacity: i32, walk: i32) -> Price {
     use Part::{Carry, Claim, Move, Work};
@@ -146,12 +144,15 @@ pub fn chosen(
     world: &World,
     candidates: Vec<Candidate>,
     (busy, spare): (&BTreeSet<RoomName>, &BTreeMap<RoomName, f64>),
+    tuning: &Tuning,
 ) -> Vec<Outpost> {
     // A young home opens every room that pays at once, as The International does.
     let stocked = |home: RoomName| stocked(world, home);
-    // Before a storage the spawns' other half is the spend's.
+    // Before a storage the spawns' share the outposts leave is the spend's;
+    // spend parts (spenders' and their carriers', an energy a tick) measured at RCL5.
     let spend = |home: RoomName, net: f64| {
-        let ticks = net.max(0.0) * SPEND_PARTS * f64::from(engine::SPAWN_TICKS_PER_PART);
+        let ticks =
+            net.max(0.0) * tuning.outpost_spend_parts * f64::from(engine::SPAWN_TICKS_PER_PART);
         if stocked(home) { ticks } else { 0.0 }
     };
     let mut spawn_left: BTreeMap<RoomName, f64> = BTreeMap::new();
@@ -160,17 +161,17 @@ pub fn chosen(
             .working_spawns()
             .filter(|s| s.pos.room == room)
             .count() as f64;
-        let half = f64::from(engine::CREEP_LIFETIME) * spawns / 2.0;
+        let share = f64::from(engine::CREEP_LIFETIME) * spawns * tuning.outpost_spawn_share;
         let dug = world.room(room).map_or(0, |r| r.sources.len() as i32);
         let left = match spare.get(&room) {
             Some(spare) if stocked(room) => {
                 spare - spend(room, f64::from(dug * engine::HELD_OUTPUT_PER_TICK))
             }
-            _ => half,
+            _ => share,
         };
         spawn_left.insert(room, left);
     }
-    let mut cpu_left = world.cpu_limit / 2.0;
+    let mut cpu_left = world.cpu_limit * tuning.outpost_cpu_share;
     let capacity = |home: RoomName| world.room(home).map_or(0, |r| r.energy_capacity);
     let mut priced: Vec<(Price, Candidate)> = (candidates.into_iter())
         .map(|c| (price(&c, capacity(c.home), c.walk), c))

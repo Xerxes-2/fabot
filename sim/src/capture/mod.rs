@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 
-use fabot_base::declarations::undeclared;
+use fabot_base::declarations::Declarations;
 use fabot_base::intel::{self, Intel};
 use fabot_base::world::{Built, Creep, Id, Owner, Pos, Room, Store, World};
 use screeps::StructureType as Kind;
@@ -65,7 +65,7 @@ impl Capture {
         if !self.windows.iter().any(|(a, b)| (*a..*b).contains(&t)) {
             return;
         }
-        let world = crate::read::world(v, &undeclared());
+        let world = crate::read::world(v, &Declarations::default());
         let mut game = Game {
             objects: Map::new(),
             me: &world.me,

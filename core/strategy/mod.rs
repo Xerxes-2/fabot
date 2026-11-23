@@ -16,6 +16,7 @@ use fabot_base::declarations::{
 use fabot_base::engine;
 use fabot_base::intel::Intel;
 use fabot_base::tiles;
+use fabot_base::tuning::Tuning;
 use fabot_base::vocabulary::{Part, ResourceType, multiple};
 use fabot_base::world::{Pos, RoomName, Rules, StructureType, World, sightings};
 use fabot_economy::EconomyState;
@@ -87,15 +88,17 @@ const NEAR: i32 = 3;
 /// takes to cast its answer twice, the first lost.
 const HOLD: i32 = 2 * engine::MAX_BODY_PARTS as i32 * engine::SPAWN_TICKS_PER_PART;
 
-/// Hivemind's quiet rampart hits.
-const FLOOR: i32 = 10_000;
-
 /// A quad, as TooAngel and most bots send: one dismantler, three healers.
 const HEALERS: i32 = 3;
 
 /// The threat in, the hits a rampart is kept at out, and whether the quad
 /// out-heals the towers, which rings a colony below `RING_LEVEL` (§5).
-pub fn wall(rules: &Rules, rival: i32, level: i32, threatened: bool) -> (i32, bool) {
+pub fn wall(
+    rules: &Rules,
+    t: &Tuning,
+    (rival, level): (i32, i32),
+    threatened: bool,
+) -> (i32, bool) {
     let capacity = screeps::SPAWN_ENERGY_CAPACITY as i32
         + rules.allowed(StructureType::Extension, rival) * engine::extension_energy(rival);
     let pairs = |part: Part| {
@@ -125,22 +128,29 @@ pub fn wall(rules: &Rules, rival: i32, level: i32, threatened: bool) -> (i32, bo
         * engine::DISMANTLE_POWER
         * boost(Part::Work, ResourceType::CatalyzedZynthiumAcid)
         * held;
+    // The floor is Hivemind's quiet rampart hits.
     let kept = match () {
-        _ if threatened => full.max(FLOOR),
+        _ if threatened => full.max(t.rampart_floor),
         // The controller there takes no surplus, so a quiet wall thickens instead.
-        _ if engine::topped_out(level) => (full / 3).max(FLOOR),
-        _ => FLOOR,
+        _ if engine::topped_out(level) => {
+            ((f64::from(full) / t.quiet_wall_divisor) as i32).max(t.rampart_floor)
+        }
+        _ => t.rampart_floor,
     };
     (kept, fire <= heal)
 }
 
 /// The threat in, a reserve out, as a priced choice would be (§5).
-pub fn reserve(rules: &Rules, lifetimes: f64, level: i32, threatened: bool) -> i32 {
+pub fn reserve(rules: &Rules, t: &Tuning, level: i32, threatened: bool) -> i32 {
     let fire = rules.allowed(StructureType::Tower, level)
         * engine::TOWER_ENERGY_COST
         * engine::CREEP_LIFETIME;
-    let full = (f64::from(fire) * lifetimes) as i32;
-    if threatened { full } else { full / 3 }
+    let full = (f64::from(fire) * t.reserve_lifetimes) as i32;
+    if threatened {
+        full
+    } else {
+        (f64::from(full) / t.quiet_reserve_divisor) as i32
+    }
 }
 
 /// Switched off, the choices are the operator's alone, but each colony keeps
@@ -195,14 +205,10 @@ pub fn plan<'t>(
                 .sum();
             let threatened = near || fought(room.name) || asked > 0;
             let owes = asked > 0 || due.contains(&room.name);
-            let kept = reserve(
-                &world.rules,
-                declarations.reserve_lifetimes,
-                level,
-                threatened,
-            );
-            let (rampart_hits, outheals) =
-                wall(&world.rules, threat.unwrap_or(level), level, threatened);
+            let tuning = &declarations.tuning;
+            let kept = reserve(&world.rules, tuning, level, threatened);
+            let rival = threat.unwrap_or(level);
+            let (rampart_hits, outheals) = wall(&world.rules, tuning, (rival, level), threatened);
             let stored = (room.structures.iter())
                 .any(|s| s.kind == StructureType::Storage && s.owner.is_ours());
             let standing = layout.get(&room.name);
@@ -268,7 +274,7 @@ pub fn plan<'t>(
     let homes =
         (declarations.clone()).planned((plans.clone(), Vec::new(), claiming.clone(), Vec::new()));
     let spare = fabot_economy::spare((world, atlas), (derived, &homes), intel, economy);
-    let chosen = outposts::chosen(world, candidates, (&busy, &spare));
+    let chosen = outposts::chosen(world, candidates, (&busy, &spare), &declarations.tuning);
     let fought: BTreeSet<RoomName> = engagements.iter().map(|e| e.room).collect();
     let around = expand::Around {
         rivals: &rivals,
@@ -286,7 +292,8 @@ pub fn plan<'t>(
         expansion,
     );
     let may_start = expand::may_start(derived, declarations, expansion);
-    expand::book(world, derived, &mut plans, &busy, may_start);
+    let margin = declarations.tuning.sponsor_margin;
+    expand::book(world, derived, &mut plans, (&busy, margin), may_start);
     let claim = expand::claim(intel, derived, expansion.in_flight.as_ref());
     let mut operations = operations(derived, declarations, (&chosen, claim.as_ref()), &preyed);
     let (planned, worked) = ((declarations, &plans[..]), (&chosen[..], claim.as_ref()));

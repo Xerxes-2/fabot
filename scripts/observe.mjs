@@ -21,9 +21,11 @@ const USAGE = `usage: npm run observe -- <command>
   switches           Memory.v2.switches as stored
   switch <name> on|off|clear
                      off: \`false\` (the module is skipped); on: \`true\` (the recorder's opt-in); clear: remove the key
-  declare [reserve <n> | allies <name,…> | enemies <name,…> | sieges <room,…> | avoid <room,…> | abandon <room,…> | outposts <capture.json> | claims <capture.json> | tactics <rules.json>]
+  declare [allies <name,…> | enemies <name,…> | sieges <room,…> | avoid <room,…> | abandon <room,…> | outposts <capture.json> | claims <capture.json> | tactics <rules.json>]
                      Memory.v2.declarations as stored; with a name, set it
-                     (outposts: the capture's, \`scripts/capture-world.mjs\`; reserve: creep lifetimes of tower fire the reserve holds)
+                     (outposts: the capture's, \`scripts/capture-world.mjs\`)
+  tuning [<key> <n> | <key> clear]
+                     Memory.v2.tuning as stored (\`core/base/tuning/mod.rs\`: a key left out is its default, one unknown a fault); with a key, set or clear it
   capture [out.jsonl]
                      the recorder's ring as \`npm run bench\`'s capture, oldest first; terrain cached in captures/terrain
   tap --out <file> [--from <tick> --to <tick>]
@@ -40,7 +42,7 @@ const USAGE = `usage: npm run observe -- <command>
   regions <room>     walkable regions past rival ramparts: exits per side, owned structures beside
   replay <capture.jsonl> [--trace <creep>]
                      dist/main.js run on the captured ticks, offline: intents, refusals, tile scores`;
-const LIVE = ["metrics", "health", "cpu", "faults", "switches", "switch", "declare", "capture", "tap", "battle", "wait", "engagements", "exchange", "room", "creep", "regions"];
+const LIVE = ["metrics", "health", "cpu", "faults", "switches", "switch", "declare", "tuning", "capture", "tap", "battle", "wait", "engagements", "exchange", "room", "creep", "regions"];
 
 // The rows of `engagements.log` as `report` reads them, then the outcomes per rival (`npc`: none named) and tactic.
 function exchange(text) {
@@ -143,20 +145,30 @@ switch (cmd) {
       console.log(JSON.stringify(declarations, null, 2));
       break;
     }
-    const n = Number(value);
-    if (name === "reserve" && n >= 0) declarations.reserve = n;
-    else if (["allies", "enemies", "sieges", "avoid", "abandon"].includes(name) && value !== undefined) declarations[name] = value.split(",").filter(Boolean);
+    if (["allies", "enemies", "sieges", "avoid", "abandon"].includes(name) && value !== undefined) declarations[name] = value.split(",").filter(Boolean);
     else if ((name === "outposts" || name === "claims") && value !== undefined) declarations[name] = JSON.parse(readFileSync(value, "utf8")).declarations[name] ?? [];
     else if (name === "tactics" && value !== undefined) {
       const file = JSON.parse(readFileSync(value, "utf8"));
       const rules = file.declarations?.tactics ?? file.tactics ?? file;
       if (!Array.isArray(rules)) fail("declare tactics: the file holds a list of { \"rival\"?, \"room\"?, \"pin\"?, \"forbid\"? }");
       declarations.tactics = rules;
-    } else fail("usage: observe declare [reserve <n ≥ 0> | allies <name,…> | enemies <name,…> | sieges <room,…> | avoid <room,…> | abandon <room,…> | outposts <capture.json> | claims <capture.json> | tactics <rules.json>]");
+    } else fail("usage: observe declare [allies <name,…> | enemies <name,…> | sieges <room,…> | avoid <room,…> | abandon <room,…> | outposts <capture.json> | claims <capture.json> | tactics <rules.json>]");
     // A memory write is not read back at once: a whole-object write would
     // revert a key declared just before it.
     await (stored ? putV2(`declarations.${name}`, declarations[name]) : putV2("declarations", declarations));
     console.log(`v2.declarations = ${JSON.stringify(declarations)} (read next tick)`);
+    break;
+  }
+  case "tuning": {
+    const [key, value] = args;
+    const tuning = (await memory("v2.tuning")) ?? {};
+    if (key !== undefined) {
+      if (value === "clear") delete tuning[key];
+      else if (value !== undefined && Number.isFinite(Number(value))) tuning[key] = Number(value);
+      else fail("usage: observe tuning [<key> <n> | <key> clear]");
+      await putV2("tuning", tuning);
+    }
+    console.log(`v2.tuning = ${JSON.stringify(tuning)}${key === undefined ? "" : " (read next tick)"}`);
     break;
   }
   case "switch": {
