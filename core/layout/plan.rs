@@ -4,7 +4,7 @@
 use fabot_atlas::Atlas;
 use fabot_base::engine;
 use fabot_base::tiles::{self, Tile};
-use fabot_base::world::{Rules, StructureType};
+use fabot_base::world::{Built as _, Rules, StructureType};
 
 use super::build::{self, Built};
 use super::ground::Ground;
@@ -176,7 +176,10 @@ fn to_plan(rules: &Rules, ground: &Ground, built: &Built) -> Plan {
         .collect();
     let mut keyed: Vec<(i32, i32, usize, Item)> = Vec::new();
     let mut push = |kind: StructureType, tile: Tile, level: i32| {
-        if !fixed.contains(&tile) || kind == Extractor {
+        let filled = keyed
+            .iter()
+            .any(|k| k.3.tile == tile && !k.3.kind.walkable());
+        if (!fixed.contains(&tile) || kind == Extractor) && !(kind == Road && filled) {
             let seq = keyed.len();
             let rock = |r: &Tile| tiles::range(*r, tile) == 1;
             let seat = |n: &&Tile| ground.terrain[**n] != place::WALL && !fixed.contains(n);
@@ -210,6 +213,7 @@ fn to_plan(rules: &Rules, ground: &Ground, built: &Built) -> Plan {
         }
     }
     // Our sites stack nothing on a container; Hivemind paves the controller's.
+    // `push` lays none under a structure already keyed, whose build razes it.
     for t in plan
         .of("road")
         .into_iter()
@@ -380,6 +384,10 @@ mod tests {
                     .filter(|i| solid.iter().filter(|t| **t == i.tile).count() > 1)
                     .collect::<Vec<_>>()
             );
+            for i in plan.items.iter().filter(|i| !i.kind.walkable()) {
+                let road = |o: &Item| o.tile == i.tile && o.kind == StructureType::Road;
+                assert!(!plan.items.iter().any(road), "a road under {i:?}");
+            }
             for i in plan.items.iter().chain(&plan.ring) {
                 assert!(!tiles::on_edge(i.tile), "{i:?} on the edge");
                 assert!(
