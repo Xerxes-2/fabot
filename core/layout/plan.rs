@@ -168,6 +168,10 @@ fn priority(kind: StructureType, level: i32, crowded: bool) -> i32 {
 }
 
 fn to_plan(rules: &Rules, ground: &Ground, built: &Built) -> Plan {
+    drawn(rules, ground, built).0
+}
+
+fn drawn(rules: &Rules, ground: &Ground, built: &Built) -> (Plan, Vec<Item>) {
     use StructureType::*;
     let plan = &built.plan;
     let fixed: Vec<Tile> = (ground.sources.iter().chain(&ground.minerals))
@@ -247,6 +251,40 @@ fn to_plan(rules: &Rules, ground: &Ground, built: &Built) -> Plan {
         ring.extend(plan.of(label).into_iter().map(item(Wall, level)));
     }
     ring.sort_by_key(|i| i.level);
+    let mut dropped: Vec<Item> = Vec::new();
+    let seen = loop {
+        let seen = reached(ground, built.center, false, items.iter().chain(&ring));
+        let beside = |t: Tile| tiles::within(1, t).into_iter().any(|n| seen[n]);
+        let mut pocket: Vec<Tile> = (items.iter())
+            .filter(|i| !matches!(i.kind, Road | Rampart) && !beside(i.tile))
+            .map(|i| i.tile)
+            .collect();
+        let wall = |t: Tile| ring.iter().any(|r| r.tile == t && r.kind == Wall);
+        let mut k = 0;
+        while k < pocket.len() {
+            for &n in tiles::around(pocket[k]) {
+                if !seen[n] && ground.terrain[n] != place::WALL && !wall(n) && !pocket.contains(&n)
+                {
+                    pocket.push(n);
+                }
+            }
+            k += 1;
+        }
+        let near = |t: Tile| pocket.iter().any(|p| tiles::range(*p, t) <= 1);
+        let given: Vec<Item> = ring
+            .extract_if(.., |r| r.kind == Wall && near(r.tile))
+            .collect();
+        if given.is_empty() {
+            break seen;
+        }
+        dropped.extend(given);
+    };
+    // A pocket of roads and ramparts alone needs none, as its walls already
+    // keep a body off it.
+    let beside = |seen: &[bool], i: &Item| tiles::within(1, i.tile).into_iter().any(|n| seen[n]);
+    dropped.extend(items.extract_if(.., |i| !beside(&seen, i)));
+    let seen = reached(ground, built.center, true, items.iter().chain(&ring));
+    dropped.extend(ring.extract_if(.., |i| !beside(&seen, i)));
 
     let unfit = (sized().into_iter())
         .filter(|kind| {
@@ -258,14 +296,49 @@ fn to_plan(rules: &Rules, ground: &Ground, built: &Built) -> Plan {
     let planned: Vec<&Item> = items.iter().chain(&ring).collect();
     let open = |t: Tile| ground.terrain[t] != place::WALL;
     let muster = shape::muster(ground.room, built.center, &planned, open);
-    Plan {
+    let plan = Plan {
         room: ground.room,
         anchor: built.center,
         items,
         ring,
         unfit,
         muster,
+    };
+    (plan, dropped)
+}
+
+/// The tiles a body reaches from the core, or in by an exit too; one beside
+/// a structure serves it (a link, a lab, a spawn's door) as well as builds it.
+fn reached<'a>(
+    ground: &Ground,
+    core: Tile,
+    exits: bool,
+    planned: impl Iterator<Item = &'a Item>,
+) -> Vec<bool> {
+    let mut blocked: Vec<bool> = (ground.terrain.iter()).map(|t| *t == place::WALL).collect();
+    for t in (ground.sources.iter().chain(&ground.minerals)).chain(&ground.controller) {
+        blocked[*t] = true;
     }
+    for i in planned {
+        blocked[i.tile] = !i.kind.walkable() || (blocked[i.tile] && i.kind != StructureType::Road);
+    }
+    let mut queue: Vec<Tile> = (tiles::all())
+        .filter(|t| exits && tiles::on_edge(*t) && !blocked[*t])
+        .chain([core])
+        .collect();
+    let mut seen = vec![false; tiles::COUNT];
+    for t in &queue {
+        seen[*t] = true;
+    }
+    while let Some(t) = queue.pop() {
+        for &n in tiles::around(t) {
+            if !seen[n] && !blocked[n] {
+                seen[n] = true;
+                queue.push(n);
+            }
+        }
+    }
+    seen
 }
 
 /// Hivemind's search, a few variations a tick as its planner spreads them.
@@ -561,16 +634,85 @@ mod tests {
         }
     }
 
+    /// The tiles a body walks to from `starts`, past every planned structure.
+    fn walked(ground: &Ground, plan: &Plan, starts: &[Tile]) -> Vec<bool> {
+        let planned = || plan.items.iter().chain(&plan.ring);
+        let rock = |t: Tile| {
+            (ground.sources.iter().chain(&ground.minerals))
+                .chain(&ground.controller)
+                .any(|r| *r == t)
+        };
+        let road = |t: Tile| planned().any(|i| i.tile == t && i.kind == StructureType::Road);
+        let open = |t: Tile| {
+            (ground.terrain[t] != place::WALL || road(t))
+                && !rock(t)
+                && planned().all(|i| i.tile != t || i.kind.walkable())
+        };
+        let mut seen = vec![false; tiles::COUNT];
+        let mut queue: std::collections::VecDeque<Tile> = starts.iter().copied().collect();
+        for t in starts {
+            seen[*t] = true;
+        }
+        while let Some(t) = queue.pop_front() {
+            for &n in tiles::around(t) {
+                if !seen[n] && open(n) {
+                    seen[n] = true;
+                    queue.push_back(n);
+                }
+            }
+        }
+        seen
+    }
+
     #[test]
-    fn every_structure_can_be_walked_to_from_the_core() {
+    fn every_structure_is_walked_to_from_the_core_and_the_ring_from_it_or_an_exit() {
+        let rules = Rules::vanilla();
+        let pocketed = fx::pocketed();
+        let drawn = (of_ground(&rules, &pocketed).map(|p| (pocketed, p)))
+            .into_iter()
+            .chain(
+                fx::samples(4)
+                    .take(fx::MAX_TEST)
+                    .filter_map(|c| fx::plan_of(&c)),
+            );
+        for (ground, plan) in drawn {
+            let exits: Vec<Tile> = (tiles::all())
+                .filter(|t| tiles::on_edge(*t) && ground.terrain[*t] != place::WALL)
+                .chain([plan.anchor])
+                .collect();
+            let beside =
+                |seen: &[bool], i: &Item| tiles::within(1, i.tile).into_iter().any(|n| seen[n]);
+            let from_core = walked(&ground, &plan, &[plan.anchor]);
+            for i in &plan.items {
+                assert!(beside(&from_core, i), "{i:?} unreached from the core");
+            }
+            let from_any = walked(&ground, &plan, &exits);
+            for i in &plan.ring {
+                assert!(beside(&from_any, i), "{i:?} unreached");
+            }
+        }
+    }
+
+    #[test]
+    fn a_pocket_walled_off_loses_only_its_roads_ramparts_and_walls() {
+        let rules = Rules::vanilla();
         for colony in fx::samples(4).take(fx::MAX_TEST) {
-            let Some((ground, plan)) = fx::plan_of(&colony) else {
+            let Some(ground) = ground::of_room(&colony.room) else {
                 continue;
             };
-            let seen = fx::reached(&ground, &plan);
-            for i in &plan.items {
-                let beside = tiles::within(1, i.tile).into_iter().any(|n| seen[n]);
-                assert!(beside, "{i:?} unreached");
+            let (walls, exits) = place::distances(&ground.terrain);
+            let Some(v) = score::variations(&ground, &walls, &exits)
+                .into_iter()
+                .next()
+            else {
+                continue;
+            };
+            let Some(b) = build::build(&rules, &ground, (&walls, &exits), &v) else {
+                continue;
+            };
+            use StructureType::{Rampart, Road, Wall};
+            for i in drawn(&rules, &ground, &b).1 {
+                assert!(matches!(i.kind, Road | Rampart | Wall), "{i:?} walled off");
             }
         }
     }

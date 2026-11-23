@@ -364,7 +364,9 @@ pricer cost ~2× CPU and 580 lines for no gain and was not merged).
   spawn's haul is the economy (Hivemind's weights lost 95k on soak); multi-seat
   source container before extensions; no
   labs below RCL8; nuker last; unreachable cut pockets kept unroaded; source
-  links never split a 1-wide post.
+  links never split a 1-wide post; a quad or decorative wall closing a
+  structure in gives way, and a pocket of roads and ramparts no walk reaches
+  is dropped (Hivemind checks neither, and our kept cut pockets get sealed).
 - **Ramparts (`strategy::wall`, `ColonyPlan.rampart_hits`):** kept at `ticks
   held × dismantler damage/tick`, where dismantler damage is the largest rival
   dismantler up to our RCL (capped at our level because a taller wall outbids
