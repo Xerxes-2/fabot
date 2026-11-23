@@ -248,14 +248,19 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   1:1 `CARRY:MOVE`, whichever delivers more energy/life per energy cost on the
   route (`bodies::carry_per_move`). Small emergency haulers (< half target
   shape) hold their own slot while CARRY is short.
-- **Cast priority:** home floor & home carriers queue ahead of fight casts (they
-  refill the bank fight casts spend); mineral miner queues before outposts;
+- **Cast priority:** a room's queue runs floors (home dig and carriers),
+  Defends, other fights, the economy (owner); only a Defend waits on the bank,
+  holding what ranks behind it, and floors rank ahead of it since they refill
+  the bank it waits on; mineral miner queues before outposts;
   while stock is past reserve (or a pile's draw beats decay), upgraders and
   pre-storage workers queue before outpost haul (the haul only adds to the stock
   they draw down); the outposts' carriers take the spawn time the colony's other
   bodies leave over a life, so a far ring of outposts never casts nothing but
   haulers. While `ColonyPlan.owes` is true (a fight cast owed or imminent siege
   successor), no surplus-spending body is spawned so spawns stay free.
+  `❓` A home's first worker ranked ahead of its outposts' dig recovers a home
+  whose dig builds its own containers, but delays outpost income at RCL2: no
+  ranking yet passes both.
 - **Spare (`economy::spare`):** home's own bodies at a steady pace, its floor a
   constant 2 workers whatever this tick's floor: home's repairs and sites move
   with the outposts' haul wear, so a floor read from them would flap the choice.

@@ -73,10 +73,9 @@ fn drawn(rules: &Rules, r: &Room, spawn: &Pos) -> Vec<Id> {
     energy.into_iter().map(|s| s.id).collect()
 }
 
-/// Each room's spawn queue: floors, then the fight's asks, then the
-/// economy's, on its idle spawns while the bank pays; a fight ask the bank
-/// cannot pay yet holds the economy's behind it, one its capacity never pays
-/// holds nothing.
+/// Each room's spawn queue, in `Rank` order on its idle spawns while the bank
+/// pays: a Defend the bank cannot pay yet holds what ranks behind it, any
+/// other ask nothing.
 pub fn queue(world: &World, asks: &[(RoomName, Ask)]) -> Vec<Action> {
     let mut out = Vec::new();
     for (room, mut asks) in by_room(asks) {
@@ -88,14 +87,12 @@ pub fn queue(world: &World, asks: &[(RoomName, Ask)]) -> Vec<Action> {
             .working_spawns()
             .filter(|s| s.pos.room == room && s.spawning.is_none());
         let mut bank = r.energy_available;
-        let mut held = false;
         for a in &asks {
-            if held && a.rank == Rank::Economy {
+            let cost = engine::body_cost(&a.body);
+            if cost > bank && a.rank == Rank::Defend && cost <= r.energy_capacity {
                 break;
             }
-            let cost = engine::body_cost(&a.body);
             if cost > bank {
-                held = held || (a.rank == Rank::Fight && cost <= r.energy_capacity);
                 continue;
             }
             let Some(spawn) = idle.next() else {

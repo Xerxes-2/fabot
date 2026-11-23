@@ -123,13 +123,20 @@ pub enum TowerAct {
     Repair(Id),
 }
 
-/// Where an ask stands in its room's queue: a floor is never displaced,
-/// a fight's goes before the economy's and holds it while it waits on the bank.
+/// Where an ask stands in its room's queue (owner): floors go first as they
+/// refill the bank a waiting Defend is paid from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Rank {
     Floor,
+    Defend,
     Fight,
     Economy,
+}
+
+impl Rank {
+    pub fn fight(defends: bool) -> Rank {
+        if defends { Rank::Defend } else { Rank::Fight }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

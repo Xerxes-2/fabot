@@ -516,6 +516,9 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
         .filter_map(|s| s.spawning.as_ref().map(|o| &o.name))
         .collect();
 
+    let defends = |c: &Cast| {
+        (decided.iter()).any(|e| e.id == c.engagement && e.objective == Objective::Defend)
+    };
     let asks = (casts.iter())
         .filter(|c| !ovens.contains(&c.name))
         .map(|c| {
@@ -524,7 +527,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
                 Ask {
                     body: c.body.clone(),
                     name: c.name.clone(),
-                    rank: Rank::Fight,
+                    rank: Rank::fight(defends(c)),
                 },
             )
         })
