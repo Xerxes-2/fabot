@@ -18,9 +18,10 @@ pub const INVADER: &str = "2";
 pub const RIVAL: (&str, &str) = ("u2", "rival");
 pub const KEEPER: &str = "3";
 
+#[derive(Default)]
 pub struct Map {
     pub rooms: Vec<(String, String)>,
-    objects: Vec<Value>,
+    pub objects: Vec<Value>,
     time: i64,
     /// Memory's text at the start: what `scripts/sim/run.mjs` stood as `simMemory`.
     pub memory: String,
@@ -78,7 +79,7 @@ impl Map {
     }
 
     /// The tile Layout's plan puts the first spawn on, as `soak.mjs` seats a respawn.
-    pub fn seat(&self, room: &str) -> (i64, i64) {
+    pub fn seat(&self, room: &str) -> Option<(i64, i64)> {
         let name = room.parse::<RoomName>().expect("a room name");
         let at = |o: &Value| {
             let xy = |k: &str| o[k].as_i64().expect("a tile") as i32;
@@ -98,9 +99,9 @@ impl Map {
             (controller, &of("source"), &of("mineral")),
             1,
         );
-        let (_, tile) = layout::first_spawn(&Rules::vanilla(), &bare).expect("a plan");
+        let (_, tile) = layout::first_spawn(&Rules::vanilla(), &bare)?;
         let pos = fabot_base::tiles::to_pos(name, tile);
-        (i64::from(pos.x), i64::from(pos.y))
+        Some((i64::from(pos.x), i64::from(pos.y)))
     }
 
     /// Our user, the room's controller ours (at level 1 unless the world's already is), in safe mode
@@ -133,7 +134,7 @@ impl Map {
         }
         // A harness fixture: any id serves, and Spawn1 is a respawn's first spawn's name.
         if !self.in_room(room).any(|o| o["type"] == "spawn") {
-            let (x, y) = self.seat(room);
+            let (x, y) = self.seat(room).expect("a plan");
             eprintln!("spawn at {x},{y}");
             objects.push(json!({ "_id": "f0000000000000000000ffff", "type": "spawn", "room": room, "x": x, "y": y,
             "name": "Spawn1", "user": US, "store": { "energy": SPAWN_ENERGY_START }, "storeCapacityResource": { "energy": SPAWN_ENERGY_CAPACITY },

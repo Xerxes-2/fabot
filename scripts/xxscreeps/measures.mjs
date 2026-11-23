@@ -86,6 +86,9 @@ const STRUCK_LATELY = 5;
 // `MENDER_WORK` in `core/economy/slots.rs`.
 const MENDER_WORK = 2;
 const firstClaimed = (samples, met) => samples.find((s) => Object.keys(s.claimed ?? {}).length && Object.values(s.claimed).every(met))?.t ?? Infinity;
+// A refused "act code" that counts: not an observer's look at a room xxscreeps'
+// map does not hold (-10), which no live map refuses.
+export const counted = (act) => act !== "observeRoom -10";
 export const measures = {
   metric: (_, a, dir) => {
     const values = windowsOf(dir, a).filter((w) => w.ticks === 100 && w.row === (a.room ?? "*")).map((w) => w.values[a.metric] ?? 0);
@@ -277,11 +280,10 @@ export const measures = {
   },
   // Engagements opened: an attack the bot never answered tests nothing.
   engagements: (_, __, dir) => engagementsOf(dir).length,
-  // Acts the engine refused (the soak's refusals.json), but an observer's
-  // look at a room xxscreeps' map does not hold (-10), which no live map refuses.
+  // Acts the engine refused (the soak's refusals.json) that `counted` counts.
   refusals: (_, __, dir) =>
     Object.entries(JSON.parse(readFileSync(join(dir, "refusals.json"), "utf8")))
-      .filter(([act]) => act !== "observeRoom -10")
+      .filter(([act]) => counted(act))
       .reduce((n, [, c]) => n + c, 0),
   // The most percent of a member's ticks it swung back (soak-step's `swung`),
   // over the engagements of `kind` (none named: every one); none seen: 0.
@@ -419,8 +421,8 @@ export const check = (samples, a, dir, max = a.max ?? Infinity) => {
 // main's longest wait from RCL4 to its third rampart over soak:many's starts:
 // 5,900 ticks, on E1's node, which starts past RCL4 with no ring.
 const RING_OWED_AFTER = 6000;
-export const invariants = (dir) => {
-  const samples = samplesOf(dir);
+/** Each invariant `samples` (default the run's) break: where, the assert, its check, and a line saying so. */
+export const failures = (dir, samples = samplesOf(dir)) => {
   const last = samples.at(-1);
   const rooms = Object.keys(last.rooms);
   const homes = Object.keys(last.homes ?? { [rooms[0]]: last });
@@ -438,6 +440,7 @@ export const invariants = (dir) => {
     ...ALWAYS.map((a) => [rooms[0], samples, a]),
   ].flatMap(([where, of, a]) => {
     const { value, ok, bound } = check(of, a, dir);
-    return ok ? [] : [`${where}: ${a.measure}${a.kind ? ` ${a.kind}` : ""} ${value} (${bound})`];
+    return ok ? [] : [{ where, ...a, value, bound, text: `${where}: ${a.measure}${a.kind ? ` ${a.kind}` : ""} ${value} (${bound})` }];
   });
 };
+export const invariants = (dir) => failures(dir).map((f) => f.text);

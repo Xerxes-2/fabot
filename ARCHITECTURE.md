@@ -806,6 +806,10 @@ scenarios matching touched modules.
   meets a global reset); any gap beyond seed noise is a reset bug.
 - `soak:labs` (sim, 30k ticks, seeds 1,2) reads the boost chain on
   `young-among-colonies`, its RCL8 homes digging O, U and K, X in one terminal.
+- `soak:gen -- --seeds A..B` (sim `--gen`) soaks one sector map.js lays out
+  per seed, our room the seed's pick, and holds each to `measures.mjs`'s
+  invariants: breadth over maps, a broken seed shrunk in time only, to its first
+  broken tick; `watch:sim -- --gen <seed>` shows one.
 - `measures.mjs` enforces invariants on every home (no lost road, no level drop,
   ≥3 ramparts post-RCL4, no paying site waiting >10k ticks, zero refusals/faults).
 - Soaks are relative A/B comparisons; a win is re-checked on other starts (a

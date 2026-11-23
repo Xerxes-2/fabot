@@ -115,17 +115,16 @@ impl<W: Write> Driver<W> {
                 let _ = writeln!(faults, "{fault}");
             }
         }
+        let mut row = json!({ "t": t, "time": ran.world.time, "cpu": decide_ms, "phases": phases, "counts": ran.counts });
         for r in &ran.refusals {
-            *self
-                .refused
-                .entry(format!("{} {}", r.act, r.code))
-                .or_default() += 1;
+            let r = format!("{} {}", r.act, r.code);
+            row["refused"][&r] = json!(row["refused"][&r].as_u64().unwrap_or(0) + 1);
+            *self.refused.entry(r).or_default() += 1;
         }
         let m = self.kept.written(ran.world.time);
         if ran.world.time % metrics::WINDOW == 0 {
             rows(m, t, &mut self.windows_read, &ledger(), windows);
         }
-        let row = json!({ "t": t, "time": ran.world.time, "cpu": decide_ms, "phases": phases, "counts": ran.counts });
         let _ = writeln!(cpu, "{row}");
         stored.map_or_else(Vec::new, |s| s.rooms(read::our_idx(v)))
     }

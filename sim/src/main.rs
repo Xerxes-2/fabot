@@ -7,6 +7,7 @@ mod act;
 mod driver;
 mod duel;
 mod engaged;
+mod generated;
 mod lives;
 mod npc;
 mod read;
@@ -56,6 +57,7 @@ struct Args {
     npc: Vec<npc::Due>,
     /// `--watch`'s port and tick in ms.
     watch: Option<(u16, u64)>,
+    generated: Option<generated::Spec>,
 }
 
 fn args() -> Args {
@@ -69,7 +71,7 @@ fn args() -> Args {
         };
         flags.insert(flag, value);
     }
-    let usage = "usage: sim --world <world.json> --room <name> --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--follow A,B] [--npc <[[tick, room, bodies or null for a core]]>] [--ended] [--check] [--reset-every N] [--watch [--port N] [--tick-ms N]]";
+    let usage = "usage: sim (--world <world.json> --room <name> | --gen <seed> [--sectors WxH]) --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--follow A,B] [--npc <[[tick, room, bodies or null for a core]]>] [--ended] [--check] [--reset-every N] [--watch [--port N] [--tick-ms N]]";
     let need = |flag: &str| (flags.get(flag).cloned()).unwrap_or_else(|| panic!("{flag}: {usage}"));
     let number = |flag: &str, or: u64| {
         (flags.get(flag)).map_or(or, |v| {
@@ -77,8 +79,9 @@ fn args() -> Args {
         })
     };
     Args {
-        world: need("--world"),
-        room: need("--room"),
+        generated: generated::Spec::of(&flags),
+        world: flags.get("--world").cloned().unwrap_or_default(),
+        room: flags.get("--room").cloned().unwrap_or_default(),
         out: need("--out"),
         ticks: number("--ticks", 3000),
         every: number("--every", 100),
@@ -204,11 +207,11 @@ fn main() {
         return duel::main();
     }
     let args = args();
-    let map = world::read(&args.world);
-    eprintln!("colony: {}; output {}", args.room, args.out);
-    let mut k = map.stand(&args.room, args.seed, args.ended);
-    let mut watch =
-        (args.watch).map(|(port, every)| watch::Watch::open(&k, &args.room, port, every));
+    let read = || (world::read(&args.world), args.room.clone());
+    let (map, room) = (args.generated.as_ref()).map_or_else(read, generated::Spec::world);
+    eprintln!("colony: {room}; output {}", args.out);
+    let mut k = map.stand(&room, args.seed, args.ended);
+    let mut watch = (args.watch).map(|(port, every)| watch::Watch::open(&k, &room, port, every));
     let terrains = (map.rooms.iter())
         .filter_map(|(name, t)| {
             let bits: Box<[u8; fabot_base::tiles::COUNT]> = t
@@ -229,7 +232,6 @@ fn main() {
         BufWriter::new(File::create(format!("{}/{name}", args.out)).expect("an output file"))
     };
     let (mut samples, mut fight) = (file("samples.jsonl"), file("fight.jsonl"));
-    file("decay.jsonl");
     let out = [
         file("faults.jsonl"),
         file("cpu.jsonl"),
@@ -256,7 +258,7 @@ fn main() {
             .collect()
     };
     let followed = [declared("outposts"), args.follow.clone()].concat();
-    let mut sampler = sample::Sampler::new(&args.room, &followed, declared("claims"));
+    let mut sampler = sample::Sampler::new(&room, &followed, declared("claims"));
     let mut engaged = false;
     let mut levels: Vec<serde_json::Value> = Vec::new();
     let (mut engine_ms, mut sample_ms) = (0.0, 0.0);
@@ -278,7 +280,6 @@ fn main() {
             if t % args.every == 0 || t == args.ticks - 1 {
                 let mut row = sampler.sample(&v, t, &map);
                 row["faults"] = json!(driver.faults.len());
-                row["lost"] = json!(0);
                 let _ = writeln!(samples, "{row}");
                 eprintln!("t{t} rcl{rcl} {} creeps {}", row["progress"], row["creeps"]);
             }
@@ -318,8 +319,6 @@ fn main() {
     .expect("an output file");
     write("levels.json", json!(levels));
     write("refusals.json", json!(driver.refused));
-    write("lost.json", json!([]));
-    write("slow.json", json!([]));
     let per = |total: f64| total / args.ticks as f64;
     let timing = json!({ "ticks": args.ticks, "wall": began.elapsed().as_millis(), "engine": per(engine_ms),
         "adapter": per(driver.adapter_ms), "decide": per(driver.decide_ms), "sampler": per(sample_ms),

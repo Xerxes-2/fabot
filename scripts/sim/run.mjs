@@ -162,19 +162,28 @@ export function exportTemplate() {
 export const buildPlan = () =>
   spawnSync("cargo", ["build", "--release", "--quiet", "--features", "tools", "--bin", "plan", "--manifest-path", join(REPO, "Cargo.toml")], { stdio: "inherit" }).status === 0;
 
-/** A soak into `out` on `world` (default the template); resolves to sim's exit code, -1 when it never ran. `watch` ({port, ms}) serves it to lazycreep. */
-export function runSim(bin, { world, room, node, ticks, seed = 1, late = 0, ended = false, unsafe = false, follow = [], rivals = [], invaders, wave, core, resetEvery = 0, watch, out }) {
+/**
+ * A soak into `out` on `world` (default the template), or on the world map.js generates off seed `gen`
+ * (sim picks the room); resolves to sim's exit code, -1 when it never ran. `watch` ({port, ms}) serves it to lazycreep.
+ */
+export function runSim(bin, { world, gen, room, node, ticks, seed = 1, late = 0, ended = false, unsafe = false, follow = [], rivals = [], invaders, wave, core, resetEvery = 0, watch, out }) {
   return new Promise((done) => {
     rmSync(out, { recursive: true, force: true });
-    const base = JSON.parse(readFileSync(world ?? TEMPLATE, "utf8"));
-    const seated = seatsUs(base);
-    const captured = seated || base.declarations || Object.keys(base.memory ?? {}).length;
-    if (!captured) seal(base.rooms);
     const map = `${out}.world.json`;
     const finish = (code) => {
       rmSync(map, { force: true });
       done(code);
     };
+    const play = (where) => {
+      const args = [...where, "--ticks", String(ticks), "--seed", String(seed), "--late", String(late), "--every", "100", "--out", out, ...(follow.length ? ["--follow", follow.join(",")] : []), ...(ended ? ["--ended"] : []), "--reset-every", String(resetEvery),
+        "--npc", JSON.stringify(npc(invaders, bodies(wave), core, ticks)), ...(watch ? ["--watch", "--port", String(watch.port), "--tick-ms", String(watch.ms)] : [])];
+      spawn(bin, args, { stdio: watch ? "inherit" : "ignore" }).on("exit", (code) => (code === 0 ? engaged(out).then(() => finish(0), () => finish(-1)) : finish(code))).on("error", () => finish(-1));
+    };
+    if (gen !== undefined) return play(["--gen", String(gen)]);
+    const base = JSON.parse(readFileSync(world ?? TEMPLATE, "utf8"));
+    const seated = seatsUs(base);
+    const captured = seated || base.declarations || Object.keys(base.memory ?? {}).length;
+    if (!captured) seal(base.rooms);
     // xxscreeps follows a capture's homes in its order and takes no room for it.
     if (seated) room = base.rooms.find((r) => r.objects.some((o) => o.type === "spawn" && o.user === base.userId)).name;
     try {
@@ -190,8 +199,6 @@ export function runSim(bin, { world, room, node, ticks, seed = 1, late = 0, ende
       return finish(-1);
     }
     if (!existsSync(map)) return finish(-1);
-    const args = ["--world", map, "--room", room, "--ticks", String(ticks), "--seed", String(seed), "--late", String(late), "--every", "100", "--out", out, ...(follow.length ? ["--follow", follow.join(",")] : []), ...(ended ? ["--ended"] : []), "--reset-every", String(resetEvery),
-      "--npc", JSON.stringify(npc(invaders, bodies(wave), core, ticks)), ...(watch ? ["--watch", "--port", String(watch.port), "--tick-ms", String(watch.ms)] : [])];
-    spawn(bin, args, { stdio: watch ? "inherit" : "ignore" }).on("exit", (code) => (code === 0 ? engaged(out).then(() => finish(0), () => finish(-1)) : finish(code))).on("error", () => finish(-1));
+    play(["--world", map, "--room", room]);
   });
 }
