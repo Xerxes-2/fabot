@@ -8,21 +8,17 @@
 //   --bot    the sim binaries to compare (default this tree's, `npm run build:sim`);
 //            the first is the base the others are read against. A name
 //            defaults to the file's.
-//   --seed   the starts for every room (default 1,2,1+7, the contested start
-//            1,2,3,4,1+7,2+7: its spread is wider): an engine seed, or seed+K
+//   --seed   the starts for every room (default 1,2,1+7): an engine seed, or seed+K
 //            for a bot that sits out its first K ticks (soak.mjs --late), a
 //            nudge the seed alone does not give a room with few tie-breaks
 //   --room   these starts instead of the default: the extremes of harvest
 //            seats, both sources with one seat (a small harvester cannot fill
 //            a source) and both with four or more (bodies can crowd in
-//            instead), one source (E23S9 on Season 11's map), the late game,
-//            and a contested start: E1 on that map with Hivemind seated two
-//            rooms off, contesting our outposts. A start is
-//            [<world>:]<room>[@<node>][+<bot>:<room>], <world> one of worlds/
-//            with no home of ours (soak.mjs --world, --node), <bot> a rival
-//            under engine/ seated in <room> (soak.mjs --opponents). With a
-//            rival, or on a world from one spawn as the library's scenarios
-//            there, our safe mode is kept to activate (--ended)
+//            instead), one source (E23S9 on Season 11's map) and the late
+//            game. A start is [<world>:]<room>[@<node>], <world> one of
+//            worlds/ with no home of ours (soak.mjs --world, --node). On a
+//            world from one spawn, as the library's scenarios there, our safe
+//            mode is kept to activate (--ended)
 //
 // Every run holds `measures.mjs`'s invariants; a run that breaks one is named
 // under the table, and the exit is non-zero.
@@ -44,7 +40,7 @@
 // has not changed is not run again.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { node26Env } from "./node26.mjs";
 import { basename, dirname, join, resolve } from "node:path";
@@ -90,21 +86,17 @@ const parseSeeds = (text) =>
     const [seed, late = "0"] = spec.split("+");
     return { seed: whole(seed, "--seed", 0), late: whole(late, "--seed", 0), label: spec };
   });
-const CONTESTED = "season-outpost-ring:E25S9@E1+hivemind:E27S9";
 const native = !flags["--xxscreeps"];
-const allStarts = (flags["--room"] ?? `W9N8,W8N3,season-outpost-ring:E23S9,season-late-seat:W12S28@N7,${CONTESTED}`).split(",").map((spec) => {
-  const m = /^(?:([\w-]+):)?([WE]\d+[NS]\d+)(?:@([A-Za-z0-9]+))?(?:\+([a-z]+):([WE]\d+[NS]\d+))?$/.exec(spec);
-  if (!m) fail(`--room: "${spec}" is not [world:]room[@node][+bot:room]`);
+const allStarts = (flags["--room"] ?? "W9N8,W8N3,season-outpost-ring:E23S9,season-late-seat:W12S28@N7").split(",").map((spec) => {
+  const m = /^(?:([\w-]+):)?([WE]\d+[NS]\d+)(?:@([A-Za-z0-9]+))?$/.exec(spec);
+  if (!m) fail(`--room: "${spec}" is not [world:]room[@node]`);
   const world = m[1] && join(HERE, "worlds", `${m[1]}.json`);
   if (world && !existsSync(world)) fail(`--room: no world ${world}`);
   const at = m[3] ?? node;
-  const rival = m[4] && { name: m[4], bot: join(HERE, "engine", m[4]), room: m[5] };
-  if (rival && !existsSync(rival.bot)) fail(`--room: no rival ${rival.bot}`);
-  return { label: spec, room: m[2], world, node: at, rival, ended: Boolean(rival || (world && !at)), seeds: parseSeeds(flags["--seed"] ?? (spec === CONTESTED ? "1,2,3,4,1+7,2+7" : "1,2,1+7")), ticks: whole(flags["--ticks"] ?? (at ? 10000 : 30000), "--ticks", 1) };
+  return { label: spec, room: m[2], world, node: at, ended: Boolean(world && !at), seeds: parseSeeds(flags["--seed"] ?? "1,2,1+7"), ticks: whole(flags["--ticks"] ?? (at ? 10000 : 30000), "--ticks", 1) };
 });
-const unstoodOf = (s) => (s.rival ? "a rival" : s.node && unstood(s.node));
-const starts = native ? allStarts.filter((s) => !unstoodOf(s)) : allStarts;
-const unrun = allStarts.filter((s) => !starts.includes(s)).map((s) => `not run: ${s.label} (${unstoodOf(s)})`);
+const starts = native ? allStarts.filter((s) => !(s.node && unstood(s.node))) : allStarts;
+const unrun = allStarts.filter((s) => !starts.includes(s)).map((s) => `not run: ${s.label} (${unstood(s.node)})`);
 unrun.forEach((u) => console.error(u));
 if (!starts.length) fail("no start to run");
 const jobs = whole(flags["--jobs"] ?? Math.max(1, Math.floor(availableParallelism() / (native ? 1 : 4))), "--jobs", 1);
@@ -150,8 +142,8 @@ const runs = bots.flatMap((bot) =>
       bot,
       seed,
       start,
-      name: `${tag}-${bot.name}-s${seed.seed}${seed.late ? `l${seed.late}` : ""}-${start.label.replace(/[:@+]/g, "-")}`,
-      key: hash(bot.code, start.room, start.rival ? `${start.rival.name}:${start.rival.room}` : "", planHash + start.node, start.world ? readFileSync(start.world) : native ? readFileSync(SIM_TEMPLATE) : "", String(seed.seed), String(seed.late), String(start.ticks), scriptsHash, String(bot.resetEvery)),
+      name: `${tag}-${bot.name}-s${seed.seed}${seed.late ? `l${seed.late}` : ""}-${start.label.replace(/[:@]/g, "-")}`,
+      key: hash(bot.code, start.room, planHash + start.node, start.world ? readFileSync(start.world) : native ? readFileSync(SIM_TEMPLATE) : "", String(seed.seed), String(seed.late), String(start.ticks), scriptsHash, String(bot.resetEvery)),
     })),
   ),
 );
@@ -167,16 +159,11 @@ console.error(
 
 function soak(run) {
   return new Promise((done) => {
-    const { room, world, node, rival, ticks, ended } = run.start;
+    const { room, world, node, ticks, ended } = run.start;
     if (native) return runSim(run.bot.file, { world, room, node, ticks, seed: run.seed.seed, late: run.seed.late, ended, resetEvery: run.bot.resetEvery, out: join(RUNS, run.name) }).then(done);
-    const opponents = join(RUNS, `${run.name}.opponents.json`);
-    if (rival) writeFileSync(opponents, JSON.stringify([rival]));
-    const args = [...(rival ? ["--opponents", opponents] : []), ...(ended ? ["--ended"] : []), "--room", room, "--run", run.name, "--ticks", String(ticks), "--seed", String(run.seed.seed), "--late", String(run.seed.late), "--every", "100", "--bot", run.bot.file, ...(node ? ["--node", node] : []), ...(world ? ["--world", world] : [])];
+    const args = [...(ended ? ["--ended"] : []), "--room", room, "--run", run.name, "--ticks", String(ticks), "--seed", String(run.seed.seed), "--late", String(run.seed.late), "--every", "100", "--bot", run.bot.file, ...(node ? ["--node", node] : []), ...(world ? ["--world", world] : [])];
     const child = spawn("node", [SOAK, ...args], { stdio: ["ignore", "ignore", "ignore"], env: node26Env({ ...process.env, FABOT_PLAN_BUILT: "1" }) });
-    child.on("exit", (code) => {
-      rmSync(opponents, { force: true });
-      done(code);
-    });
+    child.on("exit", done);
   });
 }
 
@@ -245,7 +232,7 @@ for (const start of starts)
       const run = runs.find((r) => r.start === start && r.seed === seed && r.bot === bot);
       const r = rowOf(run);
       console.log(
-        [start.label.split("+")[0].split(":").at(-1), seed.label, bot.name, r.ok ? "yes" : "NO", r.rcl, r.rcl3, r.rcl4, r.controller, r.structures, r.fortified, r.stock, r.open ? `${r.worth}?` : r.worth, r.open ? `${r.score}?` : r.score, r.faults, r.exposure, r.lostHeld]
+        [start.label.split(":").at(-1), seed.label, bot.name, r.ok ? "yes" : "NO", r.rcl, r.rcl3, r.rcl4, r.controller, r.structures, r.fortified, r.stock, r.open ? `${r.worth}?` : r.worth, r.open ? `${r.score}?` : r.score, r.faults, r.exposure, r.lostHeld]
           .map((v, i) => cell(v, i === 0 || i === 2 ? 12 : i === 15 ? 14 : 9))
           .join(""),
       );

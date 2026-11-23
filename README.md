@@ -23,12 +23,12 @@ npm test          # cargo fmt --check, line ceilings, clippy, cargo test
 npm run build     # wasm-pack → dist/main.js, dist/main.wasm
 npm run smoke     # bundle runs four ticks against a stub game
 npm run build:sim # PGO native simulator (`sim/`, Rust port of official engine)
-npm run scenario  # scenario library (native `sim` by default; rivals on xxscreeps)
+npm run scenario  # scenario library (native `sim`)
 npm run soak:many # long-horizon economy soak across seat extremes
 npm run deploy    # build, smoke, upload to the live server
 npm run observe -- health
 ```
 
 `npm run xx` drives [xxscreeps](https://github.com/laverdet/xxscreeps) (`npm run xx -- setup`
-before running rival/watch/capture scenarios, `ARCHITECTURE.md` §10.2);
+before a `--bot`/`--base`/`--capture` scenario run, `ARCHITECTURE.md` §10.2);
 `run <scenario.json>` with `--bot dist` runs the built bundle.

@@ -1,6 +1,0 @@
-{
-  "tarball": "https://registry.npmjs.org/screeps-bot-hivemind/-/screeps-bot-hivemind-3.0.0.tgz",
-  "integrity": "sha512-gSmq+voPhBgX/Eugl22Px09Lwdgcw8QWSH1rm8EObpMGu+ULAlHmAWw1yJ5MlWdlIs9AUrnHi752sepoawZdgA==",
-  "from": "package/dist",
-  "main": "hivemind"
-}

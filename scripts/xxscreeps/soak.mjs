@@ -44,33 +44,19 @@
 //   --save   a directory to copy the world into after the last tick
 //   --from   a world --save wrote (needs --room): the bot is swapped for
 //            --bot, its Memory kept, as a deploy at that tick
-//   --opponents  a JSON file of players seated beside ours, each
-//            { name, bot, room, x?, y?, config?, ally? }: `bot` a bundle or a
-//            bot directory, `config` written beside it as `opponent.js`, the
-//            spawn on colony.mjs's tile unless x, y; `ally` its name in our
-//            declared allies (not with --world or --from: their Memory declares). With --from they stand
-//            in the world already and only their code is swapped. A bot
-//            directory's `fetch.json` { tarball, integrity, from, main }
-//            names code that is never in this tree: the tarball, fetched into
-//            the cache and checked against its integrity, gives its `from` directory's
-//            files beside the directory's own, its main.js as `main`. Only --fetch reaches the registry; without it a rival
-//            whose tarball is not cached exits 4, which `scenario.mjs` reads
-//            as a skip.
 //   --world  a live capture (`scripts/capture-world.mjs`), or a crafted world
 //            of its shape (`worlds/`, terrain as 50 rows), as the world, at its
 //            tick (`engine/live.mjs`): our user the capture's, every home of
 //            ours a colony the samples follow, the capture's outposts declared;
-//            stood on the template with every structure kind (`xx.mjs`); its
-//            --opponents are its own users, their code seated on their rooms.
+//            stood on the template with every structure kind (`xx.mjs`).
 //            A world with no home of ours (`season-world.mjs`'s) is a map
-//            our colony is seated on as on the template: --room, --node,
-//            --late and --opponents as without --world
+//            our colony is seated on as on the template: --room, --node
+//            and --late as without --world
 //   --follow room,…: rooms the samples follow beside the colony's and its
 //            declared outposts': an outpost Strategy picks is declared nowhere
 //   --unsafe  our room without the engine's safe mode, which would decide
-//            every fight in it for us; implied by --opponents
-//   --ended   our room's starting safe mode ended, its stock kept to activate,
-//            opponents or not
+//            every fight in it for us
+//   --ended   our room's starting safe mode ended, its stock kept to activate
 //   --keep   leave the run's world in the cache's worlds/ (default removed)
 //   --watch  the server's backend up on every interface at --port (default 21025) for
 //            a client on this machine or the LAN to follow, each tick held to --tick-ms (default 500),
@@ -96,7 +82,7 @@ import { NODES, near, planNode } from "../sim/node.mjs";
 // Where the run's wall time went, written to timing.json (`scenario.mjs` sums them).
 const began = Date.now();
 const marks = { node26: 0, node26Calls: 0 };
-const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|T3|N4|T4|N5|R6|T7|N6|N7|R8|A7|E0|E1|E2|C2|G2|X2|F2|Y2|L5] [--invaders room:every[:first],…] [--wave role[:size],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--world <capture.json>] [--follow room,…] [--unsafe] [--ended] [--keep] [--fetch] [--watch [--tick-ms N] [--port N]]";
+const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|T3|N4|T4|N5|R6|T7|N6|N7|R8|A7|E0|E1|E2|C2|G2|X2|F2|Y2|L5] [--invaders room:every[:first],…] [--wave role[:size],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--world <capture.json>] [--follow room,…] [--unsafe] [--ended] [--keep] [--watch [--tick-ms N] [--port N]]";
 const fail = (message) => {
   console.error(message);
   process.exit(1);
@@ -117,11 +103,11 @@ const listOnly = rest[0] === "--list";
 if (listOnly) rest.shift();
 for (let i = 0; i < rest.length; i++) {
   const a = rest[i];
-  if (a === "--unsafe" || a === "--ended" || a === "--keep" || a === "--fetch" || a === "--watch") {
+  if (a === "--unsafe" || a === "--ended" || a === "--keep" || a === "--watch") {
     flags[a] = true;
     continue;
   }
-  if (!["--ticks", "--every", "--seed", "--room", "--run", "--bot", "--late", "--node", "--capture", "--save", "--from", "--invaders", "--wave", "--core", "--opponents", "--world", "--follow", ...WATCH_VALUES].includes(a)) fail(usage);
+  if (!["--ticks", "--every", "--seed", "--room", "--run", "--bot", "--late", "--node", "--capture", "--save", "--from", "--invaders", "--wave", "--core", "--world", "--follow", ...WATCH_VALUES].includes(a)) fail(usage);
   const value = rest[++i];
   if (value === undefined || value.startsWith("--")) fail(`${a} needs a value\n${usage}`);
   flags[a] = value;
@@ -169,25 +155,9 @@ const seated = live && homes.length > 0;
 const OUR_NAME = live?.username ?? "fabot";
 const from = flags["--from"] && resolve(flags["--from"]);
 if (from && (!flags["--room"] || node || late)) fail(`--from needs --room, and takes no --node or --late\n${usage}`);
-const opponents = flags["--opponents"] ? JSON.parse(readFileSync(flags["--opponents"], "utf8")) : [];
-for (const o of opponents)
-  if (!/^[a-z][\w-]*$/.test(o.name ?? "") || o.name === OUR_NAME || !existsSync(o.bot ?? "") || !/^[WE]\d+[NS]\d+$/.test(o.room ?? ""))
-    fail(`--opponents: ${JSON.stringify(o)} needs a name, a bot that exists and a room`);
 if (live && from) fail(`--world takes no --from\n${usage}`);
 if (seated && (node || late || flags["--room"] || cores.length || flags["--unsafe"] || flags["--ended"]))
   fail(`--world with a home of ours takes no --node, --late, --room, --core, --unsafe or --ended\n${usage}`);
-if (seated && opponents.some((o) => !Object.values(live.users).includes(o.name))) fail("--world: an opponent is one of the world's users, its rooms the world's");
-const specOf = (bot) => (lstatSync(bot).isDirectory() && existsSync(join(bot, "fetch.json")) ? JSON.parse(readFileSync(join(bot, "fetch.json"), "utf8")) : null);
-const cacheOf = (spec) => join(CACHE, "opponents", createHash("sha256").update(spec.integrity).digest("hex").slice(0, 16));
-// Exit 4: an opponent's code is not cached, and this run did not ask for the
-// network (`scenario.mjs` skips the scenario).
-for (const o of opponents) {
-  const spec = specOf(o.bot);
-  if (spec && !(await cached(spec))) {
-    console.error(`${o.name}: ${spec.tarball} is not cached under ${CACHE}/opponents; fetch it with --fetch`);
-    process.exit(4);
-  }
-}
 // A world's schema is its mods' (`xx.mjs` templateOf).
 const modern = live || node?.modern;
 const template = modern ? `${TEMPLATE}-modern` : cores.length ? `${TEMPLATE}-stronghold` : TEMPLATE;
@@ -355,51 +325,13 @@ if (node && node.level > 1) {
 console.error(`colony: ${colony.room}${from ? ` from ${from}` : seated ? ` from ${flags["--world"]}` : `, spawn at ${colony.x},${colony.y}`}; output ${out}`);
 if (from) node26([XXSCREEPS, "manage", "bot", "update", OUR_NAME, "./bot"], world);
 else if (!seated) node26([XXSCREEPS, script("seed/manage.js"), "bot", "add", OUR_NAME, "./bot", "--spawn", colony.room, `${colony.x},${colony.y}`], world);
-async function cached(spec) {
-  const cache = cacheOf(spec);
-  if (existsSync(join(cache, ".ok"))) return true;
-  if (!flags["--fetch"]) return false;
-  const res = await fetch(spec.tarball);
-  if (!res.ok) fail(`${spec.tarball}: ${res.status}`);
-  const body = Buffer.from(await res.arrayBuffer());
-  const cut = spec.integrity.indexOf("-");
-  if (createHash(spec.integrity.slice(0, cut)).update(body).digest("base64") !== spec.integrity.slice(cut + 1)) fail(`${spec.tarball}: not the integrity fetch.json names`);
-  rmSync(cache, { recursive: true, force: true });
-  mkdirSync(cache, { recursive: true });
-  writeFileSync(join(cache, "package.tgz"), body);
-  if (spawnSync("tar", ["-xzf", "package.tgz"], { cwd: cache, stdio: "inherit" }).status !== 0) fail(`${spec.tarball}: tar failed`);
-  writeFileSync(join(cache, ".ok"), "");
-  return true;
-}
-const copied = (spec, dir) => {
-  const from = join(cacheOf(spec), spec.from);
-  for (const f of readdirSync(from).filter((f) => /\.(js|wasm)$/.test(f))) cpSync(join(from, f), join(dir, f === "main.js" ? `${spec.main}.js` : f));
-};
-for (const o of opponents) {
-  const dir = join(world, `bot-${o.name}`);
-  if (lstatSync(o.bot).isDirectory()) {
-    cpSync(o.bot, dir, { recursive: true, filter: (f) => basename(f) !== "fetch.json" });
-    const spec = specOf(o.bot);
-    if (spec) copied(spec, dir);
-    cpSync(join(HERE, "engine", "seat.js"), join(dir, "seat.js"));
-  } else copyBundle(o.bot, dir, "main.js");
-  writeFileSync(join(dir, "opponent.js"), `module.exports = ${JSON.stringify({ ...o.config, seed })};\n`);
-  if (from || seated) {
-    node26([XXSCREEPS, "manage", "bot", "update", o.name, `./bot-${o.name}`], world);
-    continue;
-  }
-  const seat = o.x === undefined ? JSON.parse(node26([XXSCREEPS, script("colony.mjs"), o.room], world, true).trim().split("\n").at(-1)) : o;
-  node26([XXSCREEPS, script("seed/manage.js"), "bot", "add", o.name, `./bot-${o.name}`, "--spawn", o.room, `${seat.x},${seat.y}`], world);
-}
-writeFileSync(join(world, "opponents.json"), JSON.stringify(opponents.map(({ name, room }) => ({ name, room }))));
 if (built) node26([XXSCREEPS, script("node.mjs"), "stand", colony.room, "node.json", String(node.level), String(node.stored), OUR_NAME, String(node.worn ?? 1), node.labStock ?? "", node.bodies ?? ""], world);
 if (flags["--ended"]) node26([XXSCREEPS, script("node.mjs"), "ended", colony.room], world);
-else if ((opponents.length && !seated) || flags["--unsafe"]) node26([XXSCREEPS, script("node.mjs"), "unsafe", colony.room], world);
+else if (flags["--unsafe"]) node26([XXSCREEPS, script("node.mjs"), "unsafe", colony.room], world);
 if ((node?.outposts || node?.claims || node?.stale) && colony.outposts.length === 0) fail(`${colony.room}: no neighbour fits an outpost`);
-const allies = opponents.filter((o) => o.ally).map((o) => o.name);
-if (node?.outposts || node?.claims || node?.spare || node?.alone || (allies.length && !seated && !from)) {
+if (node?.outposts || node?.claims || node?.spare || node?.alone) {
   const claims = colony.outposts.slice(0, node?.claims ?? 0);
-  writeFileSync(join(world, "declarations.json"), JSON.stringify({ outposts: node?.outposts ? colony.outposts : [], claims, allies, ...(node?.alone ? { avoid: near(colony.room, 3) } : {}) }));
+  writeFileSync(join(world, "declarations.json"), JSON.stringify({ outposts: node?.outposts ? colony.outposts : [], claims, ...(node?.alone ? { avoid: near(colony.room, 3) } : {}) }));
   if (node?.stale) writeFileSync(join(world, "v2.json"), JSON.stringify({ expansion: { room: colony.outposts[0].room, since: -100000 } }));
   node26([XXSCREEPS, script("node.mjs"), "declare", colony.room, OUR_NAME, "declarations.json", ...(node?.short ? ["short"] : node?.spare ? [String(node.spare)] : []), ...(node?.stale ? ["v2.json"] : [])], world);
 }
@@ -432,7 +364,7 @@ if (watch) {
     await sleep(100);
   }
   const outposts = live?.declarations?.outposts ?? (node?.outposts || node?.claims ? colony.outposts : []);
-  const rooms = [...new Set([colony.room, ...outposts.map((o) => o.room), ...opponents.map((o) => o.room)])].join(",");
+  const rooms = [...new Set([colony.room, ...outposts.map((o) => o.room)])].join(",");
   // The client's browser opens the socket itself, so a LAN viewer needs this host's LAN address.
   const hosts = Object.values(networkInterfaces()).flat().filter((i) => i.family === "IPv4" && !i.internal).map((i) => i.address);
   const host = hosts[0] ?? "127.0.0.1";
@@ -455,7 +387,7 @@ const stepperAt = Date.now();
 // Spawned, not run synchronously, so a signal is handled while it steps.
 const stepper = spawn(
   NODE,
-  [XXSCREEPS, script("soak-step.mjs"), String(ticks), String(every), colony.room, OUR_NAME, out, waves.join(","), "opponents.json", cores.join(","), wave, String(watch ? watch.ms : 0), flags["--follow"] ?? ""],
+  [XXSCREEPS, script("soak-step.mjs"), String(ticks), String(every), colony.room, OUR_NAME, out, waves.join(","), "", cores.join(","), wave, String(watch ? watch.ms : 0), flags["--follow"] ?? ""],
   { cwd: world, env: node26Env(), detached: true, stdio: ["ignore", "pipe", "inherit"] },
 );
 children.push(stepper);

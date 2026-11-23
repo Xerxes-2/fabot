@@ -123,8 +123,7 @@ Full engine and metric details live in `ARCHITECTURE.md` §10.
 - **Economy changes:** long-run growth is the objective (`npm run soak -- --ticks 30000`,
   §5, §10.2); an early regression is accepted when the end of the run improves.
   Before shipping, `npm run soak:many` over its default starts (two seeds and a
-  late start) shows no room regressing beyond base start-spread noise, with the
-  contested room read as `ARCHITECTURE.md` §10.2 says.
+  late start) shows no room regressing beyond base start-spread noise.
 - **Unit tests:** invariants and pure arithmetic only (`npm test` < 1 min);
   scenarios and soak run on `jj ship` for the modules a change touches. Reject
   any test asserting one creep's action in one scenario.

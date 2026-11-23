@@ -9,14 +9,12 @@
 // soak-runs/worlds/, and the bundle under test runs on from it as a deploy
 // would, Memory kept.
 //
-// Usage: npm run scenario -- [name...] [--modules m,n] [--list] [--bot main.js] [--jobs J] [--nightly] [--fetch] [--capture] [--base name] [--seeds N] [--force-xxscreeps]
+// Usage: npm run scenario -- [name...] [--modules m,n] [--list] [--bot main.js] [--jobs J] [--nightly] [--capture] [--base name] [--seeds N] [--force-xxscreeps]
 //        npm run scenario -- <name> --watch [--tick-ms N] [--port N]
 //   name    the scenarios to run (default all but the nightly ones), by file name
 //   --modules  also the scenarios naming any of these modules (directories under core)
 //   --list  print the selection, each with its engine, and run nothing
 //   --nightly  all of them, with those marked "nightly", kept out of `jj ship`
-//   --fetch  fetch the tarball a rival's `fetch.json` names; without it a
-//           scenario whose rival is not cached is SKIPped, never failed
 //   --bot   the bundle (default dist/main.js)
 //   --base  a bundle name whose runs stand in soak-runs (an earlier --bot
 //           name.js): each measure is printed beside the base's, marked
@@ -31,7 +29,7 @@
 //
 // A scenario file: { "why": the invariant, "modules": the core modules it tests, "nightly"?, "xxscreeps"?: why it stays off sim, "start": { "room", "seed",
 // "late"?, "node"?, "invaders"? (soak's --invaders), "wave"? (soak's --wave), "core"? (soak's --core), "stronghold"? (sim: "room:tick:level[:deploy],…"), "resetEvery"? (sim: soak:many's --reset-every), "unsafe"?, "ended"?, "at"?, "bundle"?,
-// "opponents"? (soak's --opponents) } or { "world": a capture-shaped file
+// "opponents"? (sim's scripted rivals, `sim/src/rival`) } or { "world": a capture-shaped file
 // (soak's --world; crafted ones under worlds/), "seed", "room"?, "node"?, "late"? (a world with no home of ours, as a recipe's), "ended"?, "invaders"?, "wave"?, "opponents"? (the world's own users), "declarations"? (in place of the world's), "memory"? (keys of Memory.v2 beside the world's), "gcl"? (in place of the world's), "level"? ({ room: its controller level in place of the world's }) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"?, "room"?, "kind"?, "name"?, "act"? }] };
 // a measure is one of `measures` below, read off the soak's output over ticks
 // [from, to), counted from the run's first tick; { "metric": a name the bot's
@@ -70,10 +68,10 @@ const WATCH_VALUES = ["--tick-ms", "--port"];
 const rest = process.argv.slice(2);
 for (let i = 0; i < rest.length; i++)
   if (["--bot", "--jobs", "--modules", "--base", "--seeds"].includes(rest[i])) flags[rest[i]] = rest[++i] ?? fail(`${rest[i - 1]} takes a value`);
-  else if (rest[i] === "--list" || rest[i] === "--nightly" || rest[i] === "--fetch" || rest[i] === "--capture" || rest[i] === "--force-xxscreeps") flags[rest[i]] = true;
+  else if (rest[i] === "--list" || rest[i] === "--nightly" || rest[i] === "--capture" || rest[i] === "--force-xxscreeps") flags[rest[i]] = true;
   else if (rest[i] === "--watch") watch.push(rest[i]);
   else if (WATCH_VALUES.includes(rest[i])) watch.push(rest[i], rest[++i]);
-  else if (rest[i].startsWith("--")) fail("usage: npm run scenario -- [name...] [--modules m,n] [--list] [--bot main.js] [--jobs J] [--nightly] [--fetch] [--capture] [--base name] [--seeds N] [--force-xxscreeps] | <name> --watch [--tick-ms N] [--port N]");
+  else if (rest[i].startsWith("--")) fail("usage: npm run scenario -- [name...] [--modules m,n] [--list] [--bot main.js] [--jobs J] [--nightly] [--capture] [--base name] [--seeds N] [--force-xxscreeps] | <name> --watch [--tick-ms N] [--port N]");
   else names.push(rest[i]);
 
 const CORE = join(REPO, "core");
@@ -93,7 +91,6 @@ const xxscreepsWhy = (s) =>
   s.xxscreeps ??
   (Object.keys(s.start).filter((k) => !SIM_START.includes(k)).map((k) => `its start's ${k}`)[0] ||
     (s.start.node && unstood(s.start.node)) ||
-    (s.start.opponents ?? []).map(unseated).find(Boolean) ||
     (s.start.world && Object.keys(JSON.parse(readFileSync(resolve(REPO, s.start.world), "utf8")).segments ?? {}).length && "a capture's intel segments") ||
     (s.assert.some((a) => a.who) && "a measure of an opponent's side") ||
     s.assert.filter((a) => !SIM_MEASURES.has(a.metric !== undefined ? "metric" : a.measure)).map((a) => `${a.measure} is not read off sim`)[0] ||
@@ -101,7 +98,8 @@ const xxscreepsWhy = (s) =>
 const bundled = ["--bot", "--base", "--capture"].find((f) => flags[f]);
 const forced = watch.length ? "--watch" : flags["--force-xxscreeps"] ? "--force-xxscreeps" : undefined;
 // xxscreeps stands no stronghold and plays no scripted rival, so either is watched on sim.
-const simOnly = (s) => s.start.stronghold !== undefined || (s.start.opponents ?? []).some((o) => o.bot === "rival");
+const simOnly = (s) => s.start.stronghold !== undefined || s.start.opponents !== undefined;
+for (const s of library) for (const o of s.start.opponents ?? []) if (unseated(o)) fail(`${s.name}: no open-source bot plays in a scenario (owner), only sim's scripted "rival"`);
 for (const s of library) s.engine = (forced && !simOnly(s)) || xxscreepsWhy(s) ? "xxscreeps" : "sim";
 
 // name@sK names a scenario on seed K alone, as --seeds names its runs.
@@ -135,8 +133,6 @@ if (flags["--list"]) {
   console.log(`${scenarios.length} of ${library.length} scenarios${offSimNames.length ? `, ${offSimNames.length} skipped` : ""}`);
   process.exit(0);
 }
-// A soak that skipped (soak.mjs's exit 4) measured nothing: a rival's tarball is
-// not in the cache, and the run may not reach the registry.
 const SKIPPED = 4;
 for (const n of offSimNames) console.log(`SKIP ${n}: ${offSimWhy}`);
 if (selected.length && !scenarios.length) {
@@ -176,7 +172,7 @@ const codeOf = (...paths) =>
     .reduce((h, f) => h.update(f).update(readFileSync(f)), createHash("sha256"))
     .digest("hex")
     .slice(0, 8);
-const harness = codeOf(...["seed", "seat.js", "waves", "core", "colony.mjs", "seat-tile.mjs", "node.mjs", "live.mjs"].map((f) => join(HERE, "engine", f)));
+const harness = codeOf(...["seed", "waves", "core", "colony.mjs", "seat-tile.mjs", "node.mjs", "live.mjs"].map((f) => join(HERE, "engine", f)));
 const worldOf = (start) => `${recipe(start, seats(start.opponents).map((s) => ({ ...s, code: codeOf(s.bot) })))}-t${start.at}-${start.bundle}-h${harness}`;
 const worldDir = (start) => join(REPO, "soak-runs/worlds", worldOf(start));
 const keyOf = ({ start, ticks, engine }, name = engine === "sim" ? `sim-${simCode}` : basename(bot, ".js")) => `scenario-${name}-${start.at ? `${worldOf(start)}${tag(start.opponents)}` : recipe(start, start.opponents)}-${ticks}`;
@@ -221,16 +217,9 @@ const started = Date.now();
 const soak = (args, watched = watch.length > 0 && !args.includes("--save")) =>
   new Promise((done) => {
     const capture = flags["--capture"] && !args.includes("--save") ? ["--capture", `0-${args[args.indexOf("--ticks") + 1]}`] : [];
-    const child = spawn("node", [join(HERE, "soak.mjs"), ...args, ...capture, ...(flags["--fetch"] ? ["--fetch"] : []), ...(watched ? watch : [])], { stdio: watched ? "inherit" : "ignore", env: node26Env({ ...process.env, FABOT_PLAN_BUILT: "1" }) });
+    const child = spawn("node", [join(HERE, "soak.mjs"), ...args, ...capture, ...(watched ? watch : [])], { stdio: watched ? "inherit" : "ignore", env: node26Env({ ...process.env, FABOT_PLAN_BUILT: "1" }) });
     child.on("exit", (code) => done(code));
   });
-const opponentsOf = (name, opponents) => {
-  if (!opponents) return [];
-  const file = join(REPO, "soak-runs", `opponents-${name}.json`);
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify(opponents.map((o) => ({ ...o, bot: resolve(REPO, o.bot) }))));
-  return ["--opponents", file];
-};
 const preludes = [];
 // Two preludes of one world would save into one directory.
 const preluding = new Map();
@@ -261,7 +250,7 @@ const play = async ({ name, start, ticks, engine }) => {
     return runSim(sim, { world: world && resolve(REPO, world), room, node, ticks, seed, late, ended, unsafe, follow, rivals: opponents, invaders, wave, core, stronghold, resetEvery, watch: watched, out: join(REPO, "soak-runs", name) });
   }
   if (start.world)
-    return soak(["--world", resolve(REPO, start.world), "--seed", String(start.seed), "--ticks", String(ticks), "--run", name, "--bot", bot, ...(start.room ? ["--room", start.room] : []), ...(start.node ? ["--node", start.node] : []), ...(start.late ? ["--late", String(start.late)] : []), ...(start.invaders ? ["--invaders", start.invaders] : []), ...(start.wave ? ["--wave", start.wave] : []), ...(start.follow ? ["--follow", start.follow.join(",")] : []), ...(start.ended ? ["--ended"] : []), ...opponentsOf(name, start.opponents)]);
+    return soak(["--world", resolve(REPO, start.world), "--seed", String(start.seed), "--ticks", String(ticks), "--run", name, "--bot", bot, ...(start.room ? ["--room", start.room] : []), ...(start.node ? ["--node", start.node] : []), ...(start.late ? ["--late", String(start.late)] : []), ...(start.invaders ? ["--invaders", start.invaders] : []), ...(start.wave ? ["--wave", start.wave] : []), ...(start.follow ? ["--follow", start.follow.join(",")] : []), ...(start.ended ? ["--ended"] : [])]);
   const recipe = ["--room", start.room, "--seed", String(start.seed), "--late", String(start.late ?? 0)];
   if (!start.at)
     return soak([
@@ -277,21 +266,20 @@ const play = async ({ name, start, ticks, engine }) => {
       ...(start.core ? ["--core", start.core] : []),
       ...(start.unsafe ? ["--unsafe"] : []),
       ...(start.ended ? ["--ended"] : []),
-      ...opponentsOf(name, start.opponents),
     ]);
   const world = worldDir(start);
   if (!existsSync(world) && !preluding.has(world))
     preluding.set(world, (async () => {
       const began = Date.now();
       if (!preludes.some((p) => p.dir === `world-${worldOf(start)}`)) preludes.push({ label: `world ${worldOf(start)}`, dir: `world-${worldOf(start)}` });
-      const code = await soak([...recipe, "--ticks", String(start.at), "--run", `world-${worldOf(start)}`, "--bot", bundleAt(start.bundle), "--save", world, ...opponentsOf(`world-${name}`, start.opponents && seats(start.opponents))]);
+      const code = await soak([...recipe, "--ticks", String(start.at), "--run", `world-${worldOf(start)}`, "--bot", bundleAt(start.bundle), "--save", world]);
       console.error(`world ${worldOf(start)} played in ${((Date.now() - began) / 1000).toFixed(0)} s, counted in the soaks that waited on it`);
       if (code !== 0) rmSync(world, { recursive: true, force: true });
       return code;
     })());
   const code = await preluding.get(world);
   if (code !== undefined && code !== 0) return code;
-  return soak(["--room", start.room, "--seed", String(start.seed), "--ticks", String(ticks), "--run", name, "--bot", bot, "--from", world, ...opponentsOf(name, start.opponents)]);
+  return soak(["--room", start.room, "--seed", String(start.seed), "--ticks", String(ticks), "--run", name, "--bot", bot, "--from", world]);
 };
 // A long soak started last is the whole run's tail; ticks, with a world still to play, stand in for its cost.
 const cost = ({ start, ticks }) => ticks + (start.at && !existsSync(worldDir(start)) ? start.at : 0);
@@ -322,15 +310,9 @@ if (invalid.length) {
 
 let failed = 0;
 const moved = { better: 0, worse: 0 };
-let skipped = 0;
 for (const s of scenarios) {
   const run = runs.get(keyOf(s));
   const dir = join(REPO, "soak-runs", run.name);
-  if (run.code === SKIPPED) {
-    skipped++;
-    console.log(`SKIP ${s.name}: its rival's tarball is not cached (soak exit ${SKIPPED}); \`npm run scenario -- --fetch\` fetches it`);
-    continue;
-  }
   if (run.code === LOST) {
     failed++;
     console.log(`INVALID ${s.name}: ticks lost on both tries (a script timeout or abandoned intents); see ${dir}/lost.json`);
@@ -394,6 +376,6 @@ if (timed.length) {
     console.log(`  ${t.label} ${t.ticks} ticks: ${PHASES.map((k) => `${k} ${(t[k] / 1000).toFixed(1)}`).join(" ")} (${(t.step / t.ticks).toFixed(1)} ms/tick)`);
   writeFileSync(join(REPO, "soak-runs", "scenario-timing.json"), JSON.stringify(timed, null, 1) + "\n");
 }
-const skips = skipped + offSimNames.length;
-console.log(`${failed ? `${failed} failed` : skips ? `${scenarios.length - skipped} passed` : "all passed"}${skips ? `, ${skips} skipped` : ""} in ${((Date.now() - started) / 1000).toFixed(0)} s`);
-process.exit(failed ? 1 : selected.length && skipped === scenarios.length ? SKIPPED : 0);
+const skips = offSimNames.length;
+console.log(`${failed ? `${failed} failed` : skips ? `${scenarios.length} passed` : "all passed"}${skips ? `, ${skips} skipped` : ""} in ${((Date.now() - started) / 1000).toFixed(0)} s`);
+process.exit(failed ? 1 : 0);

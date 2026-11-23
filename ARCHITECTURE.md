@@ -804,15 +804,14 @@ Two engines complement each other:
   per room with ours; they no longer run on xxscreeps, so a `--bot`/`--base`
   A/B skips their scenarios.
   - `❓` Still on `xxscreeps` (`SIM_START`/`SIM_MEASURES` in `scripts/sim/run.mjs`):
-    the Hivemind rival bot, resumed worlds (`at`/`bundle`), capture intel
-    segments, and unported measures (`decay.jsonl`, `waves`, `lost`).
+    resumed worlds (`at`/`bundle`), capture intel segments, and unported
+    measures (`decay.jsonl`, `waves`, `lost`).
   - `❓` Cut worlds lacking sector bus rooms throw in `genDeposits` (logged and
     skipped as backend cron does).
-- **`xxscreeps` (`npm run xx`):** isolated-vm vanilla engine used for active
-  rival bots, `--bot`/`--base` comparisons, `--capture`, and `--watch` beside a
-  rival bot; with the first three, `npm run scenario` skips sim-native scenarios
-  unless `--force-xxscreeps`. A stronghold or scripted-rival scenario and a
-  single-bot world are watched on `sim` (`npm run scenario -- <name> --watch`,
+- **`xxscreeps` (`npm run xx`):** isolated-vm vanilla engine used for
+  `--bot`/`--base` comparisons and `--capture`; with these, `npm run scenario`
+  skips sim-native scenarios unless `--force-xxscreeps`. A stronghold or
+  scripted-rival scenario and a single-bot world are watched on `sim` (`npm run scenario -- <name> --watch`,
   `npm run watch:sim`, `sim/src/watch`): the run lazycreep shows is the one
   scenarios and soaks measure.
 
@@ -828,10 +827,7 @@ scenarios matching touched modules.
   and never as a median because a crowd of small bodies only fits many seats),
   `season-outpost-ring` (1-source remote economy), `season-late-seat` (10k ticks
   of N7; RCL8 controller progress buys only GCL so it is read apart and never
-  counts as a regression), and 10k ticks of `E1` on `season-outpost-ring` with
-  Hivemind two rooms off (`--xxscreeps`, Hivemind over TooAngel because it
-  reaches RCL3 and walks outposts while TooAngel stays RCL2) to read exposure
-  and losses with safe mode kept.
+  counts as a regression).
 - `soak:many -- --reset-every N` runs each sim start beside a twin whose heap is
   lost every N ticks (Memory, segments and world kept, as `src/app/driver.rs`
   meets a global reset); any gap beyond seed noise is a reset bug.
@@ -871,9 +867,8 @@ scenarios matching touched modules.
 
 **Adversaries:** scripted rivals (`sim/src/rival/`) verify plan mechanics. No
 scenario fights an open-source bot (owner): a fight tuned against one says
-little about the players a season meets. Hivemind stays only as the contested
-soak's economic neighbour (a pinned tarball fetched with `--fetch`, never
-vendored; `jj ship` never hits the network). `❓` Self-play with an attacking
+little about the players a season meets, and no soak seats one either (owner,
+2026-11-23): tests run no open-source bot. `❓` Self-play with an attacking
 v2.
 
 ### 10.3 Unit tests, where the engine would obscure
