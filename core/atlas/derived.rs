@@ -311,11 +311,11 @@ fn open(world: &World, sightings: &Sightings, owned: &BTreeSet<RoomName>, room: 
 
     !core
         && !foes.iter().any(|c| {
-            // An Invader's raid only ever walks to the work, so it stands the
+            // An armed Invader only ever walks to the work, so it stands the
             // room down on sight; a player's only the work it can strike.
-            c.owner == Owner::Invader
-                || (!held(&guards, c)
-                    && hostiles::armed(owned, &foes, c)
-                    && work.iter().any(|at| c.pos.within(hostiles::reach(c), at)))
+            hostiles::armed(owned, &foes, c)
+                && (c.owner == Owner::Invader
+                    || !held(&guards, c)
+                        && work.iter().any(|at| c.pos.within(hostiles::reach(c), at)))
         })
 }

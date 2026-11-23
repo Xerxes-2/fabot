@@ -116,8 +116,9 @@ function standRival(world, rival, i) {
     ...built("spawn", "0", t, 1), store: { energy: 300 }, spawning: null, notifyWhenAttacked: true });
 }
 
-// cronjobs.js createCreep's bodies, by `{size}{Role}`: part letters and counts.
-const INVADER = { bigHealer: "m24h25m1", bigRanged: "t6m24r18w1m1", bigMelee: "t16m24r3w4a2m1", smallHealer: "m4h5m1", smallRanged: "t2m4r3m1", smallMelee: "t2m4r1w1a1m1" };
+// cronjobs.js createCreep's bodies, by `{size}{Role}`: part letters and counts. A spent
+// melee is one a fight shot down to its last MOVE, which no cronjob makes.
+const INVADER = { bigHealer: "m24h25m1", bigRanged: "t6m24r18w1m1", bigMelee: "t16m24r3w4a2m1", smallHealer: "m4h5m1", smallRanged: "t2m4r3m1", smallMelee: "t2m4r1w1a1m1", spentMelee: "m1" };
 const PART = { m: "move", h: "heal", r: "ranged_attack", w: "work", a: "attack", t: "tough" };
 /** `soak.mjs`'s `--wave role[:size],…` as the official engine's Invader bodies. */
 const bodies = (wave = "melee,healer,ranged") =>

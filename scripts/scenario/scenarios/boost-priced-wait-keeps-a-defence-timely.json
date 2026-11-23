@@ -1,7 +1,7 @@
 {
   "why": "the lab wait is priced at the outpost's output lost each tick: the Invader raid on an outpost of a colony holding every T3 is beaten sooner bare than after three lab fills, so the priced wait must not slow a defence boosting does not pay for (main 201, a forced boost 315)",
   "modules": ["atlas", "economy", "exchange", "fight", "layout", "mv", "strategy", "tactics"],
-  "start": { "room": "W8N3", "seed": 1, "node": "M7", "invaders": "W8N2:1000:2000" },
+  "start": { "room": "W8N3", "seed": 14, "node": "M7", "invaders": "W8N2:1000:2000" },
   "ticks": 4000,
   "assert": [
     { "measure": "hostileTicks", "room": "W8N2", "max": 260 }

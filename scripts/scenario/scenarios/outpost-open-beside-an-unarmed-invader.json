@@ -1,0 +1,7 @@
+{
+  "why": "An Invader with no live weapon, and no striker its heal reaches, hurts nothing: its outpost keeps working while it stands, as Defend, which answers only armed bodies, leaves it be. soak:gen seed 80 (E3S9): a defender and an invader shot each other down to their last MOVE part, and the outpost stood down for the invader's last 1,400 ticks and lost a road for longer than a creep life. A spent melee is that invader from its first tick",
+  "modules": ["atlas", "economy"],
+  "start": { "room": "W9N8", "seed": 1, "invaders": "W9N9:100000:12500", "wave": "melee:spent" },
+  "ticks": 14000,
+  "assert": [{ "measure": "dug", "room": "W9N9", "from": 12600, "to": 14000, "min": 15000 }]
+}
