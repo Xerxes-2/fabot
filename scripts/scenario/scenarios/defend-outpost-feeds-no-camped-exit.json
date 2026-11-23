@@ -1,0 +1,20 @@
+{
+  "why": "An outpost Defend's loss budget is priced as it commits and only a re-form re-prices it, so its losses past the budget end it: our bot in three mutually hostile seats, where alpha camps the exit beta's E18S6 Defend enters by. On the old rule every death re-priced the budget to losses so far plus the predicted dead, so the bound was never crossed: beta's Defend opened t4631 (priced a win losing 1) counted 52 lost (about 15 bodies dead, the rest spent bodies healed and drafted again) by t5355, its casts walking in one at a time. Self-play, since only our own Defend's accounting is read",
+  "modules": ["fight"],
+  "start": {
+    "gen": 3,
+    "sectors": "2x1",
+    "seed": 1,
+    "players": [
+      { "name": "alpha", "declarations": { "enemies": ["beta", "gamma"] } },
+      { "name": "beta", "declarations": { "enemies": ["alpha", "gamma"] } },
+      { "name": "gamma", "declarations": { "enemies": ["alpha", "beta"] } }
+    ]
+  },
+  "ticks": 6000,
+  "assert": [
+    { "measure": "bodiesLost", "seat": "beta", "from": 4000, "max": 12 },
+    { "measure": "bodiesLost", "from": 4000, "max": 12 },
+    { "measure": "bodiesLost", "seat": "gamma", "from": 4000, "max": 12 }
+  ]
+}

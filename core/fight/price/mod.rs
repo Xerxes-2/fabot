@@ -794,9 +794,7 @@ impl<'a> Scene<'a> {
                     &self.boosts_for(atlas, e, &asked.boosts),
                 )?;
                 let cast = set.len();
-                let priced: Vec<Fighter> = (bodies.iter().chain(&asked_fighters).cloned())
-                    .chain(set.iter().map(|b| fighter::cast(b)))
-                    .collect();
+                let priced = [&ours_now[..], &cast_all(&set)].concat();
                 set.extend(casting::razer(capacity, core_hits, &priced));
 
                 let price = Priced {
@@ -846,7 +844,9 @@ impl<'a> Scene<'a> {
                     order: casting::kill_order(&raid),
                     offers,
                 };
-                next.budget = e.lost + price.outcome.losses().dead;
+                if e.unanswered || (e.phase == Phase::Forming && e.since == self.world.time) {
+                    next.budget = e.lost + price.outcome.losses().dead;
+                }
                 next.unanswered = false;
                 next.capacity = capacity;
                 // A core alone is no fight Exchange predicts (§10.1).

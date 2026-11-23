@@ -481,7 +481,10 @@ with one phase machine per kind under `core/fight/kinds/`.
   crosses; enemy workers in outposts and level-0 Invader cores count, as
   structure-less hostiles; Source Keepers never (`hostiles::foe`); the same
   rooms are the ground it pursues on). Phases: `Forming →
-  Approaching → Fighting → Pursuing → Disengaging → closed`. An outpost whose
+  Approaching → Fighting → Pursuing → Disengaging → closed`. Its loss budget
+  is priced as it commits (answered from unanswered, or the tick it enters
+  `Forming`); a re-price on a death or tracker event keeps it, or each death
+  would lift it past every loss. An outpost whose
   losses exceed budget while it has lost fewer than two (`OUTPOST_LOSSES = 2`)
   re-forms and re-prices; it closes only once ours are home and `sightings`
   clears (closing sooner reopens on the same raid with a fresh budget and feeds

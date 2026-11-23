@@ -245,7 +245,6 @@ pub struct Pricing {
     pub boosted: bool,
 }
 
-/// The bodies to cast, and whether their price boosts them.
 pub struct Asking<'a> {
     pub bodies: &'a [Body],
     pub boosted: bool,
