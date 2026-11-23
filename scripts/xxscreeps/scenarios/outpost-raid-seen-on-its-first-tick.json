@@ -1,9 +1,7 @@
 {
-  "why": "An invader seen on the tick it appears, before the engine starts its clock, has its whole life ahead: its outpost is priced at that life's yield and answered, not left closed until a later event reprices it. A scripted wave, since sim stands it with no clock as the official server does",
+  "why": "An invader seen on the tick it appears, before the engine starts its clock, has its whole life ahead: its outpost is priced at that life's yield and answered, not left closed until a later event reprices it. A scripted wave, since sim stands it with no clock as the official server does. Bound: main 49380239's slowest contact over seeds 1-6 (115) plus one spawn of a 50-part body (150); the bug at 83528a79 reached contact 328-734 ticks in",
   "modules": ["fight"],
   "start": { "room": "W9N8", "seed": 1, "invaders": "W9N9:100000:12500", "wave": "melee" },
   "ticks": 14000,
-  "assert": [
-    { "measure": "dug", "room": "W9N9", "from": 12500, "to": 14000, "min": 20000 }
-  ]
+  "assert": [{ "measure": "contactWait", "room": "W9N9", "from": 12500, "to": 14000, "max": 265 }]
 }

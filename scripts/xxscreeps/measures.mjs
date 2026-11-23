@@ -282,6 +282,11 @@ export const measures = {
       firsts.set(e.room, Math.min(firsts.get(e.room) ?? Infinity, e.drafted ?? Infinity));
     return (firsts.get(a.room) ?? Infinity) - Math.min(...[...firsts].filter(([r]) => r !== a.room).map(([, t]) => t));
   },
+  // The most ticks a Defend opened in `room` in [from, to) took to reach its foe; one never in contact, or none opened: Infinity.
+  contactWait: (_, a, dir) => {
+    const waits = rowsOf(dir).filter((e) => e.kind === "defend" && openedIn(a)(e)).map((e) => (e.contact ?? Infinity) - e.opened);
+    return waits.length ? Math.max(...waits) : Infinity;
+  },
   // Engagements opened: an attack the bot never answered tests nothing.
   engagements: (_, __, dir) => engagementsOf(dir).length,
   // Acts the engine refused (the soak's refusals.json) that `counted` counts.
