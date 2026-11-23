@@ -44,11 +44,18 @@ fn wish(
 }
 
 /// The engine carries a body that ends its tick on the border across, so a
-/// body staying in the room stays a step inside it.
-pub fn stay(atlas: &Atlas, creep: &Creep, factor: FatigueFactor, weight: i32) -> Wish {
+/// body staying in the room stays a step inside it, out of danger where it can.
+pub fn stay(
+    atlas: &Atlas,
+    creep: &Creep,
+    factor: FatigueFactor,
+    weight: i32,
+    danger: Option<&TileSet>,
+) -> Wish {
     let at = tiles::of_pos(&creep.pos);
     let mut tail = beside(atlas, creep);
     tail.retain(|tile| !tiles::on_edge(*tile));
+    tail.sort_by_key(|tile| danger.is_some_and(|d| d.contains(*tile)));
     let moves = can_move(creep, factor);
     let head = if moves && tiles::on_edge(at) && !tail.is_empty() {
         tail.remove(0)
@@ -88,7 +95,7 @@ pub fn toward_round(
     };
 
     let Some(field) = field else {
-        return stay(atlas, creep, mover.factor, weight);
+        return stay(atlas, creep, mover.factor, weight, danger);
     };
 
     let ticks = |tile: Tile| field.ticks(tile).unwrap_or(grid::UNREACHED);
@@ -111,7 +118,7 @@ pub fn toward_round(
         wish(creep, moves, at, None, Vec::new(), vec![at], weight)
     } else {
         match field.step(at).and_then(|d| tiles::neighbour(at, d)) {
-            None => stay(atlas, creep, mover.factor, weight),
+            None => stay(atlas, creep, mover.factor, weight, danger),
             Some(head) => {
                 let onward = field.step(head).and_then(|d| tiles::neighbour(head, d));
                 let mut tail = beside(atlas, creep);

@@ -199,7 +199,7 @@ pub fn wishes(
     for (i, (creep, wish)) in members.iter().zip(walks).enumerate() {
         let waits = (i == a && lagging) || !(wish.stays() || fits(i, wish.head));
         if waits {
-            let stay = plan::stay(atlas, creep, mover.factor, weight);
+            let stay = plan::stay(atlas, creep, mover.factor, weight, None);
             let mut holds = |tile: Tile| fits(i, tile) && keeps(atlas, step_back, creep, tile);
             let mut tail: Vec<Tile> = stay.tail.iter().copied().filter(|t| holds(*t)).collect();
             let regroup = stay.head != stay.at && !holds(stay.head) && !tail.is_empty();

@@ -423,7 +423,7 @@ fn work(
     };
     let task = ring.as_ref().unwrap_or(task);
     let Some(at) = spot_of(derived, task) else {
-        return plan::stay(&*atlas, creep, mover.factor, 1);
+        return plan::stay(&*atlas, creep, mover.factor, 1, danger);
     };
     let (mut target, seats) = target_of(&*atlas, derived, (slot, task, at), stood, creep);
     // v1's refill cluster.
@@ -749,7 +749,7 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
                 &ready,
                 &mut acts,
             ),
-            None => plan::stay(&*context.atlas, creep, mover.factor, 1),
+            None => plan::stay(&*context.atlas, creep, mover.factor, 1, danger),
         };
         wish_in(&mut wishes, creep.pos.room, wish);
     }
@@ -798,7 +798,7 @@ fn home(
     danger: Option<&TileSet>,
 ) -> Wish {
     if derived.colonies.is_empty() || derived.colonies.iter().any(|c| c.room == creep.pos.room) {
-        return plan::stay(&*atlas, creep, mover.factor, 1);
+        return plan::stay(&*atlas, creep, mover.factor, 1, danger);
     }
     let walk =
         |c: &&derived::Colony| distance(&*atlas, &creep.pos, &c.spawns[0].pos).unwrap_or(i32::MAX);

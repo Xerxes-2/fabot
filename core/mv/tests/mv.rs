@@ -14,6 +14,8 @@ use proptest::bool::weighted;
 use proptest::collection::vec;
 use proptest::prelude::*;
 use proptest::sample::{Index, select};
+use proptest::strategy::ValueTree;
+use proptest::test_runner::TestRunner;
 
 const ROOM: RoomName = RoomName::W1N1;
 const CASES: u32 = 500;
@@ -196,6 +198,45 @@ fn errand() -> impl Strategy<Value = Errand> {
         )
 }
 
+/// A one-MOVE body on the border of an open room with no walk (its target
+/// walled off), and danger within `radius` of `centre`.
+fn border_stay(at: Tile, centre: Tile, radius: i32) -> impl Strategy<Value = (Errand, usize, i32)> {
+    errand().prop_map(move |mut errand| {
+        errand.terrain.iter_mut().for_each(|t| *t = 0);
+        for corner in [(0, 0), (49, 0), (0, 49), (49, 49)] {
+            errand.terrain[tiles::index(corner.0, corner.1).index()] = terrain::WALL;
+        }
+        errand.creep.pos = tiles::to_pos(ROOM, at);
+        errand.creep.body.truncate(1);
+        errand.creep.body[0].kind = Part::Move;
+        errand.creep.fatigue = 0;
+        errand.target.room = ROOM;
+        errand.target.tiles = vec![tiles::index(0, 0)];
+        errand.target.range = 0;
+        (errand, centre.index(), radius)
+    })
+}
+
+fn danger_within(radius: i32, centre: usize) -> TileSet {
+    let mut danger = TileSet::default();
+    for t in tiles::within(radius, Tile::of_index(centre)) {
+        danger.insert(t);
+    }
+    danger
+}
+
+#[test]
+fn a_border_body_with_danger_on_every_inner_tile_steps_in_by_the_first() {
+    let at = tiles::index(49, 41);
+    let shut = border_stay(at, tiles::index(43, 44), 5);
+    let mut runner = TestRunner::deterministic();
+    let (errand, centre, radius) = shut.new_tree(&mut runner).unwrap().current();
+    let (_, _, wish) = planned(&errand, Some(&danger_within(radius, centre)));
+    // Owner rule: a body left on the border is carried across, so stepping in
+    // always beats staying, even onto danger.
+    assert_eq!(wish.head, tiles::index(48, 40));
+}
+
 fn resolve(crowd: &Crowd) -> Vec<(String, i32)> {
     arbitrate(|t| crowd.passable[t], &crowd.held, &crowd.wishes)
 }
@@ -299,13 +340,13 @@ fn world_of(errand: &Errand) -> World<'static> {
 }
 
 /// The errand's Atlas, its creep's pace, and the wish `plan::toward` builds.
-fn planned(errand: &Errand) -> (Atlas, Mover, Wish) {
+fn planned(errand: &Errand, danger: Option<&TileSet>) -> (Atlas, Mover, Wish) {
     let mut atlas = Atlas::of_world(&world_of(errand));
     let mover = Mover {
         footprint: Footprint::One,
         factor: factor_of(&errand.creep),
     };
-    let wish = plan::toward(&mut atlas, &errand.creep, mover, &errand.target, 3);
+    let wish = plan::toward_round(&mut atlas, &errand.creep, mover, &errand.target, 3, danger);
     (atlas, mover, wish)
 }
 
@@ -456,7 +497,7 @@ proptest! {
 
     #[test]
     fn a_planned_walk_lists_passable_tiles_beside_it_its_tail_nearer_the_target_on_the_band_out_or_beside_its_head(errand in errand()) {
-        let (atlas, mover, wish) = planned(&errand);
+        let (atlas, mover, wish) = planned(&errand, None);
         let at = wish.at;
         for &tile in std::iter::once(&wish.head).chain(&wish.tail) {
             prop_assert!(tile == at || (tiles::range(at, tile) == 1 && atlas.passable(ROOM, tile)));
@@ -478,7 +519,7 @@ proptest! {
 
     #[test]
     fn a_planned_wish_steps_onto_the_border_ring_only_where_its_walk_leaves_the_room(errand in errand()) {
-        let (atlas, mover, wish) = planned(&errand);
+        let (atlas, mover, wish) = planned(&errand, None);
         for &tile in std::iter::once(&wish.head).chain(&wish.tail) {
             prop_assert!(
                 tile == wish.at
@@ -492,38 +533,23 @@ proptest! {
 
     #[test]
     fn a_planned_wishs_working_tiles_hold_where_it_stands(errand in errand()) {
-        let (_, _, wish) = planned(&errand);
+        let (_, _, wish) = planned(&errand, None);
         prop_assert!(wish.working.is_empty() || wish.working.contains(&wish.at));
     }
 
     #[test]
     fn a_planned_walk_never_steps_into_danger_and_steps_on_out_of_it_while_a_clear_tile_is_beside_it(
-        errand in errand(),
-        centre in 0..tiles::COUNT,
-        radius in 1..=5,
+        (errand, centre, radius) in prop_oneof![
+            1 => border_stay(tiles::index(37, 0), tiles::index(34, 3), 2),
+            9 => (errand(), 0..tiles::COUNT, 1..=5),
+        ],
     ) {
-        let mut danger = TileSet::default();
-        for t in tiles::within(radius, Tile::of_index(centre)) {
-            danger.insert(t);
-        }
-        let mut atlas = Atlas::of_world(&world_of(&errand));
-        let mover = Mover {
-            footprint: Footprint::One,
-            factor: factor_of(&errand.creep),
-        };
-        let wish = plan::toward_round(
-            &mut atlas,
-            &errand.creep,
-            mover,
-            &errand.target,
-            3,
-            Some(&danger),
-        );
+        let danger = danger_within(radius, centre);
+        let (atlas, _, wish) = planned(&errand, Some(&danger));
         let clear = |t: Tile| atlas.passable(ROOM, t) && !danger.contains(t) && !tiles::on_edge(t);
+        let hemmed = tiles::on_edge(wish.at) && !around(wish.at).into_iter().any(clear);
         if !danger.contains(wish.at) {
-            // Left out: a body on the border steps in onto danger (open finding).
-            let edge = tiles::on_edge(wish.at);
-            prop_assert!(edge || wish.stays() || !danger.contains(wish.head));
+            prop_assert!(hemmed || wish.stays() || !danger.contains(wish.head));
         } else if wish.moves && around(wish.at).into_iter().any(clear) {
             prop_assert!(!wish.stays());
         }
@@ -531,7 +557,7 @@ proptest! {
 
     #[test]
     fn a_creep_that_cannot_move_is_planned_to_stay_without_a_flood(errand in errand()) {
-        let (atlas, _, wish) = planned(&errand);
+        let (atlas, _, wish) = planned(&errand, None);
         // The engine's rule, not the planner's: a body steps with no fatigue and
         // a MOVE, and each MOVE sheds two fatigue a tick.
         let legs = errand.creep.body.iter().filter(|p| p.kind == Part::Move).count() as i32;

@@ -243,7 +243,7 @@ pub fn toward(sight: &mut Sight, creep: &Creep, at: &Pos, range: i32) -> Wish {
 }
 
 pub fn hold(sight: &Sight, creep: &Creep) -> Wish {
-    plan::stay(&*sight.atlas, creep, mover_of(creep).factor, WEIGHT)
+    plan::stay(&*sight.atlas, creep, mover_of(creep).factor, WEIGHT, None)
 }
 
 /// `enter` ranks no mark outside the centre's room: a mark moving there swings the
