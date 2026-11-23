@@ -27,6 +27,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
+name = "backend"
+version = "0.3.1"
+source = "git+https://github.com/DefaultO/krebs?rev=04a5394d00b05bbff4e472e07e0bf07ac811c315#04a5394d00b05bbff4e472e07e0bf07ac811c315"
+dependencies = [
+ "engine",
+ "util",
+]
+
+[[package]]
 name = "bitflags"
 version = "2.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -631,6 +640,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 name = "sim"
 version = "0.1.0"
 dependencies = [
+ "backend",
  "engine",
  "fabot-atlas",
  "fabot-base",

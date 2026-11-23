@@ -13,6 +13,7 @@ mod read;
 mod reset;
 mod sample;
 mod view;
+mod watch;
 mod world;
 
 use std::collections::BTreeMap;
@@ -53,20 +54,22 @@ struct Args {
     /// Rooms the samples follow beside the declared ones: an outpost Strategy picks is declared nowhere.
     follow: Vec<String>,
     npc: Vec<npc::Due>,
+    /// `--watch`'s port and tick in ms.
+    watch: Option<(u16, u64)>,
 }
 
 fn args() -> Args {
     let mut flags: BTreeMap<String, String> = BTreeMap::new();
     let mut rest = std::env::args().skip(1);
     while let Some(flag) = rest.next() {
-        let value = if flag == "--ended" || flag == "--check" {
+        let value = if ["--ended", "--check", "--watch"].contains(&flag.as_str()) {
             String::new()
         } else {
             rest.next().unwrap_or_default()
         };
         flags.insert(flag, value);
     }
-    let usage = "usage: sim --world <world.json> --room <name> --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--follow A,B] [--npc <[[tick, room, bodies or null for a core]]>] [--ended] [--check] [--reset-every N]";
+    let usage = "usage: sim --world <world.json> --room <name> --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--follow A,B] [--npc <[[tick, room, bodies or null for a core]]>] [--ended] [--check] [--reset-every N] [--watch [--port N] [--tick-ms N]]";
     let need = |flag: &str| (flags.get(flag).cloned()).unwrap_or_else(|| panic!("{flag}: {usage}"));
     let number = |flag: &str, or: u64| {
         (flags.get(flag)).map_or(or, |v| {
@@ -89,6 +92,8 @@ fn args() -> Args {
             .filter(|r| !r.is_empty())
             .map(str::to_string)
             .collect(),
+        watch: (flags.contains_key("--watch"))
+            .then(|| (number("--port", 21025) as u16, number("--tick-ms", 50))),
         npc: serde_json::from_str(flags.get("--npc").map_or("[]", String::as_str)).expect(usage),
     }
 }
@@ -202,6 +207,8 @@ fn main() {
     let map = world::read(&args.world);
     eprintln!("colony: {}; output {}", args.room, args.out);
     let mut k = map.stand(&args.room, args.seed, args.ended);
+    let mut watch =
+        (args.watch).map(|(port, every)| watch::Watch::open(&k, &args.room, port, every));
     let terrains = (map.rooms.iter())
         .filter_map(|(name, t)| {
             let bits: Box<[u8; fabot_base::tiles::COUNT]> = t
@@ -297,6 +304,7 @@ fn main() {
             }
         }
         engine_ms += ms(at);
+        watch.iter_mut().for_each(|w| w.tick(&k, &driver));
     }
 
     let write = |name: &str, value: serde_json::Value| {
@@ -318,4 +326,8 @@ fn main() {
         "rooms": engine.processed as f64 / args.ticks as f64 });
     eprintln!("{timing}");
     write("timing.json", timing);
+    if let Some(w) = watch {
+        drop((samples, fight, driver));
+        w.park();
+    }
 }

@@ -15,6 +15,7 @@ fabot-layout = { workspace = true, features = ["tools"] }
 fabot-observe.workspace = true
 fabot-tactics.workspace = true
 krebs = { package = "engine", git = "https://github.com/DefaultO/krebs", rev = "04a5394d00b05bbff4e472e07e0bf07ac811c315" }
+krebs-backend = { package = "backend", git = "https://github.com/DefaultO/krebs", rev = "04a5394d00b05bbff4e472e07e0bf07ac811c315" }
 krebs-pathfinder = { package = "pathfinder", git = "https://github.com/DefaultO/krebs", rev = "04a5394d00b05bbff4e472e07e0bf07ac811c315" }
 krebs-util = { package = "util", git = "https://github.com/DefaultO/krebs", rev = "04a5394d00b05bbff4e472e07e0bf07ac811c315" }
 mimalloc = "0.1.52"
