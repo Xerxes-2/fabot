@@ -124,8 +124,8 @@ fn bank_due(seed: u64, xy: RoomXY, t: i64) -> i64 {
     t + 1 + left as i64
 }
 
-/// The room `seed` picks among those with a controller and two sources (`colony.mjs`'s
-/// rule) whose first spawn `Map::seat` can plan, the tile `Map::stand` seats it on.
+/// The room `seed` picks among those with a controller and two sources (as
+/// `npm run soak` picks its default) whose first spawn `Map::seat` can plan, the tile `Map::stand` seats it on.
 fn colony(map: &Map, seed: u64) -> String {
     let sources = |room: &str| {
         map.objects

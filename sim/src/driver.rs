@@ -130,8 +130,8 @@ impl<W: Write> Driver<W> {
     }
 }
 
-/// The metrics windows newer than `after` as `metrics.jsonl` rows (`soak-step.mjs`
-/// reads them off segment 3), the newest with the ledger beside it.
+/// The metrics windows newer than `after` as `metrics.jsonl` rows, the newest
+/// with the ledger beside it.
 fn rows(m: &Metrics, t: u64, after: &mut i32, ledger: &Value, out: &mut impl Write) {
     let fresh: Vec<_> = m.ring.iter().filter(|w| w.start > *after).collect();
     let newest = fresh.iter().map(|w| w.start).max();

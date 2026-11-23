@@ -26,8 +26,8 @@ pub fn write_memory(text: Option<String>) {
     }
 }
 
-/// Only the xxscreeps harness's wrapper sets `fabotTrace`: live, nothing is
-/// traced.
+/// Only an offline harness sets `fabotTrace` (`scripts/observe-views.mjs`):
+/// live, nothing is traced.
 pub fn tracing() -> bool {
     global().fabot_trace().as_bool() == Some(true)
 }

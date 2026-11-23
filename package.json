@@ -14,7 +14,6 @@
     "cpuprofile": "node scripts/cpuprofile.mjs",
     "bench": "node --max-old-space-size=256 scripts/bench.mjs",
     "replay": "node scripts/replay.mjs",
-    "xx": "node scripts/xxscreeps/xx.mjs",
     "soak": "node scripts/sim/soak.mjs",
     "soak:many": "node scripts/scenario/soak-many.mjs",
     "soak:gen": "node scripts/sim/soak-gen.mjs",

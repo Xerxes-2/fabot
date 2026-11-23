@@ -1,6 +1,6 @@
-//! `soak-step.mjs`'s `live`, `stoodLoaded` and `wasted`: each body's life over the followed
-//! rooms and their neighbours (`bodies.jsonl`), the longest a body of ours stood loaded and
-//! idle or kept a mineral (a carrier, or any body taking energy), and its border bounces.
+//! Each body's life over the followed rooms and their neighbours (`bodies.jsonl`), the
+//! longest a body of ours stood loaded and idle or kept a mineral (a carrier, or any body
+//! taking energy), and its border bounces.
 use std::collections::BTreeMap;
 
 use fabot_base::vocabulary;

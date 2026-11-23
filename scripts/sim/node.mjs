@@ -1,5 +1,3 @@
-// §10.2's soak nodes; `standNode` mirrors `soak.mjs --node` (`engine/node.mjs`),
-// so a node on sim starts where it starts on xxscreeps.
 import { spawnSync } from "node:child_process";
 
 const LATE_BODIES = "harvester:work6carry1move3*2,harvester:work20carry1move10,hauler:carry32move16*2,upgrader:work15carry1move15,worker:work16carry17move17*2";
@@ -103,7 +101,6 @@ export function built(kind, terrain, t, level) {
   const capacity = kind === "extension" && { storeCapacityResource: energy(level >= 8 ? 200 : level === 7 ? 100 : 50) };
   return { store: energy(0), ...extra, ...capacity, hits: kind === "road" ? full : hits, hitsMax: full, ...(DECAY[kind] && { nextDecayTime: t + DECAY[kind] }) };
 }
-// `modern` picks xxscreeps' template with every structure kind, which krebs always has.
 const STOOD = new Set(["level", "built", "stored", "without", "worn", "bodies", "outposts", "alone", "labs", "modern", "buried", "walled", "moved", "claims", "spare", "short", "stale", "labStock"]);
 const terrainOf = (room) => [room.terrain].flat().join("");
 
@@ -115,7 +112,7 @@ export function unstood(name) {
 }
 
 /**
- * What `node` stands on `ground` (`engine/node.mjs ground`'s shape), in the
+ * What `node` stands on `ground` (a room's terrain and objects), in the
  * plan tool's build order: its plan at its level but what it is `without`,
  * `buried` adding roads on the extension tiles its level adds past `built`,
  * `walled` the ring's walls with a road under each,
@@ -212,7 +209,7 @@ export function standNode(world, room, name, plan) {
   const fits = outposts(world, room);
   if ((node.outposts || node.claims || node.stale) && !fits.length) throw new Error(`${room}: no neighbour fits an outpost`);
   const declarations = { outposts: node.outposts ? fits : [], claims: fits.slice(0, node.claims ?? 0), ...(node.alone && { avoid: near(room, 3) }) };
-  // As `engine/node.mjs declare`: the engine's GCL for that many rooms past the first.
+  // The engine's GCL for that many rooms past the first.
   const rooms = node.spare ?? declarations.claims.length;
   const gcl = rooms && !node.short ? Math.ceil(1e6 * rooms ** 2.4) : world.gcl;
   const expansion = node.stale && { expansion: { room: fits[0].room, since: -100000 } };
@@ -220,7 +217,6 @@ export function standNode(world, room, name, plan) {
   return { ...world, gcl, simMemory: { ...world.memory, v2 } };
 }
 
-// Mirrors `engine/colony.mjs`'s outposts, which reads xxscreeps' database.
 function outposts(world, room) {
   const home = terrainOf(world.rooms.find((r) => r.name === room));
   const [, north, , west, east, , south] = near(room, 1);

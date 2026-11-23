@@ -51,8 +51,7 @@ export const exposureOf = (dir, last) => {
     open: Boolean(ledger && ledger.dug > 0 && Math.abs(ledger.residual) > ledger.dug / 100),
   };
 };
-// The bot's per-tick counts (`ARCHITECTURE.md` §9.3), as `soak-step` reads them off
-// the observe segment; a tick whose segment was not rewritten carries last tick's.
+// `ARCHITECTURE.md` §9.3.
 const countsOf = (dir, a) =>
   readFileSync(join(dir, "cpu.jsonl"), "utf8")
     .split("\n")
@@ -66,7 +65,6 @@ const withCounts = (dir, a, f) => {
   return rows.length ? f(rows) : Infinity;
 };
 const at = (samples, t) => samples.find((s) => s.t >= t) ?? samples.at(-1);
-const sideOf = (a) => (s) => (a.who ? s.others[a.who] : s);
 const openedIn = (a) => (e) => (!a.room || e.room === a.room) && e.opened >= (a.from ?? 0) && e.opened < (a.to ?? Infinity);
 const within = (samples, a) => samples.filter((s) => s.t >= (a.from ?? 0) && s.t < (a.to ?? Infinity));
 const upgradedIn = (s, a) => (a.room ? (s.rooms[a.room]?.upgrade ?? 0) : s.ledger.upgrade);
@@ -93,8 +91,8 @@ const STRUCK_LATELY = 5;
 // `MENDER_WORK` in `core/economy/slots.rs`.
 const MENDER_WORK = 2;
 const firstClaimed = (samples, met) => samples.find((s) => Object.keys(s.claimed ?? {}).length && Object.values(s.claimed).every(met))?.t ?? Infinity;
-// A refused "act code" that counts: not an observer's look at a room xxscreeps'
-// map does not hold (-10), which no live map refuses.
+// A refused "act code" that counts: not an observer's look past a cut world's
+// edge (-10), a room the live map always holds.
 export const counted = (act) => act !== "observeRoom -10";
 export const measures = {
   metric: (_, a, dir) => {
@@ -176,7 +174,7 @@ export const measures = {
   claimSafeMode: (samples, a) => (within(samples, a).some((s) => Object.values(s.claimed ?? {}).some((c) => c.safe)) ? 1 : 0),
   claimLevelOf: (samples, a) => at(samples, a.to ?? Infinity).claimed?.[a.room]?.level ?? 0,
   // A home's level at the window's end.
-  homeLevel: (samples, a) => { const s = sideOf(a)(at(samples, a.to ?? Infinity)); return s.homes?.[a.room]?.rcl ?? s.rcl; },
+  homeLevel: (samples, a) => { const s = at(samples, a.to ?? Infinity); return s.homes?.[a.room]?.rcl ?? s.rcl; },
   claimsOwned: (samples, a) => Object.values(at(samples, a.to ?? Infinity).claimed ?? {}).filter((c) => c.level > 0).length,
   // The most ticks a body of ours stood in its spawn past its spawn time: the
   // engine holds it there while every tile beside the spawn is taken.
@@ -312,7 +310,7 @@ export const measures = {
     Object.entries(JSON.parse(readFileSync(join(dir, "refusals.json"), "utf8")))
       .filter(([act]) => counted(act))
       .reduce((n, [, c]) => n + c, 0),
-  // The most percent of a member's ticks it swung back (soak-step's `swung`),
+  // The most percent of a member's ticks it swung back (`engaged.mjs`'s `swung`),
   // over the engagements of `kind` (none named: every one); none seen: 0.
   oscillation: (_, a, dir) =>
     Math.max(0, ...rowsOf(dir).filter((e) => !a.kind || e.kind === a.kind).flatMap((e) => Object.values(e.swung).map((s) => Math.round((100 * s.swings) / Math.max(1, s.ticks))))),
@@ -362,22 +360,22 @@ export const measures = {
   // The damage struck on the body called `name`.
   struckOn: (_, a, dir) => livesOf(dir).reduce((n, b) => n + (b.name === a.name ? (b.struck ?? 0) : 0), 0),
   faults: (_, __, dir) => readFileSync(join(dir, "faults.jsonl"), "utf8").split("\n").filter(Boolean).length,
-  // The most levels the room stood below the highest it held before (`who`:
-  // an opponent's room, else ours); a room lost stands at level 0.
+  // The most levels the room stood below the highest it held before; a room
+  // lost stands at level 0.
   levelsLost: (samples, a) => {
     let top = 0;
     let worst = 0;
-    for (const s of within(samples, a).map(sideOf(a))) {
+    for (const s of within(samples, a)) {
       top = Math.max(top, s.rcl);
       worst = Math.max(worst, top - s.rcl);
     }
     return worst;
   },
   spawnsLost: (samples, a) => {
-    const spawns = within(samples, a).map((s) => sideOf(a)(s).spawns);
+    const spawns = within(samples, a).map((s) => s.spawns);
     return spawns[0] - Math.min(...spawns);
   },
-  fewestCreeps: (samples, a) => Math.min(...within(samples, a).map((s) => sideOf(a)(s).creeps)),
+  fewestCreeps: (samples, a) => Math.min(...within(samples, a).map((s) => s.creeps)),
   // A death within STRUCK_LATELY ticks of a strike is a kill, as `death.*` reads one: a body
   // struck, then recycled by its spawn, was not killed.
   safeModeAfterCull: (samples, a, dir) => {

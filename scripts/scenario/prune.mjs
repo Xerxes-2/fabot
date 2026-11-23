@@ -1,19 +1,13 @@
-// Every run leaves a world under the engine cache, and `soak-many` a run
-// directory under soak-runs/.cache; both are derived from the template and
-// the bundle, and a session's batches leave thousands (20 GB and 6 GB at the
-// time this was written). Each batch sweeps them to a cap, oldest first, so
-// the disk holds a fixed amount rather than a week of them.
+// `soak-many` leaves a run directory under soak-runs/.cache, derived from the
+// world and the binary, and a session's batches leave thousands. Each batch
+// sweeps them to a cap, oldest first, so the disk holds a fixed amount rather
+// than a week of them.
 import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
-const KEEP_WORLDS = 200;
 const KEEP_CACHE = 200;
-// The engine writes to a world without restamping it, so a world's mtime is
-// when its run started -- this bounds a run that is still in flight.
+// A run younger than this may still be in flight in a parallel batch.
 const GRACE = 60 * 60e3;
-
-const cacheDir = () => process.env.FABOT_XXSCREEPS_HOME ?? join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "fabot-xxscreeps");
 
 // A name that vanishes under us (a parallel sweep) is not ours to count.
 function prune(dir, keep) {
@@ -33,7 +27,6 @@ function prune(dir, keep) {
 
 // `runs` is this checkout's soak-runs directory.
 export function sweep(runs) {
-  const worlds = prune(join(cacheDir(), "engine", "worlds"), KEEP_WORLDS);
   const cached = prune(join(runs, ".cache"), KEEP_CACHE);
-  if (worlds || cached) console.error(`swept ${worlds} worlds, ${cached} cached runs`);
+  if (cached) console.error(`swept ${cached} cached runs`);
 }

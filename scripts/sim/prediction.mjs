@@ -4,7 +4,7 @@
 // a: what happened, { won: true, false or null (both stood, or its rival left), left?, unresolved?, ticks, dead, hits } }.
 export const outcome = (a) => (a.won === true ? "won" : a.won === false ? "lost" : a.left ? "left" : a.unresolved ? "unresolved" : "stood");
 
-// An engagement's outcome, off the facts `engine/soak-step.mjs` or the bot's
+// An engagement's outcome, off the facts `scripts/scenario/engaged.mjs` or the bot's
 // `engagements.log` writes. Won: its rival dead at the close. Left: closed
 // while its rival stands (`outlived`), or with a rival body not seen to die
 // (`left`, the bot's): no evidence for a Win. Lost: after contact it disengaged, or

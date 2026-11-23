@@ -25,8 +25,7 @@ Four lessons from v1 shape v2:
    that wins (`Exchange::cheapest_win`) runs at commitment boundaries and is
    calibrated against real outcomes (§10.1).
 4. **Outcomes in a real engine are the test.** Unit tests are reserved for pure
-   arithmetic and structural invariants; behaviour is proven in `sim/` and
-   `xxscreeps` (§10).
+   arithmetic and structural invariants; behaviour is proven in `sim/` (§10).
 
 **Target:** many colonies decided as one world, each at RCL8 with full
 structures, fighting every engagement kind in §6.2 within the CPU limit.

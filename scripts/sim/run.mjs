@@ -1,5 +1,4 @@
-// One soak on `sim`, as `soak.mjs` runs one on xxscreeps: what `soak-many.mjs`
-// and `scenario.mjs` share of the native engine.
+// One soak on `sim`: what `soak.mjs`, `soak-many.mjs` and `scenario.mjs` share.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -14,7 +13,7 @@ const SAFE_MODE_DURATION = 20000;
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "../..");
 const PLAN = join(REPO, "target/release/plan");
-/** The xxscreeps template world (every room its terrain and sources, minerals, controller, keeper lairs, nobody's), checked in. */
+/** The template world (every room its terrain and sources, minerals, controller, keeper lairs, nobody's), checked in. */
 export const TEMPLATE = join(REPO, "scripts/scenario/worlds/template.json");
 
 // What sim stands (`world.rs`, `node.mjs`) and what `scenario.mjs` reads off what it writes
@@ -36,13 +35,12 @@ export const SIM_MEASURES = new Set([
 /** Whether a `worlds/`-shaped world holds a spawn of ours: a capture, not a map. */
 export const seatsUs = (world) => (world.rooms ?? []).some((r) => (r.objects ?? []).some((o) => o.type === "spawn" && o.user === world.userId));
 
-// What `engine/live.mjs` stands besides the structures a site builds: no tombstone, ruin or portal.
+// What a capture stands besides the structures a site builds: no tombstone, ruin or portal.
 const LIVE_KINDS = new Set([...Object.keys(BUILT), "controller", "source", "mineral", "constructionSite", "creep", "keeperLair", "invaderCore"]);
 
 /**
- * Each room's border toward a room outside `group` walled, as `engine/live.mjs` stands a world on
- * xxscreeps (a capture's terrain-only ring is a group of its own) and as the official map closes its
- * edge: an exit leads to a room or nowhere, and Layout plans by it.
+ * Each room's border toward a room outside `group` walled (a capture's terrain-only ring is a group
+ * of its own), as the official map closes its edge: an exit leads to a room or nowhere, and Layout plans by it.
  */
 function seal(group) {
   const names = new Set(group.map((r) => r.name));
@@ -55,10 +53,6 @@ function seal(group) {
   }
 }
 
-/**
- * A capture as `engine/live.mjs` stands it on xxscreeps, so a scenario reads
- * the same start on either engine; its Memory carries its declarations.
- */
 export function standCapture(world) {
   const edge = (o) => o.x === 0 || o.y === 0 || o.x === 49 || o.y === 49;
   const kept = new Map();
@@ -144,7 +138,7 @@ function npc(invaders = "", wave, core = "", stronghold = "", ticks) {
   return [...waves, ...core.split(",").filter(Boolean).map((c) => [Number(c.split(":")[1]), c.split(":")[0], null]), ...strongholds];
 }
 
-/** `engagements.jsonl` off the ticks sim wrote to `fight.jsonl`, as soak-step writes it on xxscreeps, and `segment4.jsonl` off `cpu.jsonl`. */
+/** `engagements.jsonl` off the ticks sim wrote to `fight.jsonl`, and `segment4.jsonl` off `cpu.jsonl`. */
 async function engaged(out) {
   const rows = [];
   // Every room's objects of the tick being fed: an engagement closes inside `fights.tick`.
@@ -194,12 +188,11 @@ export function runSim(bin, { world, gen, room, node, ticks, seed = 1, late = 0,
     const seated = seatsUs(base);
     const captured = seated || base.declarations || Object.keys(base.memory ?? {}).length;
     if (!captured) seal(base.rooms);
-    // xxscreeps follows a capture's homes in its order and takes no room for it.
     if (seated) room = base.rooms.find((r) => r.objects.some((o) => o.type === "spawn" && o.user === base.userId)).name;
     try {
       const stood = node ? standNode(base, room, node, PLAN) : captured ? standCapture(base) : base;
       rivals.forEach((rival, i) => standRival(stood, rival, i));
-      // As `soak.mjs`'s `node.mjs unsafe`, beside an opponent or asked: our room has no safe mode, none to activate.
+      // Beside a rival or asked: no safe mode to decide the fight for us, none to activate.
       if ((rivals.length || unsafe) && !seated && !ended)
         for (const c of stood.rooms.find((r) => r.name === room).objects.filter((o) => o.type === "controller"))
           Object.assign(c, { safeMode: 0, safeModeAvailable: 0 });

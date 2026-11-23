@@ -29,6 +29,3 @@ npm run deploy    # build, smoke, upload to the live server
 npm run observe -- health
 ```
 
-`npm run xx` drives [xxscreeps](https://github.com/laverdet/xxscreeps) (`npm run xx -- setup`
-before a `--bot`/`--base`/`--capture` scenario run, `ARCHITECTURE.md` §10.2);
-`run <scenario.json>` with `--bot dist` runs the built bundle.

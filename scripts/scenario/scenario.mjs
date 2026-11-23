@@ -81,6 +81,7 @@ const unplayable = (s) =>
   (s.start.node && unstood(s.start.node)) ||
   (s.start.opponents ?? []).map(unseated).find(Boolean) ||
   (s.start.world && Object.keys(JSON.parse(readFileSync(resolve(REPO, s.start.world), "utf8")).segments ?? {}).some((k) => k !== "2") && "a capture's segments beside intel's") ||
+  (s.assert.some((a) => a.who) && "a measure of an opponent's side (`who`), which sim samples nowhere") ||
   s.assert.filter((a) => !SIM_MEASURES.has(a.metric !== undefined ? "metric" : a.measure)).map((a) => `${a.measure} is not read off sim`)[0] ||
   null;
 for (const s of library) if (unplayable(s)) fail(`${s.name}: ${unplayable(s)}`);

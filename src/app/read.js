@@ -323,11 +323,10 @@ globalThis.__fabotRead = (() => {
       if (r.name !== drain && !stood.has(r.name) && c?.my !== true && c?.reservation?.username !== user) continue;
       logs++;
       for (const e of eventsOf(r)) {
-        const kind = e.event ?? e._$Variant;
+        const kind = e.event;
         if (kind === EVENT_ATTACK) shots.push(e);
         else if (kind === EVENT_OBJECT_DESTROYED) {
-          // xxscreeps logs the type beside the id, the game under `data`.
-          const type = (e.data ?? e).type;
+          const type = e.data.type;
           if (type !== "creep") destroyed.push([r.name, e.objectId, CONSTRUCTION_COST[type] ?? 0]);
         }
       }

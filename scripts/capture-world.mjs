@@ -1,5 +1,5 @@
 // Read a block of the live world for `npm run soak -- --world` to stand in
-// xxscreeps: each room's terrain and objects as the API serves them, our
+// sim: each room's terrain and objects as the API serves them, our
 // username, the tick, our Memory and intel rows, and the outposts named here as
 // v2 declares them (`Memory.v2.declarations`). Read-only: every call is a GET.
 //

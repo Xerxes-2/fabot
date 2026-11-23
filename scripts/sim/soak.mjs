@@ -32,7 +32,7 @@ const number = (flag, or) => Number(flags[flag] ?? or);
 const rooms = gen === undefined ? JSON.parse(readFileSync(world ?? TEMPLATE, "utf8")) : null;
 // A world that seats us plays from its own home, as runSim stands it.
 const home = rooms && seatsUs(rooms) && rooms.rooms.find((r) => r.objects.some((o) => o.type === "spawn" && o.user === rooms.userId)).name;
-if (gen !== undefined && (world || flags["--room"])) fail("--gen picks its own map and room: no --world or --room");
+if (gen !== undefined && (world || flags["--room"] || node)) fail("--gen picks its own map and room: no --world, --room or --node");
 if (home && (flags["--room"] || node)) fail(`--world seats us in ${home}: no --room or --node`);
 const room =
   home ||

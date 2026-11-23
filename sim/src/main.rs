@@ -1,5 +1,5 @@
 //! The soak on krebs, natively: `decide` on krebs's documents each tick,
-//! krebs's processor on our intents, `soak-step.mjs`'s files out.
+//! krebs's processor on our intents, the files `scripts/scenario/measures.mjs` reads out.
 // A tool, not the bot: a panic fails the run that called it.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 

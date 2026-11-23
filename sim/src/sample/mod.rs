@@ -1,5 +1,5 @@
-//! `soak-step.mjs`'s ledger and samples off krebs's documents, field for
-//! field where `measures.mjs` and `soak-many.mjs` read them.
+//! The ledger and samples off krebs's documents, as `measures.mjs` and
+//! `soak-many.mjs` read them.
 use std::collections::{BTreeMap, BTreeSet};
 
 mod labs;
@@ -45,7 +45,7 @@ fn unlock(kind: StructureType) -> f64 {
     )
 }
 
-/// `soak-step.mjs` `reserveOf`: every tower firing through a creep's life, twice over.
+/// Every tower firing through a creep's life, twice over.
 fn reserve(level: u32) -> f64 {
     if level < 4 {
         return 0.0;
@@ -149,7 +149,7 @@ fn stock(room: &Room) -> f64 {
 }
 
 impl Sampler {
-    /// The home, and the outposts and claims Memory declares, followed from the start as `soak-step.mjs` does.
+    /// The home, and the outposts and claims Memory declares, followed from the start.
     pub fn new(home: &str, outposts: &[String], claims: Vec<String>) -> Sampler {
         let mut s = Sampler::default();
         for room in std::iter::once(home).chain(outposts.iter().chain(&claims).map(String::as_str))
@@ -544,7 +544,6 @@ impl Sampler {
         Value::Object(row)
     }
 
-    /// One home's sample: `soak-step.mjs`'s `sample`.
     fn home(&mut self, v: &View, t: u64, map: &World, name: &str) -> Map<String, Value> {
         let time = v.k.time as i64;
         let home = v.room(name);

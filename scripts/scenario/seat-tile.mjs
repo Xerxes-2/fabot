@@ -1,5 +1,4 @@
-// The tile a first spawn is seated on, shared by `colony.mjs` on xxscreeps and
-// `scripts/sim/run.mjs` on sim so a seat is the same on either engine.
+// The tile a first spawn is seated on (`scripts/sim/run.mjs`).
 // `terrain(x, y)` is the tile's mask, `taken` the "x,y" of the room's objects,
 // `anchors` its controller and sources; null when no tile fits.
 const range = (a, x, y) => Math.max(Math.abs(a.x - x), Math.abs(a.y - y));
