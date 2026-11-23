@@ -4,7 +4,7 @@
 // (binary, seed, room), many at a time, then one table.
 //
 // Usage: npm run soak:many -- [--bot [name=]a,[name=]b] [--seed 1,2,1+7] [--room A,B,...]
-//                             [--ticks T] [--jobs J] [--tag name] [--node N] [--fresh] [--xxscreeps]
+//                             [--ticks T] [--jobs J] [--tag name] [--node N] [--fresh]
 //   --bot    the sim binaries to compare (default this tree's, `npm run build:sim`);
 //            the first is the base the others are read against. A name
 //            defaults to the file's.
@@ -27,22 +27,15 @@
 //   --jobs   runs at once (default every allowed core)
 //   --tag    output names: soak-runs/<tag>-<bundle>-s<seed>-<room>/ (default many)
 //   --fresh  run even where the cache holds this bundle, room, seed and ticks
-//   --reset-every N  beside each bundle, its twin `<name>-reset` reset (heap lost) every N ticks (sim only)
-//   --xxscreeps  each run on xxscreeps (`soak.mjs`), to cross-check sim: a
-//            --bot is then a bundle (default dist/main.js), and --jobs
-//            defaults to a quarter of the hardware threads (a soak keeps
-//            server, processor, runner and stepper threads busy)
+//   --reset-every N  beside each bundle, its twin `<name>-reset` reset (heap lost) every N ticks
 // A start sim cannot stand is named under the table.
 //
-// A finished run is cached under soak-runs/.cache/ by its bundle's code (the
-// version stamp aside), start, seed, ticks and the soak scripts (with the
+// A finished run is cached under soak-runs/.cache/ by its binary, start, seed, ticks and the soak scripts (with the
 // plan a node is built from, and the world), so a base that
 // has not changed is not run again.
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { availableParallelism } from "node:os";
-import { node26Env } from "./node26.mjs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sweep } from "./prune.mjs";
@@ -52,11 +45,10 @@ import { TEMPLATE as SIM_TEMPLATE, buildPlan, runSim, simBinary } from "../sim/r
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "../..");
-const SOAK = join(HERE, "soak.mjs");
 const RUNS = join(REPO, "soak-runs");
 const CACHE = join(RUNS, ".cache");
 const usage =
-  "usage: npm run soak:many -- [--bot [name=]a,...] [--seed 1,2,1+7] [--room [world:]A[@N],...] [--ticks T] [--jobs J] [--tag name] [--node N] [--fresh] [--reset-every N] [--xxscreeps]";
+  "usage: npm run soak:many -- [--bot [name=]a,...] [--seed 1,2,1+7] [--room [world:]A[@N],...] [--ticks T] [--jobs J] [--tag name] [--node N] [--fresh] [--reset-every N]";
 const fail = (m) => {
   console.error(m);
   process.exit(1);
@@ -65,7 +57,7 @@ const fail = (m) => {
 const flags = {};
 const rest = process.argv.slice(2);
 for (let i = 0; i < rest.length; i++) {
-  if (rest[i] === "--fresh" || rest[i] === "--xxscreeps") {
+  if (rest[i] === "--fresh") {
     flags[rest[i]] = true;
     continue;
   }
@@ -86,7 +78,6 @@ const parseSeeds = (text) =>
     const [seed, late = "0"] = spec.split("+");
     return { seed: whole(seed, "--seed", 0), late: whole(late, "--seed", 0), label: spec };
   });
-const native = !flags["--xxscreeps"];
 const allStarts = (flags["--room"] ?? "W9N8,W8N3,season-outpost-ring:E23S9,season-late-seat:W12S28@N7").split(",").map((spec) => {
   const m = /^(?:([\w-]+):)?([WE]\d+[NS]\d+)(?:@([A-Za-z0-9]+))?$/.exec(spec);
   if (!m) fail(`--room: "${spec}" is not [world:]room[@node]`);
@@ -95,18 +86,16 @@ const allStarts = (flags["--room"] ?? "W9N8,W8N3,season-outpost-ring:E23S9,seaso
   const at = m[3] ?? node;
   return { label: spec, room: m[2], world, node: at, ended: Boolean(world && !at), seeds: parseSeeds(flags["--seed"] ?? "1,2,1+7"), ticks: whole(flags["--ticks"] ?? (at ? 10000 : 30000), "--ticks", 1) };
 });
-const starts = native ? allStarts.filter((s) => !(s.node && unstood(s.node))) : allStarts;
+const starts = allStarts.filter((s) => !(s.node && unstood(s.node)));
 const unrun = allStarts.filter((s) => !starts.includes(s)).map((s) => `not run: ${s.label} (${unstood(s.node)})`);
 unrun.forEach((u) => console.error(u));
 if (!starts.length) fail("no start to run");
-const jobs = whole(flags["--jobs"] ?? Math.max(1, Math.floor(availableParallelism() / (native ? 1 : 4))), "--jobs", 1);
+const jobs = whole(flags["--jobs"] ?? availableParallelism(), "--jobs", 1);
 const tag = flags["--tag"] ?? "many";
 if (!/^[A-Za-z0-9-]+$/.test(tag)) fail("--tag: letters, digits, dashes");
 
-const defaultBot = () => (native ? (simBinary() ?? fail("sim did not build")) : join(REPO, "dist/main.js"));
 const resetEvery = whole(flags["--reset-every"] ?? 0, "--reset-every", 0);
-if (resetEvery && !native) fail("--reset-every: sim only");
-const bundles = (flags["--bot"] ?? defaultBot()).split(",").map((spec) => {
+const bundles = (flags["--bot"] ?? simBinary() ?? fail("sim did not build")).split(",").map((spec) => {
   const [name, path] = spec.includes("=") ? spec.split("=") : [basename(spec, ".js"), spec];
   if (!/^[A-Za-z0-9-]+$/.test(name)) fail(`--bot: "${name}" is not a name (letters, digits, dashes)`);
   const file = resolve(path);
@@ -125,15 +114,11 @@ const hash = (...parts) => {
   return h.digest("hex").slice(0, 16);
 };
 const scriptsHash = hash(
-  ...[SOAK, join(HERE, "../sim/node.mjs"), join(HERE, "../sim/run.mjs"), ...readdirSync(join(HERE, "engine"), { recursive: true }).map((f) => join(HERE, "engine", f))]
-    .filter((f) => f.endsWith(".mjs") || f.endsWith(".js"))
-    .sort()
-    .map((f) => readFileSync(f)),
+  ...[join(HERE, "../sim/node.mjs"), join(HERE, "../sim/run.mjs"), join(HERE, "engine/engaged.mjs"), join(HERE, "engine/seat-tile.mjs")].map((f) => readFileSync(f)),
 );
 // A node, and a fresh colony's first spawn, stand on the plan of this tree's Layout, whatever the bundle.
 const planHash = hash(...[join(REPO, "src/bin/plan.rs"), ...readdirSync(join(REPO, "core/layout")).sort().map((f) => join(REPO, "core/layout", f))].map((f) => readFileSync(f)));
-const wasmOf = (file) => [file.replace(/\.js$/, ".wasm")].filter(existsSync).map((f) => readFileSync(f));
-for (const b of bots) b.code = native ? hash(readFileSync(b.file)) : hash(readFileSync(b.file, "utf8").replace(/^(?:var |globalThis\.)__FABOT_VERSION__ = .*$/m, ""), ...wasmOf(b.file));
+for (const b of bots) b.code = hash(readFileSync(b.file));
 
 const runs = bots.flatMap((bot) =>
   starts.flatMap((start) =>
@@ -142,7 +127,7 @@ const runs = bots.flatMap((bot) =>
       seed,
       start,
       name: `${tag}-${bot.name}-s${seed.seed}${seed.late ? `l${seed.late}` : ""}-${start.label.replace(/[:@]/g, "-")}`,
-      key: hash(bot.code, start.room, planHash + start.node, start.world ? readFileSync(start.world) : native ? readFileSync(SIM_TEMPLATE) : "", String(seed.seed), String(seed.late), String(start.ticks), scriptsHash, String(bot.resetEvery)),
+      key: hash(bot.code, start.room, planHash + start.node, readFileSync(start.world ?? SIM_TEMPLATE), String(seed.seed), String(seed.late), String(start.ticks), scriptsHash, String(bot.resetEvery)),
     })),
   ),
 );
@@ -157,17 +142,12 @@ console.error(
 );
 
 function soak(run) {
-  return new Promise((done) => {
-    const { room, world, node, ticks, ended } = run.start;
-    if (native) return runSim(run.bot.file, { world, room, node, ticks, seed: run.seed.seed, late: run.seed.late, ended, resetEvery: run.bot.resetEvery, out: join(RUNS, run.name) }).then(done);
-    const args = [...(ended ? ["--ended"] : []), "--room", room, "--run", run.name, "--ticks", String(ticks), "--seed", String(run.seed.seed), "--late", String(run.seed.late), "--every", "100", "--bot", run.bot.file, ...(node ? ["--node", node] : []), ...(world ? ["--world", world] : [])];
-    const child = spawn("node", [SOAK, ...args], { stdio: ["ignore", "ignore", "ignore"], env: node26Env({ ...process.env, FABOT_PLAN_BUILT: "1" }) });
-    child.on("exit", done);
-  });
+  const { room, world, node, ticks, ended } = run.start;
+  return runSim(run.bot.file, { world, room, node, ticks, seed: run.seed.seed, late: run.seed.late, ended, resetEvery: run.bot.resetEvery, out: join(RUNS, run.name) });
 }
 
 // Built once here: parallel builds of one project collide.
-if (todo.some((r) => !native || r.start.node) && !buildPlan()) fail("the plan tool did not build");
+if (todo.some((r) => r.start.node) && !buildPlan()) fail("the plan tool did not build");
 const codes = {};
 const queue = [...todo];
 await Promise.all(

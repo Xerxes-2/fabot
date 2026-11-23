@@ -731,9 +731,9 @@ No performance change ships without the representative benchmark:
    `observe.cpu.modules`. The benchmark is representative once each module's
    share is within `❓ 15%` of live (`❓` calibration waits for live capture).
 
-Noise floors: `npm run bench` reads within `±0.4%` per module on an unchanged
-bundle and `scripts/xxscreeps/ab.mjs` within `±0.6%` on whole soaks (compared
-with v1's `±6%` workstation wall-clock drift). Speed claims require an
+Noise floor: `npm run bench` reads within `±0.4%` per module on an unchanged
+bundle (compared with v1's `±6%` workstation wall-clock drift); a whole soak is
+benched as a capture of its every tick (`npm run scenario -- <name> --capture`). Speed claims require an
 interleaved A/B with identical Memory fingerprints, or a deterministic count —
 never bare wall-clock.
 
@@ -781,20 +781,18 @@ rows to the engine's classification in scenarios. A rival that leaves alive is
 was not seen to die (the engine's word: its tombstone, or a siege target's
 raze), offline one it outlived.
 
-### 10.2 The engines
-
-Two engines complement each other:
+### 10.2 The engine
 
 - **`sim/` (native Rust on `krebs`, official engine rules):** zero WASM/JS, PGO
-  build (`npm run build:sim`), default for economy scenarios and `soak:many`
-  (one process per core). Models official backend cron timing (`genInvaders`
+  build (`npm run build:sim`), every soak and scenario (one process per core);
+  an A/B is two sim binaries (`--bot`, `--base`). Models official backend cron timing (`genInvaders`
   every ~88 ticks, `INSIDE_PASS = 0.66` MLE-fit to Season 11 history), scripted
   waves, level-0 cores and strongholds (`spawnStronghold`, bunker1–5), and
   `--check` cache verification. A season world
   (`season-world.mjs`) carries each sector's centre 3×3 (centre and keeper
   rooms) because `genInvaders` raids only a sector with a live core and
-  `genStrongholds` stands one only from a centre room in the world. When `sim`
-  and `xxscreeps` disagree, `@screeps/engine` / `@screeps/backend` settles it.
+  `genStrongholds` stands one only from a centre room in the world. Where
+  `sim` and the game disagree, `@screeps/engine` / `@screeps/backend` settles it.
   `npm run exchange` plays its duels on `sim` too (`sim duel`,
   `sim/src/duel/`), so the prediction error is read over thousands of duels.
   With `--real 1` our side runs the bot's tactics, the one its Defend fields;
@@ -802,20 +800,15 @@ Two engines complement each other:
   stress test: his worst reaction his bodies allow), as no rival's strategy can
   be simulated and each differs. The scenarios' scripted rivals play on `sim`
   as a second user (`sim/src/rival/`, one `Player` each), their intents merged
-  per room with ours; they no longer run on xxscreeps, so a `--bot`/`--base`
-  A/B skips their scenarios.
+  per room with ours.
   - A world a soak left is checked in as a world JSON (its Memory, and its
     intel rows as segment 2, which `sim` stands), never replayed from a
-    pinned bundle. `❓` Unported measures (`decay.jsonl`, `waves`, `lost`)
-    still need `xxscreeps`.
+    pinned bundle.
   - `❓` Cut worlds lacking sector bus rooms throw in `genDeposits` (logged and
     skipped as backend cron does).
-- **`xxscreeps` (`npm run xx`):** isolated-vm vanilla engine used for
-  `--bot`/`--base` comparisons; with these, `npm run scenario`
-  skips sim-native scenarios unless `--force-xxscreeps`. A stronghold or
-  scripted-rival scenario and a single-bot world are watched on `sim` (`npm run scenario -- <name> --watch`,
-  `npm run watch:sim`, `sim/src/watch`): the run lazycreep shows is the one
-  scenarios and soaks measure.
+- **Watching:** every scenario and soak is watched on `sim` (`npm run
+  scenario -- <name> --watch`, `npm run watch:sim`, `sim/src/watch`): the run
+  lazycreep shows is the one scenarios and soaks measure.
 
 **Scenario library (`npm run scenario`):** every live incident becomes a recipe
 scenario with outcome bounds (`scripts/xxscreeps/scenarios/`). `jj ship` runs
