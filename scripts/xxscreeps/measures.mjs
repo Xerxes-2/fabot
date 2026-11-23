@@ -22,6 +22,18 @@ const costOf = (lives) => [...new Map(lives.map((b) => [b.name, b.cost])).values
 const offsetOf = (samples) => samples[0].time - samples[0].t;
 const defendsIn = (dir, a) => rowsOf(dir).filter((e) => e.kind === "defend" && openedIn(a)(e));
 const drawnBy = (dir, a) => new Set(defendsIn(dir, a).flatMap((e) => e.drew));
+// The ticks our bodies that dig or carry were killed in `room` from `from` on, soonest first.
+const culls = (samples, a, dir) => {
+  const lives = livesOf(dir);
+  const end = Math.max(...lives.map((b) => b.last));
+  const offset = offsetOf(samples);
+  return lives
+    .filter((b) => b.ours && b.at.startsWith(`${a.room} `) && b.last < end && b.ttl > AGED && b.last - b.struckAt <= STRUCK_LATELY)
+    .filter((b) => /^[wcm]+$/.test(b.body) && /[wc]/.test(b.body))
+    .map((b) => b.last - offset)
+    .filter((t) => t >= (a.from ?? 0))
+    .sort((x, y) => x - y);
+};
 const scoutsOf = (dir) => livesOf(dir).filter((b) => b.ours && b.name.startsWith("scout-"));
 export const samplesOf = (dir) => readFileSync(join(dir, "samples.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
 // soak:many's columns beside worth, off a run's metrics and its last sample:
@@ -369,18 +381,11 @@ export const measures = {
   // A death within STRUCK_LATELY ticks of a strike is a kill, as `death.*` reads one: a body
   // struck, then recycled by its spawn, was not killed.
   safeModeAfterCull: (samples, a, dir) => {
-    const lives = livesOf(dir);
-    const end = Math.max(...lives.map((b) => b.last));
-    const offset = offsetOf(samples);
-    const kills = lives
-      .filter((b) => b.ours && b.at.startsWith(`${a.room} `) && b.last < end && b.ttl > AGED && b.last - b.struckAt <= STRUCK_LATELY)
-      .filter((b) => /^[wcm]+$/.test(b.body) && /[wc]/.test(b.body))
-      .map((b) => b.last - offset)
-      .filter((t) => t >= (a.from ?? 0))
-      .sort((x, y) => x - y);
+    const kills = culls(samples, a, dir);
     if (kills.length < 2) return 0;
     return Math.max(0, (within(samples, a).find((s) => s.safeMode)?.t ?? Infinity) - kills[1]);
   },
+  culled: (samples, a, dir) => culls(samples, a, dir).length,
   creepsLostBeforeSafeMode: (samples, a) => {
     const seen = within(samples, a);
     const safe = seen.findIndex((s) => s.safeMode);

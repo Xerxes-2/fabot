@@ -71,7 +71,7 @@ fn range(a: Found, b: Found) -> f64 {
     d(atom!("x")).max(d(atom!("y")))
 }
 
-fn has_active(o: &Obj, part: &str) -> bool {
+pub fn has_active(o: &Obj, part: &str) -> bool {
     match o.get(Atom::intern("body")) {
         Some(Val::Arr(parts)) => (parts.iter().filter_map(Val::as_obj))
             .any(|p| text(p, atom!("type")) == part && num(p, atom!("hits")) > 0.0),

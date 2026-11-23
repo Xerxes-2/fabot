@@ -6,8 +6,8 @@
     "seed": 1,
     "node": "C2",
     "opponents": [
-      { "name": "rival", "bot": "scripts/xxscreeps/engine/rival", "room": "W7N3", "config": { "role": "keep" } },
-      { "name": "other", "bot": "scripts/xxscreeps/engine/rival", "room": "W8N2", "config": { "role": "keep" } }
+      { "name": "rival", "bot": "rival", "room": "W7N3", "config": { "role": "keep" } },
+      { "name": "other", "bot": "rival", "room": "W8N2", "config": { "role": "keep" } }
     ]
   },
   "ticks": 6000,

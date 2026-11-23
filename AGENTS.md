@@ -116,7 +116,7 @@ Full engine and metric details live in `ARCHITECTURE.md` §10.
   shows its engine) and pass `npm run scenario` without regression.
 - **Fight changes:** no scenario seats an open-source bot to prove a fight
   (`ARCHITECTURE.md` §10.2, Adversaries). Scenarios verify mechanics against
-  scripted rivals (`engine/rival/`, each explaining `why`); what a fight pays
+  scripted rivals (`sim/src/rival/`, each explaining `why`); what a fight pays
   is read from live engagements (§10.1, `npm run observe -- exchange`).
 - **Fight and `Exchange` changes:** prediction error on `npm run exchange`
   (emitter, `--real` and the stress rival) must not rise (§10.1).

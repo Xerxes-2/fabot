@@ -45,10 +45,9 @@
 //   --from   a world --save wrote (needs --room): the bot is swapped for
 //            --bot, its Memory kept, as a deploy at that tick
 //   --opponents  a JSON file of players seated beside ours, each
-//            { name, bot, room, x?, y?, config?, raid?, ally? }: `bot` a bundle or a
+//            { name, bot, room, x?, y?, config?, ally? }: `bot` a bundle or a
 //            bot directory, `config` written beside it as `opponent.js`, the
-//            spawn on colony.mjs's tile unless x, y; `raid` its bodies stood
-//            on our room's edge, or its `room`'s (`engine/soak-step.mjs`), `ally` its name in our
+//            spawn on colony.mjs's tile unless x, y; `ally` its name in our
 //            declared allies (not with --world or --from: their Memory declares). With --from they stand
 //            in the world already and only their code is swapped. A bot
 //            directory's `fetch.json` { tarball, integrity, from, main }
@@ -392,7 +391,7 @@ for (const o of opponents) {
   const seat = o.x === undefined ? JSON.parse(node26([XXSCREEPS, script("colony.mjs"), o.room], world, true).trim().split("\n").at(-1)) : o;
   node26([XXSCREEPS, script("seed/manage.js"), "bot", "add", o.name, `./bot-${o.name}`, "--spawn", o.room, `${seat.x},${seat.y}`], world);
 }
-writeFileSync(join(world, "opponents.json"), JSON.stringify(opponents.map(({ name, room, raid }) => ({ name, room, raid }))));
+writeFileSync(join(world, "opponents.json"), JSON.stringify(opponents.map(({ name, room }) => ({ name, room }))));
 if (built) node26([XXSCREEPS, script("node.mjs"), "stand", colony.room, "node.json", String(node.level), String(node.stored), OUR_NAME, String(node.worn ?? 1), node.labStock ?? "", node.bodies ?? ""], world);
 if (flags["--ended"]) node26([XXSCREEPS, script("node.mjs"), "ended", colony.room], world);
 else if ((opponents.length && !seated) || flags["--unsafe"]) node26([XXSCREEPS, script("node.mjs"), "unsafe", colony.room], world);

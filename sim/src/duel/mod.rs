@@ -209,18 +209,7 @@ impl Orders<'_> {
         let Some(next) = found.expect("one room's terrain").path.first().copied() else {
             return;
         };
-        let (dx, dy) = (i32::from(next.x) - c.x, i32::from(next.y) - c.y);
-        let compass = [
-            (0, -1),
-            (1, -1),
-            (1, 0),
-            (1, 1),
-            (0, 1),
-            (-1, 1),
-            (-1, 0),
-            (-1, -1),
-        ];
-        let direction = 1 + compass.iter().position(|&d| d == (dx, dy)).expect("a step");
+        let direction = crate::rival::direction(pos(c.x, c.y), next).expect("a step");
         if c.fatigue == 0.0 && c.has(Part::Move) {
             self.put(c, "move", json!({ "direction": direction }));
         }

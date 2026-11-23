@@ -29,7 +29,7 @@ export const SIM_MEASURES = new Set([
   "spawnStuck", "scoutsCast", "scoutStill", "scoutTicksIn", "reserverOnPost", "castIn", "bodiesOut", "bodiesStruck", "struckOn",
   "deathsError", "attackersAtEnd", "creepsLostBeforeSafeMode", "predictedWinsLost", "engagements", "oscillation", "bodiesLost",
   "closedOnCore", "strongholdMisread", "strongholdDeploying", "diedIn", "heldPastWave", "idleMost", "answeredMost", "sentTo", "sentBack", "draftedAfterOthers", "arrivedApart", "signsSent", "signedInRun",
-  "liveEngagements", "liveAstray", "liveEnergy",
+  "liveEngagements", "liveAstray", "liveEnergy", "defendsOpened", "defendSpent", "rivalSpent", "answeredAfter", "recycledWounded", "culled",
 ]);
 
 /** Whether a `worlds/`-shaped world holds a spawn of ours: a capture, not a map. */
@@ -96,12 +96,18 @@ export function standCapture(world) {
 }
 
 /** Why sim cannot seat `rival` (a scenario's opponent), or null (ARCHITECTURE.md §10.2). */
-export const unseated = (rival) =>
-  rival.bot === "scripts/xxscreeps/engine/rival" && rival.config?.role === "keep" && !rival.raid && rival.x === undefined ? null : `${rival.name} plays`;
+export const unseated = (rival) => (rival.bot === "rival" && rival.x === undefined ? null : `${rival.name} plays`);
+
+const rivalId = (i) => (0xe00000 + i).toString(16);
+const PARTS = ["tough", "move", "work", "carry", "attack", "ranged_attack", "heal"];
+/** sim's `--rivals` (`sim/src/rival`): each rival's user, room, config and raid, a raid's bodies part by part. */
+const seats = (rivals) =>
+  rivals.map(({ room, config, raid }, i) => ({ id: rivalId(i), room, ...config, raid: raid && { ...raid,
+    bodies: raid.bodies.map(({ boosts = {}, ...counts }) => PARTS.flatMap((type) => Array(counts[type] ?? 0).fill({ type, hits: 100, boost: boosts[type] }))) } }));
 
 /** `rival`'s room as `manage bot add` seats it: its controller at level 1 in safe mode, a spawn on `seatTile`. */
 function standRival(world, rival, i) {
-  const id = (0xe00000 + i).toString(16);
+  const id = rivalId(i);
   world.users = { ...world.users, [id]: rival.name };
   const home = world.rooms.find((r) => r.name === rival.room);
   const terrain = [home.terrain].flat().join("");
@@ -183,9 +189,9 @@ export function runSim(bin, { world, gen, room, node, ticks, seed = 1, late = 0,
       done(code);
     };
     const play = (where) => {
-      const args = [...where, "--ticks", String(ticks), "--seed", String(seed), "--late", String(late), "--every", "100", "--out", out, ...(follow.length ? ["--follow", follow.join(",")] : []), ...(ended ? ["--ended"] : []), "--reset-every", String(resetEvery),
+      const args = [...where, "--ticks", String(ticks), "--seed", String(seed), "--late", String(late), "--every", "100", "--out", out, ...(follow.length ? ["--follow", follow.join(",")] : []), ...(ended ? ["--ended"] : []), "--reset-every", String(resetEvery), "--rivals", JSON.stringify(seats(rivals)),
         "--npc", JSON.stringify(npc(invaders, bodies(wave), core, stronghold, ticks)), ...(watch ? ["--watch", "--port", String(watch.port), "--tick-ms", String(watch.ms), ...(watch.badge ? ["--badge", watch.badge] : [])] : [])];
-      spawn(bin, args, { stdio: watch ? "inherit" : "ignore" }).on("exit", (code) => (code === 0 ? engaged(out).then(() => finish(0), () => finish(-1)) : finish(code))).on("error", () => finish(-1));
+      spawn(bin, args, { stdio: watch ? "inherit" : "ignore" }).on("exit", (code, signal) => (code === 0 || (watch && signal === "SIGINT" && existsSync(join(out, "timing.json"))) ? engaged(out).then(() => finish(0), () => finish(-1)) : finish(code))).on("error", () => finish(-1));
     };
     if (gen !== undefined) return play(["--gen", String(gen)]);
     const base = JSON.parse(readFileSync(world ?? TEMPLATE, "utf8"));

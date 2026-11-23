@@ -797,17 +797,22 @@ Two engines complement each other:
   With `--real 1` our side runs the bot's tactics, the one its Defend fields;
   the rival stays a stand-in (the emitter, or with `--rollout R --theirs 1` a
   stress test: his worst reaction his bodies allow), as no rival's strategy can
-  be simulated and each differs.
+  be simulated and each differs. The scenarios' scripted rivals play on `sim`
+  as a second user (`sim/src/rival/`, one `Player` each), their intents merged
+  per room with ours; they no longer run on xxscreeps, so a `--bot`/`--base`
+  A/B skips their scenarios.
   - `❓` Still on `xxscreeps` (`SIM_START`/`SIM_MEASURES` in `scripts/sim/run.mjs`):
-    active rival bots/raids, resumed worlds (`at`/`bundle`), capture intel
+    the Hivemind rival bot, resumed worlds (`at`/`bundle`), capture intel
     segments, and unported measures (`decay.jsonl`, `waves`, `lost`).
   - `❓` Cut worlds lacking sector bus rooms throw in `genDeposits` (logged and
     skipped as backend cron does).
 - **`xxscreeps` (`npm run xx`):** isolated-vm vanilla engine used for active
   rival bots, `--bot`/`--base` comparisons, `--capture`, and `--watch` beside a
-  rival; with the first three, `npm run scenario` skips sim-native scenarios unless
-  `--force-xxscreeps`. A single-bot world is watched on `sim` (`npm run watch:sim`,
-  `sim/src/watch`): the run lazycreep shows is the one scenarios and soaks measure.
+  rival bot; with the first three, `npm run scenario` skips sim-native scenarios
+  unless `--force-xxscreeps`. A stronghold or scripted-rival scenario and a
+  single-bot world are watched on `sim` (`npm run scenario -- <name> --watch`,
+  `npm run watch:sim`, `sim/src/watch`): the run lazycreep shows is the one
+  scenarios and soaks measure.
 
 **Scenario library (`npm run scenario`):** every live incident becomes a recipe
 scenario with outcome bounds (`scripts/xxscreeps/scenarios/`). `jj ship` runs
@@ -862,7 +867,7 @@ scenarios matching touched modules.
 
 `N1`–`N7` and `E1` are built; `❓` remaining nodes (`E0`, `E2`, `E3`, `S1`–`S4`).
 
-**Adversaries:** scripted rivals (`engine/rival/`) verify plan mechanics. No
+**Adversaries:** scripted rivals (`sim/src/rival/`) verify plan mechanics. No
 scenario fights an open-source bot (owner): a fight tuned against one says
 little about the players a season meets. Hivemind stays only as the contested
 soak's economic neighbour (a pinned tarball fetched with `--fetch`, never

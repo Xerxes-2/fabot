@@ -8,7 +8,7 @@
     "opponents": [
       {
         "name": "raider",
-        "bot": "scripts/xxscreeps/engine/rival",
+        "bot": "rival",
         "room": "W6N3",
         "config": { "role": "raid" },
         "raid": { "first": 2600, "room": "W7N3", "inside": true, "bodies": [{ "move": 2, "attack": 2 }, { "move": 2, "attack": 2 }] }

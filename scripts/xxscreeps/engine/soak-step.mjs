@@ -33,11 +33,9 @@
 // Invader cores.
 // <waves>: room:every[:first],… — an Invader wave (`waves/`) pushed in room
 // at t = first, first + every, …
-// <opponents.json>: [{ name, room, raid? }], the players seated beside ours;
+// <opponents.json>: [{ name, room }], the players seated beside ours;
 // each sample's `others` holds each one's room as it stands: level, spawns,
-// creeps, and its worth and score over its room and the followed ones. A raid { first, every?, room?, inside?, bodies: [{ part: count, boosts?: {
-// part: compound } }] } stands the opponent's bodies on the edge of `room`
-// (default <room>) toward its room (`waves/`) at t = first, first + every, …
+// creeps, and its worth and score over its room and the followed ones.
 // <cores>: room:tick,… — a level-0 Invader core (`core/`) stood in room at t = tick.
 // <follow>: soak's --follow, rooms the samples follow besides.
 // <watch ms>: soak's --watch, each step held to it and the server left up after the last; 0 (default) off.
@@ -193,7 +191,6 @@ const TRANSFER = 12;
 const LINK_KEEPS = 1 - 0.03;
 const CREEP_LIFE_TIME = 1500;
 const CREEP_CLAIM_LIFE_TIME = 600;
-const PARTS = ["tough", "move", "work", "carry", "attack", "ranged_attack", "heal"];
 const PART_COST = { move: 50, work: 100, carry: 50, attack: 80, ranged_attack: 150, heal: 250, claim: 600, tough: 10 };
 const ledger = { dug: 0, regen: 0, spawn: 0, build: 0, upgrade: 0, repair: 0, tower: 0, decayed: 0, linked: 0, stock0: null, stock: 0 };
 // What a colony holds, in energy, as it stands: the controller's climb, every
@@ -715,13 +712,6 @@ for (let t = 0; t < ticks; t++) {
   await engaged(t, rooms);
   stoodLoaded(rooms, time);
   wasted(around);
-  for (const o of opponents.filter(({ raid: r }) => r && (t === r.first || (r.every && t > r.first && (t - r.first) % r.every === 0)))) {
-    const into = o.raid.room ?? roomName;
-    const toward = Object.entries(world.map.describeExits(into) ?? {}).filter(([, next]) => next === o.room).map(([dir]) => Number(dir));
-    const bodies = o.raid.bodies.map(({ boosts = {}, ...counts }) => PARTS.flatMap((p) => Array(counts[p] ?? 0).fill({ type: p, boost: boosts[p] })));
-    await pushIntentsForRoomNextTick(shard, into, o.id, { local: { soakRaid: [[o.id, bodies, toward.length ? toward : [1, 3, 5, 7], o.raid.inside ?? false]] }, internal: true });
-    process.stderr.write(`t${t} raid of ${o.name} in ${into} from sides ${toward.join(",")}\n`);
-  }
   for (const wave of waves.filter((w) => t >= w.first && (t - w.first) % w.every === 0)) {
     const exits = Object.entries(world.map.describeExits(wave.room) ?? {});
     const users = await Promise.all(exits.map(([, next]) => shard.loadRoom(next, time).then((r) => r["#user"], () => null)));

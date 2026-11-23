@@ -13,6 +13,7 @@ mod lives;
 mod npc;
 mod read;
 mod reset;
+mod rival;
 mod sample;
 mod view;
 mod watch;
@@ -56,6 +57,7 @@ struct Args {
     /// Rooms the samples follow beside the declared ones: an outpost Strategy picks is declared nowhere.
     follow: Vec<String>,
     npc: Vec<npc::Due>,
+    rivals: Vec<rival::Rival>,
     /// `--watch`'s port and tick in ms.
     watch: Option<(u16, u64)>,
     /// Our badge as the official `{type, color1, color2, color3, param, flip}`.
@@ -74,7 +76,7 @@ fn args() -> Args {
         };
         flags.insert(flag, value);
     }
-    let usage = "usage: sim (--world <world.json> --room <name> | --gen <seed> [--sectors WxH]) --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--follow A,B] [--npc <[[tick, room, bodies, [a stronghold's level, deploy] or null for a core]]>] [--ended] [--check] [--reset-every N] [--watch [--port N] [--tick-ms N] [--badge <json>]]";
+    let usage = "usage: sim (--world <world.json> --room <name> | --gen <seed> [--sectors WxH]) --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--follow A,B] [--npc <[[tick, room, bodies, [a stronghold's level, deploy] or null for a core]]>] [--rivals <[rival::Rival]>] [--ended] [--check] [--reset-every N] [--watch [--port N] [--tick-ms N] [--badge <json>]]";
     let need = |flag: &str| (flags.get(flag).cloned()).unwrap_or_else(|| panic!("{flag}: {usage}"));
     let number = |flag: &str, or: u64| {
         (flags.get(flag)).map_or(or, |v| {
@@ -102,6 +104,8 @@ fn args() -> Args {
             .then(|| (number("--port", 21025) as u16, number("--tick-ms", 50))),
         badge: (flags.get("--badge")).map(|b| serde_json::from_str(b).expect(usage)),
         npc: serde_json::from_str(flags.get("--npc").map_or("[]", String::as_str)).expect(usage),
+        rivals: serde_json::from_str(flags.get("--rivals").map_or("[]", String::as_str))
+            .expect(usage),
     }
 }
 
@@ -145,7 +149,10 @@ impl Engine {
         let mut by_room: BTreeMap<u32, RoomIntents> = BTreeMap::new();
         for (room, i) in intents {
             k.active.insert(room as u32);
-            by_room.insert(room as u32, i);
+            let at = by_room.entry(room as u32);
+            (at.or_insert_with(|| RoomIntents { users: Vec::new() })
+                .users)
+                .extend(i.users);
         }
         let mut active = k.active.take();
         active.sort_unstable();
@@ -245,6 +252,7 @@ fn main() {
     let mut driver = driver::Driver::new(driver::Maps(terrains, closed), map.memory.clone(), out);
     driver.kept = reset::Twin::new(args.reset_every, args.check);
 
+    let mut rivals = rival::Rivals::new(args.rivals.clone());
     let mut engine = Engine {
         hooks: ProcessorHooks::default(),
         cron_last: Vec::new(),
@@ -293,13 +301,14 @@ fn main() {
         if t == args.ticks {
             break;
         }
-        let intents = if t >= args.late {
+        let mut intents = if t >= args.late {
             driver.tick(&v, t, &|| sampler.ledger())
         } else {
             Vec::new()
         };
-        drop(v);
         sampler.intend(&intents);
+        intents.extend(rivals.intents(&v, t));
+        drop(v);
 
         let at = Instant::now();
         engine.step(&mut k, intents);
@@ -312,6 +321,7 @@ fn main() {
                 None => npc::core(&mut k, room, || engine.next()),
             }
         }
+        rivals.stand(&mut k, t, &room, || engine.next());
         engine_ms += ms(at);
         watch.iter_mut().for_each(|w| w.tick(&k, &driver));
     }

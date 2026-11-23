@@ -4,19 +4,14 @@
 // that lead to no owned or reserved room, and the wave's `role[:size]`s).
 // xxscreeps' own goal doubles after each raid, so it gives no steady rate to
 // read a stand-down's cost off.
-// `soakRaid` stands a scripted raid (`raid/`) the same way: the owner's bodies
-// on the exit tiles of the sides given, or one tile inside them when `inside`,
-// since the engine moves a body on an exit tile to the next room.
 import { registerIntentProcessor } from "xxscreeps/engine/processor/index.js";
 import { Game } from "xxscreeps/game/index.js";
 import { FIND_EXIT } from "xxscreeps/game/constants/index.js";
-import { RoomPosition } from "xxscreeps/game/position.js";
 import { Room } from "xxscreeps/game/room/index.js";
 import { CREEP_LIFE_TIME } from "xxscreeps/mods/classic/creep/constants.js";
 import { kInvaderUserId } from "xxscreeps/mods/classic/invader/game.js";
 import { create } from "xxscreeps/mods/classic/invader/processor.js";
 import { activateNPC } from "xxscreeps/mods/npc/processor.js";
-import { createWithBody } from "xxscreeps/mods/classic/creep/creep.js";
 
 const side = { 1: (p) => p.y === 0, 3: (p) => p.x === 49, 5: (p) => p.y === 49, 7: (p) => p.x === 0 };
 
@@ -34,20 +29,6 @@ registerIntentProcessor(Room, "soakWave", { internal: true }, (room, context, op
   roles.forEach((spec, i) => {
     const [role, size = "small"] = spec.split(":");
     if (exits[i]) room["#insertObject"](create(exits[i], role, size, Game.time + CREEP_LIFE_TIME));
-  });
-  context.setActive();
-});
-
-registerIntentProcessor(Room, "soakRaid", { internal: true }, (room, context, owner, bodies, open, inside) => {
-  const exits = edge(room, open);
-  bodies.forEach((parts, i) => {
-    if (!exits[i]) return;
-    const { x, y } = exits[i];
-    const [ix, iy] = [x === 0 ? 1 : x === 49 ? 48 : x, y === 0 ? 1 : y === 49 ? 48 : y];
-    const at = !inside || room.getTerrain().get(ix, iy) & 1 ? exits[i] : new RoomPosition(ix, iy, room.name);
-    const creep = createWithBody(at, parts.map(({ type, boost }) => ({ type, hits: 100, boost })), `raid-${Game.time}-${i}`, owner);
-    creep["#ageTime"] = Game.time + CREEP_LIFE_TIME;
-    room["#insertObject"](creep);
   });
   context.setActive();
 });

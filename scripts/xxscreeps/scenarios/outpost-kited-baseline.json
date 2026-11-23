@@ -13,7 +13,7 @@
     "opponents": [
       {
         "name": "harasser",
-        "bot": "scripts/xxscreeps/engine/rival",
+        "bot": "rival",
         "room": "W6N3",
         "config": {
           "role": "harass",

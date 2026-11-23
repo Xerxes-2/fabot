@@ -5,7 +5,7 @@
     "room": "W8N3",
     "seed": 1,
     "node": "X2",
-    "opponents": [{ "name": "rival", "bot": "scripts/xxscreeps/engine/rival", "room": "W6N3", "config": { "role": "keep" } }]
+    "opponents": [{ "name": "rival", "bot": "rival", "room": "W6N3", "config": { "role": "keep" } }]
   },
   "ticks": 4000,
   "assert": [

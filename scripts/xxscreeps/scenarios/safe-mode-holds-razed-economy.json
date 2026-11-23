@@ -1,5 +1,5 @@
 {
-  "why": "a player's raid no cast answers, killing the refillers of a home with a tower, spends the safe mode within a sample (100 ticks) of its second kill of a body that digs or carries, and before the economy is razed; one whose raid kills fewer spends it at no bound",
+  "why": "a player's raid no cast answers, killing the refillers of a home with a tower, spends the safe mode within a sample (100 ticks) of its second kill of a body that digs or carries, and before the economy is razed; one whose raid kills fewer spends it at no bound. The raid lands at t300, before Layout stands any rampart of its ring: by t1500 the ring held it off our bodies and nothing was culled. N2 (RCL3) has no ring either, but its home holds only two creeps, too few to raze. culled asserts the cull happened, so the bound is never met empty",
   "modules": ["atlas", "economy", "exchange", "fight", "layout", "mv", "tactics"],
   "start": {
     "room": "W8N3",
@@ -9,16 +9,17 @@
     "opponents": [
       {
         "name": "raider",
-        "bot": "scripts/xxscreeps/engine/rival",
+        "bot": "rival",
         "room": "W7N3",
         "config": { "role": "raid", "target": "W8N3" },
-        "raid": { "first": 1500, "bodies": [{ "tough": 4, "move": 10, "ranged_attack": 8, "heal": 6, "boosts": { "tough": "XGHO2", "ranged_attack": "XKHO2", "heal": "XLHO2" } }, { "tough": 4, "move": 10, "ranged_attack": 8, "heal": 6, "boosts": { "tough": "XGHO2", "ranged_attack": "XKHO2", "heal": "XLHO2" } }] }
+        "raid": { "first": 300, "bodies": [{ "tough": 4, "move": 10, "ranged_attack": 8, "heal": 6, "boosts": { "tough": "XGHO2", "ranged_attack": "XKHO2", "heal": "XLHO2" } }, { "tough": 4, "move": 10, "ranged_attack": 8, "heal": 6, "boosts": { "tough": "XGHO2", "ranged_attack": "XKHO2", "heal": "XLHO2" } }] }
       }
     ]
   },
   "ticks": 2500,
   "assert": [
-    { "measure": "safeModeAfterCull", "room": "W8N3", "from": 1500, "max": 100 },
-    { "measure": "fewestCreeps", "from": 1500, "min": 4 }
+    { "measure": "culled", "room": "W8N3", "from": 300, "min": 2 },
+    { "measure": "safeModeAfterCull", "room": "W8N3", "from": 300, "max": 100 },
+    { "measure": "fewestCreeps", "from": 500, "min": 4 }
   ]
 }

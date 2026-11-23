@@ -100,8 +100,8 @@ const xxscreepsWhy = (s) =>
     null);
 const bundled = ["--bot", "--base", "--capture"].find((f) => flags[f]);
 const forced = watch.length ? "--watch" : flags["--force-xxscreeps"] ? "--force-xxscreeps" : undefined;
-// xxscreeps stands no stronghold, so one is watched on sim.
-const simOnly = (s) => s.start.stronghold !== undefined;
+// xxscreeps stands no stronghold and plays no scripted rival, so either is watched on sim.
+const simOnly = (s) => s.start.stronghold !== undefined || (s.start.opponents ?? []).some((o) => o.bot === "rival");
 for (const s of library) s.engine = (forced && !simOnly(s)) || xxscreepsWhy(s) ? "xxscreeps" : "sim";
 
 // name@sK names a scenario on seed K alone, as --seeds names its runs.

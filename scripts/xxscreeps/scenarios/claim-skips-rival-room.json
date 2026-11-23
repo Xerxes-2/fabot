@@ -8,7 +8,7 @@
     "opponents": [
       {
         "name": "rival",
-        "bot": "scripts/xxscreeps/engine/rival",
+        "bot": "rival",
         "room": "W7N3",
         "config": { "role": "keep" }
       }

@@ -24,7 +24,7 @@ pub enum Npc {
     Stronghold(u32, u32),
 }
 
-fn insert(k: &mut World, r: usize, docs: Vec<Value>) {
+pub fn insert(k: &mut World, r: usize, docs: Vec<Value>) {
     let mut objects = k.rooms[r].objects.to_vec();
     for mut doc in docs {
         doc["_id"] = json!(k.ids.next().as_str());
