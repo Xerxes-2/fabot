@@ -18,7 +18,7 @@ export const TEMPLATE = join(REPO, "scripts/scenario/worlds/template.json");
 
 // What sim stands (`world.rs`, `node.mjs`) and what `scenario.mjs` reads off what it writes
 // (`sample.rs`, `lives.rs`, `engaged.rs`: no opponent's side).
-export const SIM_START = ["room", "seed", "late", "node", "ended", "unsafe", "world", "declarations", "memory", "gcl", "stock", "level", "follow", "opponents", "invaders", "wave", "core", "stronghold", "resetEvery"];
+export const SIM_START = ["gen", "room", "seed", "late", "node", "ended", "unsafe", "world", "declarations", "memory", "gcl", "stock", "level", "follow", "opponents", "invaders", "wave", "core", "stronghold", "resetEvery"];
 export const SIM_MEASURES = new Set([
   "metric", "spendError", "decayedAway", "roadsLost", "roadsAtEnd", "dug", "contactWait", "upgrade", "build", "linked", "builtAtEnd", "sitesAtEnd",
   "buriedAtEnd", "unroadedAtEnd", "oldestPayingSite", "extensionsBeforeContainer", "sourceContainersAtEnd", "postedLinksAtEnd",

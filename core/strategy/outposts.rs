@@ -9,7 +9,7 @@ use fabot_base::engine;
 use fabot_base::intel::Intel;
 use fabot_base::tiles;
 use fabot_base::vocabulary::Part;
-use fabot_base::world::{RoomName, StructureType, World};
+use fabot_base::world::{Pos, RoomName, StructureType, World};
 use fabot_fight::casting;
 use fabot_fight::shape::{Engagement, Objective};
 
@@ -21,6 +21,8 @@ pub struct Candidate {
     pub home: RoomName,
     /// One way, in ticks.
     pub walk: i32,
+    /// Before a storage, the unroaded path the young home's budget charges.
+    pub walked: i32,
     /// Another player's bodies work it: ours are lost once a life.
     pub contested: bool,
     /// The operator's row, worked whatever it pays.
@@ -37,7 +39,7 @@ struct Price {
 /// Spenders' parts, their draw's carriers too, an energy a tick: measured at RCL5.
 const SPEND_PARTS: f64 = 2.0;
 
-fn price(c: &Candidate, capacity: i32) -> Price {
+fn price(c: &Candidate, capacity: i32, walk: i32) -> Price {
     use Part::{Carry, Claim, Move, Work};
     let life = f64::from(engine::CREEP_LIFETIME);
     let reserver = [Claim, Move];
@@ -53,7 +55,7 @@ fn price(c: &Candidate, capacity: i32) -> Price {
     dig.push(Carry);
     dig.extend(vec![Move; ((work + 2) / 2) as usize]);
     // A new remote has no road: its haulers are 1:1.
-    let carry = n * f64::from(rate * (2 * c.walk + 2)) / f64::from(engine::CARRY_PART_CAPACITY);
+    let carry = n * f64::from(rate * (2 * walk + 2)) / f64::from(engine::CARRY_PART_CAPACITY);
     let per_body = f64::from((capacity / engine::body_cost(&[Carry, Move])).clamp(1, 25));
     let haulers = (carry / per_body).ceil();
 
@@ -134,17 +136,19 @@ pub fn casters(
     casting::homes(&colonies, |from| tree.crossings(from, room))
 }
 
+fn stocked(world: &World, home: RoomName) -> bool {
+    world.room(home).is_some_and(|r| {
+        (r.structures.iter()).any(|s| s.kind == StructureType::Storage && s.owner.is_ours())
+    })
+}
+
 pub fn chosen(
     world: &World,
     candidates: Vec<Candidate>,
     (busy, spare): (&BTreeSet<RoomName>, &BTreeMap<RoomName, f64>),
 ) -> Vec<Outpost> {
     // A young home opens every room that pays at once, as The International does.
-    let stocked = |home: RoomName| {
-        world.room(home).is_some_and(|r| {
-            (r.structures.iter()).any(|s| s.kind == StructureType::Storage && s.owner.is_ours())
-        })
-    };
+    let stocked = |home: RoomName| stocked(world, home);
     // Before a storage the spawns' other half is the spend's.
     let spend = |home: RoomName, net: f64| {
         let ticks = net.max(0.0) * SPEND_PARTS * f64::from(engine::SPAWN_TICKS_PER_PART);
@@ -169,7 +173,7 @@ pub fn chosen(
     let mut cpu_left = world.cpu_limit / 2.0;
     let capacity = |home: RoomName| world.room(home).map_or(0, |r| r.energy_capacity);
     let mut priced: Vec<(Price, Candidate)> = (candidates.into_iter())
-        .map(|c| (price(&c, capacity(c.home)), c))
+        .map(|c| (price(&c, capacity(c.home), c.walk), c))
         .collect();
     let value = |p: &Price| p.net / p.spawn.max(1.0);
     priced.sort_by(|(pa, a), (pb, b)| {
@@ -182,7 +186,8 @@ pub fn chosen(
     let mut rising: BTreeSet<RoomName> = BTreeSet::new();
     for (p, c) in priced {
         let left = spawn_left.entry(c.home).or_default();
-        let spawn = p.spawn + spend(c.home, p.net);
+        let walked = price(&c, capacity(c.home), c.walked).spawn;
+        let spawn = walked + spend(c.home, p.net);
         let unpaid = p.net <= 0.0 || spawn > *left || p.cpu > cpu_left;
         let yields = busy.contains(&c.home) && !c.stands;
         if !c.declared && (unpaid || yields || rising.contains(&c.home)) {
@@ -201,7 +206,7 @@ pub fn chosen(
 }
 
 pub fn survey(
-    world: &World,
+    (world, atlas): (&World, &Atlas),
     derived: &Derived,
     (declarations, plans, claimed): (&Declarations, &[ColonyPlan], Option<RoomName>),
     intel: &Intel,
@@ -220,11 +225,25 @@ pub fn survey(
         };
         // `ARCHITECTURE.md` §7.2.
         let banks = plans.iter().any(|p| p.room == *home && h.banks(p));
-        let walk = |hops: i32, outpost: &Outpost| {
-            let to = |s: &fabot_base::declarations::Declared| tiles::seam_range(spawn, &s.pos);
-            let ranges: Vec<i32> = outpost.sources.iter().filter_map(to).collect();
+        let young = !stocked(world, *home);
+        let mean_of = |hops: i32, outpost: &Outpost, along: &dyn Fn(&Pos) -> Option<i32>| {
+            let ranges: Vec<i32> = (outpost.sources.iter())
+                .filter_map(|s| along(&s.pos))
+                .collect();
             let mean = ranges.iter().sum::<i32>() / (ranges.len() as i32).max(1);
             mean.max(hops * engine::ROOM_SIDE)
+        };
+        let straight = |at: &Pos| tiles::seam_range(spawn, at);
+        let walk = |hops: i32, outpost: &Outpost| mean_of(hops, outpost, &straight);
+        let walked = |hops: i32, outpost: &Outpost| {
+            let path = |at: &Pos| {
+                let line = straight(at)?;
+                let path = young
+                    .then(|| atlas.ticks_bare(REACH_HOPS, at, spawn))
+                    .flatten();
+                Some(path.map_or(line, |w| w.max(line)))
+            };
+            mean_of(hops, outpost, &path)
         };
         for dx in -REACH_HOPS..=REACH_HOPS {
             for dy in -REACH_HOPS..=REACH_HOPS {
@@ -238,6 +257,7 @@ pub fn survey(
                 let candidate = match (declared, intel.get(&name)) {
                     (Some(o), _) => Candidate {
                         walk: walk(hops, o),
+                        walked: walked(hops, o),
                         outpost: o.clone(),
                         home: *home,
                         contested: false,
@@ -268,6 +288,7 @@ pub fn survey(
                         };
                         Candidate {
                             walk: walk(hops, &outpost),
+                            walked: walked(hops, &outpost),
                             outpost,
                             home: *home,
                             contested: worker.is_some(),

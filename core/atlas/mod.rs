@@ -58,6 +58,9 @@ pub struct RoomGrid {
     pub struck: Option<Rc<TileSet>>,
     /// The weights without creeps or strikes: what stands once out of sight.
     standing: Rc<Table<Weight>>,
+    /// Terrain alone: a walk on it reads no structure seen, so a reset moves
+    /// it only through the room tree it crosses.
+    bare: Rc<Table<Weight>>,
     seats: Vec<(Tile, Weight)>,
     /// Out of sight, the keepers' posts the strikes were placed from.
     placed: Option<Vec<Post>>,
@@ -349,6 +352,7 @@ struct Toward {
     max_hops: i32,
     room: Coords,
     way: Option<usize>,
+    bare: bool,
 }
 
 /// A room's flood off its weights (by address) and the ticks its exits are
@@ -716,6 +720,10 @@ impl Atlas {
         }
     }
 
+    fn bare(last: Option<&RoomGrid>, terrain: &[u8]) -> Rc<Table<Weight>> {
+        last.map_or_else(|| Rc::new(Atlas::ground(terrain)), |g| g.bare.clone())
+    }
+
     fn ground(terrain: &[u8]) -> Table<Weight> {
         let mut weights: Table<Weight> = tiles::table(None);
         for (weight, t) in weights.iter_mut().zip(terrain) {
@@ -785,6 +793,7 @@ impl Atlas {
             let standing = Rc::new(weights.clone());
             let struck = Atlas::walled(&mut weights, Atlas::struck(room));
             let last = previous.rooms.remove(&c);
+            let bare = Atlas::bare(last.as_ref(), terrain.get_bits());
             let weights = Atlas::reused(last.as_ref(), weights);
             let hostiles = room.hostiles().map(|c| tiles::of_pos(&c.pos));
             let open: Vec<Tile> = hostiles.filter(|t| weights[*t].is_some()).collect();
@@ -800,6 +809,7 @@ impl Atlas {
                 live: RefCell::default(),
                 struck,
                 standing,
+                bare,
                 seats,
                 placed: None,
                 seen: true,
@@ -859,12 +869,14 @@ impl Atlas {
                     };
                     let (weights, struck) = unseen(&standing);
                     let weights = Atlas::reused(last.as_ref(), weights);
+                    let bare = Atlas::bare(last.as_ref(), terrain);
                     RoomGrid {
                         floods: Atlas::kept(last, &weights),
                         held: None,
                         live: RefCell::default(),
                         weights,
                         standing,
+                        bare,
                         seats: Vec::new(),
                         placed: placed.map(<[Post]>::to_vec),
                         struck,
@@ -1420,7 +1432,13 @@ impl Atlas {
         if let Some(dist) = held.clone().filter(|_| !self.check) {
             return dist;
         }
-        let weights = self.rooms.get(&key.room).map(|g| g.weights.clone());
+        let weights = (self.rooms.get(&key.room)).map(|g| {
+            if key.bare {
+                g.bare.clone()
+            } else {
+                g.weights.clone()
+            }
+        });
         let mut seeds = Vec::new();
         // No way leads out of the tree's root: its walk needs no tree.
         let root = key.room == key.to.room.coords();
@@ -1511,11 +1529,21 @@ impl Atlas {
     /// `toward`'s ticks at `from`; a tile no body stands on (a structure's)
     /// is a step past its nearest.
     pub fn ticks_toward(&self, max_hops: i32, to: &Pos, from: &Pos) -> Option<i32> {
+        self.ticks_on_way(max_hops, to, from, false)
+    }
+
+    /// `ticks_toward` on terrain alone.
+    pub fn ticks_bare(&self, max_hops: i32, to: &Pos, from: &Pos) -> Option<i32> {
+        self.ticks_on_way(max_hops, to, from, true)
+    }
+
+    fn ticks_on_way(&self, max_hops: i32, to: &Pos, from: &Pos, bare: bool) -> Option<i32> {
         let key = Toward {
             to: *to,
             max_hops,
             room: from.room.coords(),
             way: None,
+            bare,
         };
         let dist = self.toward(key)?;
         let tile = tiles::of_pos(from);

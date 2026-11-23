@@ -23,7 +23,7 @@
 //   --jobs  soaks at once (default every hardware thread)
 //   --watch the one scenario's soak served to lazycreep (`sim --watch`), in this terminal
 //
-// A scenario file: { "why": the invariant, "modules": the core modules it tests, "nightly"?, "start": { "room", "seed",
+// A scenario file: { "why": the invariant, "modules": the core modules it tests, "nightly"?, "start": { "gen"? (sim --gen's map, which picks the room) or "room", "seed",
 // "late"?, "node"?, "invaders"? (room:every[:first],…), "wave"? (role[:size],…), "core"? (room:tick,…), "stronghold"? ("room:tick:level[:deploy],…"), "resetEvery"? (soak:many's --reset-every), "unsafe"?, "ended"?,
 // "opponents"? (sim's scripted rivals, `sim/src/rival`) } or { "world": a capture-shaped file
 // (crafted ones under worlds/), "seed", "room"?, "node"?, "late"? (a world with no home of ours, as a recipe's), "ended"?, "invaders"?, "wave"?, "opponents"? (the world's own users), "declarations"? (in place of the world's), "memory"? (keys of Memory.v2 beside the world's), "gcl"? (in place of the world's), "level"? ({ room: its controller level in place of the world's }) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "room"?, "kind"?, "name"?, "act"? }] };
@@ -122,8 +122,8 @@ for (const { name, start } of scenarios)
   if (!start.world && (start.declarations || start.memory || start.gcl)) fail(`${name}: "declarations", "memory" and "gcl" take a "world" start`);
 
 const tag = (opponents = []) => (opponents.length ? `-o${createHash("sha256").update(JSON.stringify(opponents)).digest("hex").slice(0, 8)}` : "");
-const recipe = ({ world, room, seed, late = 0, node, invaders, wave, core, stronghold, unsafe, ended, declarations, memory, stock, gcl, level, follow, resetEvery }, opponents) =>
-  `${[world && basename(world, ".json"), room].filter(Boolean).join("-")}${declarations ? `-d${createHash("sha256").update(JSON.stringify(declarations)).digest("hex").slice(0, 8)}` : ""}${memory ? `-m${createHash("sha256").update(JSON.stringify(memory)).digest("hex").slice(0, 8)}` : ""}${stock ? `-k${createHash("sha256").update(JSON.stringify(stock)).digest("hex").slice(0, 8)}` : ""}${gcl ? `-g${gcl}` : ""}${level ? `-r${Object.entries(level).flat().join("_")}` : ""}-s${seed}${late ? `l${late}` : ""}${node ? `-${node}` : ""}${invaders ? `-i${invaders.replace(/[:,]/g, "_")}` : ""}${wave ? `-w${wave.replace(/[:,]/g, "_")}` : ""}${core ? `-c${core.replace(/[:,]/g, "_")}` : ""}${stronghold ? `-h${stronghold.replace(/[:,]/g, "_")}` : ""}${unsafe ? "-u" : ""}${ended ? "-e" : ""}${follow ? `-f${follow.join("_")}` : ""}${resetEvery ? `-x${resetEvery}` : ""}${tag(opponents)}`;
+const recipe = ({ gen, world, room, seed, late = 0, node, invaders, wave, core, stronghold, unsafe, ended, declarations, memory, stock, gcl, level, follow, resetEvery }, opponents) =>
+  `${[gen !== undefined && `gen${gen}`, world && basename(world, ".json"), room].filter(Boolean).join("-")}${declarations ? `-d${createHash("sha256").update(JSON.stringify(declarations)).digest("hex").slice(0, 8)}` : ""}${memory ? `-m${createHash("sha256").update(JSON.stringify(memory)).digest("hex").slice(0, 8)}` : ""}${stock ? `-k${createHash("sha256").update(JSON.stringify(stock)).digest("hex").slice(0, 8)}` : ""}${gcl ? `-g${gcl}` : ""}${level ? `-r${Object.entries(level).flat().join("_")}` : ""}-s${seed}${late ? `l${late}` : ""}${node ? `-${node}` : ""}${invaders ? `-i${invaders.replace(/[:,]/g, "_")}` : ""}${wave ? `-w${wave.replace(/[:,]/g, "_")}` : ""}${core ? `-c${core.replace(/[:,]/g, "_")}` : ""}${stronghold ? `-h${stronghold.replace(/[:,]/g, "_")}` : ""}${unsafe ? "-u" : ""}${ended ? "-e" : ""}${follow ? `-f${follow.join("_")}` : ""}${resetEvery ? `-x${resetEvery}` : ""}${tag(opponents)}`;
 const sim = flags["--bot"] ? resolve(flags["--bot"]) : simBinary() ?? fail("sim did not build");
 if (!existsSync(sim)) fail(`--bot: no sim at ${sim}`);
 const simName = flags["--bot"] ? basename(sim) : `sim-${createHash("sha256").update(readFileSync(sim)).digest("hex").slice(0, 8)}`;
@@ -158,10 +158,10 @@ const play = async ({ name, start, ticks }) => {
     writeFileSync(world, JSON.stringify({ ...crafted, gcl: start.gcl ?? crafted.gcl, memory: { ...crafted.memory, v2 }, declarations: start.declarations ?? crafted.declarations }));
     start = { ...start, world };
   }
-  const { world, room, node, seed, late, ended, unsafe, follow, opponents, invaders, wave, core, stronghold, resetEvery } = start;
+  const { gen, world, room, node, seed, late, ended, unsafe, follow, opponents, invaders, wave, core, stronghold, resetEvery } = start;
   const watch = flags["--watch"] ? { port: Number(flags["--port"] ?? 21025), ms: Number(flags["--tick-ms"] ?? 50) } : undefined;
   const capture = flags["--capture"] ? `0-${ticks}` : undefined;
-  return runSim(sim, { capture, world: world && resolve(REPO, world), room, node, ticks, seed, late, ended, unsafe, follow, rivals: opponents, invaders, wave, core, stronghold, resetEvery, watch, out: join(REPO, "soak-runs", name) });
+  return runSim(sim, { capture, gen, world: world && resolve(REPO, world), room, node, ticks, seed, late, ended, unsafe, follow, rivals: opponents, invaders, wave, core, stronghold, resetEvery, watch, out: join(REPO, "soak-runs", name) });
 };
 // A long soak started last is the whole run's tail.
 const queue = [...runs.values()].sort((a, b) => b.ticks - a.ticks);

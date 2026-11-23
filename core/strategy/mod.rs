@@ -259,7 +259,12 @@ pub fn plan<'t>(
         (declarations, claiming.as_ref()),
         (&declared, engagements),
     );
-    let candidates = outposts::survey(world, derived, (declarations, &plans, claimed), intel);
+    let candidates = outposts::survey(
+        (world, atlas),
+        derived,
+        (declarations, &plans, claimed),
+        intel,
+    );
     let homes =
         (declarations.clone()).planned((plans.clone(), Vec::new(), claiming.clone(), Vec::new()));
     let spare = fabot_economy::spare((world, atlas), (derived, &homes), intel, economy);
