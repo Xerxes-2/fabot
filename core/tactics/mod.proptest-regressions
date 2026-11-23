@@ -1,0 +1,11 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 0e6c620409981cadf25cb213d4feb3a0940c6e6600b660c99b162b041dba302f # shrinks to kite = false, raid = [(1, 0, 2)]
+cc 97826e6e319494155d6f874507a457d687a9bb1b7813ba462bc42b478ed1ab86 # shrinks to tactic = BlobClose, raid = [(0, -1, 2)]
+cc 9248a5291d126cc197e15d50695b1920f5da5041940bb7927604b0cd1804873a # shrinks to tactic = Kite, heavy = false, raid = [(-1, 0, 2), (0, -1, 2)], swamp = [(1, 1)]
+cc 828b9087156d8c704cf5cabaf1209d3b334636c01629e8939355c0ffbf383564 # shrinks to tactic = Kite, heavy = true, raid = [(0, 4, 0)], swamp = []
+cc 3491909c0decd36a5c68c0c02b268ee18ac868d2a1074933fe517d81a5c88edb # shrinks to tactic = Kite, heavy = false, tired = 0, raid = [(0, 2, 0)], swamp = [(0, -1)]

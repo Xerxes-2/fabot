@@ -58,6 +58,7 @@ pub struct RoomGrid {
     pub struck: Option<Rc<TileSet>>,
     /// The weights without creeps or strikes: what stands once out of sight.
     standing: Rc<Table<Weight>>,
+    seats: Vec<(Tile, Weight)>,
     /// Out of sight, the keepers' posts the strikes were placed from.
     placed: Option<Vec<Post>>,
     seen: bool,
@@ -759,8 +760,11 @@ impl Atlas {
                 }
             }
 
-            for tile in Atlas::work_seats(room) {
-                weights[tile] = grid::weight(grid::SEAT_WEIGHT);
+            let seats: Vec<(Tile, Weight)> = (Atlas::work_seats(room).into_iter())
+                .map(|t| (t, weights[t]))
+                .collect();
+            for (tile, _) in &seats {
+                weights[*tile] = grid::weight(grid::SEAT_WEIGHT);
             }
 
             let structures = (room.structures.iter()).filter(|s| !s.walkable);
@@ -793,6 +797,7 @@ impl Atlas {
                 live: RefCell::default(),
                 struck,
                 standing,
+                seats,
                 placed: None,
                 seen: true,
                 blind: false,
@@ -857,6 +862,7 @@ impl Atlas {
                         live: RefCell::default(),
                         weights,
                         standing,
+                        seats: Vec::new(),
                         placed: placed.map(<[Post]>::to_vec),
                         struck,
                         seen: false,
@@ -937,6 +943,13 @@ impl Atlas {
             }
         }
         reached
+    }
+
+    /// Terrain and road alone, as v1's arrivalGroundIn: no seat's or keeper's weight.
+    pub fn ground_at(&self, room: RoomName, tile: Tile) -> Option<i32> {
+        let grid = self.grid(room)?;
+        let seat = (grid.seats.iter()).find_map(|(t, w)| (*t == tile).then_some(*w));
+        grid::value(seat.unwrap_or(grid.standing[tile]))
     }
 
     pub fn passable(&self, room: RoomName, tile: Tile) -> bool {

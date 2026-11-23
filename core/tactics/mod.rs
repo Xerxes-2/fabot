@@ -250,11 +250,18 @@ pub fn hold(sight: &Sight, creep: &Creep) -> Wish {
 /// route between borders, and the room's middle may be walled in.
 fn aim(sight: &mut Sight, order: &[Id], centre: &Pos, enter: bool, c: &Creep, range: i32) -> Wish {
     let half = engine::ROOM_SIDE / 2;
-    if enter && c.pos.room != centre.room {
-        return toward(sight, c, &Pos::new(centre.room, half, half), half);
+    let (at, range) = match ranked(sight, order, c).first() {
+        _ if enter && c.pos.room != centre.room => (Pos::new(centre.room, half, half), half),
+        Some(h) if !c.swings() && h.live(Part::Attack) > 0 => (h.pos, engine::RANGED_RANGE),
+        first => (first.map_or(*centre, |h| h.pos), range),
+    };
+    let (target, foes) = (target_at(sight, &at, range), hostiles_in(sight, c.pos.room));
+    let walk = (mover_of(c), &target, WEIGHT);
+    if c.swings() {
+        plan::toward(sight.atlas, c, walk.0, walk.1, walk.2)
+    } else {
+        plan::kited(sight.atlas, c, walk, foes)
     }
-    let at = ranked(sight, order, c).first().map_or(*centre, |h| h.pos);
-    toward(sight, c, &at, range)
 }
 
 pub fn close(sight: &mut Sight, order: &[Id], centre: &Pos, enter: bool, creep: &Creep) -> Wish {
@@ -289,40 +296,6 @@ fn step_to(creep: &Creep, tile: Tile) -> Wish {
         working: Vec::new(),
         weight: WEIGHT,
         moves,
-    }
-}
-
-/// v1's kiteStep without its threat maps: off every swing's next reach, else
-/// to a shot's range of the mark the kill order puts first; `enter` as `aim`.
-pub fn kite(sight: &mut Sight, order: &[Id], centre: &Pos, enter: bool, creep: &Creep) -> Wish {
-    let room = creep.pos.room;
-
-    let swings: Vec<&Creep> = hostiles_in(sight, room)
-        .iter()
-        .filter(|h| struck(Part::Attack, h, &creep.pos))
-        .collect();
-
-    let gap = |tile: Tile| -> i32 {
-        let at = tiles::to_pos(room, tile);
-
-        swings
-            .iter()
-            .fold(99, |least, h| least.min(h.pos.range(&at).unwrap_or(99)))
-    };
-
-    let here = tiles::of_pos(&creep.pos);
-
-    if swings.is_empty() {
-        aim(sight, order, centre, enter, creep, engine::RANGED_RANGE)
-    } else {
-        let step = (tiles::around(here))
-            .iter()
-            .copied()
-            .filter(|t| !tiles::on_edge(*t) && sight.atlas.passable(room, *t))
-            .min_by_key(|t| (-gap(*t), *t))
-            .filter(|t| gap(*t) > gap(here));
-
-        step.map_or_else(|| hold(sight, creep), |t| step_to(creep, t))
     }
 }
 
@@ -487,12 +460,16 @@ pub fn engage(
         (Tactic::BlobClose, false) if exposed(sight, centre.room, members, c) => {
             step_back(sight, centre.room, members, c)
         }
-        (Tactic::Kite | Tactic::BlobKite, false) => kite(sight, order, centre, enter, c),
+        (Tactic::Kite | Tactic::BlobKite, false) => {
+            aim(sight, order, centre, enter, c, engine::RANGED_RANGE)
+        }
         (Tactic::Hold, _) => rampart(sight, fighters, c),
         _ => close(sight, order, centre, enter, c),
     }
 }
 
+/// A blob of bodies that do not swing, bound for a swing's range, walks only those with no tile
+/// beside or under them in a swing's reach (`plan::swung`); the rest get no wish from it.
 pub fn blob(
     sight: &mut Sight,
     centre: &Pos,
@@ -500,13 +477,20 @@ pub fn blob(
     members: &[&Creep],
     fortified: &BTreeSet<RoomName>,
 ) -> Vec<Wish> {
-    blob::wishes(
-        sight.atlas,
-        &target_at(sight, centre, range),
-        WEIGHT,
-        members,
-        fortified,
-    )
+    let near = |c: &Creep| {
+        let swung = plan::swung(sight.atlas, c, hostiles_in(sight, c.pos.room));
+        let beside = tiles::within(1, tiles::of_pos(&c.pos));
+        swung.is_some_and(|d| beside.iter().any(|t| d.contains(*t)))
+    };
+    let swingers = members.iter().any(|c| c.swings());
+    let members: Vec<&Creep> = (members.iter().copied())
+        .filter(|c| swingers || range >= engine::RANGED_RANGE || !near(c))
+        .collect();
+    if members.is_empty() {
+        return Vec::new();
+    }
+    let target = target_at(sight, centre, range);
+    blob::wishes(sight.atlas, &target, WEIGHT, &members, fortified)
 }
 
 /// A medic's seat beside a dismantler: open ground off every tile beside the
@@ -1185,6 +1169,180 @@ mod tests {
             Some(Tactic::Close)
         );
         assert_eq!(select(&[], Some(Tactic::Kite)), None);
+    }
+
+    fn creep(id: &str, owner: fabot_base::world::Owner, at: (i32, i32), parts: &[Part]) -> Creep {
+        let part = |kind| fabot_base::world::BodyPart {
+            kind,
+            hits: 100,
+            boost: None,
+        };
+        Creep {
+            id: id.into(),
+            name: id.into(),
+            owner,
+            pos: Pos::new(RoomName::W1N1, at.0, at.1),
+            body: parts.iter().copied().map(part).collect(),
+            hits: 100 * parts.len() as i32,
+            hits_max: 100 * parts.len() as i32,
+            ticks_to_live: 1000,
+            fatigue: 0,
+            store: fabot_base::world::Store::empty(),
+        }
+    }
+
+    /// A raider's body and, by hand, the ticks its step onto plain holds it; None without MOVE.
+    const RAIDERS: [(&[Part], Option<i32>); 4] = [
+        (&[Part::Attack, Part::Move], Some(1)),
+        (&[Part::RangedAttack, Part::Move], Some(1)),
+        (&[Part::Attack], None),
+        (
+            &[Part::Attack, Part::Attack, Part::Attack, Part::Move],
+            Some(3),
+        ),
+    ];
+
+    /// What a ranger does at (25, 25), `heavy` with a second RANGED_ATTACK on its one MOVE,
+    /// `tired` with that fatigue, under `tactic` (a blob of its own under `BlobClose`), swamp on
+    /// `swamp`, against `RAIDERS` at the offsets given.
+    struct Stepped {
+        /// A tile it stands on or beside no swing strikes by the tick it could be on it and gone.
+        out: bool,
+        /// Its step lands on a tile a swing does.
+        reached: bool,
+        /// The tiles `plan::swung` marks, and those v1's rule marks worked out here.
+        marked: (BTreeSet<Tile>, BTreeSet<Tile>),
+    }
+
+    fn stepped(
+        (tactic, heavy, tired): (Tactic, bool, i32),
+        raid: &[(i32, i32, usize)],
+        swamp: &[(i32, i32)],
+    ) -> Option<Stepped> {
+        use fabot_base::world::{Owner, Room, World, terrain};
+        const ROOM: RoomName = RoomName::W1N1;
+        let legs: &[Part] = if heavy {
+            &[Part::RangedAttack, Part::RangedAttack, Part::Move]
+        } else {
+            &[Part::RangedAttack, Part::Move]
+        };
+        let ranger = Creep {
+            fatigue: tired,
+            ..creep("r", Owner::Ours, (25, 25), legs)
+        };
+        let raiders: Vec<(Creep, Option<i32>)> = (raid.iter().enumerate())
+            .filter(|(_, (dx, dy, _))| (*dx, *dy) != (0, 0))
+            .map(|(i, (dx, dy, k))| {
+                let (body, step) = RAIDERS[*k];
+                let at = (25 + dx, 25 + dy);
+                (creep(&format!("h{i}"), Owner::Invader, at, body), step)
+            })
+            .collect();
+        let hostiles: Vec<Creep> = raiders.iter().map(|(h, _)| h.clone()).collect();
+        let mut bits = vec![0; 2500];
+        for (dx, dy) in swamp {
+            bits[tiles::index(25 + dx, 25 + dy).index()] = 2;
+        }
+        let world = World {
+            rooms: vec![Room {
+                terrain: terrain::leak(bits.clone()),
+                ..Room::empty(ROOM)
+            }],
+            creeps: vec![ranger.clone()],
+            time: 1,
+            me: String::new(),
+            cpu_limit: 20.0,
+            bucket: 10_000,
+            spawns: Vec::new(),
+            attacks: Vec::new(),
+            destroyed: Vec::new(),
+            our_sites: 0,
+            rooms_allowed: 1,
+            closed: Default::default(),
+            rules: fabot_base::world::Rules::vanilla(),
+        };
+        let mut atlas = Atlas::of_world(&world);
+        let marked = plan::swung(&atlas, &ranger, &hostiles);
+        let foes = BTreeMap::from([(ROOM, hostiles.clone())]);
+        let mut sight = Sight {
+            atlas: &mut atlas,
+            hostiles: &foes,
+            struck: hostiles.iter().map(|h| h.id).collect(),
+            spared: BTreeMap::new(),
+            ramparts: BTreeMap::new(),
+            musters: Vec::new(),
+            avoid: &BTreeSet::new(),
+        };
+        let order: Vec<Id> = hostiles.iter().map(|h| h.id).collect();
+        let (on, at, set) = (
+            (tactic, &order[..]),
+            (&hostiles.first()?.pos, true),
+            &[&ranger][..],
+        );
+        let walked = (tactic == Tactic::BlobClose)
+            .then(|| blob(&mut sight, at.0, engine::MELEE_RANGE, set, &BTreeSet::new()))
+            .and_then(|mut w| w.pop());
+        let wish = walked.unwrap_or_else(|| engage(&mut sight, on, at, (set, set), &ranger));
+        // v1's rule worked out here. The ranger leaves a tile `d` off once rested, a plain step
+        // a tile before and the step onto it held (its legs read by `factor_of`/`step_ticks`),
+        // never sooner than the tick after; a raider strikes it once it has closed to beside.
+        let here = tiles::of_pos(&ranger.pos);
+        let legs = grid::factor_of(&ranger);
+        let ground = |t: Tile| match bits[t.index()] {
+            2 => engine::SWAMP_WEIGHT,
+            _ => engine::PLAIN_WEIGHT,
+        };
+        let rest = (tired + 2 * legs.moves - 1) / (2 * legs.moves);
+        let step = |w| grid::step_ticks(legs, w).unwrap_or(1);
+        let leaves = |t: Tile| match tiles::range(here, t) {
+            0 => rest.max(1),
+            d => rest + (d - 1) * step(engine::PLAIN_WEIGHT) + step(ground(t)),
+        };
+        let strikes = |(h, steps): &(Creep, Option<i32>), t: Tile| match (
+            h.pos.range(&tiles::to_pos(ROOM, t)).unwrap_or(99),
+            steps,
+        ) {
+            (r, _) if r <= engine::MELEE_RANGE => Some(0),
+            (r, Some(ticks)) => Some((r - 2) * ticks + 1),
+            _ => None,
+        };
+        let swings = raiders.iter().filter(|(h, _)| h.live(Part::Attack) > 0);
+        let struck = |t: Tile| {
+            (swings.clone()).any(|raider| strikes(raider, t).is_some_and(|s| s <= leaves(t)))
+        };
+        let near = tiles::within(2 * engine::RANGED_RANGE + 1, here);
+        let mut beside = std::iter::once(here).chain(tiles::around(here).iter().copied());
+        Some(Stepped {
+            out: beside.any(|t| !struck(t)),
+            reached: struck(wish.head),
+            marked: (
+                near.iter()
+                    .copied()
+                    .filter(|t| marked.as_ref().is_some_and(|m| m.contains(*t)))
+                    .collect(),
+                near.iter().copied().filter(|t| struck(*t)).collect(),
+            ),
+        })
+    }
+
+    const WALKS: &[Tactic] = &[Tactic::Kite, Tactic::Close, Tactic::BlobClose];
+
+    proptest::proptest! {
+        #![proptest_config(fabot_base::testing::config(300))]
+
+        #[test]
+        fn a_body_that_does_not_swing_steps_into_no_swings_next_reach_while_a_tile_beside_lies_out(
+            tactic in proptest::sample::select(WALKS),
+            heavy in proptest::bool::ANY,
+            tired in proptest::sample::select(&[0, 0, 2, 4][..]),
+            raid in proptest::collection::vec((-5..=5i32, -5..=5i32, 0..4usize), 1..=3),
+            swamp in proptest::collection::vec((-2..=2i32, -2..=2i32), 0..=6),
+        ) {
+            if let Some(s) = stepped((tactic, heavy, tired), &raid, &swamp) {
+                proptest::prop_assert_eq!(&s.marked.0, &s.marked.1);
+                proptest::prop_assert!(tired > 0 || !(s.out && s.reached));
+            }
+        }
     }
 
     #[test]

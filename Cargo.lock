@@ -268,6 +268,7 @@ dependencies = [
  "fabot-atlas",
  "fabot-base",
  "fabot-mv",
+ "proptest",
  "serde",
  "serde_json",
  "strum",

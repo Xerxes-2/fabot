@@ -522,7 +522,11 @@ and `cheapest_win` (adds only to already-standing `ours`).
   raid's reach is struck alone through it). `Defend` prices both arms
   (`Close`/`Kite`/`Hold` vs `Blob*`), rather than holding bodies back until
   they gather (a hold-while, rejected). Its `BlobClose` walks the set as one
-  into melee of the kill order's first standing, through the fight.
+  into melee of the kill order's first standing, through the fight; a set
+  with no body that swings walks each only until its step would enter a
+  swing's reach, then kites (§6.4). `❓` Rangers in a mixed `BlobClose`
+  still walk into melee reach; to be solved with the outpost-defence duo
+  redesign.
 - **Focus:** the Exchange prices the kill our bodies strike: both rank the
   raid by `fighter::kill_rank`.
 - **Losses:** a set's cost charges every body of ours the outcome loses,
@@ -552,8 +556,8 @@ and `cheapest_win` (adds only to already-standing `ours`).
 
 | Tactic | Behaviour |
 |---|---|
-| `Kite` | Maintain optimal range while firing |
-| `Close` | Close distance + glue onto moving marks; a `Defend` body (`Kite` too, not the blobs) outside its centre's room enters it by any tile and ranks no mark until in. A siege's loose bodies keep its blob's line in |
+| `Kite` | A body that does not swing walks to a shot's range of its mark round each tile a swing strikes before the body could stand on it and be gone, its rest, legs and the tile's ground counted, from inside one first onto a clear tile beside, else the one struck latest if later than its own (v1's kiteStep, kiteUnsafeFor) |
+| `Close` | Close distance + glue onto moving marks; a body that does not swing closes as `Kite` walks, and on a mark that swings stops at a shot's range; a `Defend` body (`Kite` too, not the blobs) outside its centre's room enters it by any tile and ranks no mark until in. A siege's loose bodies keep its blob's line in |
 | `Hold` | Hold rampart / `Atlas` seat: one body a rampart, as Exchange's Hold stance seats them |
 | `Pursue` | Chase across room borders |
 | `Retreat` | Fall back to `ColonyPlan.muster` (off plan roads/structures) |
