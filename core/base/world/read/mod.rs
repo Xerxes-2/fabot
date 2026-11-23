@@ -112,27 +112,27 @@ impl<'a> Reader<'a> {
         }
     }
 
-    fn body(&mut self) -> Vec<BodyPart> {
-        self.list(|r| {
-            let kind = r.word().parse().unwrap_or(Part::Tough);
-            let hits = r.n();
-            let boost = r.word();
-            BodyPart {
-                kind,
-                hits,
-                boost: boost.parse().ok(),
-            }
-        })
+    fn body(&mut self, hits: i32) -> Vec<BodyPart> {
+        let n = self.n() as usize;
+        (0..n)
+            .map(|i| BodyPart {
+                kind: self.word().parse().unwrap_or(Part::Tough),
+                hits: engine::part_hits_at(n, hits, i),
+                boost: self.word().parse().ok(),
+            })
+            .collect()
     }
 
     fn creep(&mut self) -> Creep {
+        let (id, name, owner, pos, hits) =
+            (self.id(), self.s(), self.owner(), self.pos(), self.n());
         Creep {
-            id: self.id(),
-            name: self.s(),
-            owner: self.owner(),
-            pos: self.pos(),
-            body: self.body(),
-            hits: self.n(),
+            id,
+            name,
+            owner,
+            pos,
+            body: self.body(hits),
+            hits,
             hits_max: self.n(),
             ticks_to_live: self.n(),
             fatigue: self.n(),
@@ -309,7 +309,8 @@ impl<'a> Reader<'a> {
             spawning: self.flag().then(|| Oven {
                 name: self.s(),
                 remaining: self.n(),
-                body: self.body(),
+                // A spawning creep cannot be struck.
+                body: self.body(i32::MAX),
             }),
         }
     }

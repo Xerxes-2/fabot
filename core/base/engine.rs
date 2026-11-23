@@ -187,7 +187,7 @@ pub fn with_move_last(mut body: Vec<Part>) -> Vec<Part> {
     }
 }
 
-fn part_hits_at(n: usize, hits: i32, i: usize) -> i32 {
+pub fn part_hits_at(n: usize, hits: i32, i: usize) -> i32 {
     let n = n as i32;
     let i = i as i32;
     PART_HITS.min(hits - PART_HITS * (n - 1 - i)).max(0)

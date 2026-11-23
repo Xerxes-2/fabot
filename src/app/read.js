@@ -46,11 +46,11 @@ globalThis.__fabotRead = (() => {
   const body = (xs) => {
     if (!Array.isArray(xs)) return n(0);
     n(xs.length), (parts += xs.length);
-    for (const p of xs) w(p.type), n(p.hits), w(p.boost);
+    for (const p of xs) w(p.type), w(p.boost);
   };
   const creep = (c) => {
-    s(c.id), s(c.name), owner(c), pos(c.pos), body(c.body);
-    n(c.hits), n(c.hitsMax), n(c.ticksToLive), n(c.fatigue), store(c.store);
+    s(c.id), s(c.name), owner(c), pos(c.pos), n(c.hits), body(c.body);
+    n(c.hitsMax), n(c.ticksToLive), n(c.fatigue), store(c.store);
   };
   const list = (xs, each) => {
     n(xs.length);
@@ -180,15 +180,17 @@ globalThis.__fabotRead = (() => {
       const held = Object.fromEntries(list(() => [w(), n()]));
       o.store = { held, capacity: n() };
     };
-    const body = () =>
-      list(() => {
-        const [type, hits, boost] = [w(), n(), w()];
-        return boost ? { type, hits, boost } : { type, hits };
+    // Damage takes a creep's parts head first (`engine.rs` `part_hits_at`).
+    const body = (hits, len = n()) =>
+      Array.from({ length: len }, (_, i) => {
+        const [type, boost, part] = [w(), w(), Math.max(0, Math.min(100, hits - 100 * (len - 1 - i)))];
+        return boost ? { type, hits: part, boost } : { type, hits: part };
       });
     const creep = (o) => {
       o.name = s();
       owner(o), pos(o);
-      Object.assign(o, { body: body(), hits: n(), hitsMax: n(), ticksToLive: n(), fatigue: n() });
+      o.hits = n();
+      Object.assign(o, { body: body(o.hits), hitsMax: n(), ticksToLive: n(), fatigue: n() });
       store(o);
       return o.id;
     };
@@ -262,7 +264,7 @@ globalThis.__fabotRead = (() => {
         if (n()) {
           o.spawning = { name: s(), remainingTime: n() };
           const key = `creep:${o.spawning.name}`;
-          objects[key] = { name: o.spawning.name, pos: o.pos, my: true, owner: { username: me }, spawning: true, body: body() };
+          objects[key] = { name: o.spawning.name, pos: o.pos, my: true, owner: { username: me }, spawning: true, body: body(Infinity) };
           creeps[o.spawning.name] = key;
         }
         return [o.name, o.id];
