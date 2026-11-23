@@ -311,6 +311,8 @@ export const measures = {
   // Engagements opened: an attack the bot never answered tests nothing.
   // The priced engagements opened in `room` in [from, to): a window bounding others matches some.
   engagements: (_, a, dir) => engagementsOf(dir).filter(openedIn(a)).length,
+  // Sweeps that ever targeted `room`, wherever they opened.
+  sweptIn: (_, a, dir) => rowsOf(dir).filter((e) => e.kind === "sweep" && e.rooms?.includes(a.room)).length,
   // Acts the engine refused (the soak's refusals.json) that `counted` counts.
   refusals: (_, __, dir) =>
     Object.entries(JSON.parse(readFileSync(join(dir, "refusals.json"), "utf8")))

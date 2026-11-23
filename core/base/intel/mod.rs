@@ -28,6 +28,7 @@ pub struct Row {
     /// None on a row written before minerals were read, or a room without one.
     pub mineral: Option<ResourceType>,
     pub stronghold: Option<Stronghold>,
+    pub towered: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -101,7 +102,7 @@ pub struct Scout {
 const NONE: &str = "-";
 
 /// One line a room, `room seen owner level reserver lapse worker lairs
-/// controller sources contained mineral stronghold`, `-` for none, `lairs` each lair's tile and its
+/// controller sources contained mineral stronghold towered`, `-` for none, `lairs` each lair's tile and its
 /// resource's as `lair.resource,…`, `sources` each as `id@tile,…` (`.`
 /// alone for none), `stronghold` as `level.deploys_at.collapses_at`; a segment holds thousands.
 pub fn to_text(intel: &Intel) -> String {
@@ -165,6 +166,7 @@ pub fn to_text(intel: &Intel) -> String {
             }
             None => out.extend([" ", NONE]),
         }
+        out.push_str(if r.towered { " 1" } else { " 0" });
         out.push('\n');
     }
     out
@@ -217,7 +219,7 @@ pub fn of_text(text: &str) -> Intel {
     text.lines()
         .filter_map(|line| {
             let f: Vec<&str> = line.split(' ').collect();
-            if !(7..=13).contains(&f.len()) {
+            if !(7..=14).contains(&f.len()) {
                 return None;
             }
             let room = f[0].parse().ok()?;
@@ -242,6 +244,7 @@ pub fn of_text(text: &str) -> Intel {
                 contained: f.get(10) == Some(&"1"),
                 mineral: f.get(11).and_then(|m| m.parse().ok()),
                 stronghold: f.get(12).and_then(|s| stronghold_of(s)),
+                towered: f.get(13) == Some(&"1"),
             };
             Some((room, row))
         })
@@ -284,6 +287,7 @@ mod tests {
             any::<bool>(),
             option::of(select(crate::vocabulary::ORES.to_vec())),
             option::of((1..=5, 0..=9_999_999, 0..=9_999_999)),
+            any::<bool>(),
         );
         draws.prop_map(|draws| {
             let (
@@ -298,6 +302,7 @@ mod tests {
                 contained,
                 mineral,
                 stronghold,
+                towered,
             ) = draws;
             Row {
                 seen,
@@ -315,6 +320,7 @@ mod tests {
                     deploys_at,
                     collapses_at,
                 }),
+                towered,
             }
         })
     }

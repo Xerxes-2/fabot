@@ -19,7 +19,7 @@ export function engagements(write, at) {
     const ticks = Object.values(reached);
     rest.apart = ticks.length ? Math.max(...ticks) - Math.min(...ticks) : 0;
     const outlived = t === null || (await at()).some((o) => members.has(o.id));
-    write({ ...rest, dead: Math.max(rest.dead, graves.length), swung, closed: t, outlived, drew: [...ours] });
+    write({ ...rest, dead: Math.max(rest.dead, graves.length), swung, closed: t, outlived, drew: [...ours], rooms: [...rooms] });
   }
   // ibex's A-B-A oscillation. A swing that struck or healed on both its steps,
   // or stepped over a room's edge (out of the towers' reach), is a dance that

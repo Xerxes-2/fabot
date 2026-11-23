@@ -200,7 +200,7 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
 | `piles` | colony → its hub: pile tile, or built over (`Plan::pile`) | Strategy | Memory | written from the plan whenever one stands, read only while none does (a reset redraws it over ticks), so a colony banks and picks outposts on the cold tick as warm; no `--check`: a heap's first plan apart from the hub kept before it is a live fault, a warm replan updates it; dropped with its colony |
 | `switches` | module name → bool (`false` disables; `recorder: true` opts in) | Main | Memory | live kill switches |
 | `observe.*` | health, faults, per-module CPU, counts, tactic offers, alerts | Observe | segment 1 | operator telemetry & benchmark calibration |
-| `intel.rooms` | per-room snapshot (seen tick, owner/level, reservation, worker (another player's WORK body, never an Invader), keeper posts, controller/sources/containers, mineral, stronghold (core level, deploy and collapse ticks); by username, never stance) | Strategy | heap + segment 2 (every 100 ticks) | serve out-of-sight rooms; price outposts & expansion |
+| `intel.rooms` | per-room snapshot (seen tick, owner/level, reservation, worker (another player's WORK body, never an Invader), keeper posts, controller/sources/containers, mineral, stronghold (core level, deploy and collapse ticks), a tower standing; by username, never stance) | Strategy | heap + segment 2 (every 100 ticks) | serve out-of-sight rooms; price outposts & expansion |
 | `metrics.windows` | 100-tick aligned windows (per-room + world, up to 150 windows) | Observe | segment 3 | `observe metrics` & soak `metrics.jsonl` (§10.5) |
 | `recorder` | deflated `read.js` pass + Memory + intel ring | Main | segments 10–14 | live capture for benchmark & replay (§9.1) |
 | `engagements.log` | the last 200 priced engagements closed, a JSON row a line: id, kind, room, rivals, tactic, opened, contact, seen, closed, `predicted`, our dead, energy cast, and how it ended (`disengaged`, `gaveUp`, `left`, `safe`; none: its rival's death seen) | Observe (rows Fight's closes) | segment 4, written on a close (rows closed before a reset's first read wait in heap) | live `Exchange` error tracking (§10.1): an engagement's prediction goes with it, and 200 rows (~230 B each) fit one segment |
@@ -513,7 +513,9 @@ with one phase machine per kind under `core/fight/kinds/`.
   staying open so the room does not reopen afresh. Breach barrier order is
   derived from `Exchange` on open/events, never stored stale.
 - **`Sweep`** (`kinds/sweep.rs`): one active at a time on enemy-owned/reserved/
-  worked rooms (the table's `Sweep` rows, §7.3), priced by prey plus
+  worked rooms (the table's `Sweep` rows, §7.3; an owned room intel last saw
+  with a tower is none, a siege's by `declarations.sieges` alone, owner
+  decision), priced by prey plus
   exposed-source harvest over a hunter's life per walk tick (denial is worth as
   much as kills). Living sets spend their life in the enemy's field, rotating
   onward via `atlas::onward` (profitable rooms first, else stalest patrol; rooms
@@ -639,8 +641,7 @@ expansion, and operation priorities.
   declarations. Living 1-MOVE scouts rotate continuously via `atlas::onward`;
   unseen rooms offer nearest ring first and cast ahead of spend. Armed rooms are
   skipped except declared sieges.
-- `❓` Grow intel rows with towers/sources on first reader and derive avoided
-  rooms from them.
+- `❓` Derive avoided rooms from intel rows.
 - `❓` A stronghold room is never crossed (Atlas), but an outpost or claim in
   one, or reachable only through one, is not refused by name.
 

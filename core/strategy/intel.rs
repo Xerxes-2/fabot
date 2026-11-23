@@ -61,6 +61,8 @@ pub fn step(world: &World, intel: &mut Intel) {
                     deploys_at: world.time + s.deploy,
                     collapses_at: world.time + s.collapse,
                 }),
+            towered: (room.structures.iter())
+                .any(|s| s.kind == StructureType::Tower && !s.owner.is_ours()),
         };
         intel.insert(room.name, row);
     }
@@ -83,6 +85,7 @@ pub fn preyed(intel: &Intel, declarations: &Declarations, time: i32) -> Vec<Room
     let mut rooms: Vec<(i32, &RoomName)> = intel
         .iter()
         .filter(|(room, _)| !declarations.avoid.contains(*room))
+        .filter(|(_, r)| r.owner.is_none() || !r.towered)
         .filter(|(_, r)| {
             enemy(&r.owner)
                 || enemy(&r.worker)

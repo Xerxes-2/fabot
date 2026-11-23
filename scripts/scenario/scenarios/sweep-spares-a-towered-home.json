@@ -1,0 +1,10 @@
+{
+  "why": "an enemy's home with a tower is a siege's (owner), even with the tower empty and his digger standing in it: the set that swept his towerless outpost (W7N2) never moves on into his home (W6N3); before, it did, as soon as no charged tower outpriced it",
+  "modules": ["fight", "strategy"],
+  "start": { "world": "scripts/scenario/worlds/enemy-towered-home.json", "seed": 1 },
+  "ticks": 3000,
+  "assert": [
+    { "measure": "sweptIn", "room": "W6N3", "max": 0 },
+    { "measure": "sweptIn", "room": "W7N2", "min": 1 }
+  ]
+}
