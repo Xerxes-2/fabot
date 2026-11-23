@@ -76,9 +76,11 @@ fn price(c: &Candidate, capacity: i32) -> Price {
     }
 }
 
-/// An operation holds only the colonies it casts from: a claim its sponsor, a
-/// siege or sweep the colonies Fight casts it from at rest, declared to closed,
-/// since between waves none is owed; a Defend its owed casts (`ColonyPlan.owes`).
+/// An operation holds only the colonies it casts from: a claim its sponsor; a
+/// siege from its declaration, and a sweep while its engagement is answered (a
+/// Sweep row is every room intel saw an enemy in), the colonies Fight casts it
+/// from at rest, since between waves none is owed; a Defend its owed casts
+/// (`ColonyPlan.owes`).
 pub fn busy(
     atlas: &mut Atlas,
     (plans, derived): (&[ColonyPlan], &Derived),
@@ -97,11 +99,11 @@ pub fn busy(
         serving.extend(ci.map(|i| derived.colonies[i]));
     }
     let fights: BTreeSet<RoomName> = (operations.iter())
-        .filter(|o| o.kind != OpKind::Defend)
+        .filter(|o| o.kind == OpKind::Siege)
         .map(|o| o.room)
         .chain(
             (engagements.iter())
-                .filter(|e| e.objective != Objective::Defend)
+                .filter(|e| e.objective != Objective::Defend && !e.unanswered)
                 .map(|e| e.room),
         )
         .collect();

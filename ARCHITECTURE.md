@@ -663,10 +663,12 @@ expansion, and operation priorities.
   add one non-standing outpost at a time so spawns absorb one room's bodies at
   once; young homes open all paying ones because waiting on containers delays
   RCL3. An operation holds only the colonies it casts from (`outposts::busy`):
-  a claim's sponsor until its spawn stands; a siege or sweep, from its
-  operation row to its engagement's close, every colony Fight's `colony_for`
-  picks at rest for some body (`fight::casting::homes`: none nearer out-banks
-  it), since between waves no cast is owed; a
+  a claim's sponsor until its spawn stands; a siege from its operation row
+  to its engagement's close, answered or not, and a sweep only while its
+  engagement is answered (its row is every room intel saw an enemy in, and a
+  starved sweep casts nothing), every colony Fight's `colony_for` picks at
+  rest for some body (`fight::casting::homes`: none nearer out-banks it),
+  since between waves no cast is owed; a
   Defend its owed casts (`ColonyPlan.owes`). Held, they add no new outposts
   and sponsor nothing, while the others keep growing.
 - **Expansion (`strategy::expand`):** automatic, one in flight. On due ticks

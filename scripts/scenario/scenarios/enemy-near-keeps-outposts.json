@@ -1,0 +1,15 @@
+{
+  "why": "an enemy two rooms off, his room in safe mode so no sweep opens there, costs no outpost: before, his room's Sweep row held our home busy from the tick a scout saw it, and every outpost without containers yielded for good",
+  "modules": ["strategy"],
+  "start": {
+    "world": "scripts/scenario/worlds/template.json",
+    "room": "W8N3",
+    "seed": 1,
+    "declarations": { "enemies": ["rival"] },
+    "opponents": [{ "name": "rival", "bot": "rival", "room": "W6N3", "config": { "role": "keep" } }]
+  },
+  "ticks": 4000,
+  "assert": [
+    { "measure": "outpostDug", "from": 2000, "min": 1 }
+  ]
+}
