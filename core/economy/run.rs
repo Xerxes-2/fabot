@@ -569,7 +569,7 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
     let slots = slots::plan(context.atlas, of, &owners, &state.assignments);
     let (assigned, holders, retired) =
         slots::assign(&*context.atlas, &derived, &slots, &state.assignments);
-    let (casts, short) = slots::casts(&derived, &slots, &holders);
+    let (casts, short, blocked) = slots::casts(&derived, &slots, &holders);
 
     let asks = (casts.iter())
         .map(|cast| {
@@ -600,6 +600,7 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
         served: (jobs::served(&derived, &owners))
             .map(|(g, ci)| (g.room, derived.colonies[ci].room))
             .collect(),
+        blocked,
     };
 
     let scouted = scouting(&*context.atlas, &derived, &state.assignments);

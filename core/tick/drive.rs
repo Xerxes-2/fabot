@@ -147,6 +147,7 @@ where
             held: &decided.result.settled.held,
             short: &decided.result.telemetry.short,
             served: &decided.result.telemetry.served,
+            blocked: &decided.result.telemetry.blocked,
             refusals: &refusals,
             phases,
             walked: &walked,

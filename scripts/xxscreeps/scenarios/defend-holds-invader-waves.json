@@ -1,10 +1,11 @@
 {
-  "why": "Invader waves on a home at RCL4 without safe mode are held: no level or spawn lost, no wave dwelling unanswered past the threshold a window, each wave gone, and every body of ours the engine killed young counted",
-  "modules": ["atlas", "exchange", "fight", "layout", "mv", "observe", "strategy", "tactics"],
+  "why": "Invader waves on a home at RCL4 without safe mode are held: no level or spawn lost, no wave dwelling unanswered past the threshold a window, each wave gone, and every body of ours the engine killed young counted; its Defends hold the colony's spend bodies (`blocked.fight`)",
+  "modules": ["atlas", "economy", "exchange", "fight", "layout", "mv", "observe", "strategy", "tactics"],
   "start": { "room": "W8N3", "seed": 1, "node": "N3", "invaders": "W8N3:1000:1500", "unsafe": true },
   "ticks": 3500,
   "assert": [
     { "metric": "hostile.dwell", "room": "W8N3", "max": 20 },
+    { "metric": "blocked.fight", "room": "W8N3", "from": 1000, "to": 3500, "total": true, "min": 1 },
     { "measure": "levelsLost", "max": 0 },
     { "measure": "spawnsLost", "max": 0 },
     { "measure": "hostilesAtEnd", "max": 0 },

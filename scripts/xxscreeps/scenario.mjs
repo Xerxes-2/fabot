@@ -35,8 +35,8 @@
 // (soak's --world; crafted ones under worlds/), "seed", "room"?, "node"?, "late"? (a world with no home of ours, as a recipe's), "ended"?, "invaders"?, "wave"?, "opponents"? (the world's own users), "declarations"? (in place of the world's), "memory"? (keys of Memory.v2 beside the world's), "gcl"? (in place of the world's), "level"? ({ room: its controller level in place of the world's }) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"?, "room"?, "kind"?, "name"?, "act"? }] };
 // a measure is one of `measures` below, read off the soak's output over ticks
 // [from, to), counted from the run's first tick; { "metric": a name the bot's
-// metrics carry (`core/observe/metrics.rs`), "room"? } bounds its worst
-// full window, and fails when none was read.
+// metrics carry (`core/observe/metrics.rs`), "room"?, "total"? } bounds its worst
+// full window, or with "total" their sum, and fails when none was read.
 // Exits non-zero when a bound fails or a soak does, or loses ticks twice.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";

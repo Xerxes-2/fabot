@@ -1299,6 +1299,17 @@ pub struct Cast {
     pub slot: String,
 }
 
+/// Why a colony left an open slot uncast this tick.
+#[derive(strum::IntoStaticStr)]
+#[strum(serialize_all = "lowercase")]
+pub enum Blocked {
+    Bank,
+    Spawns,
+    Fight,
+}
+
+type Short = Vec<(RoomName, Pattern, i32)>;
+
 /// Every open slot whose flow stands, in order on each colony's idle spawns
 /// while the bank pays; the first it cannot pay waits for the bank. With no
 /// harvester or no carrier of its own, a colony casts one at the bank it has.
@@ -1306,7 +1317,7 @@ pub fn casts(
     derived: &Derived,
     slots: &[Slot],
     holders: &Holders,
-) -> (Vec<Cast>, Vec<(RoomName, Pattern, i32)>) {
+) -> (Vec<Cast>, Short, Vec<(RoomName, &'static str)>) {
     let open = |s: &Slot| {
         holders.get(s.id.as_str()).is_none_or(|h| {
             h.iter()
@@ -1324,6 +1335,7 @@ pub fn casts(
 
     let mut casts = Vec::new();
     let mut short: BTreeMap<(RoomName, Pattern), i32> = BTreeMap::new();
+    let mut blocked = Vec::new();
     for (ci, colony) in derived.colonies.iter().enumerate() {
         let mut idle: Vec<&Spawn> = colony
             .spawns
@@ -1388,15 +1400,14 @@ pub fn casts(
             *spare.entry((s.room, s.job.pattern(), far(s))).or_default() +=
                 standing.saturating_sub(1);
         }
-        let mut waiting = false;
+        let (mut waiting, mut fight) = (None, false);
         for s in mine {
+            if !open(s) || !fed(s) || s.body.is_empty() || casts.iter().any(|c| c.slot == s.id) {
+                continue;
+            }
             // A spend body cast now holds a spawn the fight's ask waits on.
-            if colony.owes && s.spends
-                || !open(s)
-                || !fed(s)
-                || s.body.is_empty()
-                || casts.iter().any(|c| c.slot == s.id)
-            {
+            if colony.owes && s.spends {
+                fight = true;
                 continue;
             }
             if let Some(n) = spare
@@ -1406,8 +1417,13 @@ pub fn casts(
                 *n -= 1;
                 continue;
             }
-            if waiting || idle.is_empty() || engine::body_cost(&s.body) > bank {
-                waiting = true;
+            if waiting.is_some() || idle.is_empty() || engine::body_cost(&s.body) > bank {
+                let why = if idle.is_empty() {
+                    Blocked::Spawns
+                } else {
+                    Blocked::Bank
+                };
+                waiting = waiting.or(Some(why));
                 *short.entry((colony.room, s.job.pattern())).or_default() += 1;
                 continue;
             }
@@ -1416,9 +1432,12 @@ pub fn casts(
             let floor = s.rank <= rank_of(&Job::Fill, true);
             casts.push(cast(s, s.body.clone(), floor, &mut idle, &mut bank));
         }
+        for why in waiting.into_iter().chain(fight.then_some(Blocked::Fight)) {
+            blocked.push((colony.room, why.into()));
+        }
     }
     let short = short.into_iter().map(|((r, p), n)| (r, p, n)).collect();
-    (casts, short)
+    (casts, short, blocked)
 }
 
 #[cfg(test)]

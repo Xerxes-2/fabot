@@ -84,6 +84,7 @@ export const measures = {
   metric: (_, a, dir) => {
     const values = windowsOf(dir, a).filter((w) => w.ticks === 100 && w.row === (a.room ?? "*")).map((w) => w.values[a.metric] ?? 0);
     if (!values.length) return a.min !== undefined ? -Infinity : Infinity;
+    if (a.total) return values.reduce((n, v) => n + v, 0);
     return a.min !== undefined ? Math.min(...values) : Math.max(...values);
   },
   // A body cast before the stock fell is not one cast under it, nor one cast

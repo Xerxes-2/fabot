@@ -38,6 +38,7 @@ const SPAWN_TICKS: &str = "spawn.ticks";
 const SPAWNING: &str = "spawn.util";
 const IDLE_WANT: &str = "spawn.idleWant";
 const SHORT: &str = "short.";
+const BLOCKED: &str = "blocked.";
 const FLIPS: &str = "fight.flips";
 const DEATH: &str = "death.";
 const LOST: &str = "lost.structure";
@@ -137,6 +138,11 @@ const METRICS: &[Metric] = &[
         SHORT,
         Fold::Mean,
         "the colony's open slots of the pattern left uncast",
+    ),
+    metric(
+        BLOCKED,
+        Fold::Sum,
+        "ticks the colony left an open slot uncast, by why: bank (its first waiting body costs more), spawns (none idle), fight (a spend body while it owes a fight cast)",
     ),
     metric(
         FLIPS,
@@ -375,6 +381,7 @@ pub struct Seen<'a> {
     pub held: &'a [String],
     pub short: &'a [(RoomName, &'static str, i32)],
     pub served: &'a [(RoomName, RoomName)],
+    pub blocked: &'a [(RoomName, &'static str)],
     pub refusals: &'a [Refusal],
     pub phases: &'a [(String, f64)],
     pub walked: &'a [(String, i32)],
@@ -889,6 +896,9 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
             f64::from(*n),
         );
         owed.insert(*room);
+    }
+    for (room, why) in seen.blocked {
+        add(sums, Some(*room), &format!("{BLOCKED}{why}"), 1.0);
     }
 
     for c in world

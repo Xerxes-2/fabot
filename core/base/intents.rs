@@ -181,6 +181,7 @@ pub struct Telemetry {
     pub traces: Vec<(String, Vec<(crate::world::Pos, i64)>)>,
     /// Each outpost and the colony that builds there (`jobs::served`).
     pub served: Vec<(RoomName, RoomName)>,
+    pub blocked: Vec<(RoomName, &'static str)>,
 }
 
 /// A module's tick: `Tick` settles the asks and wishes of every module as one.
@@ -201,6 +202,7 @@ impl ModuleOutput {
         self.telemetry.short.extend(other.telemetry.short);
         self.telemetry.traces.extend(other.telemetry.traces);
         self.telemetry.served.extend(other.telemetry.served);
+        self.telemetry.blocked.extend(other.telemetry.blocked);
     }
 }
 
