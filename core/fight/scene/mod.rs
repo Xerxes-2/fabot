@@ -125,7 +125,9 @@ impl<'a> Scene<'a> {
         let ours = self.homes.contains(&h.pos.room) || self.worked.contains(&h.pos.room);
         match h.owner {
             Owner::Ally(_) => false,
-            Owner::Stranger(_) => self.armed.contains(&h.id) || ours && hostiles::works(h),
+            Owner::Stranger(_) => {
+                self.armed.contains(&h.id) || ours && (hostiles::works(h) || hostiles::weaponed(h))
+            }
             _ => true,
         }
     }

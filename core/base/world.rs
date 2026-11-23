@@ -718,7 +718,7 @@ pub mod terrain {
 }
 
 pub mod hostiles {
-    use super::{Creep, Owner, Part, Room, RoomName};
+    use super::{BodyPart, Creep, Owner, Part, Room, RoomName};
     use crate::engine;
     use std::collections::BTreeSet;
 
@@ -731,11 +731,18 @@ pub mod hostiles {
         creep.owner != Owner::Keeper
     }
 
+    fn weapon(p: &BodyPart) -> bool {
+        matches!(p.kind, Part::Attack | Part::RangedAttack)
+    }
+
+    pub fn weaponed(creep: &Creep) -> bool {
+        creep.body.iter().any(weapon)
+    }
+
+    /// A weapon shot off strikes nothing back, as `Exchange` prices it,
+    /// until a HEAL of its own grows it again.
     pub fn strikes(creep: &Creep) -> bool {
-        creep
-            .body
-            .iter()
-            .any(|p| p.kind == Part::Attack || p.kind == Part::RangedAttack)
+        (creep.body.iter()).any(|p| weapon(p) && (p.hits > 0 || creep.live(Part::Heal) > 0))
     }
 
     pub fn outlives(creep: &Creep, safe_left: i32) -> bool {

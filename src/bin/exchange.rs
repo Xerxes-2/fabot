@@ -10,9 +10,10 @@
 
 use std::io::Read;
 
+use fabot_base::engine;
 use fabot_base::vocabulary::Part;
-use fabot_base::world::{Pos, RoomName};
-use fabot_exchange::{self as exchange, Outcome, Side, Terrain, Tower, fighter};
+use fabot_base::world::{BodyPart, Creep, Owner, Pos, RoomName, Store};
+use fabot_exchange::{self as exchange, Outcome, Side, Terrain, Tower};
 use fabot_fight::{Priced, kinds::defend};
 use serde_json::{Value, json};
 
@@ -43,9 +44,30 @@ fn predict(sample: &Value) -> Value {
                     .iter()
                     .map(|c| c.as_str().unwrap().parse().ok())
                     .collect();
-                let mut fighter = fighter::of_parts(&parts, &boosts, int(b, "hits"), Some(pos(b)));
-                fighter.invader = b["invader"].as_bool().unwrap_or(false);
-                fighter
+                // Priced as the bot prices a hostile it sees.
+                let creep = Creep {
+                    id: "h".into(),
+                    name: "h".into(),
+                    owner: if b["invader"].as_bool().unwrap_or(false) {
+                        Owner::Invader
+                    } else {
+                        Owner::Stranger("rival".into())
+                    },
+                    pos: pos(b),
+                    body: (parts.iter().zip(&boosts).enumerate())
+                        .map(|(i, (kind, boost))| BodyPart {
+                            kind: *kind,
+                            hits: engine::part_hits_at(parts.len(), int(b, "hits"), i),
+                            boost: *boost,
+                        })
+                        .collect(),
+                    hits: int(b, "hits"),
+                    hits_max: engine::PART_HITS * parts.len() as i32,
+                    ticks_to_live: 1500,
+                    fatigue: 0,
+                    store: Store::empty(),
+                };
+                fabot_fight::casting::fighter_of(&creep)
             })
             .collect(),
         ramparts: each(e, "ramparts")

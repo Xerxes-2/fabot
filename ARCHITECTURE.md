@@ -430,8 +430,10 @@ pricer would cost ~2× CPU and 580 lines for no gain).
 
 - **Clustering:** armed hostiles cluster by connected components at Chebyshev
   distance ≤ 4 (including across room borders). Unarmed hostiles are singletons.
-  *Armed* = `ATTACK` or `RANGED_ATTACK`, `HEAL`/`WORK` beside one in the room,
-  or `WORK` alone in an owned room.
+  *Armed* = a live `ATTACK` or `RANGED_ATTACK` (one shot off counts while a
+  `HEAL` of its own lives), `HEAL`/`WORK` beside one in the room, or `WORK`
+  alone in an owned room: a cripple shot disarmed is v1's trespasser, struck
+  where it stands in our rooms but standing nothing down and casting nothing.
 - **Identity & events:** clusters match previous groups by largest member
   overlap. Splits keep the id on the largest fragment; merges keep the older id.
   Emits `Split`, `Merged`, `Left`, `Newcomer`. New ids strictly exceed `held`

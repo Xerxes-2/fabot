@@ -5,7 +5,8 @@ use fabot_base::boost::{self, Boosting, Stock};
 use fabot_base::engine;
 use fabot_base::vocabulary::{Part, ResourceType};
 use fabot_base::world::{
-    Creep, Id, Owner, Pos, Room, RoomName, Rules, Spawn, Store, Structure, StructureType, terrain,
+    self, Creep, Id, Owner, Pos, Room, RoomName, Rules, Spawn, Store, Structure, StructureType,
+    terrain,
 };
 use fabot_exchange::{self as exchange, Fighter, fighter};
 
@@ -82,11 +83,12 @@ fn with_heal(mut body: Body) -> Body {
 }
 
 pub fn fighter_of(c: &Creep) -> Fighter {
-    let (body, boosts) = (
-        fabot_base::world::body_kinds(c),
-        fabot_base::world::body_boosts(c),
-    );
+    let (body, boosts) = (world::body_kinds(c), world::body_boosts(c));
     let mut f = fighter::of_parts(&body, &boosts, c.hits, Some(c.pos));
+    // The stand-down and the price must agree on whether a hostile strikes.
+    if !c.owner.is_ours() && world::hostiles::strikes(c) {
+        f.reach = f.reach.max(engine::strike_reach(&body, c.hits_max));
+    }
     f.invader = c.owner == Owner::Invader;
     f
 }

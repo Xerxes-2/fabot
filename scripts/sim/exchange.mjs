@@ -88,7 +88,10 @@ function hostile(kinds) {
   const tier = random() < 0.3 ? between(0, 2) : null;
   const tiers = kind === "kiter" ? Object.fromEntries(KITER.map((p) => [p, pick([null, 0, 1, 2])])) : {};
   const boosts = parts.map((p) => (tier !== null ? COMPOUNDS[p][tier] : tiers[p] != null ? COMPOUNDS[p][tiers[p]] : ""));
-  return { parts, boosts, hits: 100 * parts.length };
+  // One in three that heals is drawn hurt: its HEAL, cast last, lives on what its head lost.
+  const full = 100 * parts.length;
+  const hurt = parts.includes("heal") && random() < 1 / 3;
+  return { parts, boosts, hits: hurt ? between(100, full - 1) : full };
 }
 
 // The defending side, fixed: a guard and a ranger, or two rangers, which

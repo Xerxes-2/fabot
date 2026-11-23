@@ -35,8 +35,8 @@ pub fn armed_and_opening(
 }
 
 /// A Defend left open holds its room: a newcomer inside it is its target
-/// now, with a fresh budget, where its own group is not there (a home's,
-/// so a second raid is not left to towers) or was lost from sight.
+/// now, with a fresh budget, where its own group is not there (a home's, so
+/// a second raid is not left to towers), was lost from sight or shot disarmed.
 pub fn newcomers(
     engagements: &mut [Engagement],
     events: &[tracker::Event],
@@ -53,11 +53,9 @@ pub fn newcomers(
         let in_room =
             |id| (by_id.get(&id)).is_some_and(|g| g.room() == e.room && g.last_seen == time);
 
-        let gone = if homes.contains(&e.room) {
-            !in_room(e.group)
-        } else {
-            !by_id.contains_key(&e.group)
-        };
+        let raids = (by_id.get(&e.group))
+            .is_some_and(|g| g.last_seen < time || g.members.iter().any(|m| opens.contains(m)));
+        let gone = !raids || homes.contains(&e.room) && !in_room(e.group);
 
         let newcomer = events.iter().find_map(|event| match event {
             tracker::Event::Newcomer(id)

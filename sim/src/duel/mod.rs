@@ -310,15 +310,18 @@ fn stand(s: &Sample, seed: u64) -> World {
                 "hitsMax": 300_000_000, "nextDecayTime": 101 }));
         }
         for (i, b) in army.bodies.iter().enumerate() {
-            let body: Vec<Value> = (b.parts.iter().zip(&b.boosts))
-                .map(|(p, k)| match k.as_str() {
-                    "" => json!({ "type": p, "hits": 100 }),
-                    k => json!({ "type": p, "hits": 100, "boost": k }),
+            let body: Vec<Value> = (b.parts.iter().zip(&b.boosts).enumerate())
+                .map(|(i, (p, k))| {
+                    let hits = fabot_base::engine::part_hits_at(b.parts.len(), b.hits as i32, i);
+                    match k.as_str() {
+                        "" => json!({ "type": p, "hits": hits }),
+                        k => json!({ "type": p, "hits": hits, "boost": k }),
+                    }
                 })
                 .collect();
             let user = if b.invader { INVADER } else { user };
             objects.push(json!({ "type": "creep", "room": room, "x": b.x, "y": b.y, "user": user, "body": body,
-                "name": format!("{}-{side}-{i}", s.id), "hits": b.hits, "hitsMax": b.hits,
+                "name": format!("{}-{side}-{i}", s.id), "hits": b.hits, "hitsMax": 100 * b.parts.len(),
                 "fatigue": 0, "store": {}, "storeCapacity": 0, "notifyWhenAttacked": true }));
         }
     }
