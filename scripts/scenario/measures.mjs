@@ -202,6 +202,7 @@ export const measures = {
     new Set(livesOf(dir).filter((b) => b.ours && b.name.startsWith(a.name) && b.first > offsetOf(samples) && b.entered?.[0]?.[0] === a.room).map((b) => b.name)).size,
   claimersCast: (samples, a) => new Set(within(samples, a).flatMap((s) => s.bodies.filter((b) => b.startsWith("claimer-")).map((b) => b.split("@")[0]))).size,
   claimSpawned: (samples) => firstClaimed(samples, (c) => c.spawns > 0),
+  produced: (samples, a) => Math.max(0, ...samples.map((s) => Object.entries(s.rooms ?? {}).reduce((n, [r, x]) => n + (!a.room || r === a.room ? (x.produced?.[a.resource] ?? 0) : 0), 0))),
   // The most of a compound (`resource`) stood at once, in `room` if one is named.
   made: (samples, a) => Math.max(0, ...samples.map((s) => (a.room ? s.rooms?.[a.room]?.made : s.made)?.[a.resource] ?? 0)),
   // Our bodies' boosted parts at once, the most over the run.

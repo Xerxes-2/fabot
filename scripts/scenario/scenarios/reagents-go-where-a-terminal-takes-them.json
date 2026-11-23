@@ -4,6 +4,6 @@
   "start": { "world": "scripts/scenario/worlds/young-among-colonies.json", "seed": 1, "stock": { "W2S8": { "X": 6000 }, "W3S8": { "KO": 3000 }, "W7S9": { "OH": 3000, "UH": 1000 } } },
   "ticks": 3000,
   "assert": [
-    { "measure": "made", "resource": "KHO2", "min": 2000 }
+    { "measure": "produced", "resource": "KHO2", "min": 2700 }
   ]
 }
