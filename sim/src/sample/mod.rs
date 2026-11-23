@@ -55,6 +55,15 @@ fn reserve(level: u32) -> f64 {
 }
 
 /// A creep's body, or a tombstone's.
+pub fn boosts(o: &Obj) -> Vec<&str> {
+    match o.get(atom!("body")) {
+        Some(Val::Arr(b)) => (b.iter())
+            .filter_map(|p| p.as_obj()?.get(atom!("boost"))?.as_str())
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 pub fn parts(o: &Obj) -> Vec<&str> {
     match o.get(atom!("body")).or(o.get(atom!("creepBody"))) {
         Some(Val::Arr(parts)) => (parts.iter())
@@ -459,14 +468,7 @@ impl Sampler {
             })
             .collect();
         let creeps = ours_in(&["creep"]);
-        let boosts: Vec<Vec<&str>> = (creeps.iter())
-            .map(|o| match o.get(atom!("body")) {
-                Some(Val::Arr(b)) => (b.iter())
-                    .filter_map(|p| p.as_obj()?.get(atom!("boost"))?.as_str())
-                    .collect(),
-                _ => Vec::new(),
-            })
-            .collect();
+        let boosts: Vec<Vec<&str>> = creeps.iter().map(|o| boosts(o)).collect();
         let boosted: usize = boosts.iter().map(Vec::len).sum();
         let boosted_with = (boosts.iter())
             .map(|b| b.iter().collect::<BTreeSet<_>>().len())

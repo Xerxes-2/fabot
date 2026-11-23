@@ -208,6 +208,10 @@ export const measures = {
   boosted: (samples) => Math.max(0, ...samples.map((s) => s.boosted ?? 0)),
   // The most compounds one of our bodies carried at once.
   boostedWith: (samples) => Math.max(0, ...samples.map((s) => s.boostedWith ?? 0)),
+  // Our fight bodies whose life ended boosted short of a compound for each TOUGH, RANGED, HEAL,
+  // MOVE and ATTACK type they carry: read on a home holding every T3 combat boost.
+  boostedShort: (_, __, dir) =>
+    livesOf(dir).filter((b) => b.ours && b.name.startsWith("fight-") && b.boosts > 0 && b.boosts < new Set([...b.body].filter((p) => "trhma".includes(p))).size).length,
   // What `room`'s storage, terminal, labs, factory and power spawn hold at the window's end, and the non-energy of it.
   heldAtEnd: (samples, a) => at(samples, a.to ?? Infinity).rooms[a.room]?.held ?? Infinity,
   oresAtEnd: (samples, a) => at(samples, a.to ?? Infinity).rooms[a.room]?.ores ?? 0,

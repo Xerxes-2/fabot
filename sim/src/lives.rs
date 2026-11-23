@@ -1,14 +1,14 @@
 //! Each body's life over the followed rooms and their neighbours (`bodies.jsonl`), the
 //! longest a body of ours stood loaded and idle or kept a mineral (a carrier, or any body
 //! taking energy), and its border bounces.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use fabot_base::vocabulary;
 use krebs::atom;
 use krebs::doc::{Obj, Val};
 use serde_json::{Value, json};
 
-use crate::sample::parts;
+use crate::sample::{boosts, parts};
 use crate::view::{EVENT_ATTACK, Room, num, obj, ours, store, text, used};
 
 #[derive(Default)]
@@ -45,11 +45,10 @@ pub fn letters(body: &[&str]) -> String {
 }
 
 fn array<'a>(v: &'a mut Value, key: &str) -> &'a mut Vec<Value> {
-    let slot = &mut v[key];
-    if slot.is_null() {
-        *slot = json!([]);
+    if v[key].is_null() {
+        v[key] = json!([]);
     }
-    slot.as_array_mut().unwrap()
+    v[key].as_array_mut().unwrap()
 }
 
 fn edge(o: &Obj) -> bool {
@@ -128,6 +127,7 @@ impl Lives {
                 life["last"] = json!(time);
                 life["ttl"] = json!(num(o, atom!("ageTime")) - time as f64);
                 life["hits"] = json!(num(o, atom!("hits")));
+                life["boosts"] = json!(boosts(o).into_iter().collect::<BTreeSet<_>>().len());
                 let ticks = &mut life["rooms"][room.name];
                 *ticks = json!(ticks.as_u64().unwrap_or(0) + 1);
                 for act in acts(o) {

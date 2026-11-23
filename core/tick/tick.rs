@@ -170,7 +170,7 @@ pub fn arbitrate(context: &Context, wishes: &[(RoomName, Wish)]) -> (Vec<Action>
 }
 
 /// A body `boost::boosting` stands at a lab is held there and boosted: its
-/// module's acts and wish are dropped for the walk, or the boost itself when it
+/// module's acts and wish are dropped for the walk, and the boost itself when it
 /// stands beside it.
 fn boost_stop(
     context: &mut Context,
@@ -201,16 +201,21 @@ fn boost_stop(
             .find(|s| s.id == w.lab);
         if creep.pos.within(1, at) && lab.is_some_and(|l| boost::can_boost(l, w.load.compound)) {
             actions.push(Action::Lab(w.lab, LabAct::BoostCreep(creep.id)));
-            continue;
         }
         let mover = Mover {
             footprint: Footprint::One,
             factor: grid::loaded_factor(&world::body_kinds(creep)),
         };
-        walks.push((
-            creep.pos.room,
-            mv::plan::toward(context.atlas, creep, mover, &target_at(at, 1), 1),
-        ));
+        // Beside its lab it gives way to the carrier filling it; out of reach
+        // it shoves through, or a carrier parked on the lab's one free side
+        // holds it off until its wait runs out and it leaves short.
+        let weight = if creep.pos.within(1, at) {
+            1
+        } else {
+            tactics::WEIGHT
+        };
+        let wish = mv::plan::toward(context.atlas, creep, mover, &target_at(at, 1), weight);
+        walks.push((creep.pos.room, wish));
     }
 
     Some(walks)
