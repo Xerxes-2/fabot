@@ -7,7 +7,7 @@ use fabot_base::declarations;
 use fabot_base::grid::Footprint;
 use fabot_base::intents::{Action, RoomAct};
 use fabot_base::tiles::{self, Tile, TileSet};
-use fabot_base::world::{Built, Owner, Pos, Room, RoomName, StructureType, World, terrain};
+use fabot_base::world::{Owner, Pos, Room, RoomName, StructureType, World, terrain};
 
 use super::shape::Plan;
 use super::sites::SITES_IN_FLIGHT;
@@ -151,8 +151,8 @@ pub fn sites(
     let mut held: BTreeMap<RoomName, TileSet> = BTreeMap::new();
     for plan in plans {
         let solid = held.entry(plan.room).or_default();
-        for i in plan.items.iter().filter(|i| !i.kind.walkable()) {
-            solid.insert(i.tile);
+        for t in plan.solid() {
+            solid.insert(t);
         }
     }
 

@@ -642,7 +642,7 @@ impl Sampler {
                     StructureType::Rampart,
                     StructureType::Controller,
                 ];
-                ours(o) && kind.is_some_and(|k| !open.contains(&k))
+                kind.is_some_and(|k| (ours(o) || k == StructureType::Wall) && !open.contains(&k))
             })
             .map(|(_, o)| *o)
             .collect();

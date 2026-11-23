@@ -553,7 +553,7 @@ function sample(t, time, room, user = ours) {
   const sourceContainers = objects.filter((o) => o.structureType === "container" && o["#lookType"] !== "constructionSite" && atSource(o));
   row.sourceContainers = sourceContainers.length;
   const roads = objects.filter((o) => o.structureType === "road" && o["#lookType"] !== "constructionSite");
-  const solid = objects.filter((o) => o["#lookType"] === "structure" && o["#user"] === user && !["road", "container", "rampart", "controller"].includes(o.structureType));
+  const solid = objects.filter((o) => o["#lookType"] === "structure" && (o["#user"] === user || o.structureType === "constructedWall") && !["road", "container", "rampart", "controller"].includes(o.structureType));
   row.buried = roads.filter((r) => solid.some((o) => o.pos.x === r.pos.x && o.pos.y === r.pos.y)).length;
   // A harvest bay's extension is its harvester's, filled from the container
   // beside it; an extension bay's (Hivemind's) is filled from the open tile

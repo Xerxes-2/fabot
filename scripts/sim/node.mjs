@@ -50,6 +50,8 @@ export const NODES = {
   // RCL8 as a from-zero run reaches it: RCL7's plan standing, the stock at
   // its RCL7 level, and the roads its outposts laid on RCL8's extension tiles;
   // every room in reach avoided, so the home's dig alone pays (outposts lost).
+  // RCL5 as a run whose outposts' roads went home across the ring before its walls stood on them.
+  U5: { level: 5, stored: 50000, without: ["rampart"], walled: true },
   R8: { level: 8, built: 7, stored: 50000, without: ["rampart"], modern: true, bodies: LATE_BODIES, buried: true, alone: true },
   // N7 with every room in reach avoided.
   A7: { level: 8, stored: 500000, without: ["rampart"], modern: true, bodies: LATE_BODIES, alone: true },
@@ -102,7 +104,7 @@ export function built(kind, terrain, t, level) {
   return { store: energy(0), ...extra, ...capacity, hits: kind === "road" ? full : hits, hitsMax: full, ...(DECAY[kind] && { nextDecayTime: t + DECAY[kind] }) };
 }
 // `modern` picks xxscreeps' template with every structure kind, which krebs always has.
-const STOOD = new Set(["level", "built", "stored", "without", "worn", "bodies", "outposts", "alone", "labs", "modern", "buried", "moved", "claims", "spare", "short", "stale", "labStock"]);
+const STOOD = new Set(["level", "built", "stored", "without", "worn", "bodies", "outposts", "alone", "labs", "modern", "buried", "walled", "moved", "claims", "spare", "short", "stale", "labStock"]);
 const terrainOf = (room) => [room.terrain].flat().join("");
 
 /** Why sim cannot stand node `name`, or null. */
@@ -116,11 +118,12 @@ export function unstood(name) {
  * What `node` stands on `ground` (`engine/node.mjs ground`'s shape), in the
  * plan tool's build order: its plan at its level but what it is `without`,
  * `buried` adding roads on the extension tiles its level adds past `built`,
+ * `walled` the ring's walls with a road under each,
  * `moved` setting each container on another tile serving its rock.
  */
 export function planNode(ground, node, plan) {
-  const planned = (level) => {
-    const res = spawnSync(plan, { input: JSON.stringify({ ...ground, level, labs: Boolean(node.labs) }), encoding: "utf8" });
+  const planned = (level, ring = false) => {
+    const res = spawnSync(plan, { input: JSON.stringify({ ...ground, level, ring, labs: Boolean(node.labs) }), encoding: "utf8" });
     if (res.status !== 0) throw new Error(`the plan tool failed: ${res.stderr}`);
     return JSON.parse(res.stdout);
   };
@@ -129,6 +132,10 @@ export function planNode(ground, node, plan) {
     const held = new Set(built.map((s) => s.y * 50 + s.x));
     const next = planned(node.level).filter((s) => s.kind === "extension" && !held.has(s.y * 50 + s.x));
     built.push(...next.map(({ x, y }) => ({ kind: "road", x, y })));
+  }
+  if (node.walled) {
+    const walls = planned(node.level, true).filter((s) => s.kind === "constructedWall");
+    built.push(...walls.flatMap(({ x, y }) => [{ kind: "road", x, y }, { kind: "constructedWall", x, y }]));
   }
   if (node.moved) {
     const { terrain, sources, controller } = ground;
@@ -168,7 +175,7 @@ export function standNode(world, room, name, plan) {
   for (const s of list) {
     if (!BUILT[s.kind]) throw new Error(`no ${s.kind} in a node`);
     const o = { _id: nextId(), type: s.kind, room, x: s.x, y: s.y, notifyWhenAttacked: true, ...built(s.kind, terrain[s.y * 50 + s.x], t, node.level) };
-    if (s.kind !== "road" && s.kind !== "container") o.user = US;
+    if (!["road", "container", "constructedWall"].includes(s.kind)) o.user = US;
     if (s.kind === "spawn") Object.assign(o, s === first ? { name: "Spawn1", store: energy(300) } : { name: `Node${id}` }, { spawning: null });
     if (s.kind === "storage") o.store = { energy: Number(stock), ...Object.fromEntries(ores.map((m) => m.split(":")).map(([r, n]) => [r, Number(n)])) };
     if (s.kind === "lab" && s === list.find((l) => l.kind === "lab") && node.labStock) {

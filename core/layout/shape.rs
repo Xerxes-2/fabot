@@ -1,7 +1,7 @@
 use fabot_base::declarations::MUSTER_RANGE;
 /// Ahead of `State` so `State` can hold the standing plan.
 use fabot_base::tiles::{self, Tile};
-use fabot_base::world::{Pos, RoomName, StructureType};
+use fabot_base::world::{Built, Pos, RoomName, StructureType};
 
 /// `Level`: from which the engine allows it (its rank among its kind against
 /// CONTROLLER_STRUCTURES), or the level a rule gives a road or container.
@@ -36,6 +36,14 @@ impl Plan {
                 && i.kind != StructureType::Rampart
         };
         (!self.items.iter().any(built)).then(|| tiles::to_pos(self.room, self.anchor))
+    }
+
+    /// Hivemind's navigation matrix: the ring's walls count whether or not
+    /// Strategy builds the ring yet, since a room it later keeps walls them.
+    pub fn solid(&self) -> impl Iterator<Item = Tile> + '_ {
+        (self.items.iter().chain(&self.ring))
+            .filter(|i| !i.kind.walkable())
+            .map(|i| i.tile)
     }
 }
 

@@ -98,7 +98,7 @@ pub fn colonies(
         towers.sort_by_key(|a| a.id);
 
         let blocked: TileSet = (room.structures.iter())
-            .filter(|s| s.owner.is_ours() && !s.walkable)
+            .filter(|s| (s.owner.is_ours() || s.kind == StructureType::Wall) && !s.walkable)
             .map(|s| tiles::of_pos(&s.pos))
             .collect();
         let census = sites::census_of(room, &ours);
