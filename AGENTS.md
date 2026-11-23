@@ -112,8 +112,8 @@ Full engine and metric details live in `ARCHITECTURE.md` §10.
 - **Refactor** (no intended behaviour change): identical `npm run replay`
   against base (§10.4). Behaviour changes read their first differing tick there
   before running scenarios.
-- **Behaviour fix:** add a scenario reproducing the incident (`scenario.mjs --list`
-  shows its engine) and pass `npm run scenario` without regression.
+- **Behaviour fix:** add a scenario reproducing the incident and pass
+  `npm run scenario` without regression.
 - **Fight changes:** no scenario seats an open-source bot to prove a fight
   (`ARCHITECTURE.md` §10.2, Adversaries). Scenarios verify mechanics against
   scripted rivals (`sim/src/rival/`, each explaining `why`); what a fight pays
