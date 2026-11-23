@@ -72,7 +72,7 @@ fn range(a: Found, b: Found) -> f64 {
 }
 
 pub fn has_active(o: &Obj, part: &str) -> bool {
-    match o.get(Atom::intern("body")) {
+    match o.get(atom!("body")) {
         Some(Val::Arr(parts)) => (parts.iter().filter_map(Val::as_obj))
             .any(|p| text(p, atom!("type")) == part && num(p, atom!("hits")) > 0.0),
         _ => false,
@@ -154,7 +154,7 @@ impl Run<'_> {
     fn creep(&mut self, name: &str, act: &CreepAct) -> Result<(), ErrorCode> {
         let &creep = self.at.creeps.get(name).ok_or(NotFound)?;
         check(
-            creep.1.get(Atom::intern("spawning")) == Some(&Val::Bool(true)),
+            creep.1.get(atom!("spawning")) == Some(&Val::Bool(true)),
             Busy,
         )?;
         let id = text(creep.1, atom!("_id")).to_string();

@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use fabot_base::vocabulary;
 use krebs::atom;
-use krebs::doc::{Atom, Obj, Val};
+use krebs::doc::{Obj, Val};
 use serde_json::{Value, json};
 
 use crate::sample::parts;
@@ -59,7 +59,7 @@ fn edge(o: &Obj) -> bool {
 
 /// What the body did this tick: the engine's action log holds this tick's acts, the rest null.
 pub fn acts(o: &Obj) -> Vec<&str> {
-    let log = obj(o, Atom::intern("actionLog"));
+    let log = obj(o, atom!("actionLog"));
     log.into_iter()
         .flat_map(Obj::iter)
         .filter(|(_, v)| !matches!(v, Val::Null))
@@ -94,8 +94,10 @@ impl Lives {
                     .filter_map(|p| p.parse::<screeps::Part>().ok())
                     .map(screeps::Part::cost)
                     .sum();
-                self.keys
-                    .insert(text(o, atom!("_id")).to_string(), key.clone());
+                let id = text(o, atom!("_id"));
+                if !self.keys.contains_key(id) {
+                    self.keys.insert(id.to_string(), key.clone());
+                }
                 let life = self.open.entry(key).or_insert_with(|| {
                     json!({ "name": name, "ours": ours(o), "body": letters(&body),
                         "cost": cost, "first": time, "rooms": {}, "acts": {} })
@@ -117,7 +119,8 @@ impl Lives {
                 }
                 if !life["at"]
                     .as_str()
-                    .is_some_and(|a| a.starts_with(&format!("{} ", room.name)))
+                    .and_then(|a| a.strip_prefix(room.name))
+                    .is_some_and(|a| a.starts_with(' '))
                 {
                     array(life, "entered").push(json!([room.name, time]));
                 }

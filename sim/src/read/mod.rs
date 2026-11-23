@@ -85,7 +85,7 @@ impl Reader<'_> {
     }
 
     fn body(o: &Obj) -> Vec<BodyPart> {
-        let parts = match o.get(Atom::intern("body")) {
+        let parts = match o.get(atom!("body")) {
             Some(Val::Arr(parts)) => parts.as_slice(),
             _ => &[],
         };
@@ -117,7 +117,7 @@ impl Reader<'_> {
 
     fn controller(&self, room: RoomName, o: &Obj) -> Controller {
         let level = num(o, atom!("level")) as i32;
-        let downgrade = match o.get(Atom::intern("downgradeTime")) {
+        let downgrade = match o.get(atom!("downgradeTime")) {
             Some(Val::Num(t)) => *t as i32 - self.time,
             _ => controller_downgrade(level as u8).unwrap_or(0) as i32,
         };
@@ -141,11 +141,11 @@ impl Reader<'_> {
 
     fn structure(&self, room: RoomName, kind: StructureType, o: &Obj) -> Structure {
         let owner = self.owner(o);
-        let cooldown = match o.get(Atom::intern("cooldown")) {
+        let cooldown = match o.get(atom!("cooldown")) {
             Some(Val::Num(c)) => *c as i32,
             _ => self.left(o, atom!("cooldownTime")),
         };
-        let public = matches!(o.get(Atom::intern("isPublic")), Some(Val::Bool(true)));
+        let public = matches!(o.get(atom!("isPublic")), Some(Val::Bool(true)));
         let core = kind == StructureType::InvaderCore;
         // As `read.js`: a core not yet collapsing collapses at the latest after its deploy.
         let deploy = (num(o, atom!("deployTime")) as i32 - self.time).max(0);
@@ -190,7 +190,7 @@ impl Reader<'_> {
     /// A tombstone keeps our creep's body and life left, another's its id; a ruin none.
     fn remains(&self, room: RoomName, o: &Obj, tombstone: bool) -> Remains {
         let fallen = (tombstone && self.owner(o).is_ours()).then(|| Fallen {
-            body: match o.get(Atom::intern("creepBody")) {
+            body: match o.get(atom!("creepBody")) {
                 Some(Val::Arr(parts)) => (parts.iter().filter_map(Val::as_str))
                     .map(|t| t.parse().unwrap_or(Part::Tough))
                     .collect(),
@@ -204,7 +204,7 @@ impl Reader<'_> {
             pos: self.pos(room, o),
             store: Reader::store(o),
             theirs: (tombstone && fallen.is_none())
-                .then(|| Id::of_engine(text(o, Atom::intern("creepId")))),
+                .then(|| Id::of_engine(text(o, atom!("creepId")))),
             fallen,
         }
     }
@@ -297,7 +297,7 @@ pub fn world(v: &View, declarations: &Declarations) -> World<'static> {
                     })),
                 "tombstone" => room.remains.push(r.remains(name, o, true)),
                 "ruin" => room.remains.push(r.remains(name, o, false)),
-                "creep" if o.get(Atom::intern("spawning")) == Some(&Val::Bool(true)) => {}
+                "creep" if o.get(atom!("spawning")) == Some(&Val::Bool(true)) => {}
                 "creep" if v.ours(o) => world.creeps.push(r.creep(name, o)),
                 "creep" => room.others.push(r.creep(name, o)),
                 "flag" | "powerCreep" | "nuke" => {}

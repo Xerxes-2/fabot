@@ -56,10 +56,7 @@ fn reserve(level: u32) -> f64 {
 
 /// A creep's body, or a tombstone's.
 pub fn parts(o: &Obj) -> Vec<&str> {
-    match o
-        .get(Atom::intern("body"))
-        .or(o.get(Atom::intern("creepBody")))
-    {
+    match o.get(atom!("body")).or(o.get(atom!("creepBody"))) {
         Some(Val::Arr(parts)) => (parts.iter())
             .filter_map(|p| p.as_str().or(p.as_obj().map(|p| text(p, atom!("type")))))
             .collect(),
@@ -306,7 +303,7 @@ impl Sampler {
                     "tombstone" if self.graves.insert(text(o, atom!("_id")).into()) => {
                         let body = parts(o);
                         let recycled = self.taken.contains(text(o, atom!("creepId")));
-                        let ttl = num(o, Atom::intern("creepTicksToLive")) / life(&body);
+                        let ttl = num(o, atom!("creepTicksToLive")) / life(&body);
                         let rate = if recycled { 1.0 } else { CREEP_CORPSE_RATE } * ttl;
                         let max = f64::from(CREEP_PART_MAX_ENERGY);
                         let part = |p: Part| (f64::from(p.cost()) * rate).min(max);
@@ -321,7 +318,9 @@ impl Sampler {
                         let cost = (body.iter().filter_map(|p| p.parse::<Part>().ok()))
                             .map(|p| f64::from(p.cost()))
                             .sum::<f64>();
-                        if self.born.insert(text(o, atom!("name")).to_string())
+                        let name = text(o, atom!("name"));
+                        if !self.born.contains(name)
+                            && self.born.insert(name.to_string())
                             && self.ledger.stock0.is_some()
                         {
                             self.ledger.spawn += cost;
@@ -355,15 +354,12 @@ impl Sampler {
         self.ledger.stock0.get_or_insert(total);
         self.ledger.stock = total;
         let followed: Vec<&Room> = self.rooms.iter().map(|n| v.room(n)).collect();
+        let xy = |r: &Room| RoomXY::parse_engine(r.name).expect("a room name");
+        let at: Vec<RoomXY> = followed.iter().map(|f| xy(f)).collect();
         let neighbours = |r: &&Room| {
-            let xy = RoomXY::parse_engine(r.name).expect("a room name");
-            let next = [(0, -1), (1, 0), (0, 1), (-1, 0)].map(|(dx, dy)| RoomXY {
-                x: xy.x + dx,
-                y: xy.y + dy,
-            });
-            followed
-                .iter()
-                .any(|f| next.contains(&RoomXY::parse_engine(f.name).expect("a room name")))
+            let xy = xy(r);
+            at.iter()
+                .any(|f| (f.x - xy.x).abs() + (f.y - xy.y).abs() == 1)
         };
         let bordering = v
             .rooms
@@ -466,7 +462,7 @@ impl Sampler {
         let boosts: Vec<Vec<&str>> = (creeps.iter())
             .map(|o| match o.get(atom!("body")) {
                 Some(Val::Arr(b)) => (b.iter())
-                    .filter_map(|p| p.as_obj()?.get(Atom::intern("boost"))?.as_str())
+                    .filter_map(|p| p.as_obj()?.get(atom!("boost"))?.as_str())
                     .collect(),
                 _ => Vec::new(),
             })
@@ -481,10 +477,7 @@ impl Sampler {
             self.sent_seq = d.seq;
             let of = |k: &str| d.obj.get(Atom::intern(k)).and_then(Val::as_str);
             if of("sender") == Some(crate::world::US) {
-                let (to, amount) = (
-                    of("to").unwrap_or_default(),
-                    num(&d.obj, Atom::intern("amount")),
-                );
+                let (to, amount) = (of("to").unwrap_or_default(), num(&d.obj, atom!("amount")));
                 let resource = of("resourceType").unwrap_or_default();
                 self.labs
                     .sent(v, resource, of("from").unwrap_or_default(), to, amount);

@@ -123,7 +123,7 @@ impl Labs {
             let mut parts = Tally::new();
             if let Some(Val::Arr(body)) = c.get(atom!("body")) {
                 for part in body.iter().filter_map(Val::as_obj) {
-                    if let Some(boost) = part.get(Atom::intern("boost")).and_then(Val::as_str) {
+                    if let Some(boost) = part.get(atom!("boost")).and_then(Val::as_str) {
                         *parts.entry(boost.into()).or_default() += 1.0;
                     }
                 }
@@ -144,7 +144,7 @@ impl Labs {
         let (labs, roles) = labs_of(room);
         let mut cooling = false;
         for &o in &labs {
-            let until = num(o, Atom::intern("cooldownTime"));
+            let until = num(o, atom!("cooldownTime"));
             let held = mineral(o);
             let was = self
                 .was
@@ -245,7 +245,7 @@ impl Labs {
 
     /// `rooms` with each followed room's lab keys and stock added.
     pub fn rooms(&self, mut rooms: Value, v: &View) -> Value {
-        let cools = |o| num(o, Atom::intern("cooldownTime")) - v.k.time as f64;
+        let cools = |o| num(o, atom!("cooldownTime")) - v.k.time as f64;
         for (name, row) in rooms.as_object_mut().into_iter().flatten() {
             let room = v.room(name);
             let (labs, roles) = labs_of(room);
