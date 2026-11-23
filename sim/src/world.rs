@@ -41,8 +41,6 @@ pub fn read(path: &str) -> Map {
     let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"));
     let world: Value = serde_json::from_str(&text).expect("the world is JSON");
     let mut map = Map {
-        rooms: Vec::new(),
-        objects: Vec::new(),
         time: world["time"].as_i64().unwrap_or(0),
         memory: world
             .get("simMemory")
@@ -56,7 +54,7 @@ pub fn read(path: &str) -> Map {
         closed: (world["closed"].as_array().into_iter().flatten())
             .filter_map(|r| r.as_str().map(str::to_string))
             .collect(),
-        banks: None,
+        ..Map::default()
     };
     for room in world["rooms"].as_array().expect("rooms") {
         let name = room["name"].as_str().expect("a room's name").to_string();

@@ -1,9 +1,9 @@
 // One soak on sim (ARCHITECTURE.md §10.2), into soak-runs/<run>/; with --watch
 // served to lazycreep as it runs (`sim --watch`) until Ctrl-C.
-// Usage: npm run soak -- [--room <name>] [--world <world.json> | --gen <seed>] [--node N] [--seed N] [--late K] [--ticks N]
+// Usage: npm run soak -- [--room <name>] [--world <world.json> | --gen <seed> [--sectors WxH]] [--node N] [--seed N] [--late K] [--ticks N]
 //          [--ended] [--unsafe] [--invaders room:every[:first],…] [--wave role[:size],…] [--core room:tick,…]
 //          [--capture a-b[,c-d]] [--run name] [--watch [--port N] [--tick-ms N] [--badge <json>]]
-//          [--players <[{name, room, declarations?}]>]   our bot once per seat, the first in --room
+//          [--players <[{name, room?, declarations?}]>]   our bot once per seat, the first in --room; --gen picks a room unnamed
 //        npm run watch:sim -- …   the same, --watch implied
 //   --room  default the first room by name with a controller nobody owns and two sources
 import { readFileSync } from "node:fs";
@@ -11,9 +11,9 @@ import { join } from "node:path";
 import { invariants, samplesOf } from "../scenario/measures.mjs";
 import { TEMPLATE, buildPlan, runSim, seatsUs, simBinary } from "./run.mjs";
 
-const usage = "usage: npm run soak -- [--room <name>] [--world <world.json> | --gen <seed>] [--node N] [--seed N] [--late K] [--ticks N] [--ended] [--unsafe] [--invaders …] [--wave …] [--core …] [--capture a-b] [--players <json>] [--run name] [--watch [--port N] [--tick-ms N] [--badge <json>]]";
+const usage = "usage: npm run soak -- [--room <name>] [--world <world.json> | --gen <seed> [--sectors WxH]] [--node N] [--seed N] [--late K] [--ticks N] [--ended] [--unsafe] [--invaders …] [--wave …] [--core …] [--capture a-b] [--players <json>] [--run name] [--watch [--port N] [--tick-ms N] [--badge <json>]]";
 const SWITCHES = ["--ended", "--unsafe", "--watch"];
-const VALUES = ["--room", "--world", "--gen", "--node", "--seed", "--late", "--ticks", "--invaders", "--wave", "--core", "--capture", "--players", "--run", "--port", "--tick-ms", "--badge"];
+const VALUES = ["--room", "--world", "--gen", "--sectors", "--node", "--seed", "--late", "--ticks", "--invaders", "--wave", "--core", "--capture", "--players", "--run", "--port", "--tick-ms", "--badge"];
 const fail = (m) => {
   console.error(`${m}\n${usage}`);
   process.exit(2);
@@ -28,12 +28,13 @@ for (let i = 2; i < process.argv.length; i++) {
 const WHOLE = ["--gen", "--seed", "--late", "--ticks", "--port", "--tick-ms"];
 for (const f of WHOLE.filter((f) => flags[f] !== undefined)) if (!/^\d+$/.test(flags[f])) fail(`${f} takes a whole number`);
 if (!flags["--watch"] && ["--port", "--tick-ms", "--badge"].some((f) => flags[f])) fail("--port, --tick-ms and --badge need --watch");
-const { "--world": world, "--node": node, "--gen": gen } = flags;
+const { "--world": world, "--node": node, "--gen": gen, "--sectors": sectors } = flags;
 const number = (flag, or) => Number(flags[flag] ?? or);
 const rooms = gen === undefined ? JSON.parse(readFileSync(world ?? TEMPLATE, "utf8")) : null;
 // A world that seats us plays from its own home, as runSim stands it.
 const home = rooms && seatsUs(rooms) && rooms.rooms.find((r) => r.objects.some((o) => o.type === "spawn" && o.user === rooms.userId)).name;
 if (gen !== undefined && (world || flags["--room"] || node)) fail("--gen picks its own map and room: no --world, --room or --node");
+if (sectors !== undefined && (gen === undefined || !/^\d+x\d+$/.test(sectors))) fail("--sectors takes WxH, with --gen");
 if (home && (flags["--room"] || node)) fail(`--world seats us in ${home}: no --room or --node`);
 const room =
   home ||
@@ -49,7 +50,7 @@ const watch = flags["--watch"] && { port: number("--port", 21025), ms: number("-
 const out = join(process.cwd(), "soak-runs", flags["--run"] ?? `${room ?? `gen${gen}`}${node ? `-${node}` : ""}-seed${number("--seed", 1)}`);
 console.error(`sim: output ${out}`);
 const code = await runSim(bin, {
-  world, gen, room, node, seed: number("--seed", 1), late: number("--late", 0), ticks: number("--ticks", watch ? 1e6 : node ? 5000 : 3000),
+  world, gen, sectors, room, node, seed: number("--seed", 1), late: number("--late", 0), ticks: number("--ticks", watch ? 1e6 : node ? 5000 : 3000),
   ended: Boolean(flags["--ended"]), unsafe: Boolean(flags["--unsafe"]), invaders: flags["--invaders"], wave: flags["--wave"], core: flags["--core"],
   capture: flags["--capture"], players: flags["--players"], watch, out,
 });

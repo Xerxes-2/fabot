@@ -34,7 +34,7 @@ impl Spec {
         Some(Spec { seed, sectors })
     }
 
-    pub fn world(&self) -> (Map, String) {
+    pub fn world(&self) -> Map {
         let spec = WorldSpec {
             sectors_x: 0..self.sectors.0,
             sectors_y: 0..self.sectors.1,
@@ -57,8 +57,46 @@ impl Spec {
                 map.objects.push(o);
             }
         }
-        let room = colony(&map, self.seed);
-        (map, room)
+        map
+    }
+
+    /// An unnamed seat takes the seed's pick as one seat always has, kept `APART` from the others.
+    pub fn homes(&self, map: &Map, wanted: &[Option<String>]) -> Vec<String> {
+        let free = |r: &str| {
+            let controller = |o: &&Value| o["room"] == r && o["type"] == "controller";
+            map.objects
+                .iter()
+                .filter(controller)
+                .any(|o| o["user"].is_null())
+        };
+        let mut taken: Vec<&str> = wanted.iter().flatten().map(String::as_str).collect();
+        for (i, r) in taken.iter().enumerate() {
+            let fit = free(r) && !taken[..i].contains(r) && map.seat(r).is_some();
+            assert!(
+                fit,
+                "{r}: no free controller and first spawn's tile, or another seat's home"
+            );
+        }
+        let xy = |r: &str| r.parse::<RoomXY>().expect("a room");
+        let apart = |a: &str, b: &str| {
+            let (a, b) = (xy(a), xy(b));
+            (a.x - b.x).abs().max((a.y - b.y).abs()) >= APART
+        };
+        let order = order(map, self.seed);
+        let mut homes = Vec::new();
+        for w in wanted {
+            let home = w.as_deref().unwrap_or_else(|| {
+                let far = |r: &&&str| taken.iter().all(|t| apart(r, t)) && map.seat(r).is_some();
+                let home = order
+                    .iter()
+                    .find(far)
+                    .expect("no plannable room APART from the other homes");
+                taken.push(home);
+                home
+            });
+            homes.push(home.to_string());
+        }
+        homes
     }
 
     /// map.js draws a highway like any room; the official ones are an open lane between the
@@ -124,9 +162,11 @@ fn bank_due(seed: u64, xy: RoomXY, t: i64) -> i64 {
     t + 1 + left as i64
 }
 
-/// The room `seed` picks among those with a controller and two sources (as
-/// `npm run soak` picks its default) whose first spawn `Map::seat` can plan, the tile `Map::stand` seats it on.
-fn colony(map: &Map, seed: u64) -> String {
+/// Rooms (on the longer axis) between two homes a seat is picked for: a remote apiece between them.
+const APART: i32 = 3;
+
+/// As `npm run soak` picks its default room, from where `seed` falls among them by name.
+fn order(map: &Map, seed: u64) -> Vec<&str> {
     let sources = |room: &str| {
         map.objects
             .iter()
@@ -142,12 +182,8 @@ fn colony(map: &Map, seed: u64) -> String {
         .collect();
     fit.sort_unstable();
     let first = (seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) >> 32) as usize % fit.len();
-    let order = fit[first..].iter().chain(&fit[..first]);
-    order
-        .copied()
-        .find(|r| map.seat(r).is_some())
-        .expect("a room with a controller, two sources and a spawn tile")
-        .to_string()
+    fit.rotate_left(first);
+    fit
 }
 
 #[cfg(test)]
@@ -157,8 +193,8 @@ mod tests {
     #[test]
     fn rooms_meet_their_neighbours_and_lanes_run_through() {
         let flags = BTreeMap::from([("--gen".to_string(), "16".to_string())]);
-        let (map, _) = Spec::of(&flags).expect("a spec").world();
-        assert_eq!(map.rooms, Spec::of(&flags).expect("a spec").world().0.rooms);
+        let map = Spec::of(&flags).expect("a spec").world();
+        assert_eq!(map.rooms, Spec::of(&flags).expect("a spec").world().rooms);
         let terrain: BTreeMap<RoomXY, &[u8]> = (map.rooms.iter())
             .map(|(n, t)| (n.parse().expect("a room"), t.as_bytes()))
             .collect();

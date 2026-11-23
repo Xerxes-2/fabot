@@ -19,15 +19,26 @@ pub struct Seat {
     pub memory: String,
 }
 
-/// `--players`' entries `{name, room, declarations?}`, else one in `room` with the world's Memory.
-pub fn seats(players: Option<Vec<Value>>, room: &str, memory: &str) -> Vec<Seat> {
-    let one = || vec![json!({ "name": world::USERNAME, "room": room })];
-    (players.unwrap_or_else(one).iter().enumerate())
-        .map(|(i, p)| Seat {
+/// `--players`' entries `{name, room?, declarations?}`, else one in `room` with the world's Memory.
+pub fn seats(
+    players: Option<Vec<Value>>,
+    room: &str,
+    homes: impl FnOnce(&[Option<String>]) -> Option<Vec<String>>,
+    memory: &str,
+) -> Vec<Seat> {
+    let players = players.unwrap_or_else(|| vec![json!({ "name": world::USERNAME, "room": room })]);
+    let at = |p: &Value| p["room"].as_str().filter(|r| !r.is_empty()).map(Into::into);
+    let wanted: Vec<_> = players.iter().map(at).collect();
+    let named = |p: &Value| {
+        at(p).unwrap_or_else(|| panic!("{}: a seat names its room on --world", p["name"]))
+    };
+    let rooms = homes(&wanted).unwrap_or_else(|| players.iter().map(named).collect());
+    (players.iter().zip(rooms).enumerate())
+        .map(|(i, (p, room))| Seat {
             // The first is `US`, and u2 the duel's `RIVAL`.
             uid: format!("u{}", 2 * i + 1),
             name: p["name"].as_str().expect("a seat's name").into(),
-            room: p["room"].as_str().expect("a seat's room").into(),
+            room,
             memory: match &p["declarations"] {
                 Value::Null if i == 0 => memory.to_string(),
                 Value::Null => String::new(),
@@ -94,9 +105,7 @@ impl<W: Write> Player<W> {
         let rcl = |o: &Obj| [num(o, atom!("level")), num(o, atom!("progress"))];
         let levels: Vec<_> = of("controller").map(rcl).collect();
         let creeps = of("creep").count();
-        format!(
-            "{} rcl, progress {levels:?} creeps {creeps}",
-            self.seat.name
-        )
+        let Seat { name, room, .. } = &self.seat;
+        format!("{name} in {room}: rcl, progress {levels:?} creeps {creeps}")
     }
 }

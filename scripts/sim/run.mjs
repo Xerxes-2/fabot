@@ -167,10 +167,10 @@ export const buildPlan = () =>
 
 /**
  * A soak into `out` on `world` (default the template), or on the world map.js generates off seed `gen`
- * (sim picks the room); resolves to sim's exit code, -1 when it never ran. `watch` ({port, ms, badge}) serves it to lazycreep;
+ * over `sectors` ("WxH"; sim picks the room); resolves to sim's exit code, -1 when it never ran. `watch` ({port, ms, badge}) serves it to lazycreep;
  * `capture` ("a-b[,c-d]") writes those ticks to `out`/capture.jsonl for `scripts/bench.mjs`.
  */
-export function runSim(bin, { world, gen, room, node, ticks, seed = 1, late = 0, ended = false, unsafe = false, follow = [], rivals = [], players, invaders, wave, core, stronghold, resetEvery = 0, watch, capture, out }) {
+export function runSim(bin, { world, gen, sectors, room, node, ticks, seed = 1, late = 0, ended = false, unsafe = false, follow = [], rivals = [], players, invaders, wave, core, stronghold, resetEvery = 0, watch, capture, out }) {
   return new Promise((done) => {
     rmSync(out, { recursive: true, force: true });
     const map = `${out}.world.json`;
@@ -183,7 +183,7 @@ export function runSim(bin, { world, gen, room, node, ticks, seed = 1, late = 0,
         "--npc", JSON.stringify(npc(invaders, bodies(wave), core, stronghold, ticks)), ...(watch ? ["--watch", "--port", String(watch.port), "--tick-ms", String(watch.ms), ...(watch.badge ? ["--badge", watch.badge] : [])] : [])];
       spawn(bin, args, { stdio: watch ? "inherit" : "ignore" }).on("exit", (code, signal) => (code === 0 || (watch && signal === "SIGINT" && existsSync(join(out, "timing.json"))) ? engaged(out).then(() => finish(0), () => finish(-1)) : finish(code))).on("error", () => finish(-1));
     };
-    if (gen !== undefined) return play(["--gen", String(gen)]);
+    if (gen !== undefined) return play(["--gen", String(gen), ...(sectors ? ["--sectors", sectors] : [])]);
     const base = JSON.parse(readFileSync(world ?? TEMPLATE, "utf8"));
     const seated = seatsUs(base);
     const captured = seated || base.declarations || Object.keys(base.memory ?? {}).length;
