@@ -4,11 +4,13 @@
 // and set against what `Exchange.outcome` predicted for it, on the arm of the
 // tactic a home's Defend fields.
 //
-// Usage: npm run exchange -- [--count N] [--seed N] [--ticks N] [--real 1] [--rollout R --theirs 1]
+// Usage: npm run exchange -- [--count N] [--seed N] [--ticks N] [--real 1] [--rollout R --theirs 1] [--mixed 1]
 //   --count  duels (default 200)      --seed   the draw and the engine's (default 1)
 //   --ticks  the longest a duel runs (default 400)
 //   --real   our side runs the bot's tactics, the one its Defend fields
 //   --rollout R --theirs 1   their side searches its scripts (`sim duel`'s PGS)
+//   --mixed  our side a Defend's drafted set, a 1A1M beside six small rangers:
+//            the only draw where three or more of ours share the raid's focus
 //
 // Writes build/exchange/seed<N>/: samples.json, predictions.json,
 // results.json, report.txt. A predicted Win or Kite that lost is an Exchange
@@ -23,13 +25,13 @@ import { bugs, misses, outcome, report, stood } from "./prediction.mjs";
 import { simBinary } from "./run.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const usage = "usage: npm run exchange -- [--count N] [--seed N] [--ticks N] [--real 1] [--rollout R --theirs 1]";
+const usage = "usage: npm run exchange -- [--count N] [--seed N] [--ticks N] [--real 1] [--rollout R --theirs 1] [--mixed 1]";
 const fail = (message) => {
   console.error(message);
   process.exit(1);
 };
 
-const flags = { "--count": 200, "--seed": 1, "--ticks": 400, "--real": 0, "--rollout": 0, "--theirs": 0 };
+const flags = { "--count": 200, "--seed": 1, "--ticks": 400, "--real": 0, "--rollout": 0, "--theirs": 0, "--mixed": 0 };
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i += 2) {
   if (!(argv[i] in flags) || !/^\d+$/.test(argv[i + 1] ?? "")) fail(usage);
@@ -97,6 +99,8 @@ const OURS = [
   [GUARD, RANGER],
   [RANGER, RANGER],
 ];
+// Which mates stand beside the raid's focus is only asked of a set of more than two.
+const MIXED = [["attack", "move"], ...repeat(["move", "move", "ranged_attack", "ranged_attack", "heal", "move"], 6)];
 const ROW = 30;
 // Our side backs off from the raid toward y 48, or into the pocket: a
 // channel x 20-30 from y 22, closed at y 37.
@@ -126,7 +130,9 @@ const samples = Array.from({ length: count }, (_, i) => {
   const kinds = invader ? INVADERS : Object.keys(KINDS);
   const theirs = Array.from({ length: between(1, 4) }, () => hostile(kinds)).map((b, k) => ({ ...b, invader, x: 21 + 2 * k, y: 15 }));
   const behind = i % 4 >= 2 ? (TERRAINS[terrain].pocket ? 6 : 14) : 0;
-  const ours = OURS[i % 2].map((parts, k) => ({ parts, boosts: parts.map(() => ""), hits: 100 * parts.length, x: 24 + 2 * k, y: ROW + k * behind }));
+  const ours = flags["--mixed"]
+    ? MIXED.map((parts, k) => ({ parts, boosts: parts.map(() => ""), hits: 100 * parts.length, x: 23 + (k % 4), y: ROW + Math.floor(k / 4) }))
+    : OURS[i % 2].map((parts, k) => ({ parts, boosts: parts.map(() => ""), hits: 100 * parts.length, x: 24 + 2 * k, y: ROW + k * behind }));
   return {
     id: `s${i}`,
     room: "E21S21",

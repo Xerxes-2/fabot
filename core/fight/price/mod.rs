@@ -11,6 +11,7 @@ use fabot_base::boost::Stock;
 use fabot_base::declarations::{self, Declarations};
 use fabot_base::grid::{self, Footprint};
 use fabot_base::tiles::Tile;
+use fabot_base::vocabulary::Part::Attack;
 use fabot_base::world::{self, Creep, Id, Pos, Room, RoomName, Structure, StructureType};
 use fabot_base::{engine, tiles};
 use fabot_exchange::{
@@ -362,11 +363,20 @@ impl<'a> Scene<'a> {
     }
 
     pub(super) fn joining(&self, atlas: &Atlas, e: &Engagement, free: &[String]) -> Vec<String> {
+        let set: Vec<bool> = (e.ours.keys().filter_map(|n| self.ours.get(n.as_str())))
+            .map(|c| c.swings())
+            .chain(
+                (self.spawning.iter())
+                    .filter(|c| c.engagement == e.id)
+                    .map(|c| c.body.contains(&Attack)),
+            )
+            .collect();
+        let ranged = !set.is_empty() && !set.contains(&true);
         free.iter()
             .filter(|n| {
-                self.ours
-                    .get(n.as_str())
-                    .is_some_and(|c| self.walk_to(atlas, e, c.pos.room).is_some())
+                self.ours.get(n.as_str()).is_some_and(|c| {
+                    !(ranged && c.swings()) && self.walk_to(atlas, e, c.pos.room).is_some()
+                })
             })
             .cloned()
             .collect()

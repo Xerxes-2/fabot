@@ -530,6 +530,8 @@ and `cheapest_win` (adds only to already-standing `ours`).
   a post is kept only where it is the cheaper consequence.
 - `❓` (after zone-control defence) Exchange does not price a ranged rival
   shooting off our kiter's MOVE so a full-speed melee catches it.
+- `❓` Six or more rangers against three Invaders price Win with 0 dead and lose
+  a ranger (defend-prioritises-home-over-outpost seeds 2, 4).
 - `❓` (after zone-control defence) Exchange's Kite arm prices a self-healing
   healer, or a raid our rangers could kite off a post, as Lose where kiting
   wins.
