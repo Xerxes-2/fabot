@@ -49,6 +49,7 @@ pub fn rows(closed: &[Closed], time: i32) -> Vec<String> {
                     Objective::Defend => "defend",
                     Objective::Siege(_) => "siege",
                     Objective::Sweep => "sweep",
+                    Objective::Stronghold => "stronghold",
                 },
                 room: e.room,
                 tactic: e.plan.tactic,

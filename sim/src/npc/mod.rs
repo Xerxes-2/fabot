@@ -11,7 +11,7 @@ use krebs::world::World;
 use krebs_util::json::Json;
 use serde_json::{Value, json};
 
-use crate::view::{View, num, text, xy};
+use crate::view::{View, num, store, text, used, xy};
 use crate::world::INVADER;
 
 /// On a tick, in a room: a wave's bodies, a stronghold's [level, deploy] or (null) a level-0 core.
@@ -127,10 +127,15 @@ pub fn stronghold(k: &mut World, room: &str, level: u32, deploy: u32) {
     }
 }
 
-/// Each standing stronghold by room, beside intel's `[level, deploys_at, collapses_at, seen]`.
+/// Each stronghold by room, beside intel's `[level, deploys_at, collapses_at, seen]`; fallen, level 0.
 pub fn strongholds(v: &View, intel: &Intel) -> Value {
     let rooms = v.rooms.iter().filter_map(|room| {
-        let core = (room.of("invaderCore")).find(|o| num(o, atom!("level")) > 0.0)?;
+        let Some(core) = (room.of("invaderCore")).find(|o| num(o, atom!("level")) > 0.0) else {
+            let held = ["ruin", "container", "tombstone"].into_iter().flat_map(|k| room.of(k));
+            let loot: f64 = held.map(|o| used(o) - store(o, atom!("energy"))).sum();
+            let fallen = room.of("rampart").any(|o| text(o, atom!("user")) == INVADER);
+            return fallen.then(|| (room.name.to_string(), json!({ "level": 0, "loot": loot })));
+        };
         let row = room.name.parse().ok().and_then(|r| intel.get(&r));
         let read = row.and_then(|r| r.stronghold.map(|s| json!([s.level, s.deploys_at, s.collapses_at, r.seen])));
         let defenders = (room.of("creep")).filter(|c| !text(c, atom!("strongholdId")).is_empty());

@@ -130,7 +130,11 @@ fn holds(derived: &Derived, id: task::Target, r: ResourceType) -> i32 {
                 + labs
                 + mined
         })
-        .sum()
+        .sum::<i32>()
+        + (derived.pickups.iter().flat_map(|p| &p.loot))
+            .filter(|l| Some(l.0) == object && l.2 == r)
+            .map(|l| l.3)
+            .sum::<i32>()
 }
 
 fn piled(derived: &Derived, id: task::Target) -> bool {

@@ -30,6 +30,7 @@ enum Of {
     Container,
     Drop,
     Loot,
+    Pickup,
     Stock { pile: bool },
     Ore,
     Link,
@@ -356,6 +357,11 @@ fn takes_of(derived: &Derived, ci: usize, outposts: &[&Ground], short: i32) -> V
             add(task, pos, n, Of::Loot);
         }
     }
+    // A commodity's few units are its dearest: a pickup's every load is taken.
+    let picked = (derived.pickups.iter().filter(|p| p.colony == ci)).flat_map(|p| &p.loot);
+    for (id, pos, r, n) in picked.filter(|l| l.3 <= free) {
+        add(Task::Withdraw((*id).into(), *r), *pos, *n, Of::Pickup);
+    }
     out
 }
 
@@ -510,6 +516,7 @@ impl<'a> Jobs<'a> {
             // Under the ring's open refill, so a few units of mineral never
             // keep the spawn waiting; Hivemind's priority else, its weight by 30.
             Of::Loot => (4 - 2 * i32::from(ring), 10 * s.amount / 3),
+            Of::Pickup => (5 - 2 * i32::from(ring), s.amount),
             Of::Stock { pile: false } => (2, s.amount),
             Of::Stock { pile: true } if carrier && ring => (5, 0),
             Of::Stock { pile: true } => (if carrier { 0 } else { 4 }, 0),

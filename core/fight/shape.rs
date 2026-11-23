@@ -76,6 +76,7 @@ pub enum Objective {
     Siege(Id),
     /// A rival's remote, `room`, its economy bodies hunted.
     Sweep,
+    Stronghold,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -91,6 +92,7 @@ impl From<Kind> for Objective {
         match (k.kind.as_deref(), k.target) {
             (Some("siege"), Some(target)) => Objective::Siege(target),
             (Some("sweep"), _) => Objective::Sweep,
+            (Some("stronghold"), _) => Objective::Stronghold,
             _ => Objective::Defend,
         }
     }
@@ -102,6 +104,7 @@ impl From<Objective> for Kind {
             Objective::Defend => (None, None),
             Objective::Siege(target) => (Some("siege"), Some(target)),
             Objective::Sweep => (Some("sweep"), None),
+            Objective::Stronghold => (Some("stronghold"), None),
         };
         Kind {
             kind: kind.map(str::to_string),

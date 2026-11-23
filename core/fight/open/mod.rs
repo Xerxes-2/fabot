@@ -13,7 +13,8 @@ pub fn armed_and_opening(
 ) -> (BTreeSet<Id>, BTreeSet<Id>) {
     let stronghold: BTreeSet<RoomName> = (world.rooms.iter())
         .filter(|r| {
-            (r.structures.iter()).any(|s| s.kind == StructureType::InvaderCore && s.level > 0)
+            (r.structures.iter())
+                .any(|s| s.kind == StructureType::Rampart && s.owner == Owner::Invader)
         })
         .map(|r| r.name)
         .collect();

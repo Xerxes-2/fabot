@@ -2,7 +2,7 @@
 /// what each committed body does, and what it asks for.
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::kinds::{defend, raid, siege, sweep};
+use super::kinds::{defend, raid, siege, stronghold, sweep};
 use super::scene::{Hunting, Scene, fresh};
 use super::shape::{Cast, Engagement, FightState, Group, Objective, Phase};
 use super::{casting, open, tracker};
@@ -188,6 +188,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
     let scene = Scene {
         world,
         sightings,
+        intel,
         remembered: sightings::remembered(sightings, world),
         avoid: &declarations.avoid,
         rules: &declarations.tactics,
@@ -334,6 +335,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
                     },
                     e,
                 ),
+                Objective::Stronghold => stronghold::step(&scene, declarations, &standing, e),
             }?;
 
             Some((
@@ -448,6 +450,8 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
     ranked.extend(opened);
     ranked.extend(declared);
     ranked.extend(swept);
+    let raided = stronghold::opens(&scene, declarations, &ranked, first_id);
+    ranked.extend(raided);
     ranked.sort_by(|(a, _), (b, _)| {
         b.priority
             .partial_cmp(&a.priority)
@@ -487,6 +491,9 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
                     || e.since == world.time && e.phase == Phase::Forming =>
             {
                 decided.push(scene.priced(atlas, &mut asked, &e, &mut free, declarations));
+            }
+            Objective::Stronghold => {
+                decided.push(stronghold::priced(&scene, atlas, &mut asked, &e))
             }
             Objective::Defend | Objective::Sweep => decided.push(e),
         }

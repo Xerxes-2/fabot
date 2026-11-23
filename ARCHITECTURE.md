@@ -143,8 +143,8 @@ segments over multiple ticks (economy first); a cold tick never spends more than
 | `Atlas` | `fabot-atlas` | Room graph (region nodes, border-stretch crossings, keeper-strike avoidance, blind keeper penalty, a room intel last saw with towers that fire on us (a live stronghold's, a non-ally player's) never crossed, only reached) and per-room tile grid (creep-free weights, reverse floods, seats, footprint queries; a hostile's tile is walled only in this tick's step floods and passability, never in a kept flood, so one moving redoes no flood, tree or walk); out-of-sight grids hold what stood when last seen (else terrain) struck where intel places the keepers (`atlas.unseen`) | `World`, `terrain`, `intel.rooms`, `Declarations` (colony plans, for `server`) | flood table, `atlas.carried` |
 | `Economy` | `fabot-economy` | Slots, casts, sticky tasks, logistics dispatcher, links, labs, terminals, abandon | `Derived`, `Atlas`, `declarations`, `EconomyState`, Strategy's `scouts` | tasks, casts, `assignments` |
 | `Layout` | `fabot-layout` | Colony placement plan (Hivemind planner + xxscreeps JPS), rampart ring, construction sites, buried-road destroy, tower firing | `Derived`, `Atlas`, `declarations` | sites, destroys, tower actions, `standing.layout` |
-| `Exchange` | `fabot-exchange` | Pure combat arithmetic (`outcome`, `cheapest_win`, breach planning) | fighters, terrain | — |
-| `Fight` | `fabot-fight` | Hostile `Tracker`, engagements (`kinds/`: defend, siege, sweep, raid), casting | `Derived`, `Atlas`, `Exchange`, `declarations` (its operations table), `intel`, `FightState` | fight actions, asks, wishes, casts, `FightState` |
+| `Exchange` | `fabot-exchange` | Pure combat arithmetic (`outcome`, `cheapest_win`, breach planning, a stronghold's run) | fighters, terrain | — |
+| `Fight` | `fabot-fight` | Hostile `Tracker`, engagements (`kinds/`: defend, siege, sweep, raid, stronghold), casting | `Derived`, `Atlas`, `Exchange`, `declarations` (its operations table), `intel`, `FightState` | fight actions, asks, wishes, casts, `FightState` |
 | `Tactics` | `fabot-tactics` | Per-creep combat actions, stepping, and the operator's tactic rules (`ruling`, `checked`) (no `Fight` import) | `Atlas`, `Move`, `Sight` + plan | creep actions, wishes |
 | `Strategy` | `fabot-strategy` | Intel, observers/scouts, `ColonyPlan` & outpost selection, expansion/abandon, operation opening & global force priority | `World`, `Derived`, `intel`, `Season`, `standing.layout`, `economy::spare` over `EconomyState.assignments` (its colonies' own bodies, priced this tick), fight state | `declarations` (`ColonyPlan`, outposts, claims, operations), `intel`, `expansion`, `piles` |
 | `Season` | `fabot-strategy` (private `season`) | Disposable seasonal rules (`worth`, `spent`, season structures/scoring) | `World` | declarations to `Strategy`, season actions |
@@ -167,9 +167,9 @@ private module of `fabot-strategy`. Declarations flow down only.
 
 **Line, comment, and count ceilings** live in `scripts/ceilings.json` (checked
 by `npm run ceiling` and `npm run scenario`). `core/fight/price` (offers, set
-shapes, casting), `core/fight/scene` (the per-tick read) and `core/fight/open`
-(what opens a Defend) hold ceilings apart from the rest of `core/fight`, as
-each changes on its own (owner).
+shapes, casting), `core/fight/scene` (the per-tick read), `core/fight/open`
+(what opens a Defend) and `core/fight/tracker` (who is out there, §6.1) hold
+ceilings apart from the rest of `core/fight`, as each changes on its own (owner).
 
 ## 4. State
 
@@ -392,7 +392,11 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   pioneers until RCL4/storage, all from `atlas::sponsor`: the nearest stocked
   colony not given up, else the nearest whose bank casts a claimer; one rule
   on `Derived` facts that `outposts::busy` holds too), `Scout`, `Boost`, and future
-  `Mine`/`Pickup` declarations without owning them.
+  `Mine` declarations without owning them, and `Pickup` rows: a room's
+  loot in sight (remains' and unwalled containers' non-energy) joins the
+  far haul of the nearest colony whose bank has room for a load (none, no
+  pickup), every load of it ahead of other loot, with one far carrier kept
+  while any is left.
 - **Labs (`economy/labs.rs`):** the clusters (`boost::clusters`, each with
   its `Derived.boosts` read by Economy, Fight, and `Tick`) are the colonies not given up with a lab, most
   labs first, ties by name: each with three labs reacts, each boosts its own
@@ -523,9 +527,30 @@ with one phase machine per kind under `core/fight/kinds/`.
   straight back into an escort it just left) rather than returning home; closes
   on death, safe mode, or no remaining targets.
 
+- **`Stronghold`** (`kinds/stronghold.rs`, L1–L3): opened on the table's
+  `Stronghold` row and priced at open off the level intel read, unseen:
+  its towers stand beside the core and its garrison never leaves its
+  ramparts, so `exchange::stronghold` runs its towers on our set tick by
+  tick (PvE is exact), the struck body healing itself alone (the towers take
+  the nearest as a set walks in apart), and every count of each candidate
+  is priced, as a boosted copy waits on its own lab fills. The candidates are S11's
+  leaders' single ranger, derived from the strike (TOUGH whose boost holds
+  it, HEAL for what passes, MOVE for plain pace, the rest RANGED), and a
+  bare ranger blob. Its value is the loot by level (`coreAmounts` +
+  `containerAmounts`) at twice its density as energy, as a commodity draws
+  about twice its density in raw resources; each cast costs the share of
+  its life its walk and kill take, as a body that wins lives on (owner:
+  leaders take L1 with one ranger). Its bodies shoot the core's rampart,
+  then the core, from the post out of the garrison's reach the towers
+  strike least, healed ahead of every strike; once the core falls its
+  towers and garrison strike nothing (`Derived.danger` drops them), and
+  the set shoots any of its garrison off a rampart, then breaks the
+  ramparts over its loot, until Economy has hauled it; that garrison opens
+  no Defend either.
+  `❓` L4 (fortifier, ranged garrison reaching every post) and L5.
+
 **Planned kinds:** `Claim` (claimer + Economy pioneers), `KeeperDuty` (lair
-rotation declaring room minable), `PowerBank` (break → declare `Pickup`),
-`Stronghold` (`Siege` on core with wave groups).
+rotation declaring room minable), `PowerBank` (break → declare `Pickup`).
 
 ### 6.3 Composition and the exchange
 
@@ -707,10 +732,19 @@ expansion, and operation priorities.
   haul path crosses is, and its paths never cross an owned room; a Defend in
   a rival's remote fights his guards, a stance the enemies list sets),
   `Siege` on each declared siege (0), `Sweep` on each preyed room, stalest seen
-  first (0), whether or not a sweep is open. `Fight` opens only on a row's room
-  and ranks by its priority, but keeps its event gate (`stirred`) and prices
-  winnability at open (`Exchange`, `drainable`): which rooms and how they rank
-  is Strategy's call, whether a set wins there is Fight's (§6.2).
+  first (0), whether or not a sweep is open, `Stronghold` and `Pickup` (0)
+  on the deployed L1–L3 within reach of a colony with two lives to its
+  collapse that the colony's stock and bank take for less than its loot
+  (`kinds::stronghold::take`, priced on the inputs Fight opens with),
+  highest level then nearest, and on each fallen stronghold in sight still
+  holding loot. A cast set's row stands until its set or the room's core and
+  loot are gone, ahead of any rank or collapse, because a commitment is
+  priced once, not every tick (owner); a `Stronghold` engagement closes once
+  its room is no row. `Fight` opens only on a row's room and ranks by its
+  priority, but keeps its event gate (`stirred`) and prices winnability at
+  open (`Exchange`, `drainable`): which rooms and how they rank is
+  Strategy's call, whether a set wins there is Fight's (§6.2), save a
+  stronghold's, which Strategy prices with Fight's own `take`.
 
 ## 8. Season (disposable)
 
@@ -862,10 +896,11 @@ scenarios matching touched modules.
 | E3 colonies | 3 colonies at RCL7, 5, 2 | cross-colony work, terminal balancing | total income, cross-colony share, CPU vs colonies |
 | S1 invaders | N3 + timed Invader waves | `Defend`, towers, recovery | losses, ticks back to income |
 | S2 keepers | RCL7 + keeper room | `KeeperDuty`, keeper mining ROI | keeper-room net, losses |
-| S3 stronghold | RCL7 + neighbouring stronghold | `Siege` decision & execution | decision, gain vs cost |
+| S3 stronghold | RCL7 + neighbouring stronghold | `Stronghold` decision & execution | decision, gain vs cost |
 | S4 low CPU | N6 at CPU limit 20 | degradation, bucket | bucket curve, income lost |
 
-`N1`–`N7` and `E0`–`E2` are built; `❓` remaining nodes (`E3`, `S1`–`S4`).
+`N1`–`N7`, `E0`–`E2` and `S3` (`M7` beside `stronghold-lN-taken`'s stronghold)
+are built; `❓` remaining nodes (`E3`, `S1`, `S2`, `S4`).
 
 **Adversaries:** scripted rivals (`sim/src/rival/`) verify plan mechanics. No
 test seats an open-source bot (owner): a bot tuned against one says little
@@ -951,5 +986,5 @@ on a live-sized world.
 - `Atlas` room graph ignores `Footprint` (2×2 Quad routing through 1-wide gaps);
   boosted `CARRY` priced unboosted.
 - `Economy` cross-room travel prices intermediate rooms at one room width.
-- Planned fight kinds (`KeeperDuty`, `PowerBank`, `Stronghold`), deploy canary,
+- Planned fight kinds (`KeeperDuty`, `PowerBank`, `Stronghold` L4–L5), deploy canary,
   and remaining `sim/` features (§10.2).

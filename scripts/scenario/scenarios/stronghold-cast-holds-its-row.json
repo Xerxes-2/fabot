@@ -1,0 +1,11 @@
+{
+  "why": "a level-3 stronghold standing up beside the level-1 one a set was already cast for displaces no row: the cast set's row stands until its core falls (owner: a commitment is priced once), where a re-ranked row dropped the L1 mid-fight for the higher level",
+  "modules": ["fight", "strategy"],
+  "start": { "room": "W8N3", "seed": 1, "node": "M7", "stronghold": "W8N2:1:1,W7N3:600:3" },
+  "ticks": 2500,
+  "assert": [
+    { "measure": "strongholdFallenAt", "room": "W8N2", "max": 1500 },
+    { "measure": "bodiesLost", "room": "W8N2", "max": 0 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

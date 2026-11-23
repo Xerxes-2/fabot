@@ -51,6 +51,7 @@ pub(super) struct Hunting {
 pub(super) struct Scene<'a> {
     pub(super) world: &'a World<'a>,
     pub(super) sightings: &'a Sightings,
+    pub(super) intel: &'a fabot_base::intel::Intel,
     pub(super) remembered: BTreeMap<RoomName, Vec<Creep>>,
     pub(super) avoid: &'a BTreeSet<RoomName>,
     /// The operator's tactic rules (§6.3), filtered per engagement.
@@ -184,7 +185,7 @@ impl<'a> Scene<'a> {
         match (e.plan.order.first(), &e.objective) {
             (Some(first), _) => siege::barrier_at(room).get(first).copied(),
             (None, Objective::Siege(target)) => room.structures.iter().find(|s| s.id == *target),
-            (None, Objective::Defend | Objective::Sweep) => None,
+            (None, _) => None,
         }
     }
 
@@ -335,8 +336,8 @@ impl<'a> Scene<'a> {
 
     pub(super) fn hops(e: &Engagement) -> i32 {
         match e.objective {
-            Objective::Siege(_) | Objective::Sweep => declarations::SIEGE_HOPS,
             Objective::Defend => declarations::REACH_HOPS,
+            _ => declarations::SIEGE_HOPS,
         }
     }
 
@@ -863,6 +864,7 @@ mod tests {
             let scene = Scene {
                 world: &world,
                 sightings: &sightings,
+                intel: &Default::default(),
                 remembered: BTreeMap::new(),
                 avoid: &avoid,
                 rules: &[],

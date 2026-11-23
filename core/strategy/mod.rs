@@ -2,6 +2,7 @@ pub mod expand;
 pub mod intel;
 pub mod outposts;
 mod season;
+pub mod stronghold;
 
 use fabot_base::intel::Scout;
 use fabot_base::intents::ModuleOutput;
@@ -285,6 +286,9 @@ pub fn plan<'t>(
     let mut operations = operations(derived, declarations, (&chosen, claim.as_ref()), &preyed);
     let (planned, worked) = ((declarations, &plans[..]), (&chosen[..], claim.as_ref()));
     operations.extend(crossed((atlas, derived), planned, worked, &theirs));
+    let fights = (engagements, casts);
+    let held = (derived, &declarations.avoid);
+    operations.extend(stronghold::rows(world, intel, held, fights, atlas));
     ((plans, chosen, claim, operations), misfiled)
 }
 

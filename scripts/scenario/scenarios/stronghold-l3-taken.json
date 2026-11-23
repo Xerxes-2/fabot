@@ -1,0 +1,12 @@
+{
+  "why": "a deployed level-3 stronghold beside a colony holding T3 boosts is killed by two boosted rangers out of its melee garrison's reach, its garrison left off a rampart shot, and part of its loot hauled home before the set ages out: main never opens on it",
+  "modules": ["exchange", "fight", "strategy", "economy"],
+  "start": { "room": "W8N3", "seed": 1, "node": "M7", "stronghold": "W8N2:1:3" },
+  "ticks": 4000,
+  "assert": [
+    { "measure": "strongholdFallenAt", "room": "W8N2", "max": 2000 },
+    { "measure": "lootTaken", "room": "W8N2", "min": 30 },
+    { "measure": "bodiesLost", "room": "W8N2", "max": 0 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

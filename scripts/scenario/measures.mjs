@@ -417,11 +417,20 @@ export const measures = {
   strongholdMisread: (samples, a) =>
     within(samples, a).filter((s) =>
       Object.values(s.strongholds ?? {}).some(({ level, deployTime, collapse, intel }) => {
+        if (!level) return false;
         if (!intel) return true;
         const [l, deployed, c, seen] = intel;
         return l !== level || (deployTime ? deployed !== deployTime : deployed > seen || c !== collapse);
       }),
     ).length,
+  // The first sample in the window where `room`'s stronghold stands fallen (its core killed), else Infinity.
+  strongholdFallenAt: (samples, a) => within(samples, a).find((s) => s.strongholds?.[a.room]?.level === 0)?.t ?? Infinity,
+  // The percent of the most loot `room` held once its stronghold fell that is gone at the window's end.
+  lootTaken: (samples, a) => {
+    const fallen = within(samples, a).map((s) => s.strongholds?.[a.room]).filter((h) => h?.level === 0);
+    const most = Math.max(0, ...fallen.map((h) => h.loot));
+    return most > 0 ? Math.round((100 * (most - fallen.at(-1).loot)) / most) : 0;
+  },
   // Samples in the window where intel read a still-deploying stronghold's deploy tick.
   strongholdDeploying: (samples, a) =>
     within(samples, a).filter((s) => Object.values(s.strongholds ?? {}).some((h) => h.deployTime && h.intel?.[1] === h.deployTime)).length,

@@ -664,6 +664,13 @@ impl Plan<'_> {
             f64::from(floor + crews) * worker_upkeep,
             f64::from(KEPT_FLOOR + crews) * worker_upkeep,
         );
+        // A pickup's loot is carried home within a life, a flow as a far dig's is.
+        for p in derived.pickups.iter().filter(|p| p.colony == ci) {
+            for (_, at, _, n) in &p.loot {
+                remote
+                    .extend(leg(atlas, derived, at, &drop).map(|leg| (f64::from(*n) / life, leg)));
+            }
+        }
         let carried: Vec<(f64, Leg)> = local.all.iter().chain(&remote).copied().collect();
         let shapes = haulers(&carried, capacity);
         fixed.add(shapes.iter().map(|b| upkeep(b)).sum(), 0.0);
@@ -873,12 +880,17 @@ impl Plan<'_> {
             carriers.extend(bodies::hauler(2, engine::MAX_BODY_PARTS as i32, capacity));
         }
         let first_far = home_carriers.max(1);
+        // Too little to round up a body of its own, a pickup still holds one far carrier.
+        let picks = (derived.pickups.iter()).any(|p| p.colony == ci && !p.loot.is_empty());
+        if picks && carriers.len() <= first_far {
+            carriers.extend(bodies::hauler(2, engine::MAX_BODY_PARTS as i32, capacity));
+        }
         for (k, body) in carriers.into_iter().enumerate() {
             let slot = self.push(ci, Job::Fill, drop, colony.room, k, body);
             if let Some(j) = k.checked_sub(first_far) {
                 slot.id = format!("{outposts}{j}");
                 slot.rank = OUTPOST_HAUL;
-                slot.fed_by = Some(far.join(","));
+                slot.fed_by = (!far.is_empty()).then(|| far.join(","));
             } else if k > 0 || storage.is_none() {
                 slot.fed_by = Some(digs.join(","));
             }

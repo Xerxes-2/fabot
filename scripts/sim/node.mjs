@@ -36,6 +36,8 @@ export const NODES = {
   // W5 at RCL7, six labs.
   W7: { level: 7, stored: "100000,H:6000,O:6000,U:6000,XKHO2:900", without: ["rampart", "tower", "link", "factory"], labs: true },
   // W7 holding each T3 combat boost.
+  // M7 with a level-1 kit's TOUGH boost alone: two parts' worth.
+  K7: { level: 7, stored: "100000,H:6000,O:6000,U:6000,XGHO2:60,XLHO2:900,XKHO2:900,XZHO2:900,XUH2O:900", without: ["rampart", "tower", "link", "factory"], labs: true },
   M7: { level: 7, stored: "100000,H:6000,O:6000,U:6000,XGHO2:900,XLHO2:900,XKHO2:900,XZHO2:900,XUH2O:900", without: ["rampart", "tower", "link", "factory"], labs: true },
   // An RCL7 node as another bot left it: its roads and containers worn to
   // half, its links and ramparts sites to build.

@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::casting;
 use super::kinds::defend::{self, Home};
-use super::kinds::{raid, siege};
+use super::kinds::{raid, siege, stronghold};
 use super::scene::{Hunting, Scene, middle, picket};
 use super::shape::{Engagement, Objective, Phase};
 use fabot_atlas::Atlas;
@@ -144,6 +144,10 @@ pub(super) fn act(
             return (None, tactics::rest(sight, c, &scene.worked));
         };
 
+        if let Some(acted) = stronghold::act(sight, scene, e, c) {
+            return acted;
+        }
+
         if let Some(controller) = taps.get(&e.id).filter(|_| tactics::claims(c)) {
             let tap = controller.upgrade_blocked == 0
                 && c.pos.within(engine::MELEE_RANGE, &controller.pos);
@@ -275,6 +279,7 @@ pub(super) fn act(
             tactics::focus_of(front, &members)
                 .map(|focus| (focus.name.clone(), front.breach_strike))
         })
+        .chain(stronghold::incoming(scene, decided))
         .collect();
 
     let mut chosen: BTreeMap<String, Vec<CreepAct>> = BTreeMap::new();

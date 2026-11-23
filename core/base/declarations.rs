@@ -53,6 +53,9 @@ pub enum OpKind {
     Defend,
     Siege,
     Sweep,
+    Stronghold,
+    /// A room whose loot Economy hauls home.
+    Pickup,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -99,11 +102,8 @@ impl Declarations {
     pub fn refuse_rooms(&mut self, closed: &BTreeSet<RoomName>) -> Vec<RoomName> {
         let mut refused = Vec::new();
         let mut open = |room: &RoomName| {
-            let open = !closed.contains(room);
-            if !open {
-                refused.push(*room);
-            }
-            open
+            refused.extend(closed.get(room).copied());
+            !closed.contains(room)
         };
         self.outposts.retain(|o| open(&o.room));
         self.claims.retain(|o| open(&o.room));

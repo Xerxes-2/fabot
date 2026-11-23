@@ -1,0 +1,12 @@
+{
+  "why": "a deployed level-1 stronghold beside a colony holding T3 boosts is priced off its level unseen, killed by the leaders' single boosted ranger from out of its garrison's reach, and its loot hauled home: main never opens on it",
+  "modules": ["exchange", "fight", "strategy", "economy"],
+  "start": { "room": "W8N3", "seed": 1, "node": "M7", "stronghold": "W8N2:1:1" },
+  "ticks": 4000,
+  "assert": [
+    { "measure": "strongholdFallenAt", "room": "W8N2", "max": 1500 },
+    { "measure": "lootTaken", "room": "W8N2", "min": 90 },
+    { "measure": "bodiesLost", "room": "W8N2", "max": 0 },
+    { "measure": "faults", "max": 0 }
+  ]
+}
