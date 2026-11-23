@@ -84,11 +84,7 @@ const library = readdirSync(LIBRARY)
 for (const s of library) s.assert = withAlways(s.assert);
 for (const s of library)
   if (!s.modules?.length || s.modules.some((m) => !modules.includes(m))) fail(`${s.name}: "modules" must name some of ${modules.join(", ")}`);
-// A scripted rival shares our blind spots: the defence meets an open-source bot at least once.
-const OPEN_SOURCE = ["scripts/xxscreeps/engine/hivemind", "scripts/xxscreeps/engine/tooangel"];
-const defends = library.filter((s) => s.name.startsWith("defend-"));
-if (!defends.some((s) => s.start.opponents?.some((o) => OPEN_SOURCE.includes(o.bot)))) fail(`no defend-* scenario seats an open-source bot (${OPEN_SOURCE.join(", ")})`);
-for (const s of defends)
+for (const s of library.filter((s) => s.name.startsWith("defend-")))
   if (!s.assert.some((a) => a.measure === "bodiesLost" && a.max !== undefined)) fail(`${s.name}: a fight scenario bounds bodiesLost by a "max"`);
 // A scenario runs on `sim` (ARCHITECTURE.md §10.2) unless its start or a
 // measure needs what only xxscreeps stands or writes, or its "xxscreeps" says

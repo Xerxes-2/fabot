@@ -51,10 +51,9 @@
 //            on our room's edge, or its `room`'s (`engine/soak-step.mjs`), `ally` its name in our
 //            declared allies (not with --world or --from: their Memory declares). With --from they stand
 //            in the world already and only their code is swapped. A bot
-//            directory's `fetch.json` { tarball, integrity, from, main, build? }
+//            directory's `fetch.json` { tarball, integrity, from, main }
 //            names code that is never in this tree: the tarball, fetched into
-//            the cache, checked against its integrity and built by the shell
-//            command `build` in `from`'s parent, gives its `from` directory's
+//            the cache and checked against its integrity, gives its `from` directory's
 //            files beside the directory's own, its main.js as `main`. Only --fetch reaches the registry; without it a rival
 //            whose tarball is not cached exits 4, which `scenario.mjs` reads
 //            as a skip.
@@ -180,7 +179,7 @@ if (seated && (node || late || flags["--room"] || cores.length || flags["--unsaf
   fail(`--world with a home of ours takes no --node, --late, --room, --core, --unsafe or --ended\n${usage}`);
 if (seated && opponents.some((o) => !Object.values(live.users).includes(o.name))) fail("--world: an opponent is one of the world's users, its rooms the world's");
 const specOf = (bot) => (lstatSync(bot).isDirectory() && existsSync(join(bot, "fetch.json")) ? JSON.parse(readFileSync(join(bot, "fetch.json"), "utf8")) : null);
-const cacheOf = (spec) => join(CACHE, "opponents", createHash("sha256").update(spec.integrity + (spec.build ?? "")).digest("hex").slice(0, 16));
+const cacheOf = (spec) => join(CACHE, "opponents", createHash("sha256").update(spec.integrity).digest("hex").slice(0, 16));
 // Exit 4: an opponent's code is not cached, and this run did not ask for the
 // network (`scenario.mjs` skips the scenario).
 for (const o of opponents) {
@@ -370,7 +369,6 @@ async function cached(spec) {
   mkdirSync(cache, { recursive: true });
   writeFileSync(join(cache, "package.tgz"), body);
   if (spawnSync("tar", ["-xzf", "package.tgz"], { cwd: cache, stdio: "inherit" }).status !== 0) fail(`${spec.tarball}: tar failed`);
-  if (spec.build && spawnSync("sh", ["-c", spec.build], { cwd: join(cache, dirname(spec.from)), stdio: "inherit" }).status !== 0) fail(`${spec.tarball}: build failed`);
   writeFileSync(join(cache, ".ok"), "");
   return true;
 }

@@ -821,12 +821,12 @@ scenarios matching touched modules.
 
 `N1`–`N7` and `E1` are built; `❓` remaining nodes (`E0`, `E2`, `E3`, `S1`–`S4`).
 
-**Adversaries:** scripted rivals (`engine/rival/`) verify plan mechanics;
-fetched open-source bots (TooAngel, Hivemind, The International — pinned
-tarballs/builds fetched only with `--fetch`, never vendored, deterministic
-CPU/bucket; uncached scenarios skip rather than fail and `jj ship` never hits
-the network) prove real combat/outpost outcomes. `❓` Self-play with an
-attacking v2.
+**Adversaries:** scripted rivals (`engine/rival/`) verify plan mechanics. No
+scenario fights an open-source bot (owner): a fight tuned against one says
+little about the players a season meets. Hivemind stays only as the contested
+soak's economic neighbour (a pinned tarball fetched with `--fetch`, never
+vendored; `jj ship` never hits the network). `❓` Self-play with an attacking
+v2.
 
 ### 10.3 Unit tests, where the engine would obscure
 

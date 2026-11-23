@@ -114,13 +114,12 @@ Full engine and metric details live in `ARCHITECTURE.md` §10.
   before running scenarios.
 - **Behaviour fix:** add a scenario reproducing the incident (`scenario.mjs --list`
   shows its engine) and pass `npm run scenario` without regression.
-- **Offence scenarios** (siege, sweep, drain): seat a real rival bot (Hivemind
-  or TooAngel, `start.opponents`) — what an offence pays is proven against a bot
-  that spawns, works, and fights back. Scripted rivals (`engine/rival/`) only
-  verify plan mechanics and must explain `why`. While fight is paused, offence
-  scenarios live on the `fight-scenarios` bookmark.
-- **`Exchange` changes:** prediction error on `npm run exchange` must not rise
-  (§10.1).
+- **Fight changes:** no scenario seats an open-source bot to prove a fight
+  (`ARCHITECTURE.md` §10.2, Adversaries). Scenarios verify mechanics against
+  scripted rivals (`engine/rival/`, each explaining `why`); what a fight pays
+  is read from live engagements (§10.1, `❓` not built yet).
+- **Fight and `Exchange` changes:** prediction error on `npm run exchange`
+  (emitter, `--real` and the stress rival) must not rise (§10.1).
 - **Economy changes:** long-run growth is the objective (`npm run soak -- --ticks 30000`,
   §5, §10.2); an early regression is accepted when the end of the run improves.
   Before shipping, `npm run soak:many` over its default starts (two seeds and a

@@ -1,7 +1,0 @@
-{
-  "tarball": "https://codeload.github.com/The-International-Screeps-Bot/The-International-Open-Source/tar.gz/7e5106eebffb9627cf08cf893b6846012d970b90",
-  "integrity": "sha512-gQi8ocLPbGMH5zGq3EoAdQRfSV73S6J4V3jhmKwMH9maUKafRvN58hAOPGu0DCM0eqRTLwP6XjMO613nxY5nrg==",
-  "from": "The-International-Open-Source-7e5106eebffb9627cf08cf893b6846012d970b90/dist",
-  "main": "international",
-  "build": "printf \"import { defaultSettings } from './settingsDefault'\\nglobal.settings = { ...defaultSettings }\\n\" > src/settings.ts && echo \"export {}\" > src/other/userScript/userScript.ts && sed -i \"/LogOps.registerStyles()/d\" src/main.ts && npm ci --ignore-scripts --no-audit --no-fund && npx rollup -c"
-}
