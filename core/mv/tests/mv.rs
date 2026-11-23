@@ -14,7 +14,6 @@ use proptest::bool::weighted;
 use proptest::collection::vec;
 use proptest::prelude::*;
 use proptest::sample::{Index, select};
-use proptest::test_runner::FileFailurePersistence;
 
 const ROOM: RoomName = RoomName::W1N1;
 const CASES: u32 = 500;
@@ -311,11 +310,7 @@ fn planned(errand: &Errand) -> (Atlas, Mover, Wish) {
 }
 
 proptest! {
-    // Beside this file: no `lib.rs` above it for the default to find.
-    #![proptest_config(ProptestConfig {
-        failure_persistence: Some(Box::new(FileFailurePersistence::WithSource("proptest-regressions"))),
-        ..ProptestConfig::with_cases(CASES)
-    })]
+    #![proptest_config(fabot_base::testing::config(CASES))]
 
     #[test]
     fn no_two_bodies_end_on_one_tile_wished_or_held(crowd in crowd()) {

@@ -253,7 +253,6 @@ mod tests {
     use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest::sample::{Index, select};
-    use proptest::test_runner::FileFailurePersistence;
 
     const GRACE: i32 = 3;
 
@@ -380,11 +379,7 @@ mod tests {
     }
 
     proptest! {
-        // Beside this file: no `lib.rs` above it for the default to find.
-        #![proptest_config(ProptestConfig {
-            failure_persistence: Some(Box::new(FileFailurePersistence::WithSource("proptest-regressions"))),
-            ..ProptestConfig::with_cases(CASES)
-        })]
+        #![proptest_config(fabot_base::testing::config(CASES))]
 
         #[test]
         fn tiles_across_a_seam_link_only_when_adjacent(

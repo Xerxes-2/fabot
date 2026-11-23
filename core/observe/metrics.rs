@@ -1254,51 +1254,53 @@ pub fn counts(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fabot_base::testing::Dice;
+    use proptest::array::{uniform3, uniform5};
+    use proptest::collection::vec;
+    use proptest::option;
+    use proptest::prelude::*;
 
-    #[test]
-    fn a_ring_reads_back_as_written() {
-        let mut dice = Dice::new(3);
-        let rooms = [
-            None,
-            Some(RoomName::W1N1),
-            Some("E2S3".parse::<RoomName>().unwrap()),
-        ];
-        let names = [
-            STOCK,
-            BUILD,
-            "idle.hauler",
-            "refuse.build.-9",
-            "cpu.economy",
-        ];
-        let mut ring: VecDeque<Window> = VecDeque::new();
-        for i in 0..20 {
-            let mut w = Window {
-                start: i * WINDOW,
-                ticks: dice.between(1, WINDOW),
-                rows: BTreeMap::new(),
+    proptest! {
+        #![proptest_config(fabot_base::testing::config(256))]
+
+        #[test]
+        fn a_ring_reads_back_as_written(
+            windows in vec((1..=WINDOW, uniform3(option::of(uniform5(option::of(-5..=5000))))), 20),
+        ) {
+            let rooms = [
+                None,
+                Some(RoomName::W1N1),
+                Some("E2S3".parse::<RoomName>().unwrap()),
+            ];
+            let names = [
+                STOCK,
+                BUILD,
+                "idle.hauler",
+                "refuse.build.-9",
+                "cpu.economy",
+            ];
+            let mut ring: VecDeque<Window> = VecDeque::new();
+            for (i, (ticks, rows)) in (0..).zip(windows) {
+                let mut w = Window {
+                    start: i * WINDOW,
+                    ticks,
+                    rows: BTreeMap::new(),
+                };
+                for (row, values) in rooms.into_iter().zip(rows) {
+                    let Some(values) = values else { continue };
+                    let values = (names.iter().zip(values))
+                        .filter_map(|(name, v)| Some((name.to_string(), v.filter(|v| *v != 0)?)));
+                    w.rows.insert(row, values.collect());
+                }
+                if !w.rows.is_empty() {
+                    ring.push_back(w);
+                }
+            }
+            let mut m = Metrics {
+                ring: ring.clone(),
+                ..Metrics::default()
             };
-            for row in rooms {
-                let mut values = BTreeMap::new();
-                for name in names {
-                    let v = dice.between(-5, 5000);
-                    if dice.chance(2) && v != 0 {
-                        values.insert(name.to_string(), v);
-                    }
-                }
-                if dice.chance(2) {
-                    w.rows.insert(row, values);
-                }
-            }
-            if !w.rows.is_empty() {
-                ring.push_back(w);
-            }
+            prop_assert_eq!(Metrics::of_text(&m.text()).ring, ring);
         }
-        let mut m = Metrics {
-            ring: ring.clone(),
-            ..Metrics::default()
-        };
-        assert_eq!(Metrics::of_text(&m.text()).ring, ring);
     }
 
     #[test]

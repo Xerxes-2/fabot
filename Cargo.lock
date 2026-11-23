@@ -243,6 +243,7 @@ dependencies = [
  "fabot-base",
  "fabot-economy",
  "fabot-fight",
+ "proptest",
  "strum",
 ]
 

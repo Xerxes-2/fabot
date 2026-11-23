@@ -837,14 +837,14 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::dice::{self, Dice};
+    use crate::arb;
+    use proptest::prelude::*;
 
-    #[test]
-    fn decide_never_faults_and_holds_a_slot_and_a_task_it_can_read() {
-        let mut dice = Dice::new(51);
+    proptest! {
+        #![proptest_config(fabot_base::testing::config(256))]
 
-        for _ in 0..100 {
-            let g = dice::world(&mut dice);
+        #[test]
+        fn decide_never_faults_and_holds_a_slot_and_a_task_it_can_read(g in arb::world()) {
             let mut atlas = Atlas::of_world(&g.world);
             let sightings = BTreeMap::new();
             let mut declarations = declarations::undeclared();
@@ -868,11 +868,11 @@ mod tests {
             let out = decide(&mut context, &mut state, &[]);
 
             for (name, held) in &state.assignments {
-                assert!(!held.slot.is_empty(), "{name} {held:?}");
+                prop_assert!(!held.slot.is_empty(), "{} {:?}", name, held);
             }
 
             for (_, ask) in &out.asks {
-                assert!(ask.body.len() <= fabot_base::engine::MAX_BODY_PARTS);
+                prop_assert!(ask.body.len() <= fabot_base::engine::MAX_BODY_PARTS);
             }
 
             let wished: BTreeSet<&str> =
@@ -882,7 +882,7 @@ mod tests {
                 .filter(|c| declarations::fights(&c.name))
                 .count();
 
-            assert_eq!(
+            prop_assert_eq!(
                 wished.len() + fought,
                 g.world.creeps.len(),
                 "every body not in a fight wishes once"

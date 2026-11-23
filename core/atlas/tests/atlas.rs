@@ -17,7 +17,6 @@ use proptest::bool::weighted;
 use proptest::collection::vec;
 use proptest::prelude::*;
 use proptest::sample::{Index, select};
-use proptest::test_runner::FileFailurePersistence;
 
 const ROOM: RoomName = RoomName::W1N1;
 const CASES: u32 = 256;
@@ -402,11 +401,7 @@ fn walled_rooms() -> impl Strategy<Value = World<'static>> {
 }
 
 proptest! {
-    // Beside this file: no `lib.rs` above it for the default to find.
-    #![proptest_config(ProptestConfig {
-        failure_persistence: Some(Box::new(FileFailurePersistence::WithSource("proptest-regressions"))),
-        ..ProptestConfig::with_cases(CASES)
-    })]
+    #![proptest_config(fabot_base::testing::config(CASES))]
 
     #[test]
     fn a_loaded_body_weighs_at_least_its_empty_self_and_a_creep_reads_as_its_parts(kinds in parts(60)) {

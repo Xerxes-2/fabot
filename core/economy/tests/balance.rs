@@ -211,7 +211,7 @@ fn hold_bands(colonies: &[Colony], ships: &[Shipment]) -> Result<(), TestCaseErr
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(CASES))]
+    #![proptest_config(fabot_base::testing::config(CASES))]
 
     #[test]
     fn want_is_a_reagent_batch_and_a_boost_only_while_fighting(

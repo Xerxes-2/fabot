@@ -331,7 +331,6 @@ mod tests {
     use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest::sample::select;
-    use proptest::test_runner::FileFailurePersistence;
     use std::collections::BTreeMap;
 
     fn at(x: i32, y: i32) -> Pos {
@@ -475,11 +474,7 @@ mod tests {
     }
 
     proptest! {
-        // Beside this file: no `lib.rs` above it for the default to find.
-        #![proptest_config(ProptestConfig {
-            failure_persistence: Some(Box::new(FileFailurePersistence::WithSource("proptest-regressions"))),
-            ..ProptestConfig::with_cases(CASES)
-        })]
+        #![proptest_config(fabot_base::testing::config(CASES))]
 
         #[test]
         fn a_carrier_in_reach_that_is_not_struck_never_spends_the_safe_mode(spec in spec()) {

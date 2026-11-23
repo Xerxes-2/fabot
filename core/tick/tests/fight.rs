@@ -3,16 +3,11 @@ use fabot_base::engine;
 use fabot_base::vocabulary::Part;
 use fabot_fight::casting;
 use proptest::prelude::*;
-use proptest::test_runner::FileFailurePersistence;
 
 const CASES: u32 = 256;
 
 proptest! {
-    // Beside this file: the default files it above the crate.
-    #![proptest_config(ProptestConfig {
-        failure_persistence: Some(Box::new(FileFailurePersistence::WithSource("proptest-regressions"))),
-        ..ProptestConfig::with_cases(CASES)
-    })]
+    #![proptest_config(fabot_base::testing::config(CASES))]
 
     /// Every body cast for a kind that walks out of our rooms carries a HEAL
     /// (owner): shot up it heals the damage off instead of losing its MOVE to it

@@ -16,13 +16,14 @@ serde.workspace = true
 rustc-hash.workspace = true
 strum.workspace = true
 enum-iterator.workspace = true
+proptest = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest.workspace = true
 
 [features]
 tools = []
-test-support = []
+test-support = ["dep:proptest"]
 
 [lints]
 workspace = true

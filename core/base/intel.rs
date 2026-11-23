@@ -231,7 +231,10 @@ pub fn of_text(text: &str) -> Intel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::Dice;
+    use proptest::collection::vec;
+    use proptest::option;
+    use proptest::prelude::*;
+    use proptest::sample::select;
 
     #[test]
     fn push_int_writes_as_display() {
@@ -242,40 +245,63 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_row_reads_back_as_written() {
-        let mut dice = Dice::new(7);
-        let user = |dice: &mut Dice| {
-            dice.chance(2)
-                .then(|| dice.pick(&["a", "b_c", "d-e", "Invader"]).to_string())
-        };
-        let site = |dice: &mut Dice| Declared {
-            id: format!("{:x}", dice.between(0, 9_999_999)).as_str().into(),
-            pos: Pos::new(RoomName::W1N1, dice.between(0, 49), dice.between(0, 49)),
-        };
-        for _ in 0..300 {
-            let row = Row {
-                seen: dice.between(0, 9_999_999),
-                owner: user(&mut dice),
-                level: dice.between(0, 8),
-                reservation: user(&mut dice).map(|u| (u, dice.between(0, 9_999_999))),
-                worker: user(&mut dice),
-                lairs: dice.chance(2).then(|| {
-                    let tile = |dice: &mut Dice| Tile::of_index(dice.below(2500) as usize);
-                    (0..dice.below(5))
-                        .map(|_| (tile(&mut dice), tile(&mut dice)))
-                        .collect()
-                }),
-                controller: dice.chance(2).then(|| site(&mut dice)),
-                sources: dice
-                    .chance(2)
-                    .then(|| (0..dice.below(3)).map(|_| site(&mut dice)).collect()),
-                contained: dice.chance(2),
-                mineral: dice.chance(2).then(|| dice.pick(&crate::vocabulary::ORES)),
-                stronghold: dice.chance(2),
-            };
+    fn row() -> impl Strategy<Value = Row> {
+        let user = select(vec!["a", "b_c", "d-e", "Invader"]).prop_map(String::from);
+        let site = (0..=9_999_999, 0..=49, 0..=49).prop_map(|(id, x, y)| Declared {
+            id: format!("{id:x}").as_str().into(),
+            pos: Pos::new(RoomName::W1N1, x, y),
+        });
+        let tile = (0..2500usize).prop_map(Tile::of_index);
+        let draws = (
+            0..=9_999_999,
+            option::of(user.clone()),
+            0..=8,
+            option::of((user.clone(), 0..=9_999_999)),
+            option::of(user),
+            option::of(vec((tile.clone(), tile), 0..5)),
+            option::of(site.clone()),
+            option::of(vec(site, 0..3)),
+            any::<bool>(),
+            option::of(select(crate::vocabulary::ORES.to_vec())),
+            any::<bool>(),
+        );
+        draws.prop_map(|draws| {
+            let (
+                seen,
+                owner,
+                level,
+                reservation,
+                worker,
+                lairs,
+                controller,
+                sources,
+                contained,
+                mineral,
+                stronghold,
+            ) = draws;
+            Row {
+                seen,
+                owner,
+                level,
+                reservation,
+                worker,
+                lairs,
+                controller,
+                sources,
+                contained,
+                mineral,
+                stronghold,
+            }
+        })
+    }
+
+    proptest! {
+        #![proptest_config(crate::testing::config(300))]
+
+        #[test]
+        fn a_row_reads_back_as_written(row in row()) {
             let intel: Intel = [(RoomName::W1N1, row)].into();
-            assert_eq!(of_text(&to_text(&intel)), intel);
+            prop_assert_eq!(of_text(&to_text(&intel)), intel);
         }
     }
 }

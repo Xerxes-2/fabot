@@ -8,7 +8,6 @@ use fabot_base::vocabulary::{ORES, RESOURCES_ALL, ResourceType};
 use fabot_economy::labs::{Bench, Reaction, assign, makeable, wanted};
 use proptest::prelude::*;
 use proptest::sample::{select, subsequence};
-use proptest::test_runner::FileFailurePersistence;
 
 const CASES: u32 = 256;
 
@@ -305,11 +304,7 @@ fn no_recipe_holds_a_compound_twice() {
 }
 
 proptest! {
-    // Beside this file: the default reads `lib.rs` as the crate root and seeds `core/`.
-    #![proptest_config(ProptestConfig {
-        failure_persistence: Some(Box::new(FileFailurePersistence::WithSource("proptest-regressions"))),
-        ..ProptestConfig::with_cases(CASES)
-    })]
+    #![proptest_config(fabot_base::testing::config(CASES))]
 
     #[test]
     fn the_first_target_is_cut_to_whole_reactions_its_ore_carries((targets, stock) in targets_with_stock()) {

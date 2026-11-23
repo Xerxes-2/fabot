@@ -1068,8 +1068,11 @@ pub fn body_cost(creep: &Creep) -> i32 {
 mod tests {
     use super::{BodyPart, Creep, Id, Owner, Pos, Room, RoomName, Rules, Sightings, Store};
     use super::{World, sightings};
-    use crate::testing::Dice;
     use crate::vocabulary::Part;
+    use proptest::array::uniform3;
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+    use proptest::sample::Index;
 
     fn seen_in(name: RoomName, others: Vec<Creep>) -> Room<'static> {
         Room {
@@ -1078,37 +1081,40 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_room_out_of_sight_never_remembers_a_body_standing_now() {
-        let mut dice = Dice::new(0x5167_7105);
-        let names = [
-            RoomName::W1N1,
-            "W2N1".parse::<RoomName>().unwrap(),
-            "W3N1".parse::<RoomName>().unwrap(),
-        ];
-        let part = |kind| BodyPart {
-            kind,
-            hits: 100,
-            boost: None,
-        };
-        for _ in 0..200 {
+    proptest! {
+        #![proptest_config(crate::testing::config(256))]
+
+        #[test]
+        fn a_room_out_of_sight_never_remembers_a_body_standing_now(
+            ticks in vec((any::<Index>(), 1..=48, 1..=48, 1..=200, uniform3(any::<bool>())), 39),
+        ) {
+            let names = [
+                RoomName::W1N1,
+                "W2N1".parse::<RoomName>().unwrap(),
+                "W3N1".parse::<RoomName>().unwrap(),
+            ];
+            let part = |kind| BodyPart {
+                kind,
+                hits: 100,
+                boost: None,
+            };
             let mut kept = Sightings::new();
-            for time in 1..40 {
-                let at = dice.pick(&names);
+            for (time, (at, x, y, hits, seen)) in (1..).zip(ticks) {
+                let at = names[at.index(names.len())];
                 let raider = Creep {
                     id: Id::from("r1"),
                     name: String::new(),
                     owner: Owner::Invader,
-                    pos: Pos::new(at, dice.between(1, 48), dice.between(1, 48)),
+                    pos: Pos::new(at, x, y),
                     body: vec![part(Part::Attack), part(Part::Move)],
-                    hits: dice.between(1, 200),
+                    hits,
                     hits_max: 200,
                     ticks_to_live: 1500 - time,
                     fatigue: 0,
                     store: Store::empty(),
                 };
-                let rooms = (names.iter().filter(|_| dice.chance(2)))
-                    .map(|&r| {
+                let rooms = (names.iter().zip(seen).filter(|(_, seen)| *seen))
+                    .map(|(&r, _)| {
                         seen_in(
                             r,
                             if r == at {
@@ -1135,7 +1141,7 @@ mod tests {
                     rules: Rules::vanilla(),
                 };
                 kept = sightings::step(&world, kept);
-                assert!(sightings::kept(&world, &kept));
+                prop_assert!(sightings::kept(&world, &kept));
             }
         }
     }

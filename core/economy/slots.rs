@@ -1424,13 +1424,19 @@ pub fn casts(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dice::{self, Dice};
+    use crate::arb;
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+    use proptest::sample::Index;
 
-    #[test]
-    fn a_distance_is_never_shorter_than_the_tiles_apart_and_the_nearest_is_the_least() {
-        let mut dice = Dice::new(66);
-        for _ in 0..100 {
-            let g = dice::world(&mut dice);
+    proptest! {
+        #![proptest_config(fabot_base::testing::config(256))]
+
+        #[test]
+        fn a_distance_is_never_shorter_than_the_tiles_apart_and_the_nearest_is_the_least(
+            g in arb::world(),
+            extra in vec((any::<Index>(), 1..=48, 1..=48), 8),
+        ) {
             let atlas = Atlas::of_world(&g.world);
             let rooms: Vec<RoomName> = g.world.rooms.iter().map(|r| r.name).collect();
             let borders = [
@@ -1445,21 +1451,20 @@ mod tests {
             let mut ends: Vec<Pos> = (rooms.iter())
                 .flat_map(|r| borders.map(|(x, y)| Pos::new(*r, x, y)))
                 .collect();
-            for _ in 0..8 {
-                let room = dice.pick(&rooms);
-                ends.push(dice::pos(&mut dice, room));
+            for (room, x, y) in extra {
+                ends.push(Pos::new(rooms[room.index(rooms.len())], x, y));
             }
             for a in &ends {
                 for b in &ends {
                     let d = distance(&atlas, a, b);
-                    assert!(d.is_none_or(|d| d >= apart(a, b)), "{a:?} {b:?} {d:?}");
+                    prop_assert!(d.is_none_or(|d| d >= apart(a, b)), "{:?} {:?} {:?}", a, b, d);
                 }
                 let ranked = (ends.iter().enumerate()).map(|(i, b)| (i % 3, *b, i));
                 let least = (ends.iter().enumerate())
                     .filter_map(|(i, b)| Some((i % 3, distance(&atlas, a, b)?, i)))
                     .min();
                 let found = nearest(a, ranked, |b| distance(&atlas, a, b));
-                assert_eq!(found, least.map(|(_, d, i)| (i, d)));
+                prop_assert_eq!(found, least.map(|(_, d, i)| (i, d)));
             }
         }
     }

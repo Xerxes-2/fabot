@@ -11,7 +11,6 @@ use fabot_base::intents::{Action, CreepAct, ModuleOutput};
 use fabot_base::world::World;
 use proptest::prelude::*;
 use proptest::sample::Index;
-use proptest::test_runner::FileFailurePersistence;
 
 const CASES: u32 = 256;
 const NAMES: [&str; 8] = ["m0", "m1", "m2", "m3", "m4", "m5", "m6", "m7"];
@@ -85,11 +84,7 @@ fn said(intents: &[Action]) -> Vec<(String, String)> {
 }
 
 proptest! {
-    // Beside this file: the default files it above the crate.
-    #![proptest_config(ProptestConfig {
-        failure_persistence: Some(Box::new(FileFailurePersistence::WithSource("proptest-regressions"))),
-        ..ProptestConfig::with_cases(CASES)
-    })]
+    #![proptest_config(fabot_base::testing::config(CASES))]
 
     #[test]
     fn every_module_is_reported_once_in_order_then_the_settling(count in 0..=NAMES.len()) {

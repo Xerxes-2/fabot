@@ -173,29 +173,29 @@ impl Task {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dice::{self, Dice};
+    use crate::arb;
+    use proptest::prelude::*;
 
-    #[test]
-    fn a_task_id_reads_back_as_the_same_task() {
-        let mut dice = Dice::new(1);
-        for _ in 0..300 {
-            let target = dice::target(&mut dice);
-            let task = dice::task(&mut dice, target);
-            assert_eq!(
+    fn shared() -> impl Strategy<Value = Task> {
+        arb::task_on(prop_oneof![8 => Just(Target::Ring(arb::at().room)), 1 => arb::target()])
+    }
+
+    proptest! {
+        #![proptest_config(fabot_base::testing::config(1000))]
+
+        #[test]
+        fn a_task_id_reads_back_as_the_same_task(task in arb::task()) {
+            prop_assert_eq!(
                 of_task_id(&task_id(&task)).map(|t| task_id(&t)),
                 Some(task_id(&task))
             );
         }
-    }
 
-    #[test]
-    fn two_tasks_with_one_id_are_one_task() {
-        let mut dice = Dice::new(2);
-        for _ in 0..300 {
-            let (ta, tb) = (dice::target(&mut dice), dice::target(&mut dice));
-            let a = dice::task(&mut dice, ta);
-            let b = dice::task(&mut dice, tb);
-            assert!(task_id(&a) != task_id(&b) || format!("{a:?}") == format!("{b:?}"));
+        // Ids collide only on one target: most pairs share the ring.
+        #[test]
+        fn two_tasks_with_one_id_are_one_task(a in shared(), b in shared()) {
+            let same = format!("{a:?}") == format!("{b:?}");
+            prop_assert!(task_id(&a) != task_id(&b) || same);
         }
     }
 }

@@ -10,7 +10,6 @@ use crate::vocabulary::{
 };
 use proptest::prelude::*;
 use proptest::sample::subsequence;
-use proptest::test_runner::FileFailurePersistence;
 
 fn stock(held: &[(ResourceType, i32)], energy: i32) -> Stock {
     let held = (held.iter())
@@ -129,11 +128,7 @@ fn visit(body: &[Part], before: &Stock) -> (Visits, Stock) {
 }
 
 proptest! {
-    // Beside this file: the default reads `lib.rs` as the crate root and seeds `core/`.
-    #![proptest_config(ProptestConfig {
-        failure_persistence: Some(Box::new(FileFailurePersistence::WithSource("proptest-regressions"))),
-        ..ProptestConfig::with_cases(CASES)
-    })]
+    #![proptest_config(crate::testing::config(CASES))]
 
     #[test]
     fn a_visit_spends_its_part_count_of_its_compound_and_of_energy((body, before) in case()) {
