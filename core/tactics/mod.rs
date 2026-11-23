@@ -755,6 +755,21 @@ pub fn rampart(sight: &mut Sight, ours: &[&Creep], creep: &Creep) -> Wish {
     }
 }
 
+/// v1's guard outlived its raid where it stood, to meet the next one there.
+pub fn rest(sight: &mut Sight, creep: &Creep, outposts: &BTreeSet<RoomName>) -> Wish {
+    let (room, at) = (creep.pos.room, tiles::of_pos(&creep.pos));
+    match outposts
+        .contains(&room)
+        .then(|| sight.atlas.idle(room, at, REST_RANGE))
+    {
+        Some(Some(t)) if t == at => hold(sight, creep),
+        Some(Some(t)) => toward(sight, creep, &tiles::to_pos(room, t), 0),
+        _ => retreat(sight, creep),
+    }
+}
+
+const REST_RANGE: i32 = 8;
+
 pub fn retreat(sight: &mut Sight, creep: &Creep) -> Wish {
     let room = creep.pos.room;
     let here = (sight.musters.iter()).filter(|p| p.room == room);

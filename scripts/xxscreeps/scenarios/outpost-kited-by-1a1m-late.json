@@ -1,0 +1,110 @@
+{
+  "why": "outpost-kited-by-1a1m with our bot sitting out its first 7 ticks: the seed alone does not move this scripted fight, so this start is its second sample. Bounds by the owner",
+  "modules": [
+    "atlas",
+    "economy",
+    "fight",
+    "strategy",
+    "tactics"
+  ],
+  "start": {
+    "room": "W8N3",
+    "seed": 1,
+    "late": 7,
+    "node": "E1",
+    "invaders": "W7N3:100000:100000",
+    "opponents": [
+      {
+        "name": "harasser",
+        "bot": "scripts/xxscreeps/engine/rival",
+        "room": "W6N3",
+        "config": {
+          "role": "harass",
+          "target": "W7N3",
+          "first": 1500,
+          "count": 1,
+          "body": [
+            "attack",
+            "move"
+          ],
+          "cross": true
+        }
+      }
+    ]
+  },
+  "ticks": 6000,
+  "assert": [
+    {
+      "metric": "held",
+      "room": "W7N3",
+      "from": 1500,
+      "to": 5800,
+      "total": true,
+      "min": 3600
+    },
+    {
+      "measure": "dug",
+      "room": "W7N3",
+      "from": 1500,
+      "to": 5800,
+      "min": 70000
+    },
+    {
+      "measure": "dug",
+      "room": "W8N2",
+      "from": 1500,
+      "to": 5800
+    },
+    {
+      "measure": "hostileTicks",
+      "room": "W7N3",
+      "from": 1500,
+      "to": 5800
+    },
+    {
+      "measure": "defendsOpened",
+      "room": "W7N3",
+      "from": 1500,
+      "to": 5800
+    },
+    {
+      "metric": "fight.flips",
+      "room": "W7N3",
+      "from": 1500,
+      "to": 5800,
+      "total": true
+    },
+    {
+      "measure": "defendSpent",
+      "room": "W7N3",
+      "from": 1500,
+      "to": 5800
+    },
+    {
+      "measure": "bodiesLost",
+      "room": "W7N3",
+      "from": 1500,
+      "to": 5800
+    },
+    {
+      "metric": "loss.player",
+      "room": "W7N3",
+      "from": 1500,
+      "to": 5800,
+      "total": true
+    },
+    {
+      "measure": "rivalSpent",
+      "name": "harass",
+      "from": 1500,
+      "to": 5800
+    },
+    {
+      "measure": "answeredAfter",
+      "name": "harass",
+      "room": "W7N3",
+      "from": 1500,
+      "to": 5800
+    }
+  ]
+}

@@ -132,6 +132,8 @@ pub struct Derived {
     pub worked: Vec<Outpost>,
     /// What a body outside a fight walks round, per room with any.
     pub danger: Vec<(RoomName, TileSet)>,
+    /// What a harvester walks round, its seat and the walk to it: the strikes no guard holds (v1).
+    pub exposed: Vec<(RoomName, TileSet)>,
     pub trees: Vec<(RoomName, Tree)>,
     pub homes: Vec<Home>,
     /// The colonies whose labs react and boost (`boost::clusters`), their
@@ -149,8 +151,9 @@ impl Home {
 }
 
 impl Derived {
-    pub fn danger(&self, room: RoomName) -> Option<&TileSet> {
-        (self.danger.iter()).find_map(|(r, d)| (*r == room).then_some(d))
+    pub fn danger(&self, room: RoomName, seated: bool) -> Option<&TileSet> {
+        let sets = if seated { &self.exposed } else { &self.danger };
+        (sets.iter()).find_map(|(r, d)| (*r == room).then_some(d))
     }
 
     pub fn home(&self, room: RoomName) -> Option<&Home> {
@@ -167,10 +170,12 @@ impl Derived {
 /// room, its reach taken where its fire is above its weakest. None in a room
 /// we own: its refills keep the towers firing, and the strikes they take are
 /// what calls the safe mode.
-fn danger(world: &World, owned: &BTreeSet<RoomName>) -> Vec<(RoomName, TileSet)> {
+fn danger(world: &World, owned: &BTreeSet<RoomName>, guarded: bool) -> Vec<(RoomName, TileSet)> {
     let reaches = |r: &Room| {
+        let guards = guards(world, r.name);
         let creeps = (r.hostiles())
             .filter(|c| hostiles::foe(c) && hostiles::strikes(c))
+            .filter(|c| !(guarded && held(&guards, c)))
             .map(|c| (tiles::of_pos(&c.pos), hostiles::reach(c)));
         let towers = (r.structures.iter())
             .filter(|s| {
@@ -217,7 +222,8 @@ pub fn derive(world: &World, atlas: &mut Atlas) -> Derived {
         })
         .collect();
     Derived {
-        danger: danger(world, &owned),
+        danger: danger(world, &owned, false),
+        exposed: danger(world, &owned, true),
         homes,
         capped: owned.len() as i32 >= world.rooms_allowed,
         owned,
@@ -249,6 +255,27 @@ pub fn worked(
         .collect()
 }
 
+fn guards<'w>(world: &'w World, room: RoomName) -> Vec<&'w Creep> {
+    (world.creeps.iter())
+        .filter(|c| c.pos.room == room)
+        .collect()
+}
+
+/// v1's guard: a body of ours striking as far as the raider, and in reach of it, holds it off the work.
+fn held(guards: &[&Creep], foe: &Creep) -> bool {
+    let range = |c: &Creep| {
+        [
+            (Part::RangedAttack, engine::RANGED_RANGE),
+            (Part::Attack, engine::MELEE_RANGE),
+        ]
+        .into_iter()
+        .find_map(|(part, range)| (c.live(part) > 0).then_some(range))
+    };
+    (guards.iter()).any(|g| {
+        range(g).is_some() && range(g) >= range(foe) && g.pos.within(hostiles::reach(g), &foe.pos)
+    })
+}
+
 /// Whether an outpost's work is open (`ARCHITECTURE.md` §13, M1b): a foe
 /// stands down the work it can reach and no more.
 fn open(world: &World, sightings: &Sightings, owned: &BTreeSet<RoomName>, room: RoomName) -> bool {
@@ -261,6 +288,7 @@ fn open(world: &World, sightings: &Sightings, owned: &BTreeSet<RoomName>, room: 
         .iter()
         .any(|s| s.kind == StructureType::InvaderCore && s.level > 0);
     let foes: Vec<Creep> = seen.hostiles().cloned().collect();
+    let guards = guards(world, room);
     let work: Vec<&Pos> = seen
         .sources
         .iter()
@@ -278,7 +306,8 @@ fn open(world: &World, sightings: &Sightings, owned: &BTreeSet<RoomName>, room: 
             // An Invader's raid only ever walks to the work, so it stands the
             // room down on sight; a player's only the work it can strike.
             c.owner == Owner::Invader
-                || (hostiles::armed(owned, &foes, c)
+                || (!held(&guards, c)
+                    && hostiles::armed(owned, &foes, c)
                     && work.iter().any(|at| c.pos.within(hostiles::reach(c), at)))
         })
 }

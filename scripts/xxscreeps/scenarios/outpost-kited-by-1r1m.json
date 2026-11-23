@@ -1,11 +1,12 @@
 {
-  "why": "outpost-kited-by-1a1m's harasser as 1RA1M: it stands the outpost down from five tiles off, strikes from three, and never crosses a border: our ranged Defend outranges it, so each body dies within some 170 ticks of arriving, and what this measures is denial by recast, not a kite that lives. The window ends at t5800, before the engine's own Invaders, drawn by W7N3's dig, raid at t5857. Bounds by the owner; nightly while current code fails them",
+  "why": "outpost-kited-by-1a1m's harasser as 1RA1M: it stands the outpost down from five tiles off, strikes from three, and never crosses a border: our ranged Defend outranges it, so each body dies within some 170 ticks of arriving, and what this measures is denial by recast, not a kite that lives. The window ends at t5800, before the engine's own Invaders, drawn by W7N3's dig, raid at t5857. Bounds by the owner",
   "modules": [
     "atlas",
+    "economy",
     "fight",
-    "strategy"
+    "strategy",
+    "tactics"
   ],
-  "nightly": true,
   "start": {
     "room": "W8N3",
     "seed": 1,

@@ -141,7 +141,7 @@ pub(super) fn act(
     let mut lookups = 0;
     let mut step = |sight: &mut tactics::Sight, c: &Creep| -> (Option<CreepAct>, Wish) {
         let Some(&e) = engaged_in.get(c.name.as_str()) else {
-            return (None, tactics::retreat(sight, c));
+            return (None, tactics::rest(sight, c, &scene.worked));
         };
 
         if let Some(controller) = taps.get(&e.id).filter(|_| tactics::claims(c)) {

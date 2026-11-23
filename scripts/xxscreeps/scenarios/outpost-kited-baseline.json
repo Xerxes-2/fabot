@@ -1,11 +1,10 @@
 {
-  "why": "outpost-kited-by-1a1m's seat with its rival casting nothing: the dig and the worked ticks the kited runs are bounded against, which it passes. The window ends at t5800, before the engine's own Invaders, drawn by W7N3's dig, raid at t5857. Bounds by the owner; nightly while current code fails them",
+  "why": "outpost-kited-by-1a1m's seat with its rival casting nothing: the dig and the worked ticks the kited runs are bounded against, which it passes. The window ends at t5800, before the engine's own Invaders, drawn by W7N3's dig, raid at t5857. Bounds by the owner",
   "modules": [
     "atlas",
     "fight",
     "strategy"
   ],
-  "nightly": true,
   "start": {
     "room": "W8N3",
     "seed": 1,

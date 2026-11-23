@@ -479,7 +479,12 @@ with one phase machine per kind under `core/fight/kinds/`.
   seeks it as a seen one; with none remembered, or a re-price casting nothing,
   it disengages and keeps its budget the same way. A body with nothing alive but MOVE,
   TOUGH and CARRY counts as lost to an outpost (nothing there heals it; it can
-  end no raid) and no engagement drafts it until healed. Home `Defend` never
+  end no raid) and no engagement drafts it until healed. A fight body no
+  engagement holds rests in any outpost or claim it stands in (one walked
+  through on its way home included: where it was freed is no state kept),
+  on a tile blocking no walk or work, else at its muster: a raid recast next
+  door meets it there (v1's guard). `❓` Absorbing a raid (stand down) vs
+  answering it is no explicit Exchange price yet (owner). Home `Defend` never
   disengages (falls back to `unanswered` on towers/ramparts until the group
   is gone).
 - **`Siege`, `Raid` & `Drain`** (`kinds/siege.rs`, `kinds/raid.rs`): opened on
@@ -919,7 +924,7 @@ on a live-sized world.
 | Milestone | Scope | Exit | Status |
 |---|---|---|---|
 | M1 economy | core economy slots, logistics, layout | seat-extreme soak beats v1 across seeds | ✅ |
-| M1b outposts | remote harvest/haul/reserve; stand-down rule: a player's armed hostile stands down an outpost while it reaches its sources/containers, an Invader raid on sight (its only aim is that work; bodies withdraw while Defend answers, the outpost stays chosen), a stronghold core outright, and a blind room's last-seen hostile for its life (`sightings`) | E1 outposts net positive after Invaders | ✅ |
+| M1b outposts | remote harvest/haul/reserve; stand-down rule: a player's armed hostile stands down an outpost while it reaches its sources/containers and no armed body of ours holds it (strikes as far and stands within its own reach of it: v1's guard), an Invader raid on sight (its only aim is that work; bodies withdraw while Defend answers, the outpost stays chosen), a stronghold core outright, and a blind room's last-seen hostile for its life (`sightings`); a harvester (at its seat or walking to it) walks round only the strikes no guard holds, every other body round all | E1 outposts net positive after Invaders | ✅ |
 | M2 structures | nodes N1–N7; links (controller's + longest-way source's first beat hub-first by +5–17k over 20k ticks on N4); labs & boosts; factory and RCL8 set wait for a sink (one room mines one ore, reactions need two, offline has no market) | links beat no-links; labs feed boosts | ✅ |
 | M3 defence | `Exchange`, `Defend`, tactics, casting, rival harness | fixed rivals & self-play held; error in bound | ✅ (self-play `❓`) |
 | M4 live | v2 replaces v1 live | live since 2026-10-17 | ✅ |

@@ -952,6 +952,20 @@ impl Atlas {
         grid::value(seat.unwrap_or(grid.standing[tile]))
     }
 
+    /// Nothing solid beside, no road, edge or seat near: a body idle there blocks no walk or work.
+    pub fn idle(&self, room: RoomName, at: Tile, range: i32) -> Option<Tile> {
+        let grid = self.grid(room)?;
+        let idle = |tile: &Tile| {
+            let ground = grid::value(grid.standing[*tile]);
+            !tiles::on_edge(*tile)
+                && ground.is_some_and(|w| w != engine::ROAD_WEIGHT)
+                && (tiles::around(*tile).iter()).all(|t| grid.standing[*t].is_some())
+                && grid.seats.iter().all(|(t, _)| tiles::range(*t, *tile) > 1)
+        };
+        (tiles::within(range, at).into_iter().filter(idle))
+            .min_by_key(|t| (tiles::range(at, *t), *t))
+    }
+
     pub fn passable(&self, room: RoomName, tile: Tile) -> bool {
         self.grid(room)
             .is_some_and(|grid| grid.held()[tile].is_some())

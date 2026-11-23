@@ -673,7 +673,8 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
     let mut wishes: Vec<(RoomName, Vec<Wish>)> = Vec::new();
     for (creep, at) in tasks {
         let mover = movers[creep.name.as_str()];
-        let danger = context.derived.danger(creep.pos.room);
+        let seated = matches!(at, Some((_, _, Some(Task::Harvest(_)))));
+        let danger = context.derived.danger(creep.pos.room, seated);
         let Some((slot, body, task)) = at else {
             // A load held idle is lost to every sink.
             let loaded = creep.store.amount_of(Energy) > 0;
