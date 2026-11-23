@@ -1,7 +1,7 @@
 // One soak on `sim`: what `soak.mjs`, `soak-many.mjs` and `scenario.mjs` share.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BUILT, US, built, near, standNode } from "./node.mjs";
@@ -167,22 +167,30 @@ export const buildPlan = () =>
 
 /**
  * A soak into `out` on `world` (default the template), or on the world map.js generates off seed `gen`
- * over `sectors` ("WxH"; sim picks the room); resolves to sim's exit code, -1 when it never ran. `watch` ({port, ms, badge}) serves it to lazycreep;
+ * over `sectors` ("WxH"; sim picks the room); resolves to sim's exit code, -1 when it never ran or was killed (the cause on stderr). `watch` ({port, ms, badge}) serves it to lazycreep;
  * `capture` ("a-b[,c-d]") writes those ticks to `out`/capture.jsonl for `scripts/bench.mjs`.
  */
 export function runSim(bin, { world, gen, sectors, room, node, ticks, seed = 1, late = 0, ended = false, unsafe = false, follow = [], rivals = [], players, invaders, wave, core, stronghold, resetEvery = 0, watch, capture, out }) {
   return new Promise((done) => {
     rmSync(out, { recursive: true, force: true });
+    mkdirSync(dirname(out), { recursive: true });
     const map = `${out}.world.json`;
-    const finish = (code) => {
+    let finished = false;
+    const finish = (code, why) => {
+      if (finished) return;
+      finished = true;
+      if (why) console.error(`${out}: ${why}`);
       rmSync(map, { force: true });
       done(code);
     };
+    const fail = (e) => finish(-1, e.message);
     const play = (where) => {
       const args = [...where, "--ticks", String(ticks), "--seed", String(seed), "--late", String(late), "--every", "100", "--out", out, ...(follow.length ? ["--follow", follow.join(",")] : []), ...(ended ? ["--ended"] : []), "--reset-every", String(resetEvery), ...(capture ? ["--capture", capture] : []), "--rivals", JSON.stringify(seats(rivals)), ...(players ? ["--players", players] : []),
         "--npc", JSON.stringify(npc(invaders, bodies(wave), core, stronghold, ticks)), ...(watch ? ["--watch", "--port", String(watch.port), "--tick-ms", String(watch.ms), ...(watch.badge ? ["--badge", watch.badge] : [])] : [])];
       const dirs = [out, ...JSON.parse(players ?? "[]").slice(1).map((p) => join(out, p.name))];
-      spawn(bin, args, { stdio: watch ? "inherit" : "ignore" }).on("exit", (code, signal) => (code === 0 || (watch && signal === "SIGINT" && existsSync(join(out, "timing.json"))) ? Promise.all(dirs.map(engaged)).then(() => finish(0), () => finish(-1)) : finish(code))).on("error", () => finish(-1));
+      spawn(bin, args, { stdio: watch ? "inherit" : "ignore" })
+        .on("exit", (code, signal) => (code === 0 || (watch && signal === "SIGINT" && existsSync(join(out, "timing.json"))) ? Promise.all(dirs.map(engaged)).then(() => finish(0), fail) : finish(code ?? -1, `sim ${signal ? `killed by ${signal}` : `exited ${code}`}`)))
+        .on("error", fail);
     };
     if (gen !== undefined) return play(["--gen", String(gen), ...(sectors ? ["--sectors", sectors] : [])]);
     const base = JSON.parse(readFileSync(world ?? TEMPLATE, "utf8"));
@@ -199,10 +207,8 @@ export function runSim(bin, { world, gen, sectors, room, node, ticks, seed = 1, 
           Object.assign(c, { safeMode: 0, safeModeAvailable: 0 });
       writeFileSync(map, JSON.stringify(stood));
     } catch (e) {
-      console.error(`${out}: ${e.message}`);
-      return finish(-1);
+      return fail(e);
     }
-    if (!existsSync(map)) return finish(-1);
     play(["--world", map, "--room", room]);
   });
 }
