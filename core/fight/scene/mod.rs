@@ -2,7 +2,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::casting;
-use super::kinds::defend::Facts as DefendFacts;
+use super::kinds::defend::{self, Facts as DefendFacts};
 use super::kinds::siege::{self, Facts as SiegeFacts};
 use super::kinds::{raid, sweep};
 use super::shape::{Boosted, Cast, Engagement, Group, Objective, Phase, Plan, Slot};
@@ -508,12 +508,7 @@ impl<'a> Scene<'a> {
 
             if let Some(colony) = colony {
                 asked.queue(colony, &body);
-                let name = format!(
-                    "{}{}-{}-{slot}",
-                    declarations::FIGHT_PREFIX,
-                    self.world.time,
-                    e.id
-                );
+                let name = defend::cast_name(self.world.time, e.id, slot);
                 // A body priced boosted and cast elsewhere walks straight out.
                 let stock = asked.boosts.get_mut(&colony).filter(|_| Some(colony) == at);
                 if stock.is_some_and(|s| !boost::boosted_by(&body, s).compounds.is_empty()) {

@@ -280,9 +280,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
 
     // The edge each siege would drain at: his border tile his towers reach,
     // nearest them, and the room across it our medics wait in. The gate is the
-    // pair's: a tile his volley leaves the pairs the bank buys healing over.
-    // A room with no such tile is not drained: the set breaches by its plan,
-    // or stands off a safe mode as it did before the drain (§6.2).
+    // pair's: a tile his volley leaves the pairs the bank buys healing over (§6.2).
     let gates: BTreeMap<i32, tactics::Gate> = (engagements.iter())
         .filter(|e| matches!(e.objective, Objective::Siege(_)) && !raid::raids(e))
         .filter_map(|e| {
@@ -403,8 +401,6 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
                 Tactic::BlobClose,
             );
             watch.capacity = scene.capacity_of(&*atlas, &watch);
-            // A safe mode's room opens on the drain that prices: the least his
-            // towers strike a border tile is what a gate can draw at.
             siege::drainable(room.name, watch.capacity, &towers).then_some((op, target))
         })
         .enumerate()
@@ -483,6 +479,9 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
                         .or_else(|| scene.patrol(atlas, &e, preyed, age))
                 };
                 decided.extend(scene.swept(atlas, &mut asked, (&e, onward), (&mut free, &grounds)));
+            }
+            Objective::Defend if defend::overdue(&scene, &e) => {
+                decided.push(defend::late(&mut asked, world.time, &e))
             }
             Objective::Defend
                 if left

@@ -406,6 +406,8 @@ export const measures = {
   // one with no core stayed open after its group was last seen.
   heldPastWave: (samples, _, dir) => Math.max(0, ...rowsOf(dir).filter((e) => !e.core).map((e) => (e.closed ?? samples.at(-1).t) - (e.seen ?? e.opened))),
   idleMost: (_, __, dir) => Math.max(0, ...rowsOf(dir).map((e) => e.idle ?? 0)),
+  // The most ticks a Defend opened in `room` in [from, to) stood answered on casts none of which stood.
+  waitedMost: (_, a, dir) => Math.max(0, ...defendsIn(dir, a).map((e) => e.waited ?? 0)),
   // Over the Defends that drafted a body in [from, to) and never stood down, the most ticks from
   // that draft to their close.
   answeredMost: (samples, a, dir) =>

@@ -1,15 +1,16 @@
-/// `Defend` (`ARCHITECTURE.md` §6.2): a phase moves on an event, never a clock;
-/// `step` closes it with None.
+/// `Defend` (`ARCHITECTURE.md` §6.2): a phase moves on an event or a deadline,
+/// never a clock; `step` closes it with None.
 use std::borrow::Borrow;
 use std::collections::BTreeSet;
 
-use super::super::shape::{Engagement, Group, Phase, enter};
-use fabot_base::engine;
+use super::super::scene::{Asked, Scene};
+use super::super::shape::{Cast, Engagement, Group, Phase, Slot, enter};
 use fabot_base::tiles::{self};
 use fabot_base::vocabulary::Part;
 use fabot_base::world::{
-    Controller, Creep, Fallen, Id, Owner, Pos, RoomName, Structure, StructureType, cast,
+    Controller, Creep, Fallen, Id, Oven, Owner, Pos, RoomName, Structure, StructureType, cast,
 };
+use fabot_base::{declarations, engine};
 use fabot_tactics::Tactic;
 
 /// What a `Defend` may fight as, in the order its ties fall to (§6.3).
@@ -58,6 +59,58 @@ pub fn stands_alone(time: i32, e: &Engagement) -> Engagement {
     } else {
         e.clone()
     }
+}
+
+/// A raid in a home strikes as it stands, so a home's set none of whose casts
+/// has begun is unanswered once its spawn has begun another body since they
+/// were asked and the landing their price gave has passed: a deadline (§6.2).
+pub(crate) fn overdue(scene: &Scene, e: &Engagement) -> bool {
+    let casts: Vec<&Cast> = (scene.spawning.iter())
+        .filter(|c| c.engagement == e.id)
+        .collect();
+    let landing: i32 = (casts.iter())
+        .map(|c| engine::SPAWN_TICKS_PER_PART * c.body.len() as i32)
+        .sum();
+    let asked = casts.iter().filter_map(|c| asked_at(&c.name)).max();
+    let ovens: Vec<&Oven> = (scene.world.spawns.iter())
+        .filter(|s| s.pos.room == e.room)
+        .filter_map(|s| s.spawning.as_ref())
+        .collect();
+    let begun = |c: &&Cast| ovens.iter().any(|o| o.name == c.name);
+
+    scene.homes.contains(&e.room)
+        && e.phase == Phase::Forming
+        && !e.unanswered
+        && e.ours.is_empty()
+        && !casts.iter().any(begun)
+        && asked.is_some_and(|at| passed_over(scene.world.time, at, landing, &ovens))
+}
+
+/// Its asks dropped, a set past its deadline holds its home's towers alone.
+pub(crate) fn late(asked: &mut Asked, time: i32, e: &Engagement) -> Engagement {
+    asked.casts.retain(|c| c.engagement != e.id);
+    give_up(true, time, e)
+}
+
+/// A cast is named for the tick it was asked, which its deadline reads (§6.2).
+pub(crate) fn cast_name(time: i32, engagement: i32, slot: Slot) -> String {
+    format!("{}{time}-{engagement}-{slot}", declarations::FIGHT_PREFIX)
+}
+
+pub(crate) fn asked_at(name: &str) -> Option<i32> {
+    name.strip_prefix(declarations::FIGHT_PREFIX)?
+        .split('-')
+        .next()?
+        .parse()
+        .ok()
+}
+
+/// A body its spawn began before the set was asked was in its price; one
+/// begun after took the spawn ahead of it.
+fn passed_over(time: i32, since: i32, landing: i32, ovens: &[&Oven]) -> bool {
+    let began =
+        |o: &&&Oven| time - (engine::SPAWN_TICKS_PER_PART * o.body.len() as i32 - o.remaining);
+    time > since + landing && ovens.iter().any(|o| began(&o) > since)
 }
 
 const OUTPOST_LOSSES: i32 = 2;
@@ -472,6 +525,52 @@ mod tests {
             }
         }
         last
+    }
+
+    fn oven(parts: usize, remaining: i32) -> Oven {
+        let part = BodyPart {
+            kind: Part::Move,
+            hits: 100,
+            boost: None,
+        };
+        Oven {
+            name: "economy".into(),
+            remaining,
+            body: vec![part; parts],
+        }
+    }
+
+    #[test]
+    fn a_spawn_on_a_body_begun_before_the_set_committed_never_passes_it_over() {
+        // A 40-part hauler with 120 ticks left as a 108-tick set commits at 0.
+        let since = 0;
+        for time in since + 1..=since + 120 {
+            let on = oven(40, 120 - time);
+            assert!(!passed_over(time, since, 108, &[&on]), "t{time}");
+        }
+        assert!(
+            !passed_over(121, since, 108, &[]),
+            "a spawn come free waits on the queue"
+        );
+        assert!(
+            !passed_over(100, since, 108, &[&oven(10, 29)]),
+            "inside the landing"
+        );
+        assert!(
+            passed_over(122, since, 108, &[&oven(10, 29)]),
+            "begun after it, past the landing"
+        );
+    }
+
+    #[test]
+    fn a_cast_name_gives_back_the_tick_it_was_asked() {
+        for (time, engagement, slot) in [(0, 1, 0), (27808, 12, 3), (i32::MAX, i32::MAX, Slot::MAX)]
+        {
+            let name = cast_name(time, engagement, slot);
+            assert!(declarations::fights(&name));
+            assert_eq!(asked_at(&name), Some(time));
+        }
+        assert_eq!(asked_at("harvester-10-Spawn1"), None);
     }
 
     proptest! {
