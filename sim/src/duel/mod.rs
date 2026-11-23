@@ -343,7 +343,7 @@ fn stand(s: &Sample, seed: u64) -> World {
     ];
     users[usize::from(s.owner == Side::Theirs)]["rooms"] = json!([room]);
     let terrain: String = s.ground.concat();
-    let db = json!({ "rooms": [world::room_doc(room, false)], "rooms.terrain": [{ "room": room, "terrain": terrain }],
+    let db = json!({ "rooms": [crate::generated::room_doc(room, false, None)], "rooms.terrain": [{ "room": room, "terrain": terrain }],
         "users": users, "rooms.objects": objects });
     world::krebs(db, seed, 1)
 }

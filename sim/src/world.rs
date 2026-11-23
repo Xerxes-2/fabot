@@ -4,8 +4,6 @@ use std::sync::Arc;
 
 use fabot_base::world::{Pos, RoomName, Rules};
 use fabot_layout as layout;
-use krebs::mapgen::{self, RoomKind};
-use krebs::room_name::RoomXY;
 use krebs::scenario::GlobalScenario;
 use krebs::world::{EngineConfig, RoomSnapshot, World};
 use krebs_util::json::Json;
@@ -30,6 +28,8 @@ pub struct Map {
     gcl: i64,
     /// The rooms whose status is not our colonies' (a capture's `closed`): the engine lets no creep in.
     pub closed: Vec<String>,
+    /// A generated world's seed, which sets its buses' power banks due.
+    pub banks: Option<u64>,
 }
 
 /// Each room's terrain as 2500 digits, row by row; rows or one string.
@@ -51,6 +51,7 @@ pub fn read(path: &str) -> Map {
         closed: (world["closed"].as_array().into_iter().flatten())
             .filter_map(|r| r.as_str().map(str::to_string))
             .collect(),
+        banks: None,
     };
     for room in world["rooms"].as_array().expect("rooms") {
         let name = room["name"].as_str().expect("a room's name").to_string();
@@ -152,7 +153,7 @@ impl Map {
             .chain(self.users.iter().map(|(id, name)| user(id, name)))
             .collect();
         let db = json!({
-            "rooms": self.rooms.iter().map(|(n, _)| room_doc(n, self.closed.contains(n))).collect::<Vec<_>>(),
+            "rooms": self.rooms.iter().map(|(n, _)| crate::generated::room_doc(n, self.closed.contains(n), self.banks.map(|s| (s, t)))).collect::<Vec<_>>(),
             "rooms.terrain": self.rooms.iter().map(|(n, t)| json!({ "room": n, "terrain": t })).collect::<Vec<_>>(),
             "users": users,
             "rooms.objects": objects,
@@ -199,27 +200,6 @@ pub fn rebuilt(k: &World, r: usize, objects: Vec<krebs::doc::DocRef>) -> Arc<Roo
         s.processed_at,
         &k.user_ids,
     ))
-}
-
-/// A `rooms` doc as the official world generator lays it out: a highway a
-/// bus with its sector's deposit type, a keeper room marked so.
-pub fn room_doc(name: &str, closed: bool) -> Value {
-    let status = if closed { "out of borders" } else { "normal" };
-    let mut doc = json!({ "_id": name, "status": status });
-    let Some(xy) = RoomXY::parse_engine(name) else {
-        return doc;
-    };
-    match mapgen::room_kind(xy) {
-        RoomKind::Highway => merge(
-            &mut doc,
-            json!({ "bus": true, "depositType": mapgen::deposit_type(xy) }),
-        ),
-        kind => merge(
-            &mut doc,
-            json!({ "sourceKeepers": kind == RoomKind::Keeper }),
-        ),
-    }
-    doc
 }
 
 fn merge(o: &mut Value, with: Value) {
