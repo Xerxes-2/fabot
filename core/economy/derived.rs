@@ -336,11 +336,11 @@ impl Ground {
             return s.energy;
         }
         let past = self.stock().unwrap_or(0) - reserve;
-        let storage = self.held(|s| s.owned, |s| s.energy).unwrap_or(0).min(past);
+        let from_storage = self.held(|s| s.owned, |s| s.energy).unwrap_or(0).min(past);
         if s.owned {
-            storage
+            from_storage
         } else {
-            self.own(s).min(past - storage.max(0))
+            self.own(s).min(past - from_storage.max(0))
         }
     }
 

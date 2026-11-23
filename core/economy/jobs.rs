@@ -63,8 +63,7 @@ pub struct Jobs<'a> {
 }
 
 pub fn fee_short(ground: &Ground) -> i32 {
-    let held = (ground.terminal.as_ref()).map_or(0, |t| t.store.amount_of(Energy));
-    0.max(ground.shipped() - held)
+    (ground.terminal.as_ref()).map_or(0, |t| 0.max(ground.shipped() - t.store.amount_of(Energy)))
 }
 
 enum Supply {
