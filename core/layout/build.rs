@@ -146,12 +146,32 @@ impl Builder<'_> {
         })
     }
 
-    fn harvest_spot(&self, rock: Tile) -> Option<Tile> {
+    /// Hivemind's, on the side of the rock the core walks to first: a seat
+    /// across it has a way in of its own, which that seat's bay can fill.
+    fn harvest_spot(&self, rock: Tile, walk: &[u16]) -> Option<Tile> {
         let (sx, sy) = xy(rock);
+        let ring = tiles::around(rock);
+        let mut side: Vec<Tile> = (ring.iter().copied())
+            .filter(|t| walk[t.index()] < u16::MAX)
+            .min_by_key(|t| walk[t.index()])
+            .into_iter()
+            .collect();
+        while let Some(&n) = (ring.iter()).find(|n| {
+            walk[n.index()] < u16::MAX
+                && !side.contains(n)
+                && side.iter().any(|s| tiles::range(*s, **n) == 1)
+        }) {
+            side.push(n);
+        }
+        self.most_space(sx, sy, &side)
+            .or_else(|| self.most_space(sx, sy, ring))
+    }
+
+    fn most_space(&self, sx: i32, sy: i32, seats: &[Tile]) -> Option<Tile> {
         let mut best: Option<(Tile, i32)> = None;
         for near_exit in [false, true] {
             area(sx, sy, 1, |x, y| {
-                if self.m.buildable(x, y, false, near_exit) {
+                if seats.contains(&index(x, y)) && self.m.buildable(x, y, false, near_exit) {
                     let mut free = 0;
                     area(x, y, 1, |x2, y2| {
                         free += i32::from(self.m.buildable(x2, y2, false, near_exit));
@@ -170,10 +190,21 @@ impl Builder<'_> {
         best.map(|(t, _)| t)
     }
 
-    fn harvesters(&mut self) -> Option<()> {
+    fn harvesters(&mut self, center: Tile) -> Option<()> {
+        let mut walk = vec![u16::MAX; tiles::COUNT];
+        walk[center.index()] = 0;
+        let mut queue = std::collections::VecDeque::from([center]);
+        while let Some(t) = queue.pop_front() {
+            for &n in tiles::around(t) {
+                if walk[n.index()] == u16::MAX && !self.m.wall(tiles::x_of(n), tiles::y_of(n)) {
+                    walk[n.index()] = walk[t.index()] + 1;
+                    queue.push_back(n);
+                }
+            }
+        }
         let sources = self.ground.sources.clone();
         for (i, s) in sources.iter().enumerate() {
-            let h = self.harvest_spot(*s)?;
+            let h = self.harvest_spot(*s, &walk)?;
             self.m.plan_at(h, "harvester", None);
             self.m.plan_at(h, &format!("harvester.{i}"), None);
             self.m.plan_at(h, "bay_center", None);
@@ -870,7 +901,7 @@ pub fn build(rules: &Rules, ground: &Ground, dist: (&[u8], &[u8]), v: &Variation
         index(cx, cy - 2),
     ];
     b.m.plan_at(center, "center", None);
-    b.harvesters()?;
+    b.harvesters(center)?;
     b.upgrader(controller)?;
     b.exits(&centers);
     b.core(center);

@@ -1,0 +1,9 @@
+{
+  "why": "a source walled across its middle is dug from the side the core walks to: the far side's only way in is two tiles its own bay fills, so a harvester posted there stood idle from RCL4 on (sim --gen 1919810, E9S5, from t16600) and the room dug one source",
+  "modules": ["layout"],
+  "start": { "world": "scripts/scenario/worlds/source-across-a-wall.json", "room": "E9S5", "seed": 1, "node": "N3" },
+  "ticks": 3000,
+  "assert": [
+    { "measure": "dug", "room": "E9S5", "from": 1500, "min": 25000 }
+  ]
+}
