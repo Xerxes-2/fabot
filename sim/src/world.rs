@@ -23,6 +23,8 @@ pub struct Map {
     time: i64,
     /// Memory's text at the start: what `scripts/sim/run.mjs` stood as `simMemory`.
     pub memory: String,
+    /// A capture's intel rows (segment 2).
+    pub intel: String,
     /// The other players, by id, and our GCL: a capture's.
     users: Vec<(String, String)>,
     gcl: i64,
@@ -43,6 +45,7 @@ pub fn read(path: &str) -> Map {
         memory: world
             .get("simMemory")
             .map_or_else(String::new, Value::to_string),
+        intel: (world["segments"]["2"].as_str()).unwrap_or_default().into(),
         users: (world["users"].as_object().into_iter().flatten())
             .filter(|(id, _)| *id != US && *id != INVADER && *id != KEEPER)
             .map(|(id, name)| (id.clone(), name.as_str().unwrap_or(id).to_string()))

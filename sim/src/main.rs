@@ -251,6 +251,7 @@ fn main() {
     let closed = map.closed.iter().filter_map(|r| r.parse().ok()).collect();
     let mut driver = driver::Driver::new(driver::Maps(terrains, closed), map.memory.clone(), out);
     driver.kept = reset::Twin::new(args.reset_every, args.check);
+    driver.kept.intel = fabot_base::intel::of_text(&map.intel);
 
     let mut rivals = rival::Rivals::new(args.rivals.clone());
     let mut engine = Engine {

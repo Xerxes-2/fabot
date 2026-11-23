@@ -803,9 +803,10 @@ Two engines complement each other:
   as a second user (`sim/src/rival/`, one `Player` each), their intents merged
   per room with ours; they no longer run on xxscreeps, so a `--bot`/`--base`
   A/B skips their scenarios.
-  - `❓` Still on `xxscreeps` (`SIM_START`/`SIM_MEASURES` in `scripts/sim/run.mjs`):
-    resumed worlds (`at`/`bundle`), capture intel segments, and unported
-    measures (`decay.jsonl`, `waves`, `lost`).
+  - A world a soak left is checked in as a world JSON (its Memory, and its
+    intel rows as segment 2, which `sim` stands), never replayed from a
+    pinned bundle. `❓` Unported measures (`decay.jsonl`, `waves`, `lost`)
+    still need `xxscreeps`.
   - `❓` Cut worlds lacking sector bus rooms throw in `genDeposits` (logged and
     skipped as backend cron does).
 - **`xxscreeps` (`npm run xx`):** isolated-vm vanilla engine used for
