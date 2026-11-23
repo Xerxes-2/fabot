@@ -1,7 +1,8 @@
 // One soak on `sim`: what `soak.mjs`, `soak-many.mjs` and `scenario.mjs` share.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createInterface } from "node:readline";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BUILT, US, built, near, standNode } from "./node.mjs";
@@ -144,15 +145,17 @@ async function engaged(out) {
   // Every room's objects of the tick being fed: an engagement closes inside `fights.tick`.
   let tick = { objects: [] };
   const fights = engagements((row) => rows.push(JSON.stringify(row) + "\n"), async (rooms) => tick.objects.filter((o) => !rooms || rooms.includes(o.room)));
-  for (const line of readFileSync(join(out, "fight.jsonl"), "utf8").split("\n").filter(Boolean)) {
-    tick = JSON.parse(line);
-    await fights.tick(tick.t, tick.fight, tick.objects, new Set(tick.struck));
-  }
+  // Streamed: a long run's file outgrows the 512 MB one string holds.
+  const ticks = async function* (file) {
+    for await (const line of createInterface({ input: createReadStream(join(out, file)) })) if (line) yield JSON.parse(line);
+  };
+  for await (tick of ticks("fight.jsonl")) await fights.tick(tick.t, tick.fight, tick.objects, new Set(tick.struck));
   await fights.end();
   writeFileSync(join(out, "engagements.jsonl"), rows.join(""));
   // The bot's own `engagements.log` rows (segment 4), as each tick closed them.
-  const closed = readFileSync(join(out, "cpu.jsonl"), "utf8").split("\n").filter(Boolean).flatMap((l) => JSON.parse(l).closed ?? []);
-  writeFileSync(join(out, "segment4.jsonl"), closed.map((r) => r + "\n").join(""));
+  const closed = [];
+  for await (const t of ticks("cpu.jsonl")) for (const r of t.closed ?? []) closed.push(r + "\n");
+  writeFileSync(join(out, "segment4.jsonl"), closed.join(""));
 }
 
 /** This tree's sim (`npm run build:sim`), its path; null when it did not build. */
