@@ -681,7 +681,7 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
             let works = creep.live(Part::Work) > 0;
             let sink = (derived.grounds.iter())
                 .filter(|g| g.room == creep.pos.room)
-                .find_map(|g| match (works, &g.controller, g.bank()) {
+                .find_map(|g| match (works, &g.controller, g.deposit()) {
                     (true, Some(c), _)
                         if c.owner.is_ours() && !slots::fed(c) && !g.sites.is_empty() =>
                     {
@@ -692,7 +692,7 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
                     (true, Some(c), _) if c.owner.is_ours() && slots::fed(c) => {
                         Some((c.pos, task::RANGE_UPGRADE, CreepAct::Upgrade(c.id)))
                     }
-                    (_, _, Some(s)) if s.owned => {
+                    (_, _, Some(s)) if !s.kind.is_pile() => {
                         (s.id.object()).map(|id| (s.pos, 1, CreepAct::Transfer(id, Energy)))
                     }
                     (false, _, Some(s)) => Some((s.pos, 0, CreepAct::Drop(Energy))),

@@ -45,6 +45,8 @@ export const NODES = {
   // its outposts' bodies aside), so the run starts working, not casting.
   N6: { level: 7, stored: 300000, without: ["rampart"], modern: true, bodies: LATE_BODIES },
   N7: { level: 8, stored: 500000, without: ["rampart"], modern: true, bodies: LATE_BODIES },
+  // N6 with its storage full of its own ore, its energy under the reserve.
+  F6: { level: 7, stored: "30000,H:970000", without: ["rampart"], modern: true, bodies: LATE_BODIES },
   // RCL8 as a from-zero run reaches it: RCL7's plan standing, the stock at
   // its RCL7 level, and the roads its outposts laid on RCL8's extension tiles;
   // every room in reach avoided, so the home's dig alone pays (outposts lost).

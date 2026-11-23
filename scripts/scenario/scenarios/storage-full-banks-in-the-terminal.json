@@ -1,0 +1,12 @@
+{
+  "why": "a full storage stops neither the haul nor the spend, and no ore is mined past its band: deliveries bank in the terminal and the miner rests past 100k of its own ore. Main mined 7.7k H into the full storage, pinned it at 1,000,000 from t3000 and upgraded 7.0k in 5000 ticks (stillLoaded 151)",
+  "modules": ["economy"],
+  "start": { "room": "W8N3", "seed": 1, "node": "F6" },
+  "ticks": 5000,
+  "assert": [
+    { "measure": "oresAtEnd", "room": "W8N3", "max": 970000 },
+    { "measure": "upgrade", "min": 20000 },
+    { "measure": "stillLoaded", "max": 130 },
+    { "metric": "carry.returned", "room": "W8N3", "total": true, "max": 0 }
+  ]
+}

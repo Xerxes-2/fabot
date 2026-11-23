@@ -131,14 +131,6 @@ pub struct StoreFact {
     pub owned: bool,
 }
 
-impl StoreFact {
-    /// What a worker may draw: an owned store keeps the whole reserve, each
-    /// one, since a draw is from one store.
-    pub fn spare(&self, reserve: i32) -> i32 {
-        self.energy - if self.owned { reserve } else { 0 }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LinkRole {
     Source,
@@ -283,20 +275,73 @@ impl Ground {
         self.bank().is_some_and(|b| b.kind.is_pile()) && self.terminal.is_none()
     }
 
+    fn is_terminal(&self, s: &StoreFact) -> bool {
+        self.terminal.as_ref().is_some_and(|t| s.id == t.id.into())
+    }
+
+    pub fn banks(&self, s: &StoreFact) -> bool {
+        s.owned || self.is_terminal(s)
+    }
+
     pub fn bank(&self) -> Option<&StoreFact> {
         self.stores.iter().find(|s| s.owned || s.kind.is_pile())
     }
 
-    /// The energy its storage holds, the terminal's being the shipments';
-    /// `None` without a storage.
+    /// Both full, the storage with no room: no carrier is sent to either.
+    pub fn deposit(&self) -> Option<&StoreFact> {
+        let bank = self.bank()?;
+        let open = || (self.stores.iter()).find(|s| self.is_terminal(s) && s.free > 0);
+        (bank.free > 0).then_some(bank).or_else(open).or(Some(bank))
+    }
+
+    /// The energy the terminal's shipment takes, sent and fees, a hundred over
+    /// as the fee rounds up per send.
+    pub fn shipped(&self) -> i32 {
+        let Some((home, _)) = &self.ship_to else {
+            return 0;
+        };
+        let apart = tiles::rooms_apart(self.room, *home);
+        let fee: i32 = (self.shipment.iter())
+            .map(|(r, n)| engine::send_cost(*n, apart) + if *r == Energy { *n } else { 0 })
+            .sum();
+        if fee > 0 { fee + 100 } else { 0 }
+    }
+
+    /// What of `s` is the stock: a terminal's past what its shipment takes.
+    fn own(&self, s: &StoreFact) -> i32 {
+        if self.is_terminal(s) {
+            0.max(s.energy - self.shipped())
+        } else {
+            s.energy
+        }
+    }
+
     pub fn stock(&self) -> Option<i32> {
-        self.has_storage().then(|| {
-            self.stores
-                .iter()
-                .filter(|s| s.owned)
-                .map(|s| s.energy)
-                .sum()
-        })
+        self.held(|s| self.banks(s), |s| self.own(s))
+    }
+
+    pub fn stock_and_shipment(&self) -> Option<i32> {
+        self.held(|s| self.banks(s), |s| s.energy)
+    }
+
+    fn held(&self, of: impl Fn(&StoreFact) -> bool, n: impl Fn(&StoreFact) -> i32) -> Option<i32> {
+        let held = (self.stores.iter()).filter(|s| of(s)).map(n);
+        self.has_storage().then(|| held.sum())
+    }
+
+    /// What a worker may draw from `s`: the stock past the reserve, the
+    /// storage's first and the terminal's after, so the two never give it twice.
+    pub fn spare(&self, s: &StoreFact, reserve: i32) -> i32 {
+        if !self.banks(s) {
+            return s.energy;
+        }
+        let past = self.stock().unwrap_or(0) - reserve;
+        let storage = self.held(|s| s.owned, |s| s.energy).unwrap_or(0).min(past);
+        if s.owned {
+            storage
+        } else {
+            self.own(s).min(past - storage.max(0))
+        }
     }
 
     /// Hivemind's `link-network.ts`.
@@ -642,13 +687,14 @@ fn stores_of(
                     StoreKind::Container
                 };
 
-                if energy > 0 || owned || kind.is_buffer() {
+                let send_room = if s.kind == Terminal { MINERAL_ROOM } else { 0 };
+                if energy > 0 || owned || kind.is_buffer() || s.kind == Terminal {
                     stores.push(StoreFact {
                         id: Target::Object(s.id),
                         pos: s.pos,
                         kind,
                         energy,
-                        free: s.store.free(),
+                        free: 0.max(s.store.free() - send_room),
                         source_dug: dug,
                         owned,
                     })
@@ -1186,7 +1232,7 @@ fn holdings_of(stocks: &Stocks, spent: &BTreeMap<RoomName, Vec<ResourceType>>) -
                 .iter()
                 .map(|r| (*r, stocks.level(g, *r, reagents)))
                 .collect(),
-            energy: g.stock().unwrap_or(0) + t.store.amount_of(Energy),
+            energy: g.stock_and_shipment().unwrap_or(0),
             free: t.store.free(),
         })
     };
@@ -1267,7 +1313,7 @@ fn stock_labs(
 
 /// v1's `AidDonorMargin`: over a load and its fee.
 const AID_MARGIN: i32 = 20_000;
-/// Terminal room aid leaves a taker: energy filling it blocked every mineral send.
+/// Terminal room aid and deposits leave: energy filling it blocked every mineral send.
 const MINERAL_ROOM: i32 = super::balance::BATCH;
 
 struct Taker {
@@ -1297,7 +1343,7 @@ fn give_aid(
         .filter(|(c, _)| !given_up(c.room))
         .filter_map(|(c, g)| {
             let t = g.terminal.as_ref()?;
-            let held = g.stock()? + t.store.amount_of(Energy);
+            let held = g.stock_and_shipment()?;
             Some(Taker {
                 room: c.room,
                 level: c.controller.level,

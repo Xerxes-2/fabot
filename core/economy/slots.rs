@@ -11,7 +11,7 @@ use fabot_base::vocabulary::{Part, part_count_in};
 use fabot_base::world::{Controller, Id, Pos, RoomName, Spawn, StructureType};
 
 use super::bodies::{self, Leg, Pattern};
-use super::derived::{Body, Derived, Ground, SiteFact, dig_work, drawn_for};
+use super::derived::{Body, Derived, Ground, MineralFact, SiteFact, dig_work, drawn_for};
 use super::task::Assignment;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -599,7 +599,7 @@ impl Plan<'_> {
 
         let mut mined = 0.0;
         for m in &ground.minerals {
-            let Some(post) = m.post.filter(|_| m.container.is_some() && m.amount > 0) else {
+            let Some(post) = m.post.filter(|_| m.container.is_some() && mines(ground, m)) else {
                 continue;
             };
             if let Some(body) = bodies::sized(Pattern::Harvester, bodies::MINER_WORK, capacity) {
@@ -649,7 +649,7 @@ impl Plan<'_> {
         let drawn = |kept: i32| {
             storage.is_none()
                 || kept <= 0
-                || (ground.stores.iter()).any(|s| s.owned && s.spare(kept) >= load)
+                || (ground.stores.iter()).any(|s| ground.banks(s) && ground.spare(s, kept) >= load)
         };
         let past_reserve = drawn(colony.reserve);
         let draws = past_reserve || drawn(ground.kept_from_builders(colony.reserve));
@@ -1047,6 +1047,14 @@ pub fn colonies(
     (plan.out, plan.spare)
 }
 
+fn mines(ground: &Ground, m: &MineralFact) -> bool {
+    let held: i32 = (ground.ores.iter())
+        .filter(|(_, _, r, _)| *r == m.resource)
+        .map(|(_, _, _, n)| n)
+        .sum();
+    m.amount > 0 && held < ORE_BAND
+}
+
 /// A controller inside its downgrade deadline is worked before any other
 /// slot is cast or walked to.
 const DEADLINE: i32 = -1;
@@ -1054,6 +1062,8 @@ const DEADLINE: i32 = -1;
 const MEND: i32 = 3;
 /// The ore is RCL6's payoff: the outposts take what spawn time it leaves.
 const MINE: i32 = 3;
+/// Past it the ore only fills the storage: `balance` sends a short colony from stock.
+const ORE_BAND: i32 = 100_000;
 /// Cast before the outposts' haul (§5).
 const STOCKED: i32 = 4;
 /// Ahead of the far haul, as Hivemind's mine builder: its recasts hold every spawn.

@@ -10,7 +10,7 @@ use fabot_base::vocabulary::ResourceType::{self, Energy};
 use fabot_base::world::{Built, Id, Pos, StructureType};
 
 use super::bodies::Pattern;
-use super::derived::{Body, Derived, Ground, StoreKind};
+use super::derived::{Body, Derived, Ground, StoreKind, TerminalFact};
 use super::slots::{self, Job, Slot};
 use super::task::{Target, Task};
 
@@ -62,18 +62,9 @@ pub struct Jobs<'a> {
     owners: &'a [Option<usize>],
 }
 
-/// The energy the terminal keeps for its shipment's fee, a hundred over as
-/// the fee rounds up per send, and the energy it ships.
 pub fn fee_short(ground: &Ground) -> i32 {
-    let (Some(t), Some((home, _))) = (&ground.terminal, &ground.ship_to) else {
-        return 0;
-    };
-    let apart = fabot_base::tiles::rooms_apart(ground.room, *home);
-    let fee: i32 = (ground.shipment.iter())
-        .map(|(r, n)| engine::send_cost(*n, apart) + if *r == Energy { *n } else { 0 })
-        .sum();
-    let kept = if fee > 0 { fee + 100 } else { 0 };
-    0.max(kept - t.store.amount_of(Energy))
+    let held = (ground.terminal.as_ref()).map_or(0, |t| t.store.amount_of(Energy));
+    0.max(ground.shipped() - held)
 }
 
 enum Supply {
@@ -223,7 +214,7 @@ fn sinks_of(derived: &Derived, ci: usize) -> Vec<Spot> {
         }
     }
     if !g.abandoned
-        && let Some(s) = g.bank()
+        && let Some(s) = g.deposit()
     {
         add(s.id, s.pos, Energy, s.free, Of::Bank);
         // A pile takes a mineral too, so no carrier keeps one it cannot place.
@@ -296,13 +287,14 @@ fn takes_of(derived: &Derived, ci: usize, outposts: &[&Ground], short: i32) -> V
         };
         add(energy(s.id), s.pos, s.energy.min(short), of);
     }
-    // Sent energy is banked, or the stock the spend is sized to never sees it.
+    // Sent energy is banked where the stock is drawn, out of the minerals' room.
     let sent = |o: &Ground| {
         o.ship_to.is_some_and(|(to, _)| to == g.room)
             && o.shipment.iter().any(|(r, _)| *r == Energy)
     };
-    if let Some(t) =
-        (g.terminal.as_ref()).filter(|_| g.ship_to.is_none() && derived.grounds.iter().any(sent))
+    let banks_here = |t: &&TerminalFact| g.deposit().is_some_and(|d| d.id == t.id.into());
+    if let Some(t) = (g.terminal.as_ref())
+        .filter(|t| g.ship_to.is_none() && derived.grounds.iter().any(sent) && !banks_here(t))
     {
         let n = t.store.amount_of(Energy);
         add(energy(t.id.into()), t.pos, n, Of::Received);
@@ -345,7 +337,10 @@ fn takes_of(derived: &Derived, ci: usize, outposts: &[&Ground], short: i32) -> V
         add(energy(s.id), s.pos, s.energy, Of::Drop);
     }
     // Hivemind's `drop` and `grave` sources; a raid stands in for its danger matrix.
-    let free = g.bank().filter(|b| b.owned).map_or(0, |b| b.free);
+    let free = g
+        .deposit()
+        .filter(|b| !b.kind.is_pile())
+        .map_or(0, |b| b.free);
     for o in std::iter::once(g)
         .chain(outposts.iter().copied())
         .filter(|o| !o.raided)
@@ -945,15 +940,11 @@ impl<'a> Jobs<'a> {
         // Under it, what stands in a link or container is the reserve's too.
         let short = g.stock().is_some_and(|n| n < reserve);
         let fed = hand_fed(self.derived, g);
-        let shipping = |s: &&super::derived::StoreFact| {
-            g.ship_to.is_some() && g.terminal.as_ref().is_some_and(|t| s.id == t.id.into())
-        };
         let mut loads: Vec<(Task, Pos, i32)> = (g.stores.iter())
             .filter(|s| (!short || s.kind.is_remains()) && !(fed && s.kind.is_buffer()))
-            .filter(|s| !shipping(s))
             .map(|s| {
-                let spare = s.spare(reserve);
-                let n = if s.owned && spare < body.free {
+                let spare = g.spare(s, reserve);
+                let n = if g.banks(s) && spare < body.free {
                     0
                 } else {
                     spare
@@ -971,7 +962,7 @@ impl<'a> Jobs<'a> {
             && home.room != g.room
             && let Some(st) = home.stores.iter().find(|s| s.owned)
         {
-            let n = Some(st.spare(c.reserve)).filter(|n| *n >= body.free);
+            let n = Some(home.spare(st, c.reserve)).filter(|n| *n >= body.free);
             loads.push((Task::Withdraw(st.id, Energy), st.pos, n.unwrap_or(0)));
         }
         // Not Hivemind's rank: ranked, a worker waits idle on a drop another holds.
