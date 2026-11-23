@@ -29,6 +29,7 @@ enum Of {
     Bank,
     Container,
     Drop,
+    Loot,
     Stock { pile: bool },
     Ore,
     Link,
@@ -343,6 +344,24 @@ fn takes_of(derived: &Derived, ci: usize, outposts: &[&Ground], short: i32) -> V
     for s in g.stores.iter().filter(|s| s.kind.is_remains()) {
         add(energy(s.id), s.pos, s.energy, Of::Drop);
     }
+    // Hivemind's `drop` and `grave` sources; a raid stands in for its danger matrix.
+    let free = g.bank().filter(|b| b.owned).map_or(0, |b| b.free);
+    for o in std::iter::once(g)
+        .chain(outposts.iter().copied())
+        .filter(|o| !o.raided)
+    {
+        let piles = (o.piles.iter())
+            .filter(|p| p.resource != Energy)
+            .map(|p| (Task::Pickup(p.id.into(), p.resource), p.pos, p.amount));
+        let graves =
+            (o.loot.iter()).map(|(id, pos, r, n)| (Task::Withdraw((*id).into(), *r), *pos, *n));
+        for (task, pos, n) in piles
+            .chain(graves)
+            .filter(|(_, _, n)| (10..=free).contains(n))
+        {
+            add(task, pos, n, Of::Loot);
+        }
+    }
     out
 }
 
@@ -491,6 +510,9 @@ impl<'a> Jobs<'a> {
                 let busy = carrier && ring && g.stock().is_some_and(|n| n > reserve);
                 (4 - small - 2 * i32::from(busy), s.amount)
             }
+            // Under the ring's open refill, so a few units of mineral never
+            // keep the spawn waiting; Hivemind's priority else, its weight by 30.
+            Of::Loot => (4 - 2 * i32::from(ring), 10 * s.amount / 3),
             Of::Stock { pile: false } => (2, s.amount),
             Of::Stock { pile: true } if carrier && ring => (5, 0),
             Of::Stock { pile: true } => (if carrier { 0 } else { 4 }, 0),

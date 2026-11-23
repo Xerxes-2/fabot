@@ -260,6 +260,8 @@ pub struct Ground {
     /// What our storage and terminal hold besides energy: (store, its tile,
     /// resource, amount).
     pub ores: Vec<(Id, Pos, ResourceType, i32)>,
+    /// Remains' non-energy: (remains, its tile, resource, amount).
+    pub loot: Vec<(Id, Pos, ResourceType, i32)>,
     /// Only a cluster's home has one.
     pub lab_plan: Option<super::labs::Plan>,
     /// The lab a cast waiting at home is boosted from, and what its parts
@@ -885,6 +887,10 @@ fn ground_of(
         receiver: controller_link.or(hub_link),
         labs: labs_of(&working),
         ores: ores_of(room),
+        loot: (room.remains.iter())
+            .flat_map(|r| r.store.held.iter().map(|(x, n)| (r.id, r.pos, *x, *n)))
+            .filter(|(_, _, x, n)| *x != Energy && *n > 0)
+            .collect(),
         lab_plan: None,
         boost_lab: None,
         terminal: (working.iter())
