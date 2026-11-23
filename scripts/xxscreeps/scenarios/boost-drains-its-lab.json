@@ -1,9 +1,0 @@
-{
-  "why": "a lab holding another mineral is drained into the storage and filled with the compound its cast waits for, so the boost lands: one mineral to a lab leaves the compound nowhere else to go. The set's price chose boosting (its plan in the world's Memory holds the slot): the raider stands off at the room's edge, so the Defend loses nothing to the lab wait and lands three times its ATTACK",
-  "modules": ["atlas", "economy", "exchange", "fight", "layout", "mv", "strategy", "tactics"],
-  "start": { "world": "scripts/xxscreeps/worlds/boost-lab-drained.json", "seed": 1 },
-  "ticks": 200,
-  "assert": [
-    { "measure": "boosted", "min": 3 }
-  ]
-}

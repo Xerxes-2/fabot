@@ -1,4 +1,4 @@
-//! A `worlds/`-shaped JSON (`scripts/xxscreeps/worlds/`) stood as a krebs world,
+//! A `worlds/`-shaped JSON (`scripts/scenario/worlds/`) stood as a krebs world,
 //! our first spawn on it as `soak.mjs`'s respawn stands it.
 use std::sync::Arc;
 

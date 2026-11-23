@@ -1,0 +1,10 @@
+{
+  "why": "an RCL8 colony with its bodies standing keeps them working: no spawn sits idle while a body is owed, and the controller is fed only inside its downgrade deadline (owner, 2026-11-13: RCL8 upgrade only feeds GCL; main 68094 upgraded over the run)",
+  "modules": ["economy", "observe"],
+  "start": { "world": "scripts/scenario/worlds/season-late-seat.json", "room": "W12S28", "seed": 1, "node": "N7" },
+  "ticks": 5000,
+  "assert": [
+    { "metric": "spawn.idleWant", "max": 0 },
+    { "measure": "upgrade", "max": 0 }
+  ]
+}

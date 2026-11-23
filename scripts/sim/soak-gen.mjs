@@ -11,7 +11,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { counted, failures, samplesOf } from "../xxscreeps/measures.mjs";
+import { counted, failures, samplesOf } from "../scenario/measures.mjs";
 import { runSim, simBinary } from "./run.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../..");

@@ -1,0 +1,15 @@
+{
+  "why": "with the strategy switch off, a young colony past its raise deadline is not given up (Strategy decides nothing) while Layout keeps building it and the elder keeps its level; main still planned the abandon with the switch off, razed and unclaimed it",
+  "modules": ["economy", "layout", "strategy"],
+  "start": {
+    "world": "scripts/scenario/worlds/young-among-outposts.json",
+    "seed": 1,
+    "memory": { "expansion": { "room": "W2S5", "since": 1000000 }, "switches": { "strategy": false } }
+  },
+  "ticks": 1500,
+  "assert": [
+    { "measure": "homeLevel", "room": "W2S5", "min": 1 },
+    { "measure": "homeLevel", "room": "W2S8", "min": 8 },
+    { "measure": "build", "room": "W2S5", "min": 15000 }
+  ]
+}

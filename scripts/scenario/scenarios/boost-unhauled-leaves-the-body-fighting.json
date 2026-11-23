@@ -1,0 +1,10 @@
+{
+  "why": "a colony whose storage holds the compound and the energy but has no body left to carry them holds nothing at its lab: the cast leaves unboosted and fights the raider in its home rather than stand there for a boost that never comes",
+  "modules": ["atlas", "economy", "exchange", "fight", "layout", "mv", "strategy", "tactics"],
+  "start": { "world": "scripts/scenario/worlds/boost-unhauled.json", "seed": 1 },
+  "ticks": 60,
+  "assert": [
+    { "measure": "struckOn", "name": "raider-1", "min": 1 },
+    { "measure": "boosted", "max": 0 }
+  ]
+}

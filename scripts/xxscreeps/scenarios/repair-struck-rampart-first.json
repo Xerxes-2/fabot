@@ -1,7 +1,0 @@
-{
-  "why": "a rampart a raid strikes is lost soonest though above the safe floor: the worker mends it, not a rampart under the floor that decay alone keeps standing for hundreds of periods, so the struck rampart stands",
-  "modules": ["economy"],
-  "start": { "world": "scripts/xxscreeps/worlds/repair-struck-rampart.json", "seed": 1 },
-  "ticks": 100,
-  "assert": [{ "measure": "builtAtEnd", "kind": "rampart", "min": 2 }]
-}

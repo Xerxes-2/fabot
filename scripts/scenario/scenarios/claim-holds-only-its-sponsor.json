@@ -1,0 +1,19 @@
+{
+  "why": "a claim holds only the colony it is served from (atlas::sponsor): while W1S7 is raised from W2S8, W2S8 opens no new outpost (W1S8) and the young W2S5 opens its own (W3S6); main held every colony, so W3S6 lay idle until the claim's spawn stood",
+  "modules": ["atlas", "economy", "strategy"],
+  "start": {
+    "world": "scripts/scenario/worlds/young-among-bare-outposts.json",
+    "seed": 1,
+    "declarations": {
+      "outposts": [],
+      "claims": [{"room":"W1S7","controller":{"id":"d0029f","x":14,"y":29},"sources":[{"id":"d0029e","x":13,"y":28},{"id":"d002a0","x":46,"y":33}]}]
+    },
+    "follow": ["W3S6", "W1S8", "W1S7"]
+  },
+  "ticks": 1500,
+  "assert": [
+    { "measure": "dug", "room": "W3S6", "to": 1100, "min": 1 },
+    { "measure": "dug", "room": "W1S8", "to": 1100, "max": 0 },
+    { "measure": "claimSpawned", "max": 1500 }
+  ]
+}

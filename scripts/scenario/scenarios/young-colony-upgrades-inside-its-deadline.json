@@ -1,0 +1,9 @@
+{
+  "why": "a controller inside its downgrade deadline is upgraded before any task a body already holds: a young colony's workers out on a neighbour's refill come back to it at once",
+  "modules": ["atlas", "economy", "mv"],
+  "start": { "world": "scripts/scenario/worlds/deadline-held-refills.json", "seed": 1 },
+  "ticks": 200,
+  "assert": [
+    { "measure": "leastDowngrade", "room": "W1N1", "min": 3980 }
+  ]
+}

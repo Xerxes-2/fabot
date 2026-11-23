@@ -7,7 +7,7 @@
 //   --room  default the first room by name with a controller nobody owns and two sources
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { invariants, samplesOf } from "../xxscreeps/measures.mjs";
+import { invariants, samplesOf } from "../scenario/measures.mjs";
 import { TEMPLATE, buildPlan, runSim, seatsUs, simBinary } from "./run.mjs";
 
 const usage = "usage: npm run soak -- [--room <name>] [--world <world.json> | --gen <seed>] [--node N] [--seed N] [--late K] [--ticks N] [--ended] [--unsafe] [--invaders …] [--wave …] [--core …] [--capture a-b] [--run name] [--watch [--port N] [--tick-ms N] [--badge <json>]]";

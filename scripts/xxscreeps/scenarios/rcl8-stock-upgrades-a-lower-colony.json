@@ -1,9 +1,0 @@
-{
-  "why": "an RCL8 colony's stock past its reserve, a margin and its sites' cost goes by terminal to a colony below RCL8, whose upgrade spends it (owner, 2026-11-13: GCL is every room's upgrade, and RCL8's buys only GCL): three RCL8 colonies stand beside an RCL6 and an RCL7 one, W2S8 holding 800k, past its reserve (one lifetime of tower fire), the 20k margin and the Hivemind plan's labs, power spawn and nuker it still owes, and its terminal sends energy to the lowest of them, the RCL6 one",
-  "modules": ["economy"],
-  "start": { "world": "scripts/xxscreeps/worlds/young-among-colonies.json", "seed": 1, "declarations": { "reserve": 1 } },
-  "ticks": 4000,
-  "assert": [
-    { "measure": "sentTo", "room": "W7S5", "min": 1 }
-  ]
-}

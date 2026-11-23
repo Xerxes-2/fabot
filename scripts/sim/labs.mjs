@@ -12,12 +12,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { exposureOf, invariants, samplesOf } from "../xxscreeps/measures.mjs";
+import { exposureOf, invariants, samplesOf } from "../scenario/measures.mjs";
 import { runSim, simBinary } from "./run.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "../..");
-const WORLD = join(REPO, "scripts/xxscreeps/worlds/young-among-colonies.json");
+const WORLD = join(REPO, "scripts/scenario/worlds/young-among-colonies.json");
 // Each home's mineral, where the world's is another (all three RCL8 homes dig O there).
 const ORES = { W3S8: "U", W2S8: "K" };
 const STOCK = { W2S8: { X: 20000 } };

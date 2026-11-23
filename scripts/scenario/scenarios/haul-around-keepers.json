@@ -1,0 +1,24 @@
+{
+  "why": "no walk crosses a keeper room: the outpost W6S7 is three crossings from W7S5 only through two keeper rooms, whose one shared exit is in a keeper's reach, and two from W5S8 round them; the room graph took the keeper rooms, so W7S5's haulers to it walked past the keeper",
+  "modules": ["atlas", "economy", "mv", "strategy"],
+  "start": {
+    "world": "scripts/scenario/worlds/haul-around-keepers.json",
+    "seed": 1
+  },
+  "ticks": 1500,
+  "assert": [
+    {
+      "measure": "bodiesOut",
+      "max": 0
+    },
+    {
+      "measure": "bodiesStruck",
+      "max": 0
+    },
+    {
+      "measure": "dug",
+      "room": "W6S7",
+      "min": 1
+    }
+  ]
+}

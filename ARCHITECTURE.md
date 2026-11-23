@@ -811,7 +811,7 @@ raze), offline one it outlived.
   lazycreep shows is the one scenarios and soaks measure.
 
 **Scenario library (`npm run scenario`):** every live incident becomes a recipe
-scenario with outcome bounds (`scripts/xxscreeps/scenarios/`). `jj ship` runs
+scenario with outcome bounds (`scripts/scenario/scenarios/`). `jj ship` runs
 scenarios matching touched modules.
 
 **Soak & reading rules (`npm run soak`, `npm run soak:many`):**

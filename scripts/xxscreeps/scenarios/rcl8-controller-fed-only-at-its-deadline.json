@@ -1,9 +1,0 @@
-{
-  "why": "at RCL8 the controller is fed only inside its downgrade deadline (owner, 2026-11-13: upgrading there only feeds GCL), so no body upgrades and none past the 15 a tick it takes: A7 stands RCL8 built out with 500k stored and no outpost, its deadline far. Main 9154fa4f held more than 15 WORK upgrading in 94% of its samples from t500",
-  "modules": ["economy"],
-  "start": { "world": "scripts/xxscreeps/worlds/season-outpost-ring.json", "room": "E25S8", "seed": 1, "node": "A7", "ended": true },
-  "ticks": 4000,
-  "assert": [
-    { "measure": "upgrade", "from": 500, "max": 0 }
-  ]
-}

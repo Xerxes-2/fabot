@@ -6,8 +6,8 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BUILT, US, built, near, standNode } from "./node.mjs";
-import { seatTile } from "../xxscreeps/engine/seat-tile.mjs";
-import { engagements } from "../xxscreeps/engine/engaged.mjs";
+import { seatTile } from "../scenario/seat-tile.mjs";
+import { engagements } from "../scenario/engaged.mjs";
 
 const SAFE_MODE_DURATION = 20000;
 
@@ -15,7 +15,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "../..");
 const PLAN = join(REPO, "target/release/plan");
 /** The xxscreeps template world (every room its terrain and sources, minerals, controller, keeper lairs, nobody's), checked in. */
-export const TEMPLATE = join(REPO, "scripts/xxscreeps/worlds/template.json");
+export const TEMPLATE = join(REPO, "scripts/scenario/worlds/template.json");
 
 // What sim stands (`world.rs`, `node.mjs`) and what `scenario.mjs` reads off what it writes
 // (`sample.rs`, `lives.rs`, `engaged.rs`: no opponent's side).

@@ -1,0 +1,9 @@
+{
+  "why": "A Defend's body left with nothing alive but its legs counts as lost, so the Defend no longer holds open on it; main held such a body beside the Invader it had crippled in turn, neither able to strike, for the Invader's life (W8N8 on a W9N8 soak). The pair is placed in W2N1",
+  "modules": ["fight"],
+  "start": { "world": "scripts/scenario/worlds/outpost-spent-pair.json", "seed": 1 },
+  "ticks": 1000,
+  "assert": [
+    { "measure": "answeredMost", "max": 400 }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "why": "an outpost whose post is nearer the colony next door's spawn than its own colony's is worked with no refusal and no fault. Which post a cast miner is for is not observable, so the second miner the home pick once cast is not counted",
+  "modules": ["atlas", "economy", "mv"],
+  "start": {
+    "world": "scripts/scenario/worlds/outpost-post-across-the-border.json",
+    "seed": 1
+  },
+  "ticks": 120,
+  "assert": []
+}

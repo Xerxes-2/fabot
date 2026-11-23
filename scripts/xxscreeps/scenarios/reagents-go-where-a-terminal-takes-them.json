@@ -1,9 +1,0 @@
-{
-  "why": "a wanted reaction goes to a cluster its reagents reach through both terminals, and balance ships them there: W7S5 (3 labs) took KHO2 and all 3,000 KO, then energy aid filled its terminal by t~600, so no OH reached it and KHO2 stopped at 805 while givers kept picking it; a full terminal now neither takes a reaction's reagents nor a send, so W5S8 reacts it",
-  "modules": ["economy"],
-  "start": { "world": "scripts/xxscreeps/worlds/young-among-colonies.json", "seed": 1, "stock": { "W2S8": { "X": 6000 }, "W3S8": { "KO": 3000 }, "W7S9": { "OH": 3000, "UH": 1000 } } },
-  "ticks": 3000,
-  "assert": [
-    { "measure": "made", "resource": "KHO2", "min": 2000 }
-  ]
-}

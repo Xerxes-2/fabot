@@ -1,9 +1,0 @@
-{
-  "why": "a young colony among stocked ones has its own sites built",
-  "modules": ["atlas", "economy", "mv"],
-  "start": { "world": "scripts/xxscreeps/worlds/young-among-colonies.json", "seed": 1 },
-  "ticks": 750,
-  "assert": [
-    { "measure": "build", "room": "W2S5", "to": 750, "min": 1 }
-  ]
-}

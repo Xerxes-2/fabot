@@ -41,7 +41,7 @@ while read -r f; do
     *.md | core/*/tests/*) ;;
     core/base/* | core/tick/*) full=${full:-$f} ;;
     core/*/*) m=${f#core/}; m=${m%%/*}; [ ! -d "core/$m" ] || modules+=("$m") ;;
-    scripts/xxscreeps/scenarios/*.json) [ ! -e "$f" ] || { s=${f##*/}; scenarios+=("${s%.json}"); } ;;
+    scripts/scenario/scenarios/*.json) [ ! -e "$f" ] || { s=${f##*/}; scenarios+=("${s%.json}"); } ;;
     *) full=${full:-$f} ;;
   esac
 done <<<"$changed"
@@ -53,7 +53,7 @@ elif [ ${#modules[@]} -gt 0 ] || [ ${#scenarios[@]} -gt 0 ]; then
   picked=("${scenarios[@]}")
   [ -z "$touched" ] || picked+=(--modules "$touched")
   echo "ship: the scenarios of the modules touched (${touched:-none}) and edited (${scenarios[*]:-none})"
-  node scripts/xxscreeps/scenario.mjs "${picked[@]}" --list
+  node scripts/scenario/scenario.mjs "${picked[@]}" --list
   npm run scenario -- "${picked[@]}"
 else
   echo "ship: no code changed: no scenarios"

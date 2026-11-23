@@ -1,0 +1,11 @@
+{
+  "why": "minerals and compounds dropped in a colony's room or its outpost, on the ground or in a tombstone, end in its storage before they decay: W3N1 holds a 700 UH pile and an Invader carrying 240 XGHO2 that its towers kill, W2N1 a 400 ZK pile; main took none of them",
+  "modules": ["economy"],
+  "start": { "world": "scripts/scenario/worlds/loot-in-reach.json", "seed": 1 },
+  "ticks": 600,
+  "assert": [
+    { "measure": "made", "room": "W3N1", "resource": "UH", "min": 600 },
+    { "measure": "made", "room": "W3N1", "resource": "XGHO2", "min": 230 },
+    { "measure": "made", "room": "W3N1", "resource": "ZK", "min": 150 }
+  ]
+}

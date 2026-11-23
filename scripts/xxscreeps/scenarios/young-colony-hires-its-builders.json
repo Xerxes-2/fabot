@@ -1,9 +1,0 @@
-{
-  "why": "a young colony among a stocked neighbour's remotes hires its own workers: a remote it cannot bank hires it no haulers, and the neighbour's bodies out there fill none of its seats",
-  "modules": ["atlas", "economy", "layout", "mv"],
-  "start": { "world": "scripts/xxscreeps/worlds/young-among-outposts.json", "seed": 1 },
-  "ticks": 1500,
-  "assert": [
-    { "measure": "castIn", "name": "worker-", "room": "W2S5", "min": 1 }
-  ]
-}

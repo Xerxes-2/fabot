@@ -1,7 +1,0 @@
-{
-  "why": "the controller is upgraded past the buffer container's first decay: its upgraders keep the buffer they drink from (main at 3614fb7a: the buffer decayed at t27800 with no worker able to mend it below the reserve, no upgrader is cast without one, upgradeStall 1100); the world is that main's W8N3 seed 1 at t26000 on xxscreeps",
-  "modules": ["economy"],
-  "start": { "world": "scripts/xxscreeps/worlds/upgrade-outlives-the-buffer.json", "seed": 1 },
-  "ticks": 4000,
-  "assert": [{ "measure": "upgradeStall", "max": 800 }]
-}

@@ -1,0 +1,7 @@
+{
+  "why": "a source link sends the controller's link only what its bodies drink and the hub the rest, which carriers bank: A7 stands RCL8 with source, hub and controller links and no upgrader outside its deadline. Main 7400c7d5 sent every link to the controller's link, full from the first ticks, so no link sent from t500 (linked 0) and the dig was hauled by hand; fixed 426, about 14k sent by link, which keeps sending only while carriers empty the hub",
+  "modules": ["economy"],
+  "start": { "world": "scripts/scenario/worlds/season-outpost-ring.json", "room": "E25S8", "seed": 1, "node": "A7", "ended": true },
+  "ticks": 2000,
+  "assert": [{ "measure": "linked", "from": 500, "min": 300 }]
+}

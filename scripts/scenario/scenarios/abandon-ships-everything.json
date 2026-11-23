@@ -1,0 +1,10 @@
+{
+  "why": "a colony declared abandoned ships everything its storage, terminal and labs hold to another colony's terminal, the terminal's own energy last, its haulers feeding its terminal from its storage, not overland to another colony's sinks: all 10,500 of its ore arrives",
+  "modules": ["atlas", "economy", "mv"],
+  "start": { "world": "scripts/scenario/worlds/abandon-two-colonies.json", "seed": 1 },
+  "ticks": 3000,
+  "assert": [
+    { "measure": "heldAtEnd", "room": "W1N1", "max": 200 },
+    { "measure": "oresAtEnd", "room": "W2N1", "min": 10500 }
+  ]
+}

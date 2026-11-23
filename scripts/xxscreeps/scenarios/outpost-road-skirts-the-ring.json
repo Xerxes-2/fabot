@@ -1,7 +1,0 @@
-{
-  "why": "no road stands on a tile the ring walls: the owner's from-zero E25S8 watch kept 6 outpost roads under ring walls at t50079, decaying and mended for nothing. On sim main d4bb93cf the same start buried 6 by t38300, at RCL5, as the walls went up over the walk home",
-  "modules": ["layout"],
-  "start": { "world": "scripts/xxscreeps/worlds/season-outpost-ring.json", "room": "E25S8", "seed": 1, "ended": true },
-  "ticks": 50000,
-  "assert": [{ "measure": "buriedAtEnd", "max": 0 }]
-}

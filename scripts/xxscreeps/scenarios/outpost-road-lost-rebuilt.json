@@ -1,9 +1,0 @@
-{
-  "why": "an outpost's lost roads are rebuilt below the home's reserve: W2N1's walk held 53 roads and has lost two side by side and the tile beside the border while W3N1 holds under its reserve; main left them unbuilt",
-  "modules": ["economy", "layout"],
-  "start": { "world": "scripts/xxscreeps/worlds/outpost-road-lost.json", "seed": 1 },
-  "ticks": 1000,
-  "assert": [
-    { "measure": "roadsAtEnd", "room": "W2N1", "min": 53 }
-  ]
-}

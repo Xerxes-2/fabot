@@ -1,0 +1,10 @@
+{
+  "why": "a road a structure of ours covers is destroyed: R8 stands roads on the ten extension tiles RCL8 adds, as a from-zero run's outposts leave them. Main 9b8d0756 kept all 10 under the extensions it built by t2000. Run to t3500: a buried road clears some 300-500 ticks after the extension over it stands, and workers build rampart sites first",
+  "modules": ["layout"],
+  "start": { "world": "scripts/scenario/worlds/season-outpost-ring.json", "room": "E25S8", "seed": 1, "node": "R8", "ended": true },
+  "ticks": 3500,
+  "assert": [
+    { "measure": "builtAtEnd", "kind": "extension", "min": 60 },
+    { "measure": "buriedAtEnd", "max": 0 }
+  ]
+}

@@ -1,7 +1,0 @@
-{
-  "why": "a carrier with a mineral aboard takes no other load until it delivers it, and delivers it even where no storage stands: on this start, haulers carried O for over 1,200 ticks while withdrawing and refilling energy, and young colonies' haulers kept theirs for good",
-  "modules": ["economy"],
-  "start": { "world": "scripts/xxscreeps/worlds/young-among-colonies.json", "seed": 1, "stock": { "W3S8": { "X": 3000 }, "W5S8": { "X": 3000 } } },
-  "ticks": 1500,
-  "assert": [{ "measure": "mineralAside", "max": 0 }, { "measure": "mineralHeld", "max": 400 }]
-}

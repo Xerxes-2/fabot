@@ -1,0 +1,10 @@
+{
+  "why": "a level-0 core glimpsed once stays in sightings until it collapses, so its engagement outlives lost sight and razes it rather than closing beside it: a body that dies 3 ticks in gives W2N1's core its only sight for ~110 ticks",
+  "modules": ["atlas", "economy", "exchange", "fight", "mv", "strategy", "tactics"],
+  "start": { "world": "scripts/scenario/worlds/outpost-core-glimpsed.json", "seed": 1 },
+  "ticks": 1200,
+  "assert": [
+    { "measure": "closedOnCore", "max": 0 },
+    { "measure": "coresAtEnd", "to": 1000, "max": 0 }
+  ]
+}
