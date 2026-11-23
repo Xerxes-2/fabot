@@ -173,9 +173,10 @@ export const buildPlan = () =>
 
 /**
  * A soak into `out` on `world` (default the template), or on the world map.js generates off seed `gen`
- * (sim picks the room); resolves to sim's exit code, -1 when it never ran. `watch` ({port, ms, badge}) serves it to lazycreep.
+ * (sim picks the room); resolves to sim's exit code, -1 when it never ran. `watch` ({port, ms, badge}) serves it to lazycreep;
+ * `capture` ("a-b[,c-d]") writes those ticks to `out`/capture.jsonl for `scripts/bench.mjs`.
  */
-export function runSim(bin, { world, gen, room, node, ticks, seed = 1, late = 0, ended = false, unsafe = false, follow = [], rivals = [], invaders, wave, core, stronghold, resetEvery = 0, watch, out }) {
+export function runSim(bin, { world, gen, room, node, ticks, seed = 1, late = 0, ended = false, unsafe = false, follow = [], rivals = [], invaders, wave, core, stronghold, resetEvery = 0, watch, capture, out }) {
   return new Promise((done) => {
     rmSync(out, { recursive: true, force: true });
     const map = `${out}.world.json`;
@@ -184,7 +185,7 @@ export function runSim(bin, { world, gen, room, node, ticks, seed = 1, late = 0,
       done(code);
     };
     const play = (where) => {
-      const args = [...where, "--ticks", String(ticks), "--seed", String(seed), "--late", String(late), "--every", "100", "--out", out, ...(follow.length ? ["--follow", follow.join(",")] : []), ...(ended ? ["--ended"] : []), "--reset-every", String(resetEvery), "--rivals", JSON.stringify(seats(rivals)),
+      const args = [...where, "--ticks", String(ticks), "--seed", String(seed), "--late", String(late), "--every", "100", "--out", out, ...(follow.length ? ["--follow", follow.join(",")] : []), ...(ended ? ["--ended"] : []), "--reset-every", String(resetEvery), ...(capture ? ["--capture", capture] : []), "--rivals", JSON.stringify(seats(rivals)),
         "--npc", JSON.stringify(npc(invaders, bodies(wave), core, stronghold, ticks)), ...(watch ? ["--watch", "--port", String(watch.port), "--tick-ms", String(watch.ms), ...(watch.badge ? ["--badge", watch.badge] : [])] : [])];
       spawn(bin, args, { stdio: watch ? "inherit" : "ignore" }).on("exit", (code, signal) => (code === 0 || (watch && signal === "SIGINT" && existsSync(join(out, "timing.json"))) ? engaged(out).then(() => finish(0), () => finish(-1)) : finish(code))).on("error", () => finish(-1));
     };

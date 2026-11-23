@@ -18,9 +18,9 @@
 //           better or worse by its bound's side, and each soak's score
 //   --seeds each start also on the N - 1 seeds after its own
 //   --capture  every tick each soak decides, to its capture.jsonl, which
-//           `npm run replay` decides again with another bundle
-//   --force-xxscreeps  run on xxscreeps the sim-native scenarios that --bot, --base
-//           or --capture would SKIP, where one may fail for the engine's sake
+//           `npm run replay` decides again and `npm run bench` times
+//   --force-xxscreeps  run on xxscreeps the sim-native scenarios that --bot or --base
+//           would SKIP, where one may fail for the engine's sake
 //   --jobs  soaks at once (default a quarter of the hardware threads, as soak:many)
 //   --watch the one scenario's soak watched (soak's --watch), in this terminal
 //
@@ -92,7 +92,7 @@ const xxscreepsWhy = (s) =>
     (s.assert.some((a) => a.who) && "a measure of an opponent's side") ||
     s.assert.filter((a) => !SIM_MEASURES.has(a.metric !== undefined ? "metric" : a.measure)).map((a) => `${a.measure} is not read off sim`)[0] ||
     null);
-const bundled = ["--bot", "--base", "--capture"].find((f) => flags[f]);
+const bundled = ["--bot", "--base"].find((f) => flags[f]);
 const forced = watch.length ? "--watch" : flags["--force-xxscreeps"] ? "--force-xxscreeps" : undefined;
 // xxscreeps stands no stronghold and plays no scripted rival, so either is watched on sim.
 const simOnly = (s) => s.start.stronghold !== undefined || s.start.opponents !== undefined;
@@ -120,7 +120,6 @@ const scenarios = selected.filter((s) => !offSim.includes(s));
 const OFF_SIM = {
   "--bot": "sim builds this checkout's core, never a bundle: check out and build that revision, then plain `npm run scenario`",
   "--base": "a base's runs are xxscreeps runs, so a sim run has none to stand beside",
-  "--capture": "sim writes no capture",
 };
 const offSimWhy = `sim-native, skipped with ${bundled}: ${OFF_SIM[bundled]}`;
 const offSimNames = [...new Set(offSim.map((s) => s.name.replace(/@s\d+$/, "")))];
@@ -199,7 +198,8 @@ const play = async ({ name, start, ticks, engine }) => {
     const { world, room, node, seed, late, ended, unsafe, follow, opponents, invaders, wave, core, stronghold, resetEvery } = start;
     const flag = (f, or) => Number(watch.includes(f) ? watch[watch.indexOf(f) + 1] : or);
     const watched = watch.length ? { port: flag("--port", 21025), ms: flag("--tick-ms", 50) } : undefined;
-    return runSim(sim, { world: world && resolve(REPO, world), room, node, ticks, seed, late, ended, unsafe, follow, rivals: opponents, invaders, wave, core, stronghold, resetEvery, watch: watched, out: join(REPO, "soak-runs", name) });
+    const capture = flags["--capture"] ? `0-${ticks}` : undefined;
+    return runSim(sim, { capture, world: world && resolve(REPO, world), room, node, ticks, seed, late, ended, unsafe, follow, rivals: opponents, invaders, wave, core, stronghold, resetEvery, watch: watched, out: join(REPO, "soak-runs", name) });
   }
   if (start.world)
     return soak(["--world", resolve(REPO, start.world), "--seed", String(start.seed), "--ticks", String(ticks), "--run", name, "--bot", bot, ...(start.room ? ["--room", start.room] : []), ...(start.node ? ["--node", start.node] : []), ...(start.late ? ["--late", String(start.late)] : []), ...(start.invaders ? ["--invaders", start.invaders] : []), ...(start.wave ? ["--wave", start.wave] : []), ...(start.follow ? ["--follow", start.follow.join(",")] : []), ...(start.ended ? ["--ended"] : [])]);

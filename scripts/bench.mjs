@@ -1,8 +1,6 @@
-// The benchmark (ARCHITECTURE.md §9.1) over a soak's capture (`npm run soak
-// -- --capture a-b`) through the official engine's `Game` (`bench-game.mjs`),
-// Memory stringified after the loop. xxscreeps reuses last tick's Memory
-// object and charges no intent, so its `memory`, `write` and `execute` read
-// lower. A window starts from a fresh load, as after a global reset: its first
+// The benchmark (ARCHITECTURE.md §9.1) over a capture (sim's `--capture a-b`,
+// `npm run scenario -- <name> --capture`) through the official engine's `Game`
+// (`bench-game.mjs`), Memory stringified after the loop. A window starts from a fresh load, as after a global reset: its first
 // --cold ticks are apart, the JIT still settling (the atlas reads 5× its
 // steady cost over the first 40). A round streams the capture a tick at a
 // time: the heap is the live limit, and a takeover capture outgrows it. A

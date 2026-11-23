@@ -5,6 +5,7 @@
 
 mod act;
 mod badge;
+mod capture;
 mod driver;
 mod duel;
 mod engaged;
@@ -63,6 +64,7 @@ struct Args {
     /// Our badge as the official `{type, color1, color2, color3, param, flip}`.
     badge: Option<serde_json::Value>,
     generated: Option<generated::Spec>,
+    capture: Option<String>,
 }
 
 fn args() -> Args {
@@ -76,7 +78,7 @@ fn args() -> Args {
         };
         flags.insert(flag, value);
     }
-    let usage = "usage: sim (--world <world.json> --room <name> | --gen <seed> [--sectors WxH]) --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--follow A,B] [--npc <[[tick, room, bodies, [a stronghold's level, deploy] or null for a core]]>] [--rivals <[rival::Rival]>] [--ended] [--check] [--reset-every N] [--watch [--port N] [--tick-ms N] [--badge <json>]]";
+    let usage = "usage: sim (--world <world.json> --room <name> | --gen <seed> [--sectors WxH]) --out <dir> [--ticks N] [--every K] [--seed N] [--late K] [--follow A,B] [--npc <[[tick, room, bodies, [a stronghold's level, deploy] or null for a core]]>] [--rivals <[rival::Rival]>] [--ended] [--check] [--reset-every N] [--capture a-b[,c-d]] [--watch [--port N] [--tick-ms N] [--badge <json>]]";
     let need = |flag: &str| (flags.get(flag).cloned()).unwrap_or_else(|| panic!("{flag}: {usage}"));
     let number = |flag: &str, or: u64| {
         (flags.get(flag)).map_or(or, |v| {
@@ -85,6 +87,7 @@ fn args() -> Args {
     };
     Args {
         generated: generated::Spec::of(&flags),
+        capture: flags.get("--capture").cloned(),
         world: flags.get("--world").cloned().unwrap_or_default(),
         room: flags.get("--room").cloned().unwrap_or_default(),
         out: need("--out"),
@@ -253,6 +256,7 @@ fn main() {
     driver.kept = reset::Twin::new(args.reset_every, args.check);
     driver.kept.intel = fabot_base::intel::of_text(&map.intel);
 
+    let mut capture = (args.capture.as_ref()).map(|w| capture::Capture::open(w, &args.out, &map));
     let mut rivals = rival::Rivals::new(args.rivals.clone());
     let mut engine = Engine {
         hooks: ProcessorHooks::default(),
@@ -302,6 +306,7 @@ fn main() {
         if t == args.ticks {
             break;
         }
+        (capture.iter_mut()).for_each(|c| c.tick(t, &v, &driver.memory, &driver.kept.intel));
         let mut intents = if t >= args.late {
             driver.tick(&v, t, &|| sampler.ledger())
         } else {

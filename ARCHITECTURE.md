@@ -721,7 +721,8 @@ each `decayTime` every tick, so a ruin holding 100k+ T lasted a sixth as long.
 No performance change ships without the representative benchmark:
 
 1. **Real input:** live capture from the recorder ring (`observe capture`) or,
-   offline, a soak capture (`npm run soak -- --capture a-b`). Never synthetic
+   offline, a sim capture (`sim --capture a-b`, `npm run scenario -- <name>
+   --capture`), the World `decide` read as `Game` shows it. Never synthetic
    scenarios.
 2. **Engine cost model:** `bench.mjs` replays under live isolate heap limits
    with Memory JSON parse/stringify, 0.2 CPU/intent, and cold ticks reported
@@ -810,7 +811,7 @@ Two engines complement each other:
   - `❓` Cut worlds lacking sector bus rooms throw in `genDeposits` (logged and
     skipped as backend cron does).
 - **`xxscreeps` (`npm run xx`):** isolated-vm vanilla engine used for
-  `--bot`/`--base` comparisons and `--capture`; with these, `npm run scenario`
+  `--bot`/`--base` comparisons; with these, `npm run scenario`
   skips sim-native scenarios unless `--force-xxscreeps`. A stronghold or
   scripted-rival scenario and a single-bot world are watched on `sim` (`npm run scenario -- <name> --watch`,
   `npm run watch:sim`, `sim/src/watch`): the run lazycreep shows is the one
