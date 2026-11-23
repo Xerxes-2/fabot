@@ -1,8 +1,8 @@
 // One soak on sim served to lazycreep as it runs (`sim --watch`), as `soak.mjs --watch` serves one on xxscreeps.
 // Usage: npm run watch:sim -- (--room <name> [--world <world.json>] | --gen <seed>) [--node N] [--seed N] [--ended] [--ticks N] [--port N] [--tick-ms N] [--badge <json>]
-import { existsSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { TEMPLATE, buildPlan, exportTemplate, runSim, simBinary } from "./run.mjs";
+import { buildPlan, runSim, simBinary } from "./run.mjs";
 
 const flags = {};
 for (let i = 2; i < process.argv.length; i++) {
@@ -15,7 +15,6 @@ if (!room && gen === undefined) {
   console.error("usage: npm run watch:sim -- (--room <name> [--world <world.json>] | --gen <seed>) [--node N] [--seed N] [--ended] [--ticks N] [--port N] [--tick-ms N] [--badge <json>]");
   process.exit(2);
 }
-if (!world && gen === undefined && !existsSync(TEMPLATE) && !exportTemplate()) process.exit(1);
 if (node && !buildPlan()) process.exit(1);
 const bin = simBinary();
 if (!bin) process.exit(1);

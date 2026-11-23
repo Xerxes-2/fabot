@@ -2,7 +2,7 @@
 // and `scenario.mjs` share of the native engine.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BUILT, US, built, near, standNode } from "./node.mjs";
@@ -14,7 +14,8 @@ const SAFE_MODE_DURATION = 20000;
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "../..");
 const PLAN = join(REPO, "target/release/plan");
-export const TEMPLATE = join(REPO, "soak-runs/.template.json");
+/** The xxscreeps template world (every room its terrain and sources, minerals, controller, keeper lairs, nobody's), checked in. */
+export const TEMPLATE = join(REPO, "scripts/xxscreeps/worlds/template.json");
 
 // What sim stands (`world.rs`, `node.mjs`) and what `scenario.mjs` reads off what it writes
 // (`sample.rs`, `lives.rs`, `engaged.rs`: no opponent's side).
@@ -164,12 +165,6 @@ async function engaged(out) {
 export function simBinary() {
   const res = spawnSync("node", [join(HERE, "build.mjs")], { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
   return res.status === 0 ? res.stdout.trim() : null;
-}
-
-/** The xxscreeps template as sim reads it; false when it did not export. */
-export function exportTemplate() {
-  mkdirSync(dirname(TEMPLATE), { recursive: true });
-  return spawnSync("node", [join(HERE, "export.mjs"), TEMPLATE], { stdio: ["ignore", "ignore", "inherit"] }).status === 0;
 }
 
 /** The plan tool a node is stood from, built once before runs share it. */

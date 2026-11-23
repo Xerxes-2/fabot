@@ -48,7 +48,7 @@ import { fileURLToPath } from "node:url";
 import { sweep } from "./prune.mjs";
 import { exposureOf, invariants } from "./measures.mjs";
 import { unstood } from "../sim/node.mjs";
-import { TEMPLATE as SIM_TEMPLATE, buildPlan, exportTemplate, runSim, simBinary } from "../sim/run.mjs";
+import { TEMPLATE as SIM_TEMPLATE, buildPlan, runSim, simBinary } from "../sim/run.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "../..");
@@ -135,7 +135,6 @@ const planHash = hash(...[join(REPO, "src/bin/plan.rs"), ...readdirSync(join(REP
 const wasmOf = (file) => [file.replace(/\.js$/, ".wasm")].filter(existsSync).map((f) => readFileSync(f));
 for (const b of bots) b.code = native ? hash(readFileSync(b.file)) : hash(readFileSync(b.file, "utf8").replace(/^(?:var |globalThis\.)__FABOT_VERSION__ = .*$/m, ""), ...wasmOf(b.file));
 
-if (native && starts.some((s) => !s.world) && !exportTemplate()) fail("the template did not export");
 const runs = bots.flatMap((bot) =>
   starts.flatMap((start) =>
     start.seeds.map((seed) => ({

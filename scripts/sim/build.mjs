@@ -7,15 +7,15 @@
 //
 // Usage: node scripts/sim/build.mjs [--train]   (prints the binary's path)
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { TEMPLATE } from "./run.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "../..");
 const PROFILES = join(REPO, "target/pgo-profiles");
 const MERGED = join(PROFILES, "merged.profdata");
-const TEMPLATE = join(REPO, "soak-runs/.template.json");
 const run = (cmd, args, env = process.env) => {
   const res = spawnSync(cmd, args, { cwd: REPO, env, stdio: ["ignore", 2, 2] });
   if (res.status !== 0) {
@@ -33,10 +33,6 @@ const build = (flags) =>
 if (process.argv.includes("--train") || !existsSync(MERGED)) {
   rmSync(PROFILES, { recursive: true, force: true });
   build(`-C profile-generate=${PROFILES}`);
-  if (!existsSync(TEMPLATE)) {
-    mkdirSync(dirname(TEMPLATE), { recursive: true });
-    run("node", [join(HERE, "export.mjs"), TEMPLATE]);
-  }
   run(bin, ["--world", TEMPLATE, "--room", "W8N3", "--ticks", "30000", "--seed", "1", "--out", join(REPO, "target/pgo-train")]);
   const profiles = readdirSync(PROFILES).filter((f) => f.endsWith(".profraw")).map((f) => join(PROFILES, f));
   // rustup's llvm-tools component (rust-toolchain.toml).

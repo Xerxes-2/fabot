@@ -44,7 +44,7 @@ import { check, engagementsOf, measures, samplesOf, withAlways } from "./measure
 import { report } from "../sim/prediction.mjs";
 import { sweep } from "./prune.mjs";
 import { unstood } from "../sim/node.mjs";
-import { SIM_MEASURES, SIM_START, buildPlan, exportTemplate, runSim, simBinary, unseated } from "../sim/run.mjs";
+import { SIM_MEASURES, SIM_START, buildPlan, runSim, simBinary, unseated } from "../sim/run.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "../..");
@@ -168,7 +168,6 @@ for (const s of scenarios) {
 
 // Built once here: parallel builds of one project collide.
 if (runs.size && !buildPlan()) fail("the plan tool did not build");
-if (scenarios.some((s) => s.engine === "sim" && !s.start.world) && !exportTemplate()) fail("the template did not export");
 const started = Date.now();
 const soak = (args, watched = watch.length > 0) =>
   new Promise((done) => {
