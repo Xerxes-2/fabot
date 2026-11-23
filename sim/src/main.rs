@@ -22,8 +22,8 @@ mod watch;
 mod world;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{self, File};
-use std::io::{BufWriter, Write};
+use std::fs;
+use std::io::Write;
 use std::time::Instant;
 
 use krebs::cron::{CronCtx, JOBS};
@@ -247,13 +247,9 @@ fn main() {
     let closed: BTreeSet<_> = map.closed.iter().filter_map(|r| r.parse().ok()).collect();
     let maps = || driver::Maps(terrains.clone(), closed.clone());
     let twin = || reset::Twin::new(args.reset_every, args.check);
-    let mut players = seat::players(seats, &args.out, maps, twin);
+    let mut players = seat::players(seats, &args.out, &args.follow, maps, twin);
     players[0].driver.kept.intel = fabot_base::intel::of_text(&map.intel);
     let uids: Vec<String> = players.iter().map(|p| p.seat.uid.clone()).collect();
-    let file = |name: &str| {
-        BufWriter::new(File::create(format!("{}/{name}", args.out)).expect("an output file"))
-    };
-    let mut samples = file("samples.jsonl");
 
     let mut capture = (args.capture.as_ref()).map(|w| capture::Capture::open(w, &args.out, &map));
     let mut rivals = rival::Rivals::new(args.rivals.clone());
@@ -263,19 +259,6 @@ fn main() {
         draw: args.seed,
         processed: 0,
     };
-    let memory: Value = serde_json::from_str(&players[0].seat.memory).unwrap_or_default();
-    let declared = |key: &str| -> Vec<String> {
-        let sites = memory["v2"]["declarations"][key]
-            .as_array()
-            .into_iter()
-            .flatten();
-        sites
-            .filter_map(|c| c["room"].as_str().map(str::to_string))
-            .collect()
-    };
-    let followed = [declared("outposts"), args.follow.clone()].concat();
-    let mut sampler = sample::Sampler::new(&room, &followed, declared("claims"));
-    let mut levels: Vec<serde_json::Value> = Vec::new();
     let (mut engine_ms, mut sample_ms) = (0.0, 0.0);
     let began = Instant::now();
 
@@ -284,27 +267,26 @@ fn main() {
         let mut v = View::of(&k);
         if let Some(t) = t.checked_sub(1) {
             let at = Instant::now();
-            sampler.account(&v);
             for (p, uid) in players.iter_mut().zip(&uids) {
                 v.us = uid;
+                p.sampler.account(&v);
                 p.engaged(&v, t);
+                let rcl = p.sampler.level(&v, t);
+                if t % args.every == 0 || t == args.ticks - 1 {
+                    let mut row = p.sampler.sample(&v, t, &map);
+                    let intel = &p.driver.kept.intel;
+                    row["faults"] = json!(p.driver.faults.len());
+                    row["strongholds"] = npc::strongholds(&v, intel);
+                    let seen = intel.iter().map(|(r, w)| (r.to_string(), w.seen));
+                    row["seen"] = json!(seen.collect::<BTreeMap<_, _>>());
+                    let _ = writeln!(p.samples, "{row}");
+                    eprintln!(
+                        "{} t{t} rcl{rcl} {} creeps {}",
+                        p.seat.name, row["progress"], row["creeps"]
+                    );
+                }
             }
             v.us = &uids[0];
-            let driver = &players[0].driver;
-            let rcl = sampler.level(&v);
-            if levels.last().is_none_or(|l| l["rcl"] != rcl) {
-                levels.push(json!({ "t": t, "time": k.time - 1, "rcl": rcl }));
-            }
-            if t % args.every == 0 || t == args.ticks - 1 {
-                let mut row = sampler.sample(&v, t, &map);
-                row["faults"] = json!(driver.faults.len());
-                row["strongholds"] = npc::strongholds(&v, &driver.kept.intel);
-                let seen = (driver.kept.intel.iter()).map(|(r, w)| (r.to_string(), w.seen));
-                row["seen"] = json!(seen.collect::<BTreeMap<_, _>>());
-                let _ = writeln!(samples, "{row}");
-                eprintln!("t{t} rcl{rcl} {} creeps {}", row["progress"], row["creeps"]);
-                (players.iter().skip(1)).for_each(|p| eprintln!("  {}", p.standing(&v)));
-            }
             sample_ms += ms(at);
         }
         if t == args.ticks {
@@ -313,15 +295,11 @@ fn main() {
         let first = &players[0].driver;
         (capture.iter_mut()).for_each(|c| c.tick(t, &v, &first.memory, &first.kept.intel));
         let mut intents = Vec::new();
-        for (i, (p, uid)) in (players.iter_mut().zip(&uids).enumerate()).filter(|_| t >= args.late)
-        {
+        for (p, uid) in (players.iter_mut().zip(&uids)).filter(|_| t >= args.late) {
             v.us = uid;
-            if i == 0 {
-                intents = p.driver.tick(&v, t, &|| sampler.ledger());
-                sampler.intend(&intents);
-            } else {
-                intents.extend(p.driver.tick(&v, t, &Value::default));
-            }
+            let theirs = p.driver.tick(&v, t, &|| p.sampler.ledger());
+            p.sampler.intend(&theirs);
+            intents.extend(theirs);
         }
         intents.extend(rivals.intents(&v, t));
         drop(v);
@@ -345,12 +323,16 @@ fn main() {
     let write = |dir: &str, name: &str, value: Value| {
         fs::write(format!("{dir}/{name}"), format!("{value}\n")).expect("an output file");
     };
-    let lives = sampler.lives.close();
-    let bodies: String = lives.iter().map(|b| format!("{b}\n")).collect();
-    fs::write(format!("{}/bodies.jsonl", args.out), bodies).expect("an output file");
-    write(&args.out, "levels.json", json!(levels));
-    for p in &players {
+    for p in &mut players {
+        let lives = p.sampler.lives.close();
+        let bodies: String = lives.iter().map(|b| format!("{b}\n")).collect();
+        fs::write(format!("{}/bodies.jsonl", p.dir), bodies).expect("an output file");
+        write(&p.dir, "levels.json", json!(p.sampler.levels));
         write(&p.dir, "refusals.json", json!(p.driver.refused));
+        let mut seat = json!({ "uid": p.seat.uid, "name": p.seat.name, "room": p.seat.room });
+        seat["structuresLost"] = json!(p.sampler.structures_lost);
+        seat["deaths"] = json!(p.sampler.lives.deaths);
+        write(&p.dir, "seat.json", seat);
     }
     let driver = &players[0].driver;
     let per = |total: f64| total / args.ticks as f64;
@@ -360,7 +342,7 @@ fn main() {
     eprintln!("{timing}");
     write(&args.out, "timing.json", timing);
     if let Some(w) = watch {
-        drop((samples, players));
+        drop(players);
         w.park();
     }
 }

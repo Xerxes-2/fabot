@@ -138,7 +138,7 @@ function npc(invaders = "", wave, core = "", stronghold = "", ticks) {
   return [...waves, ...core.split(",").filter(Boolean).map((c) => [Number(c.split(":")[1]), c.split(":")[0], null]), ...strongholds];
 }
 
-/** `engagements.jsonl` off the ticks sim wrote to `fight.jsonl`, and `segment4.jsonl` off `cpu.jsonl`. */
+/** A seat's `engagements.jsonl` off the ticks sim wrote to `fight.jsonl`, and `segment4.jsonl` off `cpu.jsonl`. */
 async function engaged(out) {
   const rows = [];
   // Every room's objects of the tick being fed: an engagement closes inside `fights.tick`.
@@ -181,7 +181,8 @@ export function runSim(bin, { world, gen, sectors, room, node, ticks, seed = 1, 
     const play = (where) => {
       const args = [...where, "--ticks", String(ticks), "--seed", String(seed), "--late", String(late), "--every", "100", "--out", out, ...(follow.length ? ["--follow", follow.join(",")] : []), ...(ended ? ["--ended"] : []), "--reset-every", String(resetEvery), ...(capture ? ["--capture", capture] : []), "--rivals", JSON.stringify(seats(rivals)), ...(players ? ["--players", players] : []),
         "--npc", JSON.stringify(npc(invaders, bodies(wave), core, stronghold, ticks)), ...(watch ? ["--watch", "--port", String(watch.port), "--tick-ms", String(watch.ms), ...(watch.badge ? ["--badge", watch.badge] : [])] : [])];
-      spawn(bin, args, { stdio: watch ? "inherit" : "ignore" }).on("exit", (code, signal) => (code === 0 || (watch && signal === "SIGINT" && existsSync(join(out, "timing.json"))) ? engaged(out).then(() => finish(0), () => finish(-1)) : finish(code))).on("error", () => finish(-1));
+      const dirs = [out, ...JSON.parse(players ?? "[]").slice(1).map((p) => join(out, p.name))];
+      spawn(bin, args, { stdio: watch ? "inherit" : "ignore" }).on("exit", (code, signal) => (code === 0 || (watch && signal === "SIGINT" && existsSync(join(out, "timing.json"))) ? Promise.all(dirs.map(engaged)).then(() => finish(0), () => finish(-1)) : finish(code))).on("error", () => finish(-1));
     };
     if (gen !== undefined) return play(["--gen", String(gen), ...(sectors ? ["--sectors", sectors] : [])]);
     const base = JSON.parse(readFileSync(world ?? TEMPLATE, "utf8"));

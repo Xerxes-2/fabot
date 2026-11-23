@@ -3,12 +3,11 @@
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 
-use krebs::atom;
-use krebs::doc::Obj;
 use serde_json::{Value, json};
 
 use crate::driver::{Driver, Maps};
-use crate::view::{View, num, text};
+use crate::sample::Sampler;
+use crate::view::View;
 use crate::{engaged, reset, world};
 
 /// A player our bot plays: its user, first room, and Memory's text at the start.
@@ -52,14 +51,18 @@ pub struct Player<W: Write> {
     pub seat: Seat,
     pub driver: Driver<W>,
     pub dir: String,
+    pub sampler: Sampler,
+    pub samples: W,
     fight: W,
     engaged: bool,
 }
 
-/// Each seat's player, writing to `out` for the first and `<out>/<name>` for the rest.
+/// Each seat's player, writing to `out` for the first and `<out>/<name>` for the rest;
+/// its samples follow `follow` beside the outposts and claims its Memory declares.
 pub fn players(
     seats: Vec<Seat>,
     out: &str,
+    follow: &[String],
     maps: impl Fn() -> Maps,
     kept: impl Fn() -> reset::Twin,
 ) -> Vec<Player<BufWriter<File>>> {
@@ -79,12 +82,21 @@ pub fn players(
         ];
         let mut driver = Driver::new(maps(), seat.memory.clone(), files);
         driver.kept = kept();
-        let fight = file("fight.jsonl");
+        let memory: Value = serde_json::from_str(&seat.memory).unwrap_or_default();
+        let declared = |key: &str| -> Vec<String> {
+            let sites = (memory["v2"]["declarations"][key].as_array())
+                .into_iter()
+                .flatten();
+            (sites.filter_map(|c| Some(c["room"].as_str()?.into()))).collect()
+        };
+        let followed = [declared("outposts"), follow.to_vec()].concat();
         Player {
+            sampler: Sampler::new(&seat.room, &followed, declared("claims")),
+            samples: file("samples.jsonl"),
+            fight: file("fight.jsonl"),
             seat,
             driver,
             dir,
-            fight,
             engaged: false,
         }
     });
@@ -96,16 +108,5 @@ impl<W: Write> Player<W> {
         if let Some(row) = engaged::row(v, &self.driver.memory, t, &mut self.engaged) {
             let _ = writeln!(self.fight, "{row}");
         }
-    }
-
-    /// Its controllers' levels and progress and its creeps.
-    pub fn standing(&self, v: &View) -> String {
-        let user = |o: &&Obj| text(o, atom!("user")) == self.seat.uid;
-        let of = |kind| v.rooms.iter().flat_map(move |r| r.of(kind)).filter(user);
-        let rcl = |o: &Obj| [num(o, atom!("level")), num(o, atom!("progress"))];
-        let levels: Vec<_> = of("controller").map(rcl).collect();
-        let creeps = of("creep").count();
-        let Seat { name, room, .. } = &self.seat;
-        format!("{name} in {room}: rcl, progress {levels:?} creeps {creeps}")
     }
 }

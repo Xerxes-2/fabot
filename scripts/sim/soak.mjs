@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { invariants, samplesOf } from "../scenario/measures.mjs";
 import { TEMPLATE, buildPlan, runSim, seatsUs, simBinary } from "./run.mjs";
+import { report } from "./seats.mjs";
 
 const usage = "usage: npm run soak -- [--room <name>] [--world <world.json> | --gen <seed> [--sectors WxH]] [--node N] [--seed N] [--late K] [--ticks N] [--ended] [--unsafe] [--invaders …] [--wave …] [--core …] [--capture a-b] [--players <json>] [--run name] [--watch [--port N] [--tick-ms N] [--badge <json>]]";
 const SWITCHES = ["--ended", "--unsafe", "--watch"];
@@ -58,5 +59,6 @@ if (code === 0) {
   const last = samplesOf(out).at(-1);
   console.log(`t${last.t} rcl${last.rcl} progress ${last.progress} creeps ${last.creeps}`);
   for (const broken of invariants(out)) console.log(`invariant broken: ${broken}`);
+  if (flags["--players"]) console.log(report(out));
 }
 process.exit(code);

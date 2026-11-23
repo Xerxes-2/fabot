@@ -9,7 +9,7 @@ use krebs::doc::{Obj, Val};
 use serde_json::{Value, json};
 
 use crate::sample::{boosts, parts};
-use crate::view::{EVENT_ATTACK, Room, num, obj, ours, store, text, used};
+use crate::view::{EVENT_ATTACK, EVENT_OBJECT_DESTROYED, Room, View, num, obj, store, text, used};
 
 #[derive(Default)]
 pub struct Lives {
@@ -17,6 +17,10 @@ pub struct Lives {
     /// A body's key by id: the strike that kills it lands the tick it is gone from the room.
     keys: BTreeMap<String, String>,
     pub closed: Vec<Value>,
+    /// Bodies the engine destroyed the tick a strike landed, and what struck each last
+    /// as `[kind, user]`.
+    pub deaths: Vec<Value>,
+    by: BTreeMap<String, Value>,
     pub still_loaded: u64,
     stills: BTreeMap<String, (String, f64, u64)>,
     pub mineral_aside: u64,
@@ -68,21 +72,28 @@ pub fn acts(o: &Obj) -> Vec<&str> {
 }
 
 impl Lives {
-    /// One tick: `around` the followed rooms and their neighbours, `followed` the first of them;
-    /// what bodies of ours carried out of each home, by home.
+    /// One tick as the bot reads it: `around` the followed rooms and their neighbours, `followed`
+    /// the first of them; what bodies of ours carried out of each home, by home.
     pub fn observe(
         &mut self,
         around: &[&Room],
         followed: usize,
         homes: &[String],
-        time: u64,
+        v: &View,
     ) -> BTreeMap<String, f64> {
+        let time = v.k.time;
         let mut carried_out = BTreeMap::new();
+        let mut destroyed = BTreeSet::new();
         for (i, room) in around.iter().enumerate() {
-            let mut struck: BTreeMap<&str, f64> = BTreeMap::new();
+            let creeps = room.events().filter(|e| e.kind == EVENT_OBJECT_DESTROYED);
+            destroyed.extend(creeps.filter(|e| e.data["type"] == "creep").map(|e| e.by));
+            let mut struck: BTreeMap<&str, (f64, Value)> = BTreeMap::new();
             for e in room.events().filter(|e| e.kind == EVENT_ATTACK) {
                 let target = e.data["targetId"].as_str().unwrap_or_default();
-                *struck.entry(target).or_default() += e.data["damage"].as_f64().unwrap_or(0.0);
+                let by = (room.objects.iter()).find(|(_, o)| text(o, atom!("_id")) == e.by);
+                let at = struck.entry(target).or_default();
+                at.0 += e.data["damage"].as_f64().unwrap_or(0.0);
+                at.1 = json!(by.map(|(k, o)| [*k, text(o, atom!("user"))]));
             }
             for o in room.of("creep") {
                 let name = text(o, atom!("name"));
@@ -98,7 +109,7 @@ impl Lives {
                     self.keys.insert(id.to_string(), key.clone());
                 }
                 let life = self.open.entry(key).or_insert_with(|| {
-                    json!({ "name": name, "ours": ours(o), "body": letters(&body),
+                    json!({ "name": name, "ours": v.ours(o), "body": letters(&body),
                         "cost": cost, "first": time, "rooms": {}, "acts": {} })
                 });
                 let at = format!(
@@ -140,7 +151,7 @@ impl Lives {
                         }
                     }
                 }
-                if !ours(o) {
+                if !v.ours(o) {
                     continue;
                 }
                 let energy = store(o, atom!("energy"));
@@ -188,10 +199,12 @@ impl Lives {
                 }
                 self.last_two.insert(name.to_string(), [b, Some(now)]);
             }
-            for (id, d) in struck {
-                if let Some(life) = self.keys.get(id).and_then(|k| self.open.get_mut(k)) {
+            for (id, (d, by)) in struck {
+                let Some(k) = self.keys.get(id) else { continue };
+                if let Some(life) = self.open.get_mut(k) {
                     life["struck"] = json!(life["struck"].as_f64().unwrap_or(0.0) + d);
                     life["struckAt"] = json!(time);
+                    self.by.insert(k.clone(), by);
                 }
             }
         }
@@ -199,8 +212,21 @@ impl Lives {
             .filter(|(_, l)| l["last"] != time)
             .map(|(k, _)| k.clone())
             .collect();
+        let dead: BTreeSet<&String> = destroyed
+            .iter()
+            .filter_map(|id| self.keys.get(*id))
+            .collect();
         for key in gone {
-            self.closed.extend(self.open.remove(&key));
+            let life = self.open.remove(&key).expect("an open life");
+            let by = self.by.remove(&key);
+            if life["struckAt"] == time && dead.contains(&key) {
+                self.deaths.push(
+                    json!({ "t": time, "name": life["name"], "ours": life["ours"],
+                    "cost": life["cost"], "body": life["body"], "user": key.split(' ').next(),
+                    "by": by }),
+                );
+            }
+            self.closed.push(life);
         }
         carried_out
     }

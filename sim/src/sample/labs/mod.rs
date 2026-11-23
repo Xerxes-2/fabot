@@ -12,7 +12,7 @@ use krebs::utils::{calc_rooms_distance, calc_terminal_energy_cost};
 use screeps::{LAB_BOOST_MINERAL, LAB_MINERAL_CAPACITY, LAB_REACTION_AMOUNT, ResourceType};
 use serde_json::{Value, json};
 
-use crate::view::{EVENT_HARVEST, Room, View, num, obj, ours, store, text, xy};
+use crate::view::{EVENT_HARVEST, Room, View, num, obj, store, text, xy};
 
 type Tally = BTreeMap<String, f64>;
 
@@ -65,13 +65,13 @@ fn add_ores(to: &mut Tally, resource: &str, amount: f64) {
 }
 
 /// Every mineral and compound in our stores, stores nobody's, piles, tombstones and our bodies.
-fn stock_of(room: &Room) -> Tally {
+fn stock_of(room: &Room, us: &str) -> Tally {
     let mut out = Tally::new();
     for &(kind, o) in &room.objects {
         let resource = text(o, atom!("resourceType"));
         if kind == "energy" && resource != "energy" {
             *out.entry(resource.into()).or_default() += num(o, Atom::intern(resource));
-        } else if kind != "energy" && (ours(o) || text(o, atom!("user")).is_empty()) {
+        } else if kind != "energy" && [us, ""].contains(&text(o, atom!("user"))) {
             for (r, n) in obj(o, atom!("store")).into_iter().flat_map(Obj::iter) {
                 if r.as_str() != "energy" {
                     *out.entry(r.as_str().into()).or_default() += n.as_f64().unwrap_or(0.0);
@@ -82,8 +82,11 @@ fn stock_of(room: &Room) -> Tally {
     out
 }
 
-fn labs_of<'a>(room: &'a Room) -> (Vec<&'a Obj>, Option<Roles>) {
-    let labs: Vec<&Obj> = room.of("lab").filter(|o| ours(o)).collect();
+fn labs_of<'a>(room: &'a Room, us: &str) -> (Vec<&'a Obj>, Option<Roles>) {
+    let labs: Vec<&Obj> = room
+        .of("lab")
+        .filter(|o| text(o, atom!("user")) == us)
+        .collect();
     let tiles: Vec<(Id, Pos)> = labs
         .iter()
         .map(|o| {
@@ -107,7 +110,7 @@ fn role(roles: Option<&Roles>, o: &Obj) -> &'static str {
 }
 
 impl Labs {
-    pub fn account(&mut self, room: &Room, time: f64) {
+    pub fn account(&mut self, room: &Room, time: f64, us: &str) {
         for e in room.events().filter(|e| e.kind == EVENT_HARVEST) {
             let target = e.data["targetId"].as_str().unwrap_or_default();
             if let Some(ore) = room.of("mineral").find(|m| text(m, atom!("_id")) == target) {
@@ -119,7 +122,7 @@ impl Labs {
             }
         }
         let cluster = self.clusters.entry(room.name.into()).or_default();
-        for c in room.of("creep").filter(|c| ours(c)) {
+        for c in room.of("creep").filter(|c| text(c, atom!("user")) == us) {
             let mut parts = Tally::new();
             if let Some(Val::Arr(body)) = c.get(atom!("body")) {
                 for part in body.iter().filter_map(Val::as_obj) {
@@ -141,7 +144,7 @@ impl Labs {
             }
         }
 
-        let (labs, roles) = labs_of(room);
+        let (labs, roles) = labs_of(room, us);
         let mut cooling = false;
         for &o in &labs {
             let until = num(o, atom!("cooldownTime"));
@@ -204,12 +207,15 @@ impl Labs {
                 .map(|_| None)
                 .collect(),
         };
-        let carried = room.of("creep").filter(|c| ours(c)).any(|c| {
-            missing
-                .iter()
-                .flatten()
-                .any(|r| store(c, Atom::intern(r)) > 0.0)
-        });
+        let carried = room
+            .of("creep")
+            .filter(|c| text(c, atom!("user")) == us)
+            .any(|c| {
+                missing
+                    .iter()
+                    .flatten()
+                    .any(|r| store(c, Atom::intern(r)) > 0.0)
+            });
         let full = roles.outputs.iter().all(|id| {
             lab(*id)
                 .and_then(|o| mineral(o))
@@ -237,7 +243,7 @@ impl Labs {
             .or_default() += amount;
         if !v
             .index(to)
-            .is_some_and(|i| v.rooms[i].of("controller").any(ours))
+            .is_some_and(|i| v.rooms[i].of("controller").any(|c| v.ours(c)))
         {
             add_ores(&mut self.away, resource, amount);
         }
@@ -248,14 +254,14 @@ impl Labs {
         let cools = |o| num(o, atom!("cooldownTime")) - v.k.time as f64;
         for (name, row) in rooms.as_object_mut().into_iter().flatten() {
             let room = v.room(name);
-            let (labs, roles) = labs_of(room);
+            let (labs, roles) = labs_of(room, v.us);
             let labs = labs.iter().map(|o| {
                 let id = text(o, atom!("_id"));
                 json!([id, xy(o), mineral(o), cools(o), role(roles.as_ref(), o)])
             });
             let row = row.as_object_mut().expect("a json! object");
             row.insert("labs".into(), json!(labs.collect::<Vec<_>>()));
-            row.insert("stockOf".into(), json!(stock_of(room)));
+            row.insert("stockOf".into(), json!(stock_of(room, v.us)));
             if let Some(c) = self.clusters.get(name) {
                 for (k, value) in [
                     ("produced", json!(c.produced)),
@@ -275,7 +281,7 @@ impl Labs {
     pub fn totals(&self, v: &View, rooms: &[String]) -> [(&'static str, Value); 7] {
         let (mut held, mut boosted) = (Tally::new(), Tally::new());
         for name in rooms {
-            for (r, n) in stock_of(v.room(name)) {
+            for (r, n) in stock_of(v.room(name), v.us) {
                 add_ores(&mut held, &r, n);
             }
         }

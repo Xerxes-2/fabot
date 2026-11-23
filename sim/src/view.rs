@@ -25,11 +25,6 @@ pub fn obj(o: &Obj, k: Atom) -> Option<&Obj> {
     o.get(k).and_then(Val::as_obj)
 }
 
-/// Of the first seat, the one the samples follow.
-pub fn ours(o: &Obj) -> bool {
-    text(o, atom!("user")) == US
-}
-
 /// The game API's `isActive` for a spawn or extension: the engine marks one off.
 pub fn on(o: &Obj) -> bool {
     !matches!(o.get(atom!("off")), Some(Val::Bool(true)))

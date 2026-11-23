@@ -18,8 +18,8 @@ use serde_json::{Map, Value, json};
 use crate::lives::{self, Lives};
 use crate::read::build_cost;
 use crate::view::{
-    EVENT_ATTACK, EVENT_BUILD, EVENT_HARVEST, EVENT_HEAL, EVENT_REPAIR, EVENT_TRANSFER,
-    EVENT_UPGRADE_CONTROLLER, Room, View, num, obj, ours, store, text, used, xy,
+    EVENT_ATTACK, EVENT_BUILD, EVENT_HARVEST, EVENT_HEAL, EVENT_OBJECT_DESTROYED, EVENT_REPAIR,
+    EVENT_TRANSFER, EVENT_UPGRADE_CONTROLLER, Room, View, num, obj, store, text, used, xy,
 };
 use crate::world::Map as World;
 use krebs::room_name::RoomXY;
@@ -140,15 +140,17 @@ pub struct Sampler {
     sent_seq: u64,
     labs: labs::Labs,
     signs_sent: usize,
+    pub structures_lost: u64,
+    pub levels: Vec<Value>,
 }
 
 /// Piles, tombstones (an Invader's corpse is ours to take), and stores nobody's or ours.
-fn stock(room: &Room) -> f64 {
+fn stock(v: &View, room: &Room) -> f64 {
     (room.objects.iter())
         .map(|(kind, o)| match *kind {
             "energy" => num(o, atom!("energy")),
             "tombstone" => store(o, atom!("energy")),
-            _ if ours(o) || text(o, atom!("user")).is_empty() => store(o, atom!("energy")),
+            _ if v.ours(o) || text(o, atom!("user")).is_empty() => store(o, atom!("energy")),
             _ => 0.0,
         })
         .sum()
@@ -178,19 +180,18 @@ impl Sampler {
     fn follow_worked(&mut self, v: &View) -> Vec<String> {
         let mut joined = Vec::new();
         for room in &v.rooms {
-            let mine = room.of("creep").filter(|o| ours(o));
+            let mine = room.of("creep").filter(|o| v.ours(o));
             let carried: f64 = mine.map(|o| store(o, atom!("energy"))).sum();
             if self.lines.contains_key(room.name) || room.events.is_null() && carried == 0.0 {
                 continue;
             }
             let held = room.of("controller").any(|o| {
-                ours(o)
-                    || obj(o, atom!("reservation"))
-                        .is_some_and(|r| text(r, atom!("user")) == crate::world::US)
+                v.ours(o)
+                    || obj(o, atom!("reservation")).is_some_and(|r| text(r, atom!("user")) == v.us)
             });
             let creep = |id: &str| {
                 room.of("creep")
-                    .any(|o| text(o, atom!("_id")) == id && ours(o))
+                    .any(|o| text(o, atom!("_id")) == id && v.ours(o))
             };
             let source = |id: &str| room.of("source").any(|o| text(o, atom!("_id")) == id);
             let worked = room.events().any(|e| {
@@ -203,7 +204,7 @@ impl Sampler {
                 joined.push(room.name.to_string());
                 if let Some(stock0) = &mut self.ledger.stock0 {
                     // What our creeps carry in was in the room they came from.
-                    *stock0 += stock(room) - carried;
+                    *stock0 += stock(v, room) - carried;
                 }
             }
         }
@@ -213,7 +214,7 @@ impl Sampler {
     /// One tick of the ledger, off the followed rooms as the tick left them.
     pub fn account(&mut self, v: &View) {
         if self.homes.is_empty() {
-            let spawn = |r: &&Room| r.of("spawn").any(ours);
+            let spawn = |r: &&Room| r.of("spawn").any(|o| v.ours(o));
             let others = v.rooms.iter().filter(spawn).map(|r| r.name.to_string());
             self.homes = std::iter::once(self.rooms[0].clone())
                 .chain(others.filter(|r| *r != self.rooms[0]))
@@ -231,7 +232,7 @@ impl Sampler {
         let mut total = 0.0;
         for name in &self.rooms {
             let room = v.room(name);
-            total += stock(room);
+            total += stock(v, room);
             let line = self.lines.get_mut(name).expect("a line per followed room");
             // Its stock at joining is counted after this tick's decay.
             let booked = self.ledger.stock0.is_some() && !joined.contains(name);
@@ -242,9 +243,12 @@ impl Sampler {
                     .collect()
             };
             let sources = ids(&|kind, _| kind == "source");
-            let towers = ids(&|kind, o| kind == "tower" && ours(o));
-            let links = ids(&|kind, o| kind == "link" && ours(o));
-            let strangers = ids(&|_, o| !ours(o) && !text(o, atom!("user")).is_empty());
+            let towers = ids(&|kind, o| kind == "tower" && v.ours(o));
+            let links = ids(&|kind, o| kind == "link" && v.ours(o));
+            let strangers = ids(&|_, o| !v.ours(o) && !text(o, atom!("user")).is_empty());
+            let owned = room.of("controller").any(|o| v.ours(o));
+            let lost =
+                |t: &Value| owned && !matches!(t.as_str(), Some("creep" | "constructedWall"));
             for e in room.events().filter(|e| !strangers.contains(e.by)) {
                 let target = e.data["targetId"].as_str().unwrap_or_default();
                 let amount = e.data["amount"].as_f64().unwrap_or(0.0);
@@ -277,14 +281,15 @@ impl Sampler {
                     EVENT_ATTACK | EVENT_HEAL if by_tower => {
                         ledger.tower += f64::from(TOWER_ENERGY_COST)
                     }
+                    EVENT_OBJECT_DESTROYED if lost(&e.data["type"]) => self.structures_lost += 1,
                     _ => {}
                 }
             }
-            self.labs.account(room, time);
+            self.labs.account(room, time, v.us);
             let (mut bank, mut hostile, mut low_spawns) = (0.0, false, 0.0);
             for &(kind, o) in &room.objects {
                 match kind {
-                    "controller" if ours(o) => {
+                    "controller" if v.ours(o) => {
                         let left = num(o, atom!("downgradeTime")) - time;
                         line.least_downgrade =
                             Some(line.least_downgrade.map_or(left, |l| l.min(left)));
@@ -292,8 +297,7 @@ impl Sampler {
                     "controller" => {
                         let reservation = obj(o, atom!("reservation"));
                         let held = |r: &Obj| {
-                            text(r, atom!("user")) == crate::world::US
-                                && num(r, atom!("endTime")) > time
+                            text(r, atom!("user")) == v.us && num(r, atom!("endTime")) > time
                         };
                         line.reserved += f64::from(u8::from(reservation.is_some_and(held)));
                     }
@@ -308,7 +312,7 @@ impl Sampler {
                             line.decayed += lost;
                         }
                     }
-                    "creep" if !ours(o) => hostile = true,
+                    "creep" if !v.ours(o) => hostile = true,
                     "tombstone" if self.graves.insert(text(o, atom!("_id")).into()) => {
                         let body = parts(o);
                         let recycled = self.taken.contains(text(o, atom!("creepId")));
@@ -336,7 +340,7 @@ impl Sampler {
                         }
                         line.bodies += cost / life(&body);
                     }
-                    "spawn" | "extension" if ours(o) => {
+                    "spawn" | "extension" if v.ours(o) => {
                         bank += store(o, atom!("energy"));
                         low_spawns += f64::from(u8::from(
                             kind == "spawn"
@@ -376,12 +380,7 @@ impl Sampler {
             .filter(|r| !self.lines.contains_key(r.name))
             .filter(neighbours);
         let around: Vec<&Room> = followed.iter().copied().chain(bordering).collect();
-        // The tick the bot reads, as a body's name and ticks to live count it.
-        let read = v.k.time;
-        for (home, out) in self
-            .lives
-            .observe(&around, followed.len(), &self.homes, read)
-        {
+        for (home, out) in self.lives.observe(&around, followed.len(), &self.homes, v) {
             self.lines
                 .get_mut(&home)
                 .expect("a home is followed")
@@ -405,12 +404,16 @@ impl Sampler {
         self.taken = acts.flatten().collect();
     }
 
-    /// The home's level, 0 once it is not ours.
-    pub fn level(&self, v: &View) -> f64 {
+    /// The home's level, 0 once it is not ours, kept in `levels` when it changed at tick `t`.
+    pub fn level(&mut self, v: &View, t: u64) -> f64 {
         let home = v.room(&self.rooms[0]);
-        home.of("controller")
-            .find(|o| ours(o))
-            .map_or(0.0, |o| num(o, atom!("level")))
+        let rcl =
+            (home.of("controller").find(|o| v.ours(o))).map_or(0.0, |o| num(o, atom!("level")));
+        if self.levels.last().is_none_or(|l| l["rcl"] != rcl) {
+            self.levels
+                .push(json!({ "t": t, "time": v.k.time - 1, "rcl": rcl }));
+        }
+        rcl
     }
 
     pub fn ledger(&self) -> Value {
@@ -449,7 +452,7 @@ impl Sampler {
         let ours_in = |kinds: &[&str]| -> Vec<&Obj> {
             (self.rooms.iter())
                 .flat_map(|n| v.room(n).objects.iter())
-                .filter(|(k, o)| kinds.contains(k) && ours(o))
+                .filter(|(k, o)| kinds.contains(k) && v.ours(o))
                 .map(|(_, o)| *o)
                 .collect()
         };
@@ -478,7 +481,7 @@ impl Sampler {
         for d in v.k.market.transactions.iter().filter(|d| d.seq > read) {
             self.sent_seq = d.seq;
             let of = |k: &str| d.obj.get(Atom::intern(k)).and_then(Val::as_str);
-            if of("sender") == Some(crate::world::US) {
+            if of("sender") == Some(v.us) {
                 let (to, amount) = (of("to").unwrap_or_default(), num(&d.obj, atom!("amount")));
                 let resource = of("resourceType").unwrap_or_default();
                 self.labs
@@ -500,21 +503,25 @@ impl Sampler {
         let raised = raised.filter(|n| {
             v.room(n)
                 .of("controller")
-                .any(|c| ours(c) && num(c, atom!("level")) > 0.0)
+                .any(|c| v.ours(c) && num(c, atom!("level")) > 0.0)
         });
         for name in self.claims.iter().map(String::as_str).chain(raised) {
             let room = v.room(name);
-            let mine = room.of("controller").any(ours);
-            let towers: Vec<&Obj> = room.of("tower").filter(|o| mine && ours(o)).collect();
+            let mine = room.of("controller").any(|o| v.ours(o));
+            let towers: Vec<&Obj> = room.of("tower").filter(|o| mine && v.ours(o)).collect();
             let level = room
                 .of("controller")
-                .find(|c| ours(c))
+                .find(|c| v.ours(c))
                 .map_or(0.0, |c| num(c, atom!("level")));
             let safe = room
                 .of("controller")
-                .any(|c| ours(c) && num(c, atom!("safeMode")) > v.k.time as f64);
-            claimed.insert(name.into(), json!({ "fire": towers.iter().map(|t| store(t, atom!("energy"))).sum::<f64>(),
-                "towers": towers.len(), "safe": safe, "level": level, "spawns": room.of("spawn").filter(|o| mine && ours(o)).count() }));
+                .any(|c| v.ours(c) && num(c, atom!("safeMode")) > v.k.time as f64);
+            claimed.insert(
+                name.into(),
+                json!({ "fire": towers.iter().map(|t| store(t, atom!("energy"))).sum::<f64>(),
+                "towers": towers.len(), "safe": safe, "level": level,
+                "spawns": room.of("spawn").filter(|o| mine && v.ours(o)).count() }),
+            );
         }
         for (k, value) in [
             ("ore", json!(ore)),
@@ -551,7 +558,7 @@ impl Sampler {
         let mut queued: BTreeMap<String, i64> = BTreeMap::new();
         let mut mineral = Value::Null;
         for &(kind, o) in &home.objects {
-            let mine = ours(o);
+            let mine = v.ours(o);
             let st = text(o, atom!("structureType"));
             match kind {
                 "constructionSite" if mine => {
@@ -636,7 +643,7 @@ impl Sampler {
                     StructureType::Rampart,
                     StructureType::Controller,
                 ];
-                kind.is_some_and(|k| (ours(o) || k == StructureType::Wall) && !open.contains(&k))
+                kind.is_some_and(|k| (v.ours(o) || k == StructureType::Wall) && !open.contains(&k))
             })
             .map(|(_, o)| *o)
             .collect();
@@ -688,7 +695,7 @@ impl Sampler {
         let (mut fortification, mut sites, mut level) = (0.0, 0.0, 0_u32);
         for name in &self.rooms {
             for &(kind, o) in &v.room(name).objects {
-                let mine = ours(o);
+                let mine = v.ours(o);
                 let structure = kind.parse::<StructureType>().ok();
                 match (kind, structure) {
                     ("constructionSite", _) if mine => sites += num(o, atom!("progress")),
@@ -747,12 +754,12 @@ impl Sampler {
             let (mut held, mut ores, mut made) = (0.0, 0.0, Map::new());
             for &(kind, o) in &v.room(name).objects {
                 match kind {
-                    "creep" if ours(o) => creeps += 1,
+                    "creep" if v.ours(o) => creeps += 1,
                     "creep" => hostiles += 1,
                     "road" => roads += 1,
                     "container" => containers += 1,
                     "invaderCore" => cores += 1,
-                    "storage" | "terminal" | "lab" | "factory" | "powerSpawn" if ours(o) => {
+                    "storage" | "terminal" | "lab" | "factory" | "powerSpawn" if v.ours(o) => {
                         for (r, amount) in obj(o, atom!("store")).into_iter().flat_map(Obj::iter) {
                             let amount = amount.as_f64().unwrap_or(0.0);
                             held += amount;
@@ -774,7 +781,7 @@ impl Sampler {
             }
             let bodies = line.bodies.round();
             let sign = (v.room(name).of("controller")).find_map(|c| obj(c, atom!("sign")));
-            let sign = sign.filter(|s| text(s, atom!("user")) == crate::world::US);
+            let sign = sign.filter(|s| text(s, atom!("user")) == v.us);
             out.insert(name.clone(), json!({ "dug": line.dug, "decayed": line.decayed, "build": line.build,
                 "upgrade": line.upgrade, "repair": line.repair, "bodies": bodies, "reserved": line.reserved,
                 "hostile": line.hostile, "waves": 0, "carriedOut": line.carried_out, "leastDowngrade": line.least_downgrade,
