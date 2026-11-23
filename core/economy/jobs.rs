@@ -821,9 +821,9 @@ impl<'a> Jobs<'a> {
         } else {
             vec![ground]
         };
-        // What is aboard was drawn past the reserve: a held task spends it.
+        // A held task spends what is aboard; below the reserve only a mend, so it ends whole, not one tick past risk.
         if let Some(t @ (Task::Build(_) | Task::Repair(_) | Task::Upgrade(_))) = kept
-            && !slot.draws_reserve()
+            && (!slot.draws_reserve() || matches!(t, Task::Repair(_)))
             && grounds.iter().any(|g| match t {
                 Task::Build(id) => g.sites.iter().any(|s| *id == s.id.into()),
                 Task::Repair(id) => g.repairs.iter().any(|r| *id == r.id.into()),
