@@ -5,7 +5,7 @@ use krebs::atom;
 use krebs::doc::Atom;
 use serde_json::{Value, json};
 
-use crate::view::{EVENT_ATTACK, EVENT_HEAL, Room, View, num, ours, text};
+use crate::view::{EVENT_ATTACK, EVENT_HEAL, Room, View, num, text};
 
 pub fn row(v: &View, memory: &str, t: u64, open: &mut bool) -> Option<Value> {
     let m: Value = (memory.contains("\"engagements\":[{"))
@@ -26,7 +26,7 @@ pub fn row(v: &View, memory: &str, t: u64, open: &mut bool) -> Option<Value> {
             let name = o.get(atom!("name")).or(o.get(Atom::intern("creepName")));
             json!({ "id": text(o, atom!("_id")), "name": name.and_then(|n| n.as_str()), "room": room,
                 "x": num(o, atom!("x")), "y": num(o, atom!("y")), "hits": num(o, atom!("hits")),
-                "hitsMax": num(o, atom!("hitsMax")), "type": kind, "ours": ours(o),
+                "hitsMax": num(o, atom!("hitsMax")), "type": kind, "ours": v.ours(o),
                 "ttl": num(o, Atom::intern("creepTicksToLive")) })
         })
         .collect();

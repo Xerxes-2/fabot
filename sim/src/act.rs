@@ -18,7 +18,7 @@ use krebs_util::json::Json;
 use screeps::ErrorCode::{self, *};
 use serde_json::{Value, json};
 
-use crate::view::{View, num, obj, on, ours, store, text, used};
+use crate::view::{View, num, obj, on, store, text, used};
 
 type Found<'a> = (usize, &'a Obj);
 
@@ -41,7 +41,7 @@ fn index<'a>(v: &'a View<'a>) -> Index<'a> {
     let us = crate::read::our_idx(v);
     let seen = |r: &usize| (v.k.rooms[*r].presence.iter()).any(|(u, p)| *u == us && p.objects > 0);
     let creeps = (0..v.rooms.len()).filter(seen).flat_map(|r| {
-        let creeps = v.rooms[r].of("creep").filter(|o| ours(o));
+        let creeps = v.rooms[r].of("creep").filter(|o| v.ours(o));
         creeps.map(move |o| (text(o, atom!("name")), (r, o)))
     });
     Index {
@@ -286,9 +286,9 @@ impl Run<'_> {
     /// `StructureObserver.observeRoom`, less `PWR_OPERATE_OBSERVER`, which we never use.
     fn observe(&mut self, id: world::Id, target: world::RoomName) -> Result<(), ErrorCode> {
         let (room, observer) = self.at.get(id).ok_or(NotFound)?;
-        check(!ours(observer), NotOwner)?;
+        check(!self.v.ours(observer), NotOwner)?;
         let mut controllers = self.v.rooms[room].of("controller");
-        let active = controllers.any(|c| ours(c) && num(c, atom!("level")) >= 8.0);
+        let active = controllers.any(|c| self.v.ours(c) && num(c, atom!("level")) >= 8.0);
         check(!active, RclNotEnough)?;
         let at = self.v.rooms[room]
             .name
@@ -317,8 +317,8 @@ impl Run<'_> {
         check(!on(spawn), RclNotEnough)?;
         let bank: f64 = if drawn.is_empty() {
             let banks = self.v.rooms[room].objects.iter();
-            let banks =
-                banks.filter(|(k, o)| matches!(*k, "spawn" | "extension") && ours(o) && on(o));
+            let banks = banks
+                .filter(|(k, o)| matches!(*k, "spawn" | "extension") && self.v.ours(o) && on(o));
             banks.map(|(_, o)| store(o, atom!("energy"))).sum()
         } else {
             let drawn = drawn.iter().filter_map(|d| self.at.get(*d));

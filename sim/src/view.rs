@@ -25,6 +25,7 @@ pub fn obj(o: &Obj, k: Atom) -> Option<&Obj> {
     o.get(k).and_then(Val::as_obj)
 }
 
+/// Of the first seat, the one the samples follow.
 pub fn ours(o: &Obj) -> bool {
     text(o, atom!("user")) == US
 }
@@ -82,6 +83,7 @@ impl Room<'_> {
 pub struct View<'a> {
     pub k: &'a Krebs,
     pub rooms: Vec<Room<'a>>,
+    pub us: &'a str,
 }
 
 impl<'a> View<'a> {
@@ -97,7 +99,11 @@ impl<'a> View<'a> {
                 },
             })
             .collect();
-        View { k, rooms }
+        View { k, rooms, us: US }
+    }
+
+    pub fn ours(&self, o: &Obj) -> bool {
+        text(o, atom!("user")) == self.us
     }
 
     pub fn index(&self, room: &str) -> Option<usize> {

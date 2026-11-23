@@ -858,7 +858,10 @@ scenarios matching touched modules.
 
 **Adversaries:** scripted rivals (`sim/src/rival/`) verify plan mechanics. No
 test seats an open-source bot (owner): a bot tuned against one says little
-about the players a season meets. `❓` Self-play with an attacking v2.
+about the players a season meets. Self-play: `sim --players` (`sim/src/seat/`)
+seats our bot several times in one world, each seat its own `Driver`, Memory
+and declarations; the samples follow the first. `❓` Each seat sampled, and a
+scenario that scores one seat against another.
 
 ### 10.3 Unit tests, where the engine would obscure
 

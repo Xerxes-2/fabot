@@ -9,28 +9,23 @@ use fabot_base::vocabulary::{self, Part};
 use fabot_base::world::*;
 use krebs::atom;
 use krebs::doc::{Atom, Obj, Val};
-use krebs::world::UserIdx;
+use krebs::world::{UserIdx, World as Krebs};
 use screeps::{
     CPU_BUCKET_MAX, GCL_MULTIPLY, GCL_POW, StructureType, controller_downgrade, controller_levels,
 };
 
-use crate::view::{self, EVENT_ATTACK, EVENT_OBJECT_DESTROYED, View, num, obj, ours, text};
-use crate::world::{INVADER, KEEPER, US, USERNAME};
+use crate::view::{self, EVENT_ATTACK, EVENT_OBJECT_DESTROYED, View, num, obj, text};
 
-pub fn username(user: &str) -> &str {
-    match user {
-        US => USERNAME,
-        INVADER => screeps::INVADER_USERNAME,
-        KEEPER => screeps::SOURCE_KEEPER_USERNAME,
-        other => other,
-    }
+fn username<'a>(k: &'a Krebs, user: &'a str) -> &'a str {
+    let at = k.users.iter().find(|u| text(&u.doc, atom!("_id")) == user);
+    at.map_or(user, |u| text(&u.doc, atom!("username")))
 }
 
 pub fn our_idx(v: &View) -> UserIdx {
     let at =
         v.k.users
             .iter()
-            .position(|u| text(&u.doc, atom!("_id")) == US);
+            .position(|u| text(&u.doc, atom!("_id")) == v.us);
     at.expect("our user") as UserIdx
 }
 
@@ -52,6 +47,8 @@ pub fn build_cost(kind: &str) -> i32 {
 struct Reader<'a> {
     time: i32,
     declarations: &'a Declarations,
+    k: &'a Krebs,
+    me: &'a str,
 }
 
 impl Reader<'_> {
@@ -62,7 +59,7 @@ impl Reader<'_> {
     fn owner(&self, o: &Obj) -> Owner {
         match text(o, atom!("user")) {
             "" => Owner::Nobody,
-            user => Owner::of_user(username(user).to_string(), USERNAME, self.declarations),
+            user => Owner::of_user(username(self.k, user).into(), self.me, self.declarations),
         }
     }
 
@@ -217,11 +214,17 @@ impl Reader<'_> {
 pub fn world(v: &View, declarations: &Declarations) -> World<'static> {
     let k = v.k;
     let time = k.time as i32;
-    let r = Reader { time, declarations };
+    let me = username(k, v.us);
+    let r = Reader {
+        time,
+        declarations,
+        k,
+        me,
+    };
     let us = our_idx(v);
     let mut world = World {
         time,
-        me: USERNAME.to_string(),
+        me: me.to_string(),
         cpu_limit: 100.0,
         bucket: CPU_BUCKET_MAX as i32,
         rooms: Vec::new(),
@@ -236,7 +239,7 @@ pub fn world(v: &View, declarations: &Declarations) -> World<'static> {
     };
     for room in &v.rooms {
         let sites = room.of("constructionSite");
-        world.our_sites += sites.filter(|o| ours(o)).count() as i32;
+        world.our_sites += sites.filter(|o| v.ours(o)).count() as i32;
     }
     let observed: BTreeSet<&str> = (k.rooms.iter().flat_map(|r| r.presence.iter()))
         .filter(|(u, _)| *u == us)
@@ -295,16 +298,16 @@ pub fn world(v: &View, declarations: &Declarations) -> World<'static> {
                 "tombstone" => room.remains.push(r.remains(name, o, true)),
                 "ruin" => room.remains.push(r.remains(name, o, false)),
                 "creep" if o.get(Atom::intern("spawning")) == Some(&Val::Bool(true)) => {}
-                "creep" if ours(o) => world.creeps.push(r.creep(name, o)),
+                "creep" if v.ours(o) => world.creeps.push(r.creep(name, o)),
                 "creep" => room.others.push(r.creep(name, o)),
                 "flag" | "powerCreep" | "nuke" => {}
                 kind => {
-                    if ours(o) && matches!(kind, "spawn" | "extension") && view::on(o) {
+                    if v.ours(o) && matches!(kind, "spawn" | "extension") && view::on(o) {
                         let store = Reader::store(o);
                         room.energy_available += store.amount_of(vocabulary::ResourceType::Energy);
                         room.energy_capacity += store.capacity;
                     }
-                    if ours(o) && kind == "spawn" {
+                    if v.ours(o) && kind == "spawn" {
                         let spawn = Spawn {
                             id: Id::of_engine(text(o, atom!("_id"))),
                             name: text(o, atom!("name")).to_string(),
@@ -325,7 +328,7 @@ pub fn world(v: &View, declarations: &Declarations) -> World<'static> {
                 let named = text(oven, atom!("name"));
                 let creep = at
                     .of("creep")
-                    .find(|c| text(c, atom!("name")) == named && ours(c));
+                    .find(|c| text(c, atom!("name")) == named && v.ours(c));
                 spawn.spawning = Some(Oven {
                     name: named.to_string(),
                     remaining: r.left(oven, atom!("spawnTime")),

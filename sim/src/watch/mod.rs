@@ -22,11 +22,9 @@ use krebs_backend::{ApiCtx, Published, api, field, png, server, socket, str_fiel
 use krebs_util::json::Json;
 use serde_json::{Map, Value, json};
 
-use crate::driver::Driver;
+use crate::seat::Player;
 use crate::view::text;
 use crate::world::{US, USERNAME};
-
-type Fault = (&'static str, String);
 
 /// The socket binds every interface: what a LAN client can make it hold is bounded.
 const SERVING: usize = 16;
@@ -41,7 +39,7 @@ pub struct Watch {
     next: Instant,
     prev: WorldView,
     decided: f64,
-    told: BTreeSet<Fault>,
+    told: BTreeSet<String>,
 }
 
 struct Shared {
@@ -87,7 +85,9 @@ impl Watch {
                 });
             }
         });
-        banner(port, every, room);
+        let first = k.users.iter().find(|u| text(&u.doc, atom!("_id")) == US);
+        let user = first.map_or(USERNAME, |u| text(&u.doc, atom!("username")));
+        banner(port, every, room, user);
         Watch {
             shared,
             every: Duration::from_millis(every),
@@ -98,16 +98,21 @@ impl Watch {
         }
     }
 
-    /// Publishes the tick `k` ended on to every subscriber, then waits out the rest of `--tick-ms`.
-    pub fn tick<W: Write>(&mut self, k: &Krebs, driver: &Driver<W>) {
+    /// Publishes the tick `k` ended on to every subscriber, then waits out the rest of `--tick-ms`;
+    /// the first seat's CPU, each seat's new faults under its name.
+    pub fn tick<W: Write>(&mut self, k: &Krebs, players: &[Player<W>]) {
         let view = k.view();
         self.shared.published.set(view.clone());
+        let driver = &players[0].driver;
         let cpu = json!({ "cpu": driver.decide_ms - self.decided, "memory": driver.memory.len() });
         self.decided = driver.decide_ms;
-        let fresh: Vec<String> = (driver.faults.iter())
-            .filter(|f| self.told.insert((*f).clone()))
-            .map(|(at, why)| format!("fault {at}: {why}"))
-            .collect();
+        let faults = players
+            .iter()
+            .flat_map(|p| p.driver.faults.iter().map(move |f| (p, f)));
+        let fresh: Vec<String> = (faults
+            .map(|(p, (at, why))| format!("{} fault {at}: {why}", p.seat.name)))
+        .filter(|f| self.told.insert(f.clone()))
+        .collect();
         let console =
             (!fresh.is_empty()).then(|| json!({ "messages": { "log": fresh, "results": [] } }));
         let conns = {
@@ -140,14 +145,14 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 /// What `soak.mjs --watch` prints: how to point lazycreep at this run.
-fn banner(port: u16, every: u64, room: &str) {
+fn banner(port: u16, every: u64, room: &str, user: &str) {
     // A connected UDP socket names the address this host reaches the LAN by; nothing is sent.
     let lan = UdpSocket::bind("0.0.0.0:0")
         .and_then(|s| s.connect("192.0.2.1:9").and(s.local_addr()))
         .map_or("127.0.0.1".to_string(), |a| a.ip().to_string());
     let api = format!("http://127.0.0.1:{port}");
     eprintln!(
-        "\nwatch: {api}, a tick every {every} ms; user {USERNAME}, any token\n  client, in another shell (MSC_PORT=… if 8080 is taken):\n    MSC_ADDRESS=0.0.0.0 MSC_API_UPSTREAM={api} nix run github:Xerxes-2/lazycreep#gateway\n  then http://{lan}:8080 (or localhost) → 设置 → 添加自定义 Server:\n    名称 fabot-watch · API 根路径 /api · WebSocket 地址 ws://{lan}:{port}/socket/websocket · 分 Shard 不勾\n  then 设置 → Auth token: guest\n  room: {room}\n"
+        "\nwatch: {api}, a tick every {every} ms; user {user}, any token\n  client, in another shell (MSC_PORT=… if 8080 is taken):\n    MSC_ADDRESS=0.0.0.0 MSC_API_UPSTREAM={api} nix run github:Xerxes-2/lazycreep#gateway\n  then http://{lan}:8080 (or localhost) → 设置 → 添加自定义 Server:\n    名称 fabot-watch · API 根路径 /api · WebSocket 地址 ws://{lan}:{port}/socket/websocket · 分 Shard 不勾\n  then 设置 → Auth token: guest\n  room: {room}\n"
     );
 }
 

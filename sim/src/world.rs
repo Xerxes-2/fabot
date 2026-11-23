@@ -10,6 +10,8 @@ use krebs_util::json::Json;
 use screeps::{SAFE_MODE_DURATION, SPAWN_ENERGY_CAPACITY, SPAWN_ENERGY_START, SPAWN_HITS};
 use serde_json::{Value, json};
 
+use crate::seat::Seat;
+
 pub const US: &str = "u1";
 pub const USERNAME: &str = "fabot";
 pub const INVADER: &str = "2";
@@ -108,17 +110,18 @@ impl Map {
         Some((i64::from(pos.x), i64::from(pos.y)))
     }
 
-    /// Our user, the room's controller ours (at level 1 unless the world's already is), in safe mode
-    /// unless `ended` or the world says, and Spawn1 on Layout's tile unless a spawn stands.
-    pub fn stand(&self, room: &str, seed: u64, ended: bool, badge: Option<Value>) -> World {
+    /// Each seat's user, its room's controller its own (at level 1 unless the world's already is), in safe
+    /// mode unless `ended` or the world says, and Spawn1 on Layout's tile unless a spawn stands.
+    pub fn stand(&self, seats: &[Seat], seed: u64, ended: bool, badge: Option<Value>) -> World {
         let t = self.time;
         let mut objects: Vec<Value> = Vec::new();
         for o in &self.objects {
             let mut o = o.clone();
-            match o["type"].as_str() {
-                Some("controller") if o["room"] == room => {
-                    if o["user"] != US {
-                        let ours = json!({ "level": 1, "user": US, "progress": 0, "downgradeTime": null, "safeModeAvailable": 0 });
+            let seat = seats.iter().find(|s| o["room"] == s.room);
+            match (o["type"].as_str(), seat) {
+                (Some("controller"), Some(s)) => {
+                    if o["user"] != s.uid {
+                        let ours = json!({ "level": 1, "user": s.uid, "progress": 0, "downgradeTime": null, "safeModeAvailable": 0 });
                         merge(&mut o, ours);
                     }
                     if o.get("safeMode").is_none() {
@@ -130,31 +133,37 @@ impl Map {
                         merge(&mut o, json!({ "safeMode": safe }));
                     }
                 }
-                Some("controller") if o["user"].is_null() => merge(&mut o, json!({ "level": 0 })),
-                Some("source") => merge(&mut o, json!({ "invaderHarvested": 0 })),
+                (Some("controller"), _) if o["user"].is_null() => {
+                    merge(&mut o, json!({ "level": 0 }))
+                }
+                (Some("source"), _) => merge(&mut o, json!({ "invaderHarvested": 0 })),
                 _ => {}
             }
             objects.push(o);
         }
         // A harness fixture: any id serves, and Spawn1 is a respawn's first spawn's name.
-        if !self.in_room(room).any(|o| o["type"] == "spawn") {
+        for (i, Seat { uid, room, .. }) in seats.iter().enumerate() {
+            if self.in_room(room).any(|o| o["type"] == "spawn") {
+                continue;
+            }
             let (x, y) = self.seat(room).expect("a plan");
             eprintln!("spawn at {x},{y}");
-            objects.push(json!({ "_id": "f0000000000000000000ffff", "type": "spawn", "room": room, "x": x, "y": y,
-            "name": "Spawn1", "user": US, "store": { "energy": SPAWN_ENERGY_START }, "storeCapacityResource": { "energy": SPAWN_ENERGY_CAPACITY },
+            objects.push(json!({ "_id": format!("f0000000000000000000{:04x}", 0xffff - i), "type": "spawn", "room": room, "x": x, "y": y,
+            "name": "Spawn1", "user": uid, "store": { "energy": SPAWN_ENERGY_START }, "storeCapacityResource": { "energy": SPAWN_ENERGY_CAPACITY },
             "hits": SPAWN_HITS, "hitsMax": SPAWN_HITS, "spawning": null, "notifyWhenAttacked": true }));
         }
-        let mut us = crate::badge::ours(user(US, USERNAME), badge);
-        let homes = objects
-            .iter()
-            .filter(|o| o["type"] == "controller" && o["user"] == US);
-        us["rooms"] = homes.map(|o| o["room"].clone()).collect();
-        us["gcl"] = json!(self.gcl);
+        let mut players = seats.iter().map(|s| {
+            let mut u = user(&s.uid, &s.name);
+            let homes =
+                (objects.iter()).filter(|o| o["type"] == "controller" && o["user"] == s.uid);
+            u["rooms"] = homes.map(|o| o["room"].clone()).collect();
+            u["gcl"] = json!(self.gcl);
+            u
+        });
+        let us = crate::badge::ours(players.next().expect("a seat"), badge);
         let npcs = [us, user(INVADER, "Invader"), user(KEEPER, "Source Keeper")];
-        let users: Vec<_> = npcs
-            .into_iter()
-            .chain(self.users.iter().map(|(id, name)| user(id, name)))
-            .collect();
+        let others = self.users.iter().map(|(id, name)| user(id, name));
+        let users: Vec<_> = npcs.into_iter().chain(players).chain(others).collect();
         let db = json!({
             "rooms": self.rooms.iter().map(|(n, _)| crate::generated::room_doc(n, self.closed.contains(n), self.banks.map(|s| (s, t)))).collect::<Vec<_>>(),
             "rooms.terrain": self.rooms.iter().map(|(n, t)| json!({ "room": n, "terrain": t })).collect::<Vec<_>>(),
