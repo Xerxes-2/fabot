@@ -1,13 +1,11 @@
 {
-  "why": "An outpost Defend wins the raid the Exchange priced it to win: W8N2's raid at t9944 is answered by a cast body, which then stands free and is drafted, uncast, against W7N3's at t10208; both priced Win, both won, none of ours dead. Each body reaches its raid with the rest, each live row is classed as the engine's, and the run books the energy cast. Before this run's start shifted, W7N3's pair (a free body beside a new cast) was walked in 14 ticks apart and lost both. A gap up to 7 is the raid stepping onto the nearer body in its last ticks, which no price foresees (owner, 2026-11-24; seeds 1-4 reach 6)",
+  "why": "An outpost Defend wins the raid the Exchange priced it to win: W8N2's and W7N3's raids near t10000 are each answered by cast bodies, or a free one drafted uncast; each priced Win and won. Each body reaches its raid with the rest, each live row is classed as the engine's, and the run books the energy cast. On 7b15ba9f (before the fix), W7N3's pair (a free body beside a new cast) was walked in 14 ticks apart and lost both. A gap up to 7 is the raid stepping onto the nearer body in its last ticks, which no price foresees (owner, 2026-11-24; seeds 1-5 reach 6)",
   "modules": ["fight", "exchange"],
   "start": { "room": "W8N3", "seed": 1, "late": 7 },
   "ticks": 10560,
   "assert": [
-    { "measure": "engagements", "from": 9900, "min": 2 },
-    { "measure": "arrivedApart", "from": 9900, "max": 7 },
-    { "measure": "predictedWinsLost", "from": 9900, "max": 0 },
-    { "measure": "liveAstray", "from": 9900, "max": 0 },
+    { "each": "engagement", "where": { "kind": "defend", "home": false }, "least": 2, "assert": { "apart": { "max": 7 }, "bug": 0 } },
+    { "measure": "liveAstray", "max": 0 },
     { "measure": "liveEnergy", "min": 1 }
   ]
 }

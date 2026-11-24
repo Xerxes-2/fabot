@@ -1,5 +1,5 @@
 {
-  "why": "An outpost Defend's loss budget is priced as it commits and only a re-form re-prices it, so its losses past the budget end it: our bot in three mutually hostile seats, where alpha camps the exit beta's E18S6 Defend enters by. On the old rule every death re-priced the budget to losses so far plus the predicted dead, so the bound was never crossed: beta's Defend opened t4631 (priced a win losing 1) counted 52 lost (about 15 bodies dead, the rest spent bodies healed and drafted again) by t5355, its casts walking in one at a time. Self-play, since only our own Defend's accounting is read",
+  "why": "An outpost Defend's loss budget is priced as it commits and only a re-form re-prices it, so its losses past the budget end it: our bot in three mutually hostile seats, where alpha camps the exit beta's E18S6 Defend enters by. On the old rule every death re-priced the budget to losses so far plus the predicted dead, so the bound was never crossed: beta's Defend opened t4631 (priced a win losing 1) counted 52 lost (about 15 bodies dead, the rest spent bodies healed and drafted again) by t5355, its casts walking in one at a time. Each Defend in every seat, at whichever tick it opens, loses at most the bodies of the tick it quits on past its budget (defend 3 there: 47 past it on 8c0c5ded, before the fix; at most 0 on seeds 1-5 after, every seat opening Defends on every seed). Bodies lost over the run, each seat, are a guardrail 1.5x the seed 1-5 maxima on main (alpha 8, beta 8, gamma 12). Self-play, since only our own Defend's accounting is read",
   "modules": ["fight"],
   "start": {
     "gen": 3,
@@ -13,8 +13,11 @@
   },
   "ticks": 6000,
   "assert": [
-    { "measure": "bodiesLost", "seat": "beta", "from": 4000, "max": 12 },
-    { "measure": "bodiesLost", "from": 4000, "max": 12 },
-    { "measure": "bodiesLost", "seat": "gamma", "from": 4000, "max": 12 }
+    { "measure": "bodiesLost", "seat": "beta", "max": 12 },
+    { "measure": "bodiesLost", "max": 12 },
+    { "measure": "bodiesLost", "seat": "gamma", "max": 18 },
+    { "each": "engagement", "seat": "beta", "where": { "kind": "defend" }, "assert": { "pastBudget": { "max": 2 } } },
+    { "each": "engagement", "where": { "kind": "defend" }, "assert": { "pastBudget": { "max": 2 } } },
+    { "each": "engagement", "seat": "gamma", "where": { "kind": "defend" }, "assert": { "pastBudget": { "max": 2 } } }
   ]
 }
