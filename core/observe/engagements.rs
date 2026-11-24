@@ -1,4 +1,4 @@
-//! `engagements.log` (`ARCHITECTURE.md` §4, §10.1): each priced engagement as
+//! `engagements.log` (`ARCHITECTURE.md` §4, §10.1): each engagement as
 //! it closed, a JSON row a line, as `scripts/sim/prediction.mjs` reads one.
 use std::collections::{BTreeSet, VecDeque};
 
@@ -25,7 +25,8 @@ struct Row<'a> {
     contact: Option<i32>,
     seen: Option<i32>,
     closed: i32,
-    predicted: &'a Outcome,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    predicted: Option<&'a Outcome>,
     dead: i32,
     energy: i32,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -58,7 +59,7 @@ pub fn rows(closed: &[Closed], time: i32) -> Vec<String> {
                 contact: e.actual.contact,
                 seen: e.actual.seen,
                 closed: time,
-                predicted: e.predicted.as_ref()?,
+                predicted: e.predicted.as_ref(),
                 dead: e.lost + e.actual.left_dead,
                 energy: e.actual.energy,
                 disengaged: e.phase == Phase::Disengaging,
@@ -83,7 +84,9 @@ impl Log {
     pub fn push(&mut self, rows: Vec<String>) -> String {
         self.0.extend(rows);
         while self.0.len() > ROWS || self.0.iter().map(|r| r.len() + 1).sum::<usize>() > BYTES {
-            self.0.pop_front();
+            // Owner: the log is read for Exchange's error, so priced rows outlast the rest.
+            let unpriced = self.0.iter().position(|r| !r.contains(r#""predicted":"#));
+            self.0.remove(unpriced.unwrap_or(0));
         }
         self.0.make_contiguous().join("\n")
     }
@@ -102,5 +105,18 @@ mod tests {
         assert_eq!(text.lines().next(), Some("0000000005"));
         let text = log.push(rows(ROWS, BYTES / 50));
         assert!(text.len() <= BYTES);
+    }
+
+    #[test]
+    fn a_full_log_drops_its_oldest_unpriced_row_before_any_priced_one() {
+        let row = |i: usize| match i {
+            1 | 3 => format!(r#"{{"id":{i}}}"#),
+            _ => format!(r#"{{"id":{i},"predicted":{{}}}}"#),
+        };
+        let text = Log::default().push((0..ROWS + 2).map(row).collect());
+        assert_eq!(
+            text.lines().take(3).collect::<Vec<_>>(),
+            [row(0), row(2), row(4)]
+        );
     }
 }

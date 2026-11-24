@@ -36,7 +36,7 @@ impl Actual {
     }
 }
 
-/// A priced engagement as it closed, its dead counted to the close; `left`: not
+/// An engagement as it closed, its dead counted to the close; `left`: not
 /// every rival death was seen.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Closed {
@@ -103,11 +103,11 @@ fn step((scene, raids, fallen): Facts, prior: Option<&Engagement>, e: &mut Engag
     e.actual.gave_up |= prior.is_some_and(|w| !w.unanswered) && e.unanswered;
 }
 
-/// The priced engagements `decided` drops, with their closing tick's events and dead.
+/// The engagements `decided` drops, with their closing tick's events and dead.
 pub fn closed(facts: Facts, open: &[Engagement], decided: &[Engagement]) -> Vec<Closed> {
     let (scene, raids, _) = facts;
     (open.iter())
-        .filter(|e| e.predicted.is_some() && !decided.iter().any(|d| d.id == e.id))
+        .filter(|e| !decided.iter().any(|d| d.id == e.id))
         .map(|e| {
             let mut engagement = e.clone();
             step(facts, Some(e), &mut engagement);
@@ -240,5 +240,18 @@ mod tests {
         let unseen = |last| play(&[(1, true, false), (2, false, false), (last, false, false)]).0;
         assert!(!unseen(engine::CREEP_LIFETIME).actual.unseen.is_empty());
         assert!(unseen(1 + engine::CREEP_LIFETIME).actual.unseen.is_empty());
+    }
+
+    #[test]
+    fn an_unpriced_close_counts_its_closing_ticks_dead() {
+        let e = Engagement {
+            ours: BTreeMap::from([("a".to_string(), 0)]),
+            ..defend(None)
+        };
+        let lost = on_tick(1, BTreeMap::new(), |scene| {
+            let closes = closed((scene, &[], &BTreeSet::new()), &[e], &[]);
+            closes.iter().map(|c| c.engagement.lost).collect::<Vec<_>>()
+        });
+        assert_eq!(lost, [1]);
     }
 }

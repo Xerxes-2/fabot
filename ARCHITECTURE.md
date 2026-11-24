@@ -204,7 +204,7 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
 | `intel.rooms` | per-room snapshot (seen tick, owner/level, reservation, worker (another player's WORK body, never an Invader), keeper posts, controller/sources/containers, mineral, stronghold (core level, deploy and collapse ticks), a tower standing; by username, never stance) | Strategy | heap + segment 2 (every 100 ticks) | serve out-of-sight rooms; price outposts & expansion |
 | `metrics.windows` | 100-tick aligned windows (per-room + world, up to 150 windows) | Observe | segment 3 | `observe metrics` & soak `metrics.jsonl` (§10.5) |
 | `recorder` | deflated `read.js` pass + Memory + intel ring | Main | segments 10–14 | live capture for benchmark & replay (§9.1) |
-| `engagements.log` | the last 200 priced engagements closed, a JSON row a line: id, kind, room, rivals, tactic, opened, contact, seen, closed, `predicted`, our dead, energy cast, and how it ended (`disengaged`, `gaveUp`, `left`, `safe`; none: its rival's death seen) | Observe (rows Fight's closes) | segment 4, written on a close (rows closed before a reset's first read wait in heap) | live `Exchange` error tracking (§10.1): an engagement's prediction goes with it, and 200 rows (~230 B each) fit one segment |
+| `engagements.log` | the last 200 engagements closed (an unpriced row evicted before any priced one, owner), a JSON row a line: id, kind, room, rivals, tactic, opened, contact, seen, closed, `predicted` (priced only), our dead, energy cast, and how it ended (`disengaged`, `gaveUp`, `left`, `safe`; none: its rival's death seen) | Observe (rows Fight's closes) | segment 4, written on a close (rows closed before a reset's first read wait in heap) | live `Exchange` error tracking (§10.1): an engagement's prediction goes with it, and 200 rows (~230 B each) fit one segment |
 | `metrics` | open window sums & per-creep/site/room deltas | Observe | heap | incremental tick deltas |
 | `standing.layout` | per-room layout plan & incremental drawing state + ground key + `cold` (drawn with no standing held: a reset or a new colony) | Layout | heap | rebuilds at 4 variations/tick after reset; `cold` marks the first plan `piles` is checked against |
 | `scouts` | scout targets | Strategy | heap (this tick) | derived from intel for Economy |
@@ -922,7 +922,7 @@ arithmetic and invariants.
 Every engagement records `Predicted` at open and compares against actual
 outcome at close. Offline, `npm run exchange` and fight scenarios evaluate
 predictions via `scripts/sim/prediction.mjs`; `predictedWinsLost` fails a
-scenario as an `Exchange` bug. Live, each priced engagement's row lands in
+scenario as an `Exchange` bug. Live, each engagement's row lands in
 `engagements.log` (§4) as it closes, and `npm run observe -- exchange` prints
 the same table, then each rival's outcomes by tactic; `liveAstray` holds those
 rows to the engine's classification in scenarios. A rival that leaves alive is
