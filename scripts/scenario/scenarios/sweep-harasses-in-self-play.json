@@ -1,5 +1,5 @@
 {
-  "why": "Two seats of ours harass each other (sweep-casts-what-its-spawns-land's self-play start). A sweep casts the cheapest harasser that out-reaches a room's armed bodies, one a room within its spawns' share, so his economy bodies die beside our sweeps: over seeds 1-5 beta's sweeps kill 35-61 on 74dcbb12, 8-17 on 803fe40a before one a room. Alpha's kills (31-75 against 21-39) overlap between the two builds, so they bound nothing; bodies lost and sweep cost are guardrails about 30% over 74dcbb12's seed maxima (27 bodies, 35,410 energy)",
+  "why": "Two seats of ours harass each other (sweep-casts-what-its-spawns-land's self-play start). A sweep casts the cheapest harasser that out-reaches a room's armed bodies, one a room within its spawns' share, so his economy bodies die beside our sweeps: over seeds 1-5 beta's sweeps kill 21-40 (40 on the start seed) now that outpost Defends answer harassers with bare bodies (owner, 2026-11-24), against 8-17 on 803fe40a before one a room; seeds 3 and 5 read 24 and 21 and would fail the >= 26 bound, which holds on the start seed alone (the only one asserted). Bodies lost and sweep cost are guardrails about 30% over the seed maxima: bodies 55 alpha, 57 beta, sweep cost 46,780 energy",
   "modules": ["fight", "strategy"],
   "start": {
     "gen": 7,
@@ -12,9 +12,9 @@
   "ticks": 30000,
   "assert": [
     { "measure": "killedBeside", "kind": "sweep", "seat": "beta", "min": 26 },
-    { "measure": "bodiesLost", "max": 35 },
-    { "measure": "bodiesLost", "seat": "beta", "max": 35 },
-    { "measure": "drewCost", "kind": "sweep", "max": 45000 },
-    { "measure": "drewCost", "kind": "sweep", "seat": "beta", "max": 45000 }
+    { "measure": "bodiesLost", "max": 72 },
+    { "measure": "bodiesLost", "seat": "beta", "max": 74 },
+    { "measure": "drewCost", "kind": "sweep", "max": 61000 },
+    { "measure": "drewCost", "kind": "sweep", "seat": "beta", "max": 61000 }
   ]
 }
