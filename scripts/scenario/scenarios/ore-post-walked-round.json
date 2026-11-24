@@ -1,9 +1,9 @@
 {
-  "why": "a walk prices an ore's post as it does a source's: where the outposts' road runs over the digger's container and a way round it stands (sim --gen 1919810, E9S2), the bodies bound past take the way round, so none waits on the digger once the node's first casts are out (main: 32 wedged, both sides of the post queued)",
+  "why": "a walk prices an ore's post as it does a source's: where the outposts' road runs over the digger's container and a way round it stands (sim --gen 1919810, E9S2), the bodies bound past take the way round, so none waits on the digger once the node's first casts are out (main: 32 wedged, both sides of the post queued). The bound is 30% past the most seen across harmless plan perturbations (builder scan reversed, pathfinder heap order, wall road cost, every combination, on main and the centre-first planner): 1 wedged, so 2",
   "modules": ["atlas", "economy", "mv"],
   "start": { "world": "scripts/scenario/worlds/ore-post-e9s2.json", "room": "E9S2", "seed": 1, "node": "N7" },
   "ticks": 6000,
   "assert": [
-    { "metric": "move.wedged", "from": 1000, "total": true, "max": 0 }
+    { "metric": "move.wedged", "from": 1000, "total": true, "max": 2 }
   ]
 }

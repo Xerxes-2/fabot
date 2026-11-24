@@ -1,10 +1,10 @@
 {
-  "why": "a small Invader raids a home (soak:gen seed 61, E3S9 t22000) whose Defend asks one 650-energy cast; the spawn begins haulers ahead of it (t22018 on) while the raid kills three: past the landing its price gave (30 ticks of spawning) with none begun it stands unanswered, its ask dropped, rather than forming on it; a set asked again stands within its landing and a begun cast's spawning, so no home Defend's stint passes 61 (258 on adb336fb; seed 80's 1,237 before), whichever raid it answers",
+  "why": "a small Invader raids a home (soak:gen seed 61, E3S9 t22000) whose Defend asks one 650-energy cast; the spawn begins haulers ahead of it (t22018 on) while the raid kills three: past the landing its price gave (30 ticks of spawning) with none begun it stands unanswered, its ask dropped, rather than forming on it; a set asked again stands within its landing and a begun cast's spawning, so no home Defend's stint passes 61 (258 on adb336fb; seed 80's 1,237 before), whichever raid it answers. Bodies lost is a guardrail 30% past the most seen across harmless plan perturbations (builder scan reversed, pathfinder heap order, wall road cost, every combination, on main and the centre-first planner): 1, so 2",
   "modules": ["atlas", "economy", "exchange", "fight", "layout", "mv", "observe", "strategy", "tactics"],
   "start": { "gen": 61, "seed": 1 },
   "ticks": 22400,
   "assert": [
     { "each": "engagement", "where": { "kind": "defend", "home": true }, "assert": { "waited": { "max": 61 } } },
-    { "measure": "bodiesLost", "max": 0 }
+    { "measure": "bodiesLost", "max": 2 }
   ]
 }

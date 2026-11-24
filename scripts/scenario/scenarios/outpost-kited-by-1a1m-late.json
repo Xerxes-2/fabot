@@ -1,5 +1,5 @@
 {
-  "why": "outpost-kited-by-1a1m with our bot sitting out its first 7 ticks: the seed alone does not move this scripted fight, so this start is its second sample. Bounds by the owner",
+  "why": "outpost-kited-by-1a1m with our bot sitting out its first 7 ticks: the seed alone does not move this scripted fight, so this start is its second sample. Bounds 30% under the least seen across harmless plan perturbations (builder scan reversed, pathfinder heap order, wall road cost, every combination, on main and the centre-first planner): held 2,986, so 2,090; dug 51,994, so 36,000",
   "modules": [
     "atlas",
     "economy",
@@ -40,14 +40,14 @@
       "from": 1500,
       "to": 5800,
       "total": true,
-      "min": 3600
+      "min": 2090
     },
     {
       "measure": "dug",
       "room": "W7N3",
       "from": 1500,
       "to": 5800,
-      "min": 70000
+      "min": 36000
     },
     {
       "measure": "dug",
