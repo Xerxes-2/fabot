@@ -624,7 +624,6 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
         .map(|b| (b.name.as_str(), b))
         .collect();
 
-    // A body holding a task books its load before another picks.
     let kept = |name: &str| state.assignments.get(name).and_then(|a| a.task.clone());
     let held: Vec<(usize, &Body, Option<Task>)> = (assigned.iter())
         .filter_map(|(name, si)| Some((*si, *bodies.get(name.as_str())?, kept(name))))

@@ -274,13 +274,14 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   spots are booked down by inbound loads;
   harvest-bay containers keep a full bay's reserve for their harvester; a hub
   pile outranks other sources while the ring has room; workers fetching their
-  own take the nearest load; held tasks run to completion; a lab a body stands
-  waiting at outranks the ring unless a spawn is open, as the body ages there
-  and a spawning colony's ring never empties; while a home harvester or carrier
-  waits on the bank, the controller container ranks under an open ring, as
-  Hivemind ties it with extensions on a larger weight, so upgraders draining
-  it faster than it fills starve the bodies that refill the bank (ungated it
-  failed three scenarios; gated on any waiting cast, it cost upgrade on soak).
+  own take the nearest load; held loads book before any fresh pick and run to
+  completion; a lab a body stands waiting at outranks the ring unless a spawn
+  is open, as the body ages there and a spawning colony's ring never empties;
+  while a home harvester or carrier waits on the bank, the controller
+  container ranks under an open ring, as Hivemind ties it with extensions on a
+  larger weight, so upgraders draining it faster than it fills starve the
+  bodies that refill the bank (ungated it failed three scenarios; gated on any
+  waiting cast, it cost upgrade on soak).
   `❓` After a wipe the floors cast a harvester and worker at the bank held; a
   200-energy worker's 50 a trip can lag their own recasts, so no full cast pays.
 - **Hub pile (`ColonyPlan.pile`):** from RCL2 until storage stands, remotes

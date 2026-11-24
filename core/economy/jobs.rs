@@ -62,6 +62,8 @@ pub struct Jobs<'a> {
     booked: BTreeMap<Id, Id>,
     hauls: Vec<i32>,
     owners: &'a [Option<usize>],
+    replayed: BTreeMap<String, Task>,
+    fresh: bool,
 }
 
 pub fn fee_short(ground: &Ground) -> i32 {
@@ -437,7 +439,7 @@ impl<'a> Jobs<'a> {
                 _ => {}
             }
         }
-        Jobs {
+        let mut jobs = Jobs {
             atlas,
             derived,
             sinks,
@@ -451,7 +453,23 @@ impl<'a> Jobs<'a> {
                 .map(|gi| derived.haul(owners, gi))
                 .collect(),
             owners,
+            replayed: BTreeMap::new(),
+            fresh: false,
+        };
+        // A fresh pick books only what the holders leave, so it never books
+        // one out mid-walk.
+        for (si, body, task) in held {
+            let s = &slots[*si];
+            if let Some(t) = task.as_ref()
+                && s.job == Job::Fill
+                && Jobs::fetching(body, Some(t)) == t.is_intake()
+                && jobs.task(s, body, Some(t)).is_some()
+            {
+                jobs.replayed.insert(body.name.clone(), t.clone());
+            }
         }
+        jobs.fresh = true;
+        jobs
     }
 
     fn nearest<R: Ord, T>(&self, from: &Pos, ends: impl Iterator<Item = (R, Pos, T)>) -> Option<T> {
@@ -549,6 +567,9 @@ impl<'a> Jobs<'a> {
         (body, carrier): (&Body, bool),
         fits: &dyn Fn(&Spot) -> bool,
     ) -> Option<usize> {
+        if !self.fresh {
+            return None;
+        }
         let ends = (spots.iter().enumerate())
             .filter(|(_, s)| s.amount > 0 && fits(s))
             .filter_map(|(i, s)| Some((i, self.rank(ci, s, body, carrier)?)))
@@ -689,6 +710,9 @@ impl<'a> Jobs<'a> {
     }
 
     pub fn task(&mut self, slot: &Slot, body: &Body, kept: Option<&Task>) -> Option<Task> {
+        if let Some(t) = self.replayed.get(&body.name) {
+            return Some(t.clone());
+        }
         let ci = slot.colony;
         match &slot.job {
             Job::Dig(id) => Some(Task::Harvest((*id).into())),
