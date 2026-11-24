@@ -109,6 +109,12 @@ pub fn colonies(
                         .any(|(r, p)| r == rock && sites::posted(plan, *p) && census.site[*p] == 0)
                 })
                 .map(|(_, c)| c)
+                .chain(
+                    (room.structures.iter())
+                        .filter(|w| w.kind == StructureType::Wall && w.hits > 0)
+                        .map(|w| tiles::of_pos(&w.pos))
+                        .filter(|t| !tiles::on_edge(*t) && !plan.walls(*t)),
+                )
                 .collect(),
             None => Vec::new(),
         };
@@ -145,7 +151,8 @@ pub fn colonies(
                 .collect(),
             astray: (room.structures.iter())
                 .filter(|c| {
-                    c.kind == StructureType::Container && astray.contains(&tiles::of_pos(&c.pos))
+                    matches!(c.kind, StructureType::Container | StructureType::Wall)
+                        && astray.contains(&tiles::of_pos(&c.pos))
                 })
                 .map(|c| c.id)
                 .collect(),

@@ -38,6 +38,10 @@ impl Plan {
         (!self.items.iter().any(built)).then(|| tiles::to_pos(self.room, self.anchor))
     }
 
+    pub fn walls(&self, t: Tile) -> bool {
+        (self.items.iter().chain(&self.ring)).any(|i| i.tile == t && i.kind == StructureType::Wall)
+    }
+
     /// Hivemind's navigation matrix: the ring's walls count whether or not
     /// Strategy builds the ring yet, since a room it later keeps walls them.
     pub fn solid(&self) -> impl Iterator<Item = Tile> + '_ {

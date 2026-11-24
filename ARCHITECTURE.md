@@ -142,7 +142,7 @@ segments over multiple ticks (economy first); a cold tick never spends more than
 | `World` | `fabot-base` | Single-pass tick snapshot, event-log strikes/destroys, per-tick `rules` (`CONTROLLER_STRUCTURES`) | `Game` | — |
 | `Atlas` | `fabot-atlas` | Room graph (region nodes, border-stretch crossings, keeper-strike avoidance, blind keeper penalty, a room intel last saw with towers that fire on us (a live stronghold's, a non-ally player's) never crossed, only reached) and per-room tile grid (creep-free weights, reverse floods, seats, footprint queries; a hostile's tile is walled only in this tick's step floods and passability, never in a kept flood, so one moving redoes no flood, tree or walk); out-of-sight grids hold what stood when last seen (else terrain) struck where intel places the keepers (`atlas.unseen`); a walk can run on terrain alone, as it lies or paved (`bare`) | `World`, `terrain`, `intel.rooms`, `Declarations` (colony plans, for `server`) | flood table, `atlas.carried` |
 | `Economy` | `fabot-economy` | Slots, casts, sticky tasks, logistics dispatcher, links, labs, terminals, abandon | `Derived`, `Atlas`, `declarations`, `EconomyState`, Strategy's `scouts` | tasks, casts, `assignments` |
-| `Layout` | `fabot-layout` | Colony placement plan (Hivemind planner + xxscreeps JPS), rampart ring, construction sites, buried-road destroy, tower firing | `Derived`, `Atlas`, `declarations` | sites, destroys, tower actions, `standing.layout` |
+| `Layout` | `fabot-layout` | Colony placement plan (Hivemind planner + xxscreeps JPS), rampart ring, construction sites, buried-road and off-plan wall destroy, tower firing | `Derived`, `Atlas`, `declarations` | sites, destroys, tower actions, `standing.layout` |
 | `Exchange` | `fabot-exchange` | Pure combat arithmetic (`outcome`, `cheapest_win`, breach planning, a stronghold's run) | fighters, terrain | — |
 | `Fight` | `fabot-fight` | Hostile `Tracker`, engagements (`kinds/`: defend, siege, sweep, raid, stronghold), casting | `Derived`, `Atlas`, `Exchange`, `declarations` (its operations table), `intel`, `FightState` | fight actions, asks, wishes, casts, `FightState` |
 | `Tactics` | `fabot-tactics` | Per-creep combat actions, stepping, and the operator's tactic rules (`ruling`, `checked`) (no `Fight` import) | `Atlas`, `Move`, `Sight` + plan | creep actions, wishes |
@@ -370,7 +370,8 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   labs below RCL8; nuker last; unreachable cut pockets kept unroaded; source
   links never split a 1-wide post; a quad or decorative wall closing a
   structure in gives way, as does one closing in what only an ore's post
-  leads to (its digger yields only to a chain two weights heavier), and a pocket of roads and ramparts no walk reaches
+  leads to (its digger yields only to a chain two weights heavier) or cuts the
+  core off an exit (its outposts may lie only that way), and a pocket of roads and ramparts no walk reaches
   is dropped (Hivemind checks neither, and our kept cut pockets get sealed).
   `❓` The plan is chaotic under any builder or pathfinder change: each
   variation's greedy build carries every road into its later steps (spawn,

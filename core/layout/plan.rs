@@ -252,6 +252,8 @@ fn drawn(rules: &Rules, ground: &Ground, built: &Built) -> (Plan, Vec<Item>) {
     }
     ring.sort_by_key(|i| i.level);
     let mut dropped: Vec<Item> = Vec::new();
+    // An outpost or another colony may lie only beyond an exit.
+    let free = reached(ground, built.center, (false, true), items.iter());
     let seen = loop {
         let walk = |held| {
             reached(
@@ -267,6 +269,7 @@ fn drawn(rules: &Rules, ground: &Ground, built: &Built) -> (Plan, Vec<Item>) {
             .filter(|i| !matches!(i.kind, Road | Rampart) && !beside(i.tile))
             .map(|i| i.tile)
             .chain(tiles::all().filter(|t| through[*t] && !seen[*t]))
+            .chain(tiles::all().filter(|t| free[*t] && tiles::on_edge(*t) && !seen[*t]))
             .collect();
         let wall = |t: Tile| ring.iter().any(|r| r.tile == t && r.kind == Wall);
         let mut inside = vec![false; tiles::COUNT];
@@ -665,7 +668,7 @@ mod tests {
     }
 
     #[test]
-    fn every_structure_is_walked_to_from_the_core_and_the_ring_from_it_or_an_exit() {
+    fn every_structure_and_exit_is_walked_to_from_the_core_and_the_ring_from_it_or_an_exit() {
         let rules = Rules::vanilla();
         let pocketed = fx::pocketed();
         let drawn = (of_ground(&rules, &pocketed).map(|p| (pocketed, p)))
@@ -685,6 +688,14 @@ mod tests {
             let from_core = walked(&ground, &plan, &[plan.anchor]);
             for i in &plan.items {
                 assert!(beside(&from_core, i), "{i:?} unreached from the core");
+            }
+            let unwalled = Plan {
+                ring: Vec::new(),
+                ..plan.clone()
+            };
+            let bare = walked(&ground, &unwalled, &[plan.anchor]);
+            for t in exits.iter().filter(|t| bare[**t]) {
+                assert!(from_core[*t], "exit {t:?} walled off");
             }
             let from_any = walked(&ground, &plan, &exits);
             for i in &plan.ring {
