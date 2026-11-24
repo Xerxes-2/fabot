@@ -286,6 +286,7 @@ impl<'a> Scene<'a> {
                 next: flight(c),
             })
             .collect();
+        let creepless = marks.is_empty();
         marks.extend(
             room.structures
                 .iter()
@@ -293,11 +294,12 @@ impl<'a> Scene<'a> {
                     s.kind == StructureType::Container
                         || s.kind == StructureType::Link && !s.owner.is_ours()
                 })
-                .filter(|s| siege::beside(&reached, &s.pos))
+                .filter(|s| creepless && siege::beside(&reached, &s.pos))
                 .map(|s| tactics::Mark {
                     id: s.id,
                     pos: s.pos,
-                    worth: s.hits,
+                    worth: (s.kind.construction_cost())
+                        .map_or(0, |c| c as i32 * s.hits / s.hits_max.max(1)),
                     hits: s.hits,
                     massed: s.kind != StructureType::Container,
                     shielded: shields.contains(&tiles::of_pos(&s.pos)),
