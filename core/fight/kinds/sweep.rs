@@ -4,8 +4,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::super::casting;
 use super::super::scene::{Hunting, Scene};
 use super::super::shape::{Engagement, Phase, enter};
-use fabot_atlas::Atlas;
+use fabot_atlas::{self as atlas, Atlas};
 use fabot_base::engine;
+use fabot_base::intel::Row;
+use fabot_base::tiles;
 use fabot_base::vocabulary::Part;
 use fabot_base::world::{Creep, Owner, Pos, Room, RoomName, Source};
 use fabot_exchange::Fighter;
@@ -87,6 +89,52 @@ pub(crate) fn beats(
         }
         _ => false,
     }
+}
+
+/// Stalest first, beside his worked rooms too (his farther ones lie past our scouts), an
+/// unseen one as stale as the stalest seen; none held by a player not an enemy, past a
+/// rival's towers, or where the tracker holds an armed group (owner: the escort it left).
+pub(crate) fn patrol(
+    scene: &Scene,
+    atlas: &Atlas,
+    e: &Engagement,
+    (preyed, enemies): (&[RoomName], &BTreeSet<String>),
+) -> Option<RoomName> {
+    let from = scene.members_of(e).first()?.pos.room;
+    let towered: BTreeSet<RoomName> = (scene.intel.iter())
+        .filter(|(_, row)| row.towered)
+        .map(|(room, _)| *room)
+        .chain(scene.avoid.iter().copied())
+        .collect();
+    let sides = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+    let beside = (preyed.iter()).flat_map(|r| sides.map(|(dx, dy)| r.offset(dx, dy)));
+    let open = (beside.flatten())
+        .filter(|r| tiles::has_controller(r.coords()) && !scene.worked.contains(r))
+        .chain(preyed.iter().copied())
+        .filter(|r| *r != e.room && !towered.contains(r) && !scene.homes.contains(r))
+        .filter(|r| (scene.by_id.values()).all(|g| g.room() != *r || !scene.armed_seen(g)));
+    let rows: Vec<_> = (open.map(|r| (r, scene.intel.get(&r))))
+        .filter(|(_, row)| {
+            row.is_none_or(|row| {
+                let users = row
+                    .owner
+                    .iter()
+                    .chain(row.reservation.iter().map(|(u, _)| u));
+                row.level == 0 && users.into_iter().all(|u| enemies.contains(u))
+            })
+        })
+        .collect();
+    let age = |row: Option<&&Row>| row.map(|row| scene.world.time - row.seen);
+    let stalest = rows.iter().filter_map(|(_, row)| age(row.as_ref())).max();
+    let walk = |r: RoomName| atlas.route(&towered, Scene::hops(e), from, r);
+    atlas::onward(rows.iter().filter_map(|(r, row)| {
+        let crossed = walk(*r)?.len() as i32 - 1;
+        Some((
+            *r,
+            age(row.as_ref()).or(stalest)?,
+            engine::ROOM_SIDE * crossed,
+        ))
+    }))
 }
 
 /// Never home (owner).

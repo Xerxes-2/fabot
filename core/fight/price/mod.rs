@@ -126,10 +126,7 @@ impl<'a> Scene<'a> {
         left: bool,
         grew: bool,
     ) -> Option<Engagement> {
-        let mut names: Vec<RoomName> = self.colonies_of(atlas, e).iter().map(|r| r.name).collect();
-        names.sort();
-
-        let colony = names.into_iter().next()?;
+        let colony = self.colonies_of(atlas, e).iter().map(|r| r.name).min()?;
         let from = (self.world.spawns.iter())
             .find(|s| s.pos.room == colony)
             .map_or_else(|| middle(colony), |s| s.pos);
@@ -510,27 +507,6 @@ impl<'a> Scene<'a> {
                 self.walk_of(atlas, e, *room)
             };
             Some((*room, *worth, walk?))
-        }))
-    }
-
-    /// An unseen room is worth its staleness; one owned is priced only in
-    /// sight, under its towers, and one where the tracker still holds an armed
-    /// group is not stale (owner), so a set never walks straight back to the
-    /// escort it left.
-    pub(super) fn patrol(
-        &self,
-        atlas: &Atlas,
-        e: &Engagement,
-        preyed: &[RoomName],
-        age: impl Fn(RoomName) -> Option<(i32, bool)>,
-    ) -> Option<RoomName> {
-        let open = preyed
-            .iter()
-            .filter(|r| **r != e.room && !self.avoid.contains(*r))
-            .filter(|r| (self.by_id.values()).all(|g| g.room() != **r || !self.armed_seen(g)));
-        atlas::onward(open.filter_map(|r| match age(*r)? {
-            (_, true) => None,
-            (age, false) => Some((*r, age, self.walk_of(atlas, e, *r)?)),
         }))
     }
 

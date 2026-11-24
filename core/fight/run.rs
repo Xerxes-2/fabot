@@ -79,11 +79,6 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
     let preyed: &[RoomName] = &declarations.rooms(OpKind::Sweep).collect::<Vec<_>>();
     let sightings = context.sightings;
     let intel = context.intel;
-    let age = |room: RoomName| {
-        intel
-            .get(&room)
-            .map(|row| (world.time - row.seen, row.level > 0))
-    };
     let atlas: &mut Atlas = &mut *context.atlas;
 
     let mut foes: BTreeMap<RoomName, Vec<Creep>> = BTreeMap::new();
@@ -329,7 +324,9 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
                         elsewhere: scene.elsewhere(atlas, e, &candidates, &grounds),
                         patrol: (grounds.get(&e.room))
                             .filter(|g| g.worth == 0 && g.escort.is_empty())
-                            .and_then(|_| scene.patrol(atlas, e, preyed, age)),
+                            .and_then(|_| {
+                                sweep::patrol(&scene, atlas, e, (preyed, &declarations.enemies))
+                            }),
                     },
                     e,
                 ),
@@ -479,8 +476,9 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
                     || changed(&e, &events, &scene.by_id) =>
             {
                 let onward = || {
-                    (scene.elsewhere(atlas, &e, &candidates, &grounds))
-                        .or_else(|| scene.patrol(atlas, &e, preyed, age))
+                    (scene.elsewhere(atlas, &e, &candidates, &grounds)).or_else(|| {
+                        sweep::patrol(&scene, atlas, &e, (preyed, &declarations.enemies))
+                    })
                 };
                 decided.extend(scene.swept(atlas, &mut asked, (&e, onward), (&mut free, &grounds)));
             }

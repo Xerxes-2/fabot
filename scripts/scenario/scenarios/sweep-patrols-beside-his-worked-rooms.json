@@ -1,0 +1,17 @@
+{
+  "why": "His farther outposts lie past our scouts, so a sweep's patrol takes the rooms beside those he works, an unseen one stalest (sweep-casts-what-its-spawns-land's self-play start). Alpha's outposts E7S5 and E9S6 never entered beta's intel and no sweep of beta's went there on the commit before or c45a8705; after, beta swept both",
+  "modules": ["fight"],
+  "start": {
+    "gen": 7,
+    "seed": 1,
+    "players": [
+      { "name": "alpha", "declarations": { "enemies": ["beta"] } },
+      { "name": "beta", "declarations": { "enemies": ["alpha"] } }
+    ]
+  },
+  "ticks": 30000,
+  "assert": [
+    { "measure": "sweptIn", "seat": "beta", "room": "E7S5", "min": 1 },
+    { "measure": "sweptIn", "seat": "beta", "room": "E9S6", "min": 1 }
+  ]
+}

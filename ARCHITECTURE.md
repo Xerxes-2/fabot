@@ -545,7 +545,10 @@ with one phase machine per kind under `core/fight/kinds/`.
   colonies' spawns cast them in the spawn time that life leaves
   (`copies_within`, as an outpost `Defend`), each landing after its spawn and
   the nearest colony's walk. Living sets spend their life in the enemy's field, rotating
-  onward via `atlas::onward` (profitable rooms first, else stalest patrol; rooms
+  onward via `atlas::onward` (profitable rooms first, else stalest patrol, the
+  rooms beside his worked ones among them, an unseen one as stale as the
+  stalest seen, none a player not an enemy holds or reached only past a
+  rival's towers; rooms
   with a tracker group still in `Lost` grace are not stale so a set never walks
   straight back into an escort it just left) rather than returning home; closes
   on death, safe mode, or no remaining targets. Past the deadline a home's
