@@ -269,7 +269,9 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   spots are booked down by inbound loads;
   harvest-bay containers keep a full bay's reserve for their harvester; a hub
   pile outranks other sources while the ring has room; workers fetching their
-  own take the nearest load; held tasks run to completion.
+  own take the nearest load; held tasks run to completion; a lab a body stands
+  waiting at outranks the ring unless a spawn is open, as the body ages there
+  and a spawning colony's ring never empties.
 - **Hub pile (`ColonyPlan.pile`):** from RCL2 until storage stands, remotes
   deliver to the planned storage tile (a paved tile blocking no site). Keeps no
   reserve because ground energy decays every tick. While banking on a pile,
@@ -661,6 +663,7 @@ conflicts never silently cancel an act.
   waits only while its age is within the `lab_wait` of its compounds; past
   that it leaves with what it has. `Tick` holds a body at its lab while the
   lab has room and a carrier exists.
+  `❓` A body leaving at that bound unboosted fights in a set priced boosted.
 
 ## 7. Strategy
 
