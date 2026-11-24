@@ -11,7 +11,7 @@ use fabot_base::intents::CreepAct;
 use fabot_base::tiles::{self, Tile};
 use fabot_base::vocabulary::{Part, ResourceType};
 use fabot_base::wish::Wish;
-use fabot_base::world::{Creep, Id, Pos, Room, Structure, StructureType};
+use fabot_base::world::{self, Creep, Id, Pos, Room, Structure, StructureType};
 use fabot_exchange::{self as exchange, Fighter, Ground, Losses, Outcome};
 use fabot_tactics::{self as tactics, Sight, Tactic};
 
@@ -220,15 +220,11 @@ pub fn dance(sight: &mut Sight, room: &Room, members: &[&Creep], c: &Creep) -> W
     let guards = guards(room);
     let healers: Vec<(&Creep, i32)> = (members.iter())
         .filter(|m| m.name != c.name)
-        .map(|m| (*m, m.live(Part::Heal)))
+        .map(|m| (*m, world::power(m, Part::Heal)))
         .collect();
     let heal_at = |at: &Pos| -> i32 {
         (healers.iter())
-            .map(|(m, parts)| match m.pos.range(at) {
-                Some(r) if r <= engine::MELEE_RANGE => engine::HEAL_POWER * parts,
-                Some(r) if r <= engine::RANGED_RANGE => engine::RANGED_HEAL_POWER * parts,
-                _ => 0,
-            })
+            .map(|(m, power)| m.pos.range(at).map_or(0, |r| engine::heal_at(*power, r)))
             .sum()
     };
     let net = |tile: Tile| -> i32 {

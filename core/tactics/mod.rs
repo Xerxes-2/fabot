@@ -13,7 +13,7 @@ use fabot_base::intents::CreepAct;
 use fabot_base::tiles::Tile;
 use fabot_base::vocabulary::Part;
 use fabot_base::wish::Wish;
-use fabot_base::world::{Creep, Id, Pos, RoomName};
+use fabot_base::world::{self, Creep, Id, Pos, RoomName};
 use fabot_base::{engine, tiles};
 use fabot_mv::{blob, plan};
 
@@ -337,7 +337,7 @@ fn rescued(raid: &[Creep], members: &[&Creep], creep: &Creep) -> bool {
                 m.pos.within(engine::MELEE_RANGE, &creep.pos)
                     && (m.name == creep.name || m.hits == m.hits_max)
             })
-            .map(|m| engine::HEAL_POWER * m.live(Part::Heal))
+            .map(|m| engine::heal_at(world::power(m, Part::Heal), engine::MELEE_RANGE))
             .sum::<i32>();
 
     let ticks_out = 1 + raid
@@ -634,7 +634,10 @@ pub fn siege(
     let dismantles = |c: &Creep| c.body.iter().any(|p| p.kind == Part::Work);
 
     let net = front.breach_strike
-        - engine::HEAL_POWER * members.iter().map(|m| m.live(Part::Heal)).sum::<i32>();
+        - members
+            .iter()
+            .map(|m| engine::heal_at(world::power(m, Part::Heal), engine::MELEE_RANGE))
+            .sum::<i32>();
 
     let relieved = |c: &Creep| c.live(Part::Work) == 0 || c.hits < 2 * net;
 
@@ -794,18 +797,17 @@ pub fn retreat(sight: &mut Sight, creep: &Creep) -> Wish {
 /// v1's heal reflex. The engine keeps one of a swing and a heal, and one of a
 /// shot and a ranged heal: a swinging body does not heal, a shooting one heals
 /// beside it. A heal lands in the tick's sum with the strikes, so what is
-/// `incoming` is owed.
+/// `incoming` is owed. Each healer comes with its `world::power` of HEAL.
 pub fn allot<'p>(
-    healers: &[&Creep],
+    healers: &[(&Creep, i32)],
     patients: &[&'p Creep],
     owed: &mut BTreeMap<String, i32>,
     shooting: &dyn Fn(&str) -> bool,
-) -> Vec<(String, &'p Creep, bool)> {
+) -> Vec<(String, &'p Creep, bool, i32)> {
     let mut healers = healers.to_vec();
-    healers.sort_by(|a, b| a.name.cmp(&b.name));
+    healers.sort_by(|a, b| a.0.name.cmp(&b.0.name));
     let mut out = Vec::new();
-    for healer in healers {
-        let parts = healer.live(Part::Heal);
+    for (healer, power) in healers {
         let near = if shooting(&healer.name) {
             engine::MELEE_RANGE
         } else {
@@ -831,15 +833,10 @@ pub fn allot<'p>(
                     p.name.clone(),
                 )
             });
-        if let (true, Some((p, r))) = (parts > 0, patient) {
-            let beside = r <= engine::MELEE_RANGE;
-            let power = if beside {
-                engine::HEAL_POWER
-            } else {
-                engine::RANGED_HEAL_POWER
-            };
-            *owed.entry(p.name.clone()).or_insert(0) -= parts * power;
-            out.push((healer.name.clone(), p, beside));
+        if let (true, Some((p, r))) = (power > 0, patient) {
+            let heal = engine::heal_at(power, r);
+            *owed.entry(p.name.clone()).or_insert(0) -= heal;
+            out.push((healer.name.clone(), p, r <= engine::MELEE_RANGE, heal));
         }
     }
     out
@@ -854,7 +851,9 @@ pub fn nets(
     c: &Creep,
 ) -> Vec<(Tile, i32)> {
     let here = tiles::of_pos(&c.pos);
-    let healers: Vec<&Creep> = mates.iter().copied().chain([c]).collect();
+    let healers: Vec<(&Creep, i32)> = (mates.iter().copied().chain([c]))
+        .map(|m| (m, world::power(m, Part::Heal)))
+        .collect();
     std::iter::once(here)
         .chain(
             tiles::around(here)
@@ -879,9 +878,8 @@ pub fn nets(
                 .collect();
             let heal: i32 = allot(&healers, &patients, &mut owed, &|_| true)
                 .iter()
-                .filter(|(_, p, _)| p.name == c.name)
-                .filter_map(|(h, _, _)| healers.iter().find(|m| m.name == *h))
-                .map(|h| engine::HEAL_POWER * h.live(Part::Heal))
+                .filter(|(_, p, _, _)| p.name == c.name)
+                .map(|(_, _, _, heal)| heal)
                 .sum();
             (t, threat[t] - heal)
         })
@@ -910,15 +908,16 @@ pub fn heals(
             (p.name.clone(), p.hits_max - p.hits + more)
         })
         .collect();
-    let healers: Vec<&Creep> = healers
+    let healers: Vec<(&Creep, i32)> = healers
         .iter()
         .copied()
         .filter(|h| !swinging.contains(&h.name))
+        .map(|h| (h, world::power(h, Part::Heal)))
         .collect();
     let patients: Vec<&Creep> = patients.iter().collect();
     allot(&healers, &patients, &mut owed, &|n| shooting.contains(n))
         .into_iter()
-        .map(|(healer, p, beside)| {
+        .map(|(healer, p, beside, _)| {
             let act = if beside {
                 CreepAct::HealCreep(p.id)
             } else {

@@ -55,6 +55,11 @@ fn a_mass_attack_falls_10_4_1_and_stops_past_three() {
 }
 
 #[test]
+fn a_boosted_heal_lands_48_beside_16_within_three() {
+    assert_eq!([1, 3, 4].map(|r| engine::heal_at(4, r)), [48, 16, 0]);
+}
+
+#[test]
 fn the_live_parts_are_the_tail_the_hits_cover() {
     use Part::{Attack, Move, Tough};
     let body = [Tough, Tough, Attack, Move];

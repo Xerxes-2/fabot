@@ -139,6 +139,15 @@ pub fn mass_attack_power_at(range: i32) -> i32 {
     }
 }
 
+/// `power`: the heal parts' boosted count, as `world::power` gives it.
+pub fn heal_at(power: i32, range: i32) -> i32 {
+    match range {
+        r if r <= MELEE_RANGE => HEAL_POWER * power,
+        r if r <= RANGED_RANGE => RANGED_HEAL_POWER * power,
+        _ => 0,
+    }
+}
+
 fn tower_power_at(power: i32, range: i32) -> i32 {
     const OPTIMAL: i32 = screeps::TOWER_OPTIMAL_RANGE as i32;
     if range <= OPTIMAL {

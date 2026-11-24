@@ -13,11 +13,7 @@ fn range(a: &Creep, b: &Creep) -> i32 {
 fn heal_on(target: &Creep, hostiles: &[Creep]) -> i32 {
     hostiles
         .iter()
-        .map(|h| match range(h, target) {
-            r if r <= engine::MELEE_RANGE => engine::HEAL_POWER * power(h, Part::Heal),
-            r if r <= engine::RANGED_RANGE => engine::RANGED_HEAL_POWER * power(h, Part::Heal),
-            _ => 0,
-        })
+        .map(|h| engine::heal_at(power(h, Part::Heal), range(h, target)))
         .sum()
 }
 

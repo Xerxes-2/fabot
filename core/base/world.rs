@@ -1072,10 +1072,6 @@ pub fn power(creep: &Creep, part: Part) -> i32 {
     engine::power_at(&body_kinds(creep), &body_boosts(creep), creep.hits)(part)
 }
 
-pub fn body_cost(creep: &Creep) -> i32 {
-    engine::body_cost(&body_kinds(creep))
-}
-
 #[cfg(test)]
 mod tests {
     use super::{BodyPart, Creep, Id, Owner, Pos, Room, RoomName, Rules, Sightings, Store};
