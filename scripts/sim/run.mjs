@@ -19,7 +19,7 @@ const PLAN = join(REPO, "target/release/plan");
 export const TEMPLATE = join(REPO, "scripts/scenario/worlds/template.json");
 
 // What sim stands (`world.rs`, `node.mjs`).
-export const SIM_START = ["gen", "room", "seed", "late", "node", "ended", "unsafe", "world", "declarations", "memory", "gcl", "stock", "level", "roadless", "follow", "opponents", "invaders", "wave", "core", "stronghold", "resetEvery", "sectors", "players"];
+export const SIM_START = ["gen", "room", "seed", "late", "node", "ended", "unsafe", "world", "declarations", "memory", "gcl", "stock", "level", "roadless", "overlay", "follow", "opponents", "invaders", "wave", "core", "stronghold", "resetEvery", "sectors", "players"];
 
 /** Whether a `worlds/`-shaped world holds a spawn of ours: a capture, not a map. */
 export const seatsUs = (world) => (world.rooms ?? []).some((r) => (r.objects ?? []).some((o) => o.type === "spawn" && o.user === world.userId));

@@ -128,13 +128,13 @@ const jobs = Number(flags["--jobs"] ?? availableParallelism());
 sweep(join(REPO, "soak-runs"));
 
 for (const { name, start } of scenarios)
-  if (start.world && Object.keys(start).some((k) => !["world", "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "follow", "ended", "memory", "gcl", "stock", "level", "roadless"].includes(k))) fail(`${name}: a "world" start takes a "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "follow", "ended", "memory", "gcl", "stock", "level", "roadless" and nothing else`);
+  if (start.world && Object.keys(start).some((k) => !["world", "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "follow", "ended", "memory", "gcl", "stock", "level", "roadless", "overlay"].includes(k))) fail(`${name}: a "world" start takes a "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "follow", "ended", "memory", "gcl", "stock", "level", "roadless", "overlay" and nothing else`);
 for (const { name, start } of scenarios)
-  if (!start.world && (start.declarations || start.memory || start.gcl || start.stock || start.level || start.roadless)) fail(`${name}: "declarations", "memory", "gcl", "stock", "level" and "roadless" take a "world" start`);
+  if (!start.world && (start.declarations || start.memory || start.gcl || start.stock || start.level || start.roadless || start.overlay)) fail(`${name}: "declarations", "memory", "gcl", "stock", "level", "roadless" and "overlay" take a "world" start`);
 
 const tag = (opponents = []) => (opponents.length ? `-o${createHash("sha256").update(JSON.stringify(opponents)).digest("hex").slice(0, 8)}` : "");
-const recipe = ({ gen, sectors, players, world, room, seed, late = 0, node, invaders, wave, core, stronghold, unsafe, ended, declarations, memory, stock, gcl, level, roadless, follow, resetEvery }, opponents) =>
-  `${[gen !== undefined && `gen${gen}`, sectors && `x${sectors}`, world && basename(world, ".json"), room].filter(Boolean).join("-")}${declarations ? `-d${createHash("sha256").update(JSON.stringify(declarations)).digest("hex").slice(0, 8)}` : ""}${memory ? `-m${createHash("sha256").update(JSON.stringify(memory)).digest("hex").slice(0, 8)}` : ""}${stock ? `-k${createHash("sha256").update(JSON.stringify(stock)).digest("hex").slice(0, 8)}` : ""}${gcl ? `-g${gcl}` : ""}${level ? `-r${Object.entries(level).flat().join("_")}` : ""}${roadless ? `-n${roadless.join("_")}` : ""}-s${seed}${late ? `l${late}` : ""}${node ? `-${node}` : ""}${invaders ? `-i${invaders.replace(/[:,]/g, "_")}` : ""}${wave ? `-w${wave.replace(/[:,]/g, "_")}` : ""}${core ? `-c${core.replace(/[:,]/g, "_")}` : ""}${stronghold ? `-h${stronghold.replace(/[:,]/g, "_")}` : ""}${unsafe ? "-u" : ""}${ended ? "-e" : ""}${follow ? `-f${follow.join("_")}` : ""}${resetEvery ? `-x${resetEvery}` : ""}${players ? `-p${createHash("sha256").update(JSON.stringify(players)).digest("hex").slice(0, 8)}` : ""}${tag(opponents)}`;
+const recipe = ({ gen, sectors, players, world, room, seed, late = 0, node, invaders, wave, core, stronghold, unsafe, ended, declarations, memory, stock, gcl, level, roadless, overlay, follow, resetEvery }, opponents) =>
+  `${[gen !== undefined && `gen${gen}`, sectors && `x${sectors}`, world && basename(world, ".json"), room].filter(Boolean).join("-")}${declarations ? `-d${createHash("sha256").update(JSON.stringify(declarations)).digest("hex").slice(0, 8)}` : ""}${memory ? `-m${createHash("sha256").update(JSON.stringify(memory)).digest("hex").slice(0, 8)}` : ""}${stock ? `-k${createHash("sha256").update(JSON.stringify(stock)).digest("hex").slice(0, 8)}` : ""}${gcl ? `-g${gcl}` : ""}${level ? `-r${Object.entries(level).flat().join("_")}` : ""}${roadless ? `-n${roadless.join("_")}` : ""}${overlay ? `-v${basename(overlay, ".json")}` : ""}-s${seed}${late ? `l${late}` : ""}${node ? `-${node}` : ""}${invaders ? `-i${invaders.replace(/[:,]/g, "_")}` : ""}${wave ? `-w${wave.replace(/[:,]/g, "_")}` : ""}${core ? `-c${core.replace(/[:,]/g, "_")}` : ""}${stronghold ? `-h${stronghold.replace(/[:,]/g, "_")}` : ""}${unsafe ? "-u" : ""}${ended ? "-e" : ""}${follow ? `-f${follow.join("_")}` : ""}${resetEvery ? `-x${resetEvery}` : ""}${players ? `-p${createHash("sha256").update(JSON.stringify(players)).digest("hex").slice(0, 8)}` : ""}${tag(opponents)}`;
 const sim = flags["--bot"] ? resolve(flags["--bot"]) : simBinary() ?? fail("sim did not build");
 if (!existsSync(sim)) fail(`--bot: no sim at ${sim}`);
 const simName = flags["--bot"] ? basename(sim) : `sim-${createHash("sha256").update(readFileSync(sim)).digest("hex").slice(0, 8)}`;
@@ -150,10 +150,13 @@ for (const s of scenarios) {
 if (runs.size && !buildPlan()) fail("the plan tool did not build");
 const started = Date.now();
 const play = async ({ name, start, ticks }) => {
-  if (start.world && (start.declarations || start.memory || start.gcl || start.stock || start.level || start.roadless)) {
+  if (start.world && (start.declarations || start.memory || start.gcl || start.stock || start.level || start.roadless || start.overlay)) {
     const world = join(REPO, "soak-runs", `world-${name}.json`);
     mkdirSync(dirname(world), { recursive: true });
-    const crafted = JSON.parse(readFileSync(resolve(REPO, start.world), "utf8"));
+    // `overlay`: a world file whose rooms stand in for the base world's of their names, its seat ours.
+    const { rooms: over = [], ...seat } = start.overlay ? JSON.parse(readFileSync(resolve(REPO, start.overlay), "utf8")) : {};
+    const base = JSON.parse(readFileSync(resolve(REPO, start.world), "utf8"));
+    const crafted = { ...base, ...seat, rooms: base.rooms.map((r) => over.find((o) => o.name === r.name) ?? r) };
     const v2 = { ...crafted.memory?.v2, ...start.memory };
     // `stock`: amounts set in each named room's terminal.
     for (const [room, add] of Object.entries(start.stock ?? {})) {

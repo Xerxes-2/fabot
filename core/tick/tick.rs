@@ -191,8 +191,17 @@ fn boost_stop(
         .cloned()
         .collect();
 
+    let mut seated: Vec<Pos> = Vec::new();
     for (creep, w) in &stalls {
         let at = &w.at;
+        // So it stands in no other lab's feed a carrier must reach.
+        let labs: Vec<Pos> = boost::labs_in(world, at.room).map(|l| l.pos).collect();
+        let feeds = |p: &Pos| labs.iter().filter(|l| *l != at && p.within(1, l)).count();
+        let seat = (context.atlas.seats(Footprint::One, 1, at).into_iter())
+            .filter(|p| !seated.contains(p))
+            .min_by_key(|p| (feeds(p), p.range(&creep.pos), tiles::of_pos(p)))
+            .unwrap_or(*at);
+        seated.push(seat);
         let lab = (world.rooms.iter())
             .flat_map(|r| &r.structures)
             .find(|s| s.id == w.lab);
@@ -211,7 +220,8 @@ fn boost_stop(
         } else {
             tactics::WEIGHT
         };
-        let wish = mv::plan::toward(context.atlas, creep, mover, &target_at(at, 1), weight);
+        let goal = target_at(&seat, i32::from(seat == *at));
+        let wish = mv::plan::toward(context.atlas, creep, mover, &goal, weight);
         walks.push((creep.pos.room, wish));
     }
 
