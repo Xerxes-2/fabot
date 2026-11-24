@@ -25,8 +25,9 @@ pub struct Row {
     pub controller: Option<Declared>,
     pub sources: Option<Vec<Declared>>,
     pub contained: bool,
-    /// None on a row written before minerals were read, or a room without one.
-    pub mineral: Option<ResourceType>,
+    /// None on a row written before minerals were read, or a room without one;
+    /// its tile none on a row written before tiles were.
+    pub mineral: Option<(ResourceType, Option<Tile>)>,
     pub stronghold: Option<Stronghold>,
     pub towered: bool,
 }
@@ -162,8 +163,12 @@ pub fn to_text(intel: &Intel) -> String {
         }
         out.push_str(if r.contained { " 1" } else { " 0" });
         match r.mineral {
-            Some(m) => {
+            Some((m, at)) => {
                 let _ = write!(out, " {m}");
+                if let Some(at) = at {
+                    out.push('@');
+                    push_int(&mut out, at.index() as i32);
+                }
             }
             None => out.extend([" ", NONE]),
         }
@@ -212,6 +217,14 @@ fn site_of(room: RoomName, text: &str) -> Option<Declared> {
     })
 }
 
+fn mineral_of(text: &str) -> Option<(ResourceType, Option<Tile>)> {
+    let (m, at) = text
+        .split_once('@')
+        .map_or((text, None), |(m, at)| (m, Some(at)));
+    let tile = |at: &str| at.parse().ok().filter(|i| *i < tiles::COUNT);
+    Some((m.parse().ok()?, at.and_then(tile).map(Tile::of_index)))
+}
+
 fn stronghold_of(text: &str) -> Option<Stronghold> {
     let mut n = text.split('.').map(|n| n.parse().ok());
     Some(Stronghold {
@@ -249,7 +262,7 @@ pub fn of_text(text: &str) -> Intel {
                 controller: f.get(8).and_then(|c| site_of(room, c)),
                 sources,
                 contained: f.get(10) == Some(&"1"),
-                mineral: f.get(11).and_then(|m| m.parse().ok()),
+                mineral: f.get(11).and_then(|m| mineral_of(m)),
                 stronghold: f.get(12).and_then(|s| stronghold_of(s)),
                 towered: f.get(13) == Some(&"1"),
             };
@@ -288,11 +301,14 @@ mod tests {
             0..=8,
             option::of((user.clone(), 0..=9_999_999)),
             option::of(user),
-            option::of(vec((tile.clone(), tile), 0..5)),
+            option::of(vec((tile.clone(), tile.clone()), 0..5)),
             option::of(site.clone()),
             option::of(vec(site, 0..3)),
             any::<bool>(),
-            option::of(select(crate::vocabulary::ORES.to_vec())),
+            option::of((
+                select(crate::vocabulary::ORES.to_vec()),
+                option::of(tile.clone()),
+            )),
             option::of((1..=5, 0..=9_999_999, 0..=9_999_999)),
             any::<bool>(),
         );

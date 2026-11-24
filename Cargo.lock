@@ -272,6 +272,7 @@ dependencies = [
  "fabot-layout",
  "screeps-game-api",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

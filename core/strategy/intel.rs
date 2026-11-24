@@ -53,7 +53,8 @@ pub fn step(world: &World, intel: &mut Intel) {
                 (room.structures.iter())
                     .any(|c| c.kind == StructureType::Container && c.pos.within(1, &s.pos))
             }),
-            mineral: room.minerals.first().and_then(|m| m.resource),
+            mineral: (room.minerals.first())
+                .and_then(|m| Some((m.resource?, Some(tiles::of_pos(&m.pos))))),
             stronghold: (room.structures.iter())
                 .find(|s| s.kind == StructureType::InvaderCore && s.level > 0)
                 .map(|s| Stronghold {
