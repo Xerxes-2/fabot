@@ -13,7 +13,7 @@ pub fn can_move(creep: &Creep, factor: FatigueFactor) -> bool {
 
 /// Within two ticks: what a walker meeting it head-on waits to swap with.
 pub fn rests_soon(creep: &Creep, factor: FatigueFactor) -> bool {
-    factor.moves > 0 && creep.fatigue <= 4 * factor.moves
+    grid::rest(factor, creep.fatigue).is_some_and(|r| r <= 2)
 }
 
 fn beside(atlas: &Atlas, creep: &Creep) -> Vec<Tile> {
@@ -174,7 +174,8 @@ pub fn swung(atlas: &Atlas, creep: &Creep, hostiles: &[Creep]) -> Option<TileSet
     let (room, here) = (creep.pos.room, tiles::of_pos(&creep.pos));
     let held = |t| grid::step_ticks(grid::factor_of(creep), atlas.ground_at(room, t)?);
     let leaves = |t| match tiles::range(here, t) {
-        0 => Some(rest(creep)),
+        // A body that cannot move never leaves.
+        0 => Some(grid::rest(grid::factor_of(creep), creep.fatigue).unwrap_or(i32::MAX)),
         d => Some(arrives(creep, d)? - 1 + held(t)?),
     };
     let struck = |t: &Tile| {
@@ -196,21 +197,12 @@ fn soonest(room: RoomName, hostiles: &[Creep], t: Tile) -> Option<i32> {
     swings.filter_map(|h| arrives(h, closes(h)?)).min()
 }
 
-/// The ticks before a body's fatigue lets it step; none for a body that cannot.
-fn rest(creep: &Creep) -> i32 {
-    let moves = grid::factor_of(creep).moves;
-    if moves > 0 {
-        (creep.fatigue + 2 * moves - 1) / (2 * moves)
-    } else {
-        0
-    }
-}
-
 /// The tick a body stands `n` tiles on at its pace on plain, its rest first; now for none.
 fn arrives(creep: &Creep, n: i32) -> Option<i32> {
-    let step = grid::step_ticks(grid::factor_of(creep), engine::PLAIN_WEIGHT);
+    let factor = grid::factor_of(creep);
+    let step = grid::step_ticks(factor, engine::PLAIN_WEIGHT);
     if n > 0 {
-        Some(rest(creep) + (n - 1) * step? + 1)
+        Some(grid::rest(factor, creep.fatigue)? + (n - 1) * step? + 1)
     } else {
         Some(0)
     }

@@ -223,6 +223,7 @@ dependencies = [
  "fabot-atlas",
  "fabot-base",
  "fabot-exchange",
+ "fabot-mv",
  "fabot-tactics",
  "proptest",
  "serde",

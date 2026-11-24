@@ -16,27 +16,31 @@ pub fn radius(n: usize) -> i32 {
     (n / 2) as i32
 }
 
-fn slowest(members: &[&Creep]) -> Mover {
-    let factors: Vec<FatigueFactor> = members.iter().map(|c| factor_of(c)).collect();
-    let slowest = (factors.iter().copied())
+/// The gait a set walks at: its slowest mover's on plain, then swamp, then road.
+pub fn slowest(factors: impl IntoIterator<Item = FatigueFactor>) -> Option<FatigueFactor> {
+    let pace = |f: &FatigueFactor| {
+        [
+            engine::PLAIN_WEIGHT,
+            engine::SWAMP_WEIGHT,
+            engine::ROAD_WEIGHT,
+        ]
+        .map(|w| step_ticks(*f, w))
+    };
+    (factors.into_iter())
         .filter(|f| f.moves > 0)
-        .min_by_key(|f| {
-            Reverse((
-                step_ticks(*f, engine::PLAIN_WEIGHT),
-                step_ticks(*f, engine::SWAMP_WEIGHT),
-                step_ticks(*f, engine::ROAD_WEIGHT),
-            ))
-        });
+        .min_by_key(|f| Reverse(pace(f)))
+}
+
+fn mover(members: &[&Creep]) -> Mover {
+    let factor = factor_of(members[0]);
     Mover {
         footprint: Footprint::One,
-        factor: slowest.unwrap_or(factors[0]),
+        factor: slowest(members.iter().map(|c| factor_of(c))).unwrap_or(factor),
     }
 }
 
-/// None for a body that cannot move.
 fn fatigue_ticks(creep: &Creep) -> Option<i32> {
-    let moves = factor_of(creep).moves;
-    (moves != 0).then(|| (creep.fatigue + 2 * moves - 1) / (2 * moves))
+    grid::rest(factor_of(creep), creep.fatigue)
 }
 
 pub fn wishes(
@@ -46,7 +50,7 @@ pub fn wishes(
     members: &[&Creep],
     fortified: &BTreeSet<RoomName>,
 ) -> Vec<Wish> {
-    let mover = slowest(members);
+    let mover = mover(members);
 
     fn left(
         atlas: &mut Atlas,

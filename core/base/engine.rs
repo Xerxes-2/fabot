@@ -175,10 +175,10 @@ pub fn tower_attack_at(range: i32) -> i32 {
 }
 
 /// The engine destroys parts from the head; a part with any hit left acts.
-pub fn live_parts(body: &[Part], hits: i32) -> Vec<Part> {
+pub fn live_parts(body: &[Part], hits: i32) -> &[Part] {
     let live = ((hits + PART_HITS - 1) / PART_HITS) as usize;
     let skip = body.len().saturating_sub(live);
-    body[skip..].to_vec()
+    &body[skip..]
 }
 
 pub fn strike_reach(live: impl Fn(Part) -> bool) -> i32 {
@@ -216,13 +216,12 @@ pub fn power_at<'a>(
     boosts: &'a [Option<ResourceType>],
     hits: i32,
 ) -> Box<dyn Fn(Part) -> i32 + 'a> {
+    let live = live_parts(body, hits);
     if boosts.is_empty() {
-        let live = live_parts(body, hits);
-        return Box::new(move |part| part_count_in(&live, part));
+        return Box::new(move |part| part_count_in(live, part));
     }
-    let live = ((hits + PART_HITS - 1) / PART_HITS) as usize;
-    let skip = body.len().saturating_sub(live);
-    let acting: Vec<(Part, Option<ResourceType>)> = body[skip..]
+    let skip = body.len() - live.len();
+    let acting: Vec<(Part, Option<ResourceType>)> = live
         .iter()
         .copied()
         .zip(boosts[skip..].iter().copied())

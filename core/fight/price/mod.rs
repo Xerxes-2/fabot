@@ -17,6 +17,7 @@ use fabot_base::{engine, tiles};
 use fabot_exchange::{
     self as exchange, Fighter, Ground, Losses, Outcome, Side, Stance, Terrain, fighter,
 };
+use fabot_mv::blob;
 use fabot_tactics::{self as tactics, Offer, Tactic};
 
 type CopiesOf<'a> = Box<dyn Fn(&casting::Body) -> i32 + 'a>;
@@ -812,10 +813,7 @@ fn cast_all(set: &[casting::Body]) -> Vec<Fighter> {
 }
 
 pub(super) fn gait(set: &[Fighter]) -> Option<grid::FatigueFactor> {
-    (set.iter())
-        .map(|f| f.gait)
-        .filter(|g| g.moves > 0)
-        .min_by_key(|g| std::cmp::Reverse(grid::step_ticks(*g, engine::PLAIN_WEIGHT)))
+    blob::slowest(set.iter().map(|f| f.gait))
 }
 
 pub(super) fn entries(

@@ -12,6 +12,7 @@ doctest = false
 fabot-base.workspace = true
 fabot-atlas.workspace = true
 fabot-exchange.workspace = true
+fabot-mv.workspace = true
 fabot-tactics.workspace = true
 serde.workspace = true
 

@@ -67,6 +67,10 @@ pub fn loaded_factor(body: &[Part]) -> FatigueFactor {
     }
 }
 
+pub fn rest(factor: FatigueFactor, fatigue: i32) -> Option<i32> {
+    (factor.moves > 0).then(|| (fatigue + 2 * factor.moves - 1) / (2 * factor.moves))
+}
+
 /// In half-ticks: at least one, since no step is free. None without MOVE.
 fn step_units(factor: FatigueFactor, weight: i32) -> Option<i32> {
     (factor.moves > 0).then(|| 1.max((weight * factor.weight + factor.moves - 1) / factor.moves))
