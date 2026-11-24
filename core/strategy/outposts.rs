@@ -18,6 +18,8 @@ use fabot_fight::shape::{Engagement, Objective};
 
 /// What one intent costs the engine; a body acts about once a tick.
 const INTENT_CPU: f64 = 0.2;
+/// An outpost's containers serve its tenure: in soaks the mean outpost held 11-14k ticks.
+const TENURE: f64 = 9_000.0;
 
 pub struct Candidate {
     pub outpost: Outpost,
@@ -37,12 +39,11 @@ struct Price {
     net: f64,
     spawn: f64,
     cpu: f64,
-    value: f64,
+    unbuilt: f64,
 }
 
-fn price(c: &Candidate, capacity: i32, walk: i32) -> Price {
+fn price(c: &Candidate, capacity: i32) -> Price {
     use Part::{Carry, Claim, Move};
-    let life = f64::from(engine::CREEP_LIFETIME);
     let reserver = [Claim, Move];
     let reserved = capacity >= engine::body_cost(&reserver);
     let rate = if reserved {
@@ -55,11 +56,13 @@ fn price(c: &Candidate, capacity: i32, walk: i32) -> Price {
         bodies::sized(Pattern::Harvester, derived::dig_work(rate), capacity).unwrap_or_default();
     // A new remote has no road: its haulers are 1:1.
     let pair = [Carry, Move];
-    let carry = n * f64::from(rate * (2 * walk + 2)) / f64::from(engine::CARRY_PART_CAPACITY);
+    let carry =
+        |walk: i32| n * f64::from(rate * (2 * walk + 2)) / f64::from(engine::CARRY_PART_CAPACITY);
+    let (carry, walked) = (carry(c.walk), carry(c.walked));
     let per_body = f64::from((capacity / engine::body_cost(&pair)).clamp(1, 25));
 
     let mut upkeep = n * slots::upkeep(&dig) + carry * slots::upkeep(&pair);
-    let mut spawn = n * slots::spawn_ticks(&dig) + carry * slots::spawn_ticks(&pair);
+    let mut spawn = n * slots::spawn_ticks(&dig) + walked * slots::spawn_ticks(&pair);
     let mut bodies = n + (carry / per_body).ceil();
     if reserved {
         upkeep += slots::upkeep(&reserver);
@@ -69,23 +72,22 @@ fn price(c: &Candidate, capacity: i32, walk: i32) -> Price {
     let lost = if c.contested { upkeep } else { 0.0 };
     let net = n * f64::from(rate) - upkeep - lost;
     // Its haul is priced unroaded, so a road repays itself and is no setup.
-    let setup = n * f64::from(engine::CONTAINER_BUILD_COST) / life;
-    let unbuilt = if c.stands { 0.0 } else { setup };
+    let setup = n * f64::from(engine::CONTAINER_BUILD_COST) / TENURE;
     Price {
         net,
         spawn,
         cpu: bodies * INTENT_CPU,
-        value: (net - unbuilt) / spawn.max(1.0),
+        unbuilt: if c.stands { 0.0 } else { setup },
     }
 }
 
-fn price_at(world: &World, c: &Candidate, walk: i32) -> Price {
-    price(c, world.room(c.home).map_or(0, |r| r.energy_capacity), walk)
+fn price_at(world: &World, c: &Candidate) -> Price {
+    price(c, world.room(c.home).map_or(0, |r| r.energy_capacity))
 }
 
 /// The energy a tick `c` nets its home, as `chosen` ranks it.
 pub fn net(world: &World, c: &Candidate) -> f64 {
-    price_at(world, c, c.walk).net
+    price_at(world, c).net
 }
 
 /// An operation holds only the colonies it casts from: a claim its sponsor; a
@@ -183,20 +185,23 @@ pub fn chosen(
     }
     let mut cpu_left = world.cpu_limit * tuning.outpost_cpu_share;
     let mut priced: Vec<(Price, Candidate)> = (candidates.into_iter())
-        .map(|c| (price_at(world, &c, c.walk), c))
+        .map(|c| {
+            let mut p = price_at(world, &c);
+            p.spawn += spend(c.home, p.net);
+            (p, c)
+        })
         .collect();
+    let value = |p: &Price| (p.net - p.unbuilt) / p.spawn.max(1.0);
     priced.sort_by(|(pa, a), (pb, b)| {
         (b.declared.cmp(&a.declared))
-            .then(pb.value.total_cmp(&pa.value))
+            .then(value(pb).total_cmp(&value(pa)))
             .then(a.outpost.room.cmp(&b.outpost.room))
     });
     let mut out = Vec::new();
     let mut rising: BTreeSet<RoomName> = BTreeSet::new();
     for (p, c) in priced {
         let left = spawn_left.entry(c.home).or_default();
-        let walked = price_at(world, &c, c.walked).spawn;
-        let spawn = walked + spend(c.home, p.net);
-        let unpaid = p.net <= 0.0 || spawn > *left || p.cpu > cpu_left;
+        let unpaid = p.net <= 0.0 || p.spawn > *left || p.cpu > cpu_left;
         // A busy home holds back a new room, not the spawn time it ranks for.
         let yields = busy.contains(&c.home) && !c.stands;
         if !c.declared && (unpaid || rising.contains(&c.home)) {
@@ -205,7 +210,7 @@ pub fn chosen(
         if !c.stands && stocked(c.home) {
             rising.insert(c.home);
         }
-        *left -= spawn;
+        *left -= p.spawn;
         cpu_left -= p.cpu;
         if !c.declared && !yields {
             out.push(c.outpost);
@@ -354,6 +359,6 @@ mod tests {
         let haul = f64::from(engine::HELD_OUTPUT_PER_TICK * 2) / 50.0 * 100.0 / 1500.0;
         let upkeep = 800.0 / 1500.0 + haul + 650.0 / 600.0;
         let net = f64::from(engine::HELD_OUTPUT_PER_TICK) - upkeep;
-        assert!((price(&c, 800, 0).net - net).abs() < 1e-9);
+        assert!((price(&c, 800).net - net).abs() < 1e-9);
     }
 }
