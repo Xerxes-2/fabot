@@ -30,7 +30,7 @@ export const SIM_MEASURES = new Set([
   "spawnStuck", "scoutsCast", "scoutStill", "scoutTicksIn", "reserverOnPost", "castIn", "bodiesOut", "bodiesStruck", "struckOn",
   "deathsError", "attackersAtEnd", "creepsLostBeforeSafeMode", "predictedWinsLost", "engagements", "repriced", "held", "oscillation", "bodiesLost", "waitedMost", "safeModes",
   "closedOnCore", "strongholdMisread", "strongholdDeploying", "strongholdFallenAt", "lootTaken", "boostedShort", "diedIn", "crossed", "heldPastWave", "idleMost", "answeredMost", "sentTo", "sentBack", "draftedAfterOthers", "arrivedApart", "signsSent", "signedInRun",
-  "liveEngagements", "sweptIn", "liveAstray", "liveEnergy", "defendsOpened", "defendSpent", "rivalSpent", "answeredAfter", "recycledWounded", "culled",
+  "liveEngagements", "sweptIn", "setMost", "formingMost", "bareMost", "spared", "killedBeside", "liveAstray", "liveEnergy", "defendsOpened", "defendSpent", "rivalSpent", "answeredAfter", "recycledWounded", "culled",
 ]);
 
 /** Whether a `worlds/`-shaped world holds a spawn of ours: a capture, not a map. */

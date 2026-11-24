@@ -537,8 +537,13 @@ with one phase machine per kind under `core/fight/kinds/`.
   worked rooms (the table's `Sweep` rows, §7.3; an owned room intel last saw
   with a tower is none, a siege's by `declarations.sieges` alone, owner
   decision), priced by prey plus
-  exposed-source harvest over a hunter's life per walk tick (denial is worth as
-  much as kills). Living sets spend their life in the enemy's field, rotating
+  exposed-source harvest over a hunter's life per walk tick: the output it
+  denies, never the escort it must beat (owner: pricing the escort made both
+  seats escalate in self-play). Its casts, tower squad included, and their
+  predicted losses cost no more than that worth less what it fields, and its
+  colonies' spawns cast them in the spawn time that life leaves
+  (`copies_within`, as an outpost `Defend`), each landing after its spawn and
+  the nearest colony's walk. Living sets spend their life in the enemy's field, rotating
   onward via `atlas::onward` (profitable rooms first, else stalest patrol; rooms
   with a tracker group still in `Lost` grace are not stale so a set never walks
   straight back into an escort it just left) rather than returning home; closes

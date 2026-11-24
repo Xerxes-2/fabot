@@ -147,7 +147,7 @@ pub(crate) fn priced(
 }
 
 /// What a stronghold is priced against, Strategy's row and Fight's open
-/// alike: the colony that casts and boosts its set (`Scene::boost_home`'s
+/// alike: the colony that casts and boosts its set (`Scene::nearest`'s
 /// rule: nearest by `walk`, within reach), its bank's capacity, its stock net
 /// of what other casts reserve (`stocks`), and that walk.
 pub fn priced_from(

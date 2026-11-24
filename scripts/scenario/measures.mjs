@@ -69,6 +69,7 @@ const outposts = (key) => (samples, a) => {
   return Object.keys(last.rooms).slice(1).reduce((n, r) => n + last.rooms[r][key] - (first.rooms[r]?.[key] ?? 0), 0);
 };
 const at = (samples, t) => samples.find((s) => s.t >= t) ?? samples.at(-1);
+const kindIn = (a) => (e) => (!a.kind || e.kind === a.kind) && openedIn(a)(e);
 const openedIn = (a) => (e) => (!a.room || e.room === a.room) && e.opened >= (a.from ?? 0) && e.opened < (a.to ?? Infinity);
 const within = (samples, a) => samples.filter((s) => s.t >= (a.from ?? 0) && s.t < (a.to ?? Infinity));
 const upgradedIn = (s, a) => (a.room ? (s.rooms[a.room]?.upgrade ?? 0) : s.ledger.upgrade);
@@ -412,6 +413,15 @@ export const measures = {
   // one with no core stayed open after its group was last seen.
   heldPastWave: (samples, _, dir) => Math.max(0, ...rowsOf(dir).filter((e) => !e.core).map((e) => (e.closed ?? samples.at(-1).t) - (e.seen ?? e.opened))),
   idleMost: (_, __, dir) => Math.max(0, ...rowsOf(dir).map((e) => e.idle ?? 0)),
+  // Of the engagements of `kind` (any, unnamed) opened in [from, to): the most bodies one held and
+  // asked at once, the most ticks one formed answered, a sweep's most ticks on end in a room with no
+  // rival creep, the ticks each rival body that is no fight's stood unhurt beside a sweep, and
+  // those whose tombstones stood beside it (`engaged.mjs`).
+  setMost: (_, a, dir) => Math.max(0, ...rowsOf(dir).filter(kindIn(a)).map((e) => e.set ?? 0)),
+  formingMost: (_, a, dir) => Math.max(0, ...rowsOf(dir).filter(kindIn(a)).map((e) => e.forming ?? 0)),
+  bareMost: (_, a, dir) => Math.max(0, ...rowsOf(dir).filter(kindIn(a)).map((e) => e.bare ?? 0)),
+  spared: (_, a, dir) => rowsOf(dir).filter(kindIn(a)).reduce((n, e) => n + (e.spared ?? 0), 0),
+  killedBeside: (_, a, dir) => rowsOf(dir).filter(kindIn(a)).reduce((n, e) => n + (e.killed ?? 0), 0),
   // The most ticks a Defend opened in `room` in [from, to) stood answered on casts none of which stood.
   waitedMost: (_, a, dir) => Math.max(0, ...defendsIn(dir, a).map((e) => e.waited ?? 0)),
   // Over the Defends that drafted a body in [from, to) and never stood down, the most ticks from

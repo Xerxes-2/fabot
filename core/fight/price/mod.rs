@@ -387,7 +387,7 @@ impl<'a> Scene<'a> {
     /// The set beside `ours` that beats the room's escort and out-heals the
     /// towers where it works, or what strikes `ours` where they stand (owner:
     /// a set tanking two towers at 20 is cheap), within what holding the room
-    /// is worth.
+    /// is worth and the spawn time its held life leaves: one cast later denies less.
     pub(super) fn hunt(
         &self,
         ground: &Hunting,
@@ -397,18 +397,26 @@ impl<'a> Scene<'a> {
         boosts: &Stock,
     ) -> Option<casting::Pricing> {
         let at = &ground.at;
-        let worth = ground.worth + ground.escort.iter().map(sweep::worth).sum::<i32>();
+        let fielded: i32 = ours.iter().map(|f| engine::body_cost(&f.body)).sum();
+        let worth = (ground.worth - fielded).max(0);
+        let spawning = ground.spawning
+            - (ours.iter().filter(|f| f.pos.is_none()))
+                .map(|f| engine::SPAWN_TICKS_PER_PART * f.body.len() as i32)
+                .sum::<i32>();
         let theirs = Side {
             bodies: ground.escort.iter().map(casting::fighter_of).collect(),
             ..Side::default()
         };
         let mut priced = casting::price(
             Stance::Standoff,
-            &casting::side_in(&self.world.rules, Some(room), ours.clone()),
+            &Side {
+                cast_walk: ground.walk,
+                ..casting::side_in(&self.world.rules, Some(room), ours.clone())
+            },
             &theirs,
             casting::terrain_at(Some(room), at),
             &casting::walking(capacity),
-            |body| worth / engine::body_cost(body),
+            |body| casting::copies_within(worth, spawning, body),
             0,
             boosts,
         )?;
@@ -432,7 +440,11 @@ impl<'a> Scene<'a> {
         }
 
         let cost: i32 = priced.set.iter().map(|b| engine::body_cost(b)).sum();
-        (holds(&priced.set) && cost <= worth).then_some(priced)
+        let spawned: i32 = (priced.set.iter())
+            .map(|b| engine::SPAWN_TICKS_PER_PART * b.len() as i32)
+            .sum();
+        let paid = cost + priced.outcome.losses().energy <= worth && spawned <= spawning;
+        (holds(&priced.set) && paid).then_some(priced)
     }
 
     /// Each room an enemy works a sweep may commit to, its worth, the nearest
@@ -459,11 +471,7 @@ impl<'a> Scene<'a> {
                         && !Scene::safe(r)
                 })?;
                 let e = fresh(0, Objective::Sweep, *name, 0, Tactic::Kite);
-                let walk = self
-                    .colonies_of(atlas, &e)
-                    .iter()
-                    .filter_map(|r| self.walk_to(atlas, &e, r.name))
-                    .min()?;
+                let walk = g.walk?;
                 let capacity = self.capacity_of(atlas, &e);
                 let boosts = self.boosts_for(atlas, &e, &self.boosts);
                 let won = self.hunt(g, room, Vec::new(), capacity, &boosts).is_some();
@@ -553,13 +561,8 @@ impl<'a> Scene<'a> {
             .filter_map(|n| self.ours.get(n.as_str()))
             .map(|c| self.fighter(c))
             .collect();
-        fielding.extend(
-            asked
-                .casts
-                .iter()
-                .filter(|c| c.engagement == e.id)
-                .map(|c| fighter::cast(&c.body)),
-        );
+        let casts = (asked.casts.iter()).filter(|c| c.engagement == e.id);
+        fielding.extend(casts.map(|c| fighter::cast(&c.body)));
 
         let capacity = self.capacity_of(atlas, e);
         let boosts = self.boosts_for(atlas, e, &asked.boosts);
@@ -584,9 +587,8 @@ impl<'a> Scene<'a> {
         let escort = &ground.escort;
         // A set walks in as one; in its room each body's step is its own.
         let together = e.ours.len() + joining.len() + set.len() > 1;
-        let worth = ground.worth + escort.iter().map(sweep::worth).sum::<i32>();
         let (candidates, pin) = self.ruled(e, sweep::CANDIDATES);
-        let offers = sweep_offers(&candidates, together, worth, &set);
+        let offers = sweep_offers(&candidates, together, ground.worth, &set);
 
         let Some(tactic) = tactics::select(&offers, pin).map(|o| o.tactic) else {
             let onward = onward().filter(|_| !e.ours.is_empty());
@@ -684,9 +686,7 @@ impl<'a> Scene<'a> {
         // another and walked from the nearest colony; held by none, it goes
         // as it stands. Held, it counts a body only if it lives to the fight's
         // end, or bodies with 19-99 ticks to live price a win it reaches with one.
-        let colony = (self.colonies_of(atlas, e).iter())
-            .filter_map(|r| self.walk_to(atlas, e, r.name))
-            .min();
+        let colony = self.nearest(atlas, e).map(|(walk, _)| walk);
         let waiting = |casts: &[casting::Body]| match casts.len() {
             0 => 0,
             _ => engine::SPAWN_TICKS_PER_PART * casts.concat().len() as i32 + colony.unwrap_or(0),
@@ -735,9 +735,7 @@ impl<'a> Scene<'a> {
                         .filter(|h| !self.cores.contains(&h.id))
                         .fold(0, |most, h| most.max(h.ticks_to_live));
 
-                    let spawns = (self.world.working_spawns())
-                        .filter(|s| colonies.iter().any(|r| r.name == s.pos.room))
-                        .count() as i32;
+                    let spawns = self.spawns_in(&colonies);
 
                     let razing = casting::razer(capacity, core_hits, &[]);
 

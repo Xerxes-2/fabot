@@ -13,7 +13,7 @@ export function engagements(write, at) {
   // it targeted, which catch a death that closed it before it counted one.
   async function close(rec, t) {
     const graves = (await at([...rec.rooms])).filter((o) => o.type === "tombstone" && o.ours && o.ttl > 1 && rec.ours.has(o.name));
-    const { members, ours, rooms, swing, blind, asking, reached, fought, ...rest } = rec;
+    const { members, ours, rooms, swing, blind, asking, reached, fought, formed, empty, tombs, ...rest } = rec;
     const swung = Object.fromEntries(Object.entries(swing).map(([n, { ticks, swings }]) => [n, { ticks, swings }]));
     // `apart`: the ticks between the first and the last of its bodies coming within three of its raid.
     const ticks = Object.values(reached);
@@ -43,7 +43,7 @@ export function engagements(write, at) {
       const asked = new Set((fight?.casts ?? []).map((c) => c.engagement));
       for (const e of fight?.engagements ?? []) {
         now.add(e.id);
-        const rec = open.get(e.id) ?? { id: e.id, kind: e.kind ?? "defend", room: e.room, opened: t, members: new Set(), ours: new Set(), rooms: new Set(), swing: {}, reached: {}, answered: false, gaveUp: false, disengaged: false, contact: null, seen: null, dead: 0, blind: 0, idle: 0, asking: 0, waited: 0 };
+        const rec = open.get(e.id) ?? { id: e.id, kind: e.kind ?? "defend", room: e.room, opened: t, members: new Set(), ours: new Set(), rooms: new Set(), swing: {}, reached: {}, answered: false, gaveUp: false, disengaged: false, contact: null, seen: null, dead: 0, blind: 0, idle: 0, asking: 0, waited: 0, set: 0, formed: 0, forming: 0, empty: 0, bare: 0, spared: 0, tombs: new Set() };
         open.set(e.id, rec);
         for (const m of (fight.groups ?? []).find((g) => g.id === e.group)?.members ?? []) rec.members.add(m);
         rec.predicted = e.predicted;
@@ -66,6 +66,10 @@ export function engagements(write, at) {
         // `waited`: the most ticks on end a Defend stood answered on casts asked, none of its bodies standing.
         rec.asking = rec.kind === "defend" && !e.unanswered && !ours.length && asked.has(e.id) ? rec.asking + 1 : 0;
         rec.waited = Math.max(rec.waited, rec.asking);
+        // `set`: the most bodies it held and asked at once; `forming`: the most ticks on end it formed answered.
+        rec.set = Math.max(rec.set, ours.length + (fight.casts ?? []).filter((c) => c.engagement === e.id).length);
+        rec.formed = e.phase === "forming" && !e.unanswered ? rec.formed + 1 : 0;
+        rec.forming = Math.max(rec.forming, rec.formed);
         const theirs = objects.filter((o) => rec.members.has(o.id));
         if (theirs.length) rec.seen = t;
         rec.core ||= theirs.some((o) => o.type === "invaderCore");
@@ -74,6 +78,17 @@ export function engagements(write, at) {
         const close = bodies.some((o) => theirs.some((h) => near(h, o, 3)));
         if (rec.contact === null && (close || theirs.some((h) => h.hits < h.hitsMax))) rec.contact = t;
         swinging(rec, bodies, t, struck);
+        // A sweep with all its bodies in its room: `bare`, the most ticks on end no
+        // rival creep stood there; `spared`, the ticks each rival body that is no fight's stood there unhurt.
+        if (rec.kind !== "sweep") continue;
+        const held = bodies.length > 0 && bodies.every((o) => o.room === e.room);
+        const rivals = held ? objects.filter((o) => o.type === "creep" && !o.ours && o.room === e.room) : [];
+        rec.empty = held && !rivals.length ? rec.empty + 1 : 0;
+        rec.bare = Math.max(rec.bare, rec.empty);
+        rec.spared += rivals.filter((o) => !o.name.startsWith("fight-") && o.hits >= o.hitsMax).length;
+        // `killed`: the rival bodies that are no fight's whose tombstones stood beside it.
+        if (held) for (const o of objects) if (o.type === "tombstone" && !o.ours && o.room === e.room && !o.name.startsWith("fight-")) rec.tombs.add(o.id);
+        rec.killed = rec.tombs.size;
       }
       for (const [id, rec] of open)
         if (!now.has(id)) {

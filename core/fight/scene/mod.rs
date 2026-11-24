@@ -46,6 +46,8 @@ pub(super) struct Hunting {
     pub(super) marks: Vec<tactics::Mark>,
     pub(super) worth: i32,
     pub(super) at: Pos,
+    pub(super) walk: Option<i32>,
+    pub(super) spawning: i32,
 }
 
 pub(super) struct Scene<'a> {
@@ -195,9 +197,8 @@ impl<'a> Scene<'a> {
         // Denied only once a body stands there: its life less the most a body
         // spawns in and its walk.
         let e = fresh(0, Objective::Sweep, room.name, 0, Tactic::Kite);
-        let walk = (self.colonies_of(atlas, &e).iter())
-            .filter_map(|r| self.walk_to(atlas, &e, r.name))
-            .min();
+        let colonies = self.colonies_of(atlas, &e);
+        let walk = self.nearest(atlas, &e).map(|(walk, _)| walk);
         let spawn = engine::SPAWN_TICKS_PER_PART * engine::MAX_BODY_PARTS as i32;
         let held = walk.map_or(0, |w| engine::CREEP_LIFETIME - spawn - w);
         let all = sweep::prey(room);
@@ -314,6 +315,8 @@ impl<'a> Scene<'a> {
                 .unwrap_or_else(|| middle(room.name)),
             escort,
             marks,
+            walk,
+            spawning: spawn * self.spawns_in(&colonies),
         }
     }
 
@@ -353,13 +356,12 @@ impl<'a> Scene<'a> {
         (*rooms.get(rooms.len().checked_sub(2)?)?).into()
     }
 
-    /// The nearest colony: a set is priced as walked and boosted from it, and
-    /// a body its stock boosts is cast there.
-    fn boost_home(&self, atlas: &Atlas, e: &Engagement) -> Option<RoomName> {
+    /// The nearest colony and its walk: a set is priced as walked and boosted
+    /// from it, and a body its stock boosts is cast there.
+    pub(super) fn nearest(&self, atlas: &Atlas, e: &Engagement) -> Option<(i32, RoomName)> {
         (self.colonies_of(atlas, e).iter())
             .filter_map(|r| Some((self.walk_to(atlas, e, r.name)?, r.name)))
             .min()
-            .map(|(_, home)| home)
     }
 
     pub(super) fn boosts_for(
@@ -369,7 +371,8 @@ impl<'a> Scene<'a> {
         left: &casting::Boosts,
     ) -> boost::Stock {
         (self
-            .boost_home(atlas, e)
+            .nearest(atlas, e)
+            .map(|(_, home)| home)
             .filter(|_| e.phase == Phase::Forming))
         .and_then(|home| left.get(&home))
         .cloned()
@@ -407,6 +410,12 @@ impl<'a> Scene<'a> {
             .collect()
     }
 
+    pub(super) fn spawns_in(&self, colonies: &[&Room]) -> i32 {
+        (self.world.working_spawns())
+            .filter(|s| colonies.iter().any(|r| r.name == s.pos.room))
+            .count() as i32
+    }
+
     pub(super) fn capacity_of(&self, atlas: &Atlas, e: &Engagement) -> i32 {
         self.colonies_of(atlas, e)
             .iter()
@@ -438,8 +447,8 @@ impl<'a> Scene<'a> {
         set: casting::Asking,
         asked: &mut Asked,
     ) -> Vec<Boosted> {
-        let boost_at =
-            (self.boost_home(atlas, e)).filter(|_| set.boosted && e.phase == Phase::Forming);
+        let boost_at = (self.nearest(atlas, e).map(|(_, home)| home))
+            .filter(|_| set.boosted && e.phase == Phase::Forming);
         let asks: Vec<Wanted> = (e.free(&asked.casts).zip(set.bodies))
             .map(|(slot, body)| Wanted {
                 slot,
@@ -533,10 +542,7 @@ impl<'a> Scene<'a> {
     /// A body that dies before a successor asked now could stand is
     /// succeeded in its slot (§6.2's rotation).
     pub(super) fn succeed(&self, atlas: &Atlas, e: &Engagement, asked: &mut Asked) {
-        let Some((walk, home)) = (self.colonies_of(atlas, e).iter())
-            .filter_map(|r| Some((self.walk_to(atlas, e, r.name)?, r.name)))
-            .min()
-        else {
+        let Some((walk, home)) = self.nearest(atlas, e) else {
             return;
         };
 
