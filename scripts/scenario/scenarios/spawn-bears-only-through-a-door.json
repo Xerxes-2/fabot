@@ -1,0 +1,10 @@
+{
+  "why": "a spawn bears a body only onto a tile it walks out from: the tile above this one is a pocket our extensions close, which the engine's first free side (top, clockwise) would bear the first body into for life",
+  "modules": ["layout"],
+  "start": { "world": "scripts/scenario/worlds/spawn-pocket.json", "seed": 1 },
+  "ticks": 1500,
+  "assert": [
+    { "measure": "bornStuck", "max": 0 },
+    { "measure": "spawnStuck", "max": 10 }
+  ]
+}

@@ -20,6 +20,7 @@ use fabot_base::wish::Wish;
 use fabot_base::world::{
     self, Id, Pos, Room, RoomName, Rules, Sightings, Structure, StructureType, World,
 };
+use fabot_layout::shape::LayoutState;
 use fabot_mv as mv;
 use fabot_strategy::{self as strategy, intel};
 use fabot_tactics as tactics;
@@ -76,13 +77,15 @@ fn drawn(rules: &Rules, r: &Room, spawn: &Pos) -> Vec<Id> {
 /// Each room's spawn queue, in `Rank` order on its idle spawns while the bank
 /// pays: a Defend the bank cannot pay yet holds what ranks behind it, any
 /// other ask nothing.
-pub fn queue(world: &World, asks: &[(RoomName, Ask)]) -> Vec<Action> {
+fn queue(context: &Context, layout: &LayoutState, asks: &[(RoomName, Ask)]) -> Vec<Action> {
+    let world = context.world;
     let mut out = Vec::new();
     for (room, mut asks) in by_room(asks) {
         asks.sort_by_key(|a| a.rank);
         let Some(r) = world.room(room) else {
             continue;
         };
+        let open = |t| context.atlas.ground_at(room, t).is_some();
         let mut idle = world
             .working_spawns()
             .filter(|s| s.pos.room == room && s.spawning.is_none());
@@ -104,6 +107,8 @@ pub fn queue(world: &World, asks: &[(RoomName, Ask)]) -> Vec<Action> {
                     a.body.clone(),
                     a.name.clone(),
                     drawn(&world.rules, r, &spawn.pos),
+                    (layout.get(&room).and_then(|s| s.plan.as_ref()))
+                        .map_or_else(Vec::new, |p| p.doors(tiles::of_pos(&spawn.pos), open)),
                 ),
             ));
             bank -= cost;
@@ -228,8 +233,8 @@ fn boost_stop(
     Some(walks)
 }
 
-fn settle(context: &mut Context, asked: &ModuleOutput) -> Settled {
-    let mut out = queue(context.world, &asked.asks);
+fn settle(context: &mut Context, layout: &LayoutState, asked: &ModuleOutput) -> Settled {
+    let mut out = queue(context, layout, &asked.asks);
     out.extend(asked.actions.iter().cloned());
     let walks = boost_stop(context, &mut out, &asked.wishes);
     let (moves, held) = arbitrate(context, walks.as_deref().unwrap_or(&asked.wishes));
@@ -274,7 +279,7 @@ pub fn run(
     }
 
     let start = clock();
-    let settled = settle(context, &asked);
+    let settled = settle(context, &state.layout, &asked);
     reports.push(Report {
         module: "settle",
         cpu: clock() - start,

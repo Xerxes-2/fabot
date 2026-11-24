@@ -2,7 +2,7 @@
 // change to both. Nothing is kept: the views die with the tick.
 const CREEP = 0;
 const ROOM = 1;
-const [INT, TEXT, BY_ID, TEXTS] = [0, 1, 2, 3];
+const [INT, TEXT, BY_ID, TEXTS, DRAWN] = [0, 1, 2, 3, 4];
 const [CODE, GONE, THREW] = [0, 1, 2];
 const NOT_FOUND = -5;
 
@@ -42,7 +42,10 @@ globalThis.__fabotExec = (ints, text) => {
         args.push(target);
       } else {
         const words = Array.from(ints.subarray(at, (at += x)), (w) => strs[w]);
-        args.push(tag === TEXTS ? words : x === 0 ? {} : { energyStructures: words.map(byId).filter((s) => s !== undefined) });
+        if (tag === TEXTS) args.push(words);
+        else if (tag === DRAWN) args.push(x === 0 ? {} : { energyStructures: words.map(byId).filter((s) => s !== undefined) });
+        // The engine refuses an empty list.
+        else if (x > 0) args.at(-1).directions = words.map(Number);
       }
     }
     if (self === undefined) refused.push(i, NOT_FOUND, GONE);

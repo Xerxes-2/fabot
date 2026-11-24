@@ -192,6 +192,9 @@ export const measures = {
         .filter((b) => b.ours && b.first <= Number(b.name.split("-")[1]) + SEEN_AFTER_CAST)
         .map((b) => (b.left ?? b.last + 1) - b.first - SPAWN_TIME_PER_PART * b.body.length),
     ),
+  // Our bodies that stood where they were born the rest of a life 100 ticks
+  // past it (every tick still but the birth step): born where no walk leaves.
+  bornStuck: (_, __, dir) => livesOf(dir).filter((b) => b.ours && b.left !== undefined && b.last - b.left >= 100 && (b.still ?? 0) >= b.last - b.first - 1).length,
   // Scouts cast, the most ticks one stood still (a scout never idles), and
   // the ticks scouts stood in `room`.
   scoutsCast: (_, __, dir) => new Set(scoutsOf(dir).map((b) => b.name)).size,

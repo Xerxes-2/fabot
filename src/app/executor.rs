@@ -24,6 +24,7 @@ const TEXT: i32 = 1;
 const BY_ID: i32 = 2;
 const TEXTS: i32 = 3;
 const DRAWN: i32 = 4;
+const DOORS: i32 = 5;
 const GONE: i32 = 1;
 const THREW: i32 = 2;
 const ERR_INVALID_ARGS: i32 = -10;
@@ -187,10 +188,11 @@ impl Pack {
             Action::Spawn(id, SpawnAct::RecycleCreep(creep)) => {
                 self.call(OBJECT, id, "recycleCreep").by_id(creep)
             }
-            Action::Spawn(id, SpawnAct::SpawnCreep(body, name, drawn)) => {
+            Action::Spawn(id, SpawnAct::SpawnCreep(body, name, drawn, doors)) => {
                 (self.call(OBJECT, id, "spawnCreep").list(TEXTS, body))
                     .text(name)
                     .list(DRAWN, drawn)
+                    .list(DOORS, doors)
             }
         };
     }

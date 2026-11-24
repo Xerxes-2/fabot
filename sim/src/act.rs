@@ -306,7 +306,7 @@ impl Run<'_> {
     fn spawn(
         &mut self,
         id: world::Id,
-        (body, name, drawn): (&[Part], &str, &[world::Id]),
+        (body, name, drawn, doors): (&[Part], &str, &[world::Id], &[i32]),
     ) -> Result<(), ErrorCode> {
         let (room, spawn) = self.at.get(id).ok_or(NotFound)?;
         check(
@@ -332,6 +332,9 @@ impl Run<'_> {
         let mut value = json!({ "name": name, "body": body });
         if !drawn.is_empty() {
             value["energyStructures"] = json!(drawn);
+        }
+        if !doors.is_empty() {
+            value["directions"] = json!(doors);
         }
         self.stored.put(room, &id.text(), "createCreep", value);
         Ok(())
@@ -401,8 +404,8 @@ impl Run<'_> {
                 "recycle",
                 self.on(*id, &[*c], "recycleCreep", json!({ "id": c })),
             ),
-            Action::Spawn(id, SpawnAct::SpawnCreep(body, name, drawn)) => {
-                ("spawn", self.spawn(*id, (body, name, drawn)))
+            Action::Spawn(id, SpawnAct::SpawnCreep(body, name, drawn, doors)) => {
+                ("spawn", self.spawn(*id, (body, name, drawn, doors)))
             }
         }
     }

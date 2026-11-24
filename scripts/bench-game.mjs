@@ -23,7 +23,12 @@ const FREE = new Set(["say"]);
 let tick;
 let data;
 let intents;
-const idOf = (a) => (a !== null && typeof a === "object" && !Array.isArray(a) ? (a.id ?? a.name) : a);
+// An options object (spawnCreep's) compares by what it names, its structures by id.
+const idOf = (a) => {
+  if (Array.isArray(a)) return a.map(idOf);
+  if (a === null || typeof a !== "object") return a;
+  return a.id ?? a.name ?? Object.fromEntries(Object.entries(a).map(([k, v]) => [k, idOf(v)]));
+};
 
 const roomNames = [];
 const toXY = (name) => {
