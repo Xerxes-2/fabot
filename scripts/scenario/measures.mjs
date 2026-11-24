@@ -300,6 +300,8 @@ export const measures = {
     const waits = rowsOf(dir).filter((e) => e.kind === "defend" && openedIn(a)(e)).map((e) => (e.contact ?? Infinity) - e.opened);
     return waits.length ? Math.max(...waits) : Infinity;
   }),
+  // The ticks Defends that disengaged as their raid stepped out stood so with it back in their room (engaged.mjs).
+  disengagedBeside: (_, __, dir) => rowsOf(dir).reduce((n, e) => n + (e.beside ?? 0), 0),
   // Sweeps that ever targeted `room`, wherever they opened.
   sweptIn: on("room", (_, a, dir) => rowsOf(dir).filter((e) => e.kind === "sweep" && e.rooms?.includes(a.room)).length),
   // Acts the engine refused (the soak's refusals.json) that `counted` counts.

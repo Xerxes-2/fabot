@@ -35,6 +35,7 @@ pub struct Facts {
     pub held: bool,
     pub asked: bool,
     pub on_our_ground: bool,
+    pub returned: bool,
     pub clear: bool,
     pub raided: bool,
     pub remembered: bool,
@@ -166,6 +167,17 @@ pub(crate) fn unvisited(scene: &Scene, e: &Engagement) -> bool {
     e.plan.tactic == Tactic::Hold && fights && off_post(scene, e)
 }
 
+/// Or on the edge tile facing it next door, as a bounce over the border leaves nothing.
+pub(crate) fn on_ground(scene: &Scene, centre: &Pos) -> bool {
+    let across = tiles::room_toward(centre.room, tiles::exit_of(tiles::of_pos(centre)));
+    scene.defended.contains(&centre.room) || across.is_some_and(|r| scene.defended.contains(&r))
+}
+
+pub(crate) fn returned(scene: &Scene, was: &[Group], e: &Engagement) -> bool {
+    let on = |g: &Group| on_ground(scene, &g.centre);
+    scene.by_id.get(&e.group).is_some_and(on) && !(was.iter()).any(|g| g.id == e.group && on(g))
+}
+
 const OUTPOST_LOSSES: i32 = 2;
 
 pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
@@ -174,12 +186,14 @@ pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
     let toward = |phase: Phase| Some(enter(phase, facts.time, e));
     let quit = || Some(give_up(facts.held, facts.time, e));
 
+    let spent = e.lost > e.budget + if facts.held { 0 } else { OUTPOST_LOSSES };
+
     // Closed while the raid stands, it reopens on it with a fresh budget.
     if e.phase == Phase::Disengaging {
-        return if facts.home && !facts.raided {
-            None
-        } else {
-            Some(e.clone())
+        return match (facts.home && !facts.raided, facts.returned && !spent) {
+            (true, _) => None,
+            (_, true) => toward(Phase::Forming),
+            _ => Some(e.clone()),
         };
     }
 
@@ -197,8 +211,7 @@ pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
             .or_else(quit);
     }
 
-    let spent = e.budget + if facts.held { 0 } else { OUTPOST_LOSSES };
-    if facts.group.is_some() && e.lost > spent {
+    if facts.group.is_some() && spent {
         return quit();
     }
 
@@ -742,6 +755,7 @@ mod tests {
             budget in 0..=3,
             (west, grouped) in any::<(bool, bool)>(),
             [in_reach, home, asked, on_our_ground, clear, remembered] in any::<[bool; 6]>(),
+            returned in any::<bool>(),
         ) {
             let room = if west { "W1N1" } else { "W2N1" };
             let group = grouped.then(|| Group {
@@ -767,18 +781,25 @@ mod tests {
                 held: false,
                 asked,
                 on_our_ground,
+                returned,
                 clear,
                 raided: true,
                 remembered,
             };
 
-            let beaten = facts.group.is_some() && e.lost > e.budget + OUTPOST_LOSSES;
-            if e.phase == Phase::Disengaging || beaten {
-                let next = step(&facts, &e).expect("a raid still standing keeps its room held");
-                prop_assert_eq!(next.phase, Phase::Disengaging);
+            let spent = e.lost > e.budget + OUTPOST_LOSSES;
+            let back = e.phase == Phase::Disengaging && returned && !spent;
+            let next = step(&facts, &e);
+            if back || e.phase == Phase::Disengaging || facts.group.is_some() && spent {
+                let next = next.as_ref().expect("a raid still standing keeps its room held");
+                if back {
+                    prop_assert_eq!((next.phase, next.since, next.budget), (Phase::Forming, 1, e.budget));
+                } else {
+                    prop_assert_eq!(next.phase, Phase::Disengaging);
+                }
             }
-            let next = step(&facts, &e).filter(|n| n.phase == Phase::Forming);
-            if facts.group.is_some() && let Some(next) = next {
+            let formed = next.filter(|n| n.phase == Phase::Forming);
+            if facts.group.is_some() && !back && let Some(next) = formed {
                 prop_assert_eq!(next.since, e.since, "a seen raid never re-forms");
             }
         }
@@ -810,6 +831,7 @@ mod tests {
                 held: false,
                 asked,
                 on_our_ground,
+                returned: false,
                 clear: false,
                 raided,
                 remembered,

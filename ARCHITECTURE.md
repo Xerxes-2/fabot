@@ -496,14 +496,22 @@ with one phase machine per kind under `core/fight/kinds/`.
   table's `Defend` rooms (§7.3: owned, worked, and the rooms their haul
   crosses; enemy workers in outposts and level-0 Invader cores count, as
   structure-less hostiles; Source Keepers never (`hostiles::foe`); the same
-  rooms are the ground it pursues on). Phases: `Forming →
+  rooms are the ground it pursues on, read off the raid's centre, the edge
+  tile facing one included, so a bounce over the border is no leaving). Phases: `Forming →
   Approaching → Fighting → Pursuing → Disengaging → closed`. Its loss budget
   is priced as it commits: its first answer to a raid, a newcomer group being
   a new raid. A re-price on a death or tracker event keeps it, or each death
   would lift it past every loss. An outpost fights on past its budget by
   `OUTPOST_LOSSES` (2) bodies, then gives up: it disengages and closes only
   once ours are home and `sightings` clears (closing sooner reopens on the
-  same raid with a fresh budget and feeds it bodies). Blind, with no body of
+  same raid with a fresh budget and feeds it bodies). Disengaged within that
+  bound, it re-forms and re-prices on the budget it kept the tick its raid's
+  centre steps from off our ground back onto it (the crossing is the event;
+  the centre is all a group keeps from one tick to the next). `❓` A raid
+  hovering a tile or two across the border flaps it, each re-form asking its
+  shortfall (self-play seed 7: 11 and 9 re-forms in 30k ticks, one Defend
+  re-formed, quit and re-formed within 46 ticks); stopping that needs a
+  deadline or a wider band (owner: ships as is). Blind, with no body of
   ours standing or asked, it re-forms and re-prices the raid
   `sightings.last` remembers after each loss or age-out while it has lost
   fewer than two, until the sighting expires, and casts and seeks it as a

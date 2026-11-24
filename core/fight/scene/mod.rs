@@ -593,11 +593,12 @@ impl<'a> Scene<'a> {
         e: &Engagement,
         standing: &BTreeSet<String>,
         aging_out: &BTreeSet<String>,
+        was: &[Group],
     ) -> DefendFacts {
         let group = self.by_id.get(&e.group).cloned();
         let on_our_ground = group
             .as_ref()
-            .is_some_and(|g| self.defended.contains(&g.room()));
+            .is_some_and(|g| defend::on_ground(self, &g.centre));
 
         DefendFacts {
             time: self.world.time,
@@ -609,6 +610,7 @@ impl<'a> Scene<'a> {
             held: self.homes.contains(&e.room),
             asked: self.spawning.iter().any(|c| c.engagement == e.id),
             on_our_ground,
+            returned: defend::returned(self, was, e),
             // A room in sight shows where its groups stand: one gone from it
             // has left, whoever else stands there (a core, or Invaders the
             // raid passed), and they open engagements of their own.

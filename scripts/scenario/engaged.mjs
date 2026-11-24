@@ -15,7 +15,7 @@ export function engagements(write, at, bodyOf = () => "") {
   // it targeted, which catch a death that closed it before it counted one.
   async function close(rec, t) {
     const graves = (await at([...rec.rooms])).filter((o) => o.type === "tombstone" && o.ours && o.ttl > 1 && rec.ours.has(o.name));
-    const { members, ours, rooms, swing, blind, asking, reached, fought, formed, empty, tombs, ...rest } = rec;
+    const { members, ours, rooms, swing, blind, asking, reached, fought, formed, empty, tombs, was, off, ...rest } = rec;
     const swung = Object.fromEntries(Object.entries(swing).map(([n, { ticks, swings }]) => [n, { ticks, swings }]));
     // `apart`: the ticks between the first and the last of its bodies coming within three of its raid.
     const ticks = Object.values(reached);
@@ -80,6 +80,11 @@ export function engagements(write, at, bodyOf = () => "") {
         rec.forming = Math.max(rec.forming, rec.formed);
         const theirs = objects.filter((o) => rec.members.has(o.id));
         if (theirs.length) rec.seen = t;
+        // `beside`: the ticks a Defend that disengaged as its raid stepped out stood so with its raid back in its room.
+        const raid = (fight.groups ?? []).find((g) => g.id === e.group);
+        if (e.phase === "disengaging" && rec.was !== "disengaging") rec.off = raid?.room !== e.room;
+        rec.was = e.phase;
+        if (rec.kind === "defend" && rec.off && e.phase === "disengaging" && raid?.room === e.room) rec.beside = (rec.beside ?? 0) + 1;
         rec.core ||= theirs.some((o) => o.type === "invaderCore");
         const bodies = objects.filter((o) => o.type === "creep" && o.ours && ours.includes(o.name));
         for (const o of bodies) if (theirs.some((h) => near(h, o, 3))) rec.reached[o.name] ??= t;

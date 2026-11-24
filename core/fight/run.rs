@@ -304,7 +304,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
                 Objective::Defend => {
                     let home = scene.homes.contains(&e.room);
                     let counted = if home { &standing } else { &able };
-                    defend::step(&scene.facts_of(e, counted, &aging_out), e)
+                    defend::step(&scene.facts_of(e, counted, &aging_out, &state.groups), e)
                 }
                 Objective::Siege(_) => {
                     let declared = declarations.priority(OpKind::Siege, e.room).is_some();
