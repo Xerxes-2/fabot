@@ -77,6 +77,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
     let world = context.world;
     let declarations = context.declarations;
     let preyed: &[RoomName] = &declarations.rooms(OpKind::Sweep).collect::<Vec<_>>();
+    let hunted = (preyed, &declarations.enemies);
     let sightings = context.sightings;
     let intel = context.intel;
     let atlas: &mut Atlas = &mut *context.atlas;
@@ -310,26 +311,25 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
                     let f = scene.siege_facts(e, declared, &standing, &aging_out, gates.get(&e.id));
                     siege::step(&f, e)
                 }
-                Objective::Sweep => sweep::step(
-                    &sweep::Facts {
-                        time: world.time,
-                        standing: standing.clone(),
-                        aging_out: aging_out.clone(),
-                        asked: scene.spawning.iter().any(|c| c.engagement == e.id),
-                        arrived: scene.members_of(e).iter().all(|c| c.pos.room == e.room),
-                        worth: grounds
-                            .get(&e.room)
-                            .map(|g| g.worth > 0 || !g.escort.is_empty()),
-                        safe: scene.in_sight(e.room).is_some_and(Scene::safe),
-                        elsewhere: scene.elsewhere(atlas, e, &candidates, &grounds),
-                        patrol: (grounds.get(&e.room))
-                            .filter(|g| g.worth == 0 && g.escort.is_empty())
-                            .and_then(|_| {
-                                sweep::patrol(&scene, atlas, e, (preyed, &declarations.enemies))
-                            }),
-                    },
-                    e,
-                ),
+                Objective::Sweep => {
+                    let members = scene.members_of(e);
+                    let held = members.is_empty() || sweep::holds(&scene, e, (e.room, &grounds));
+                    let worth = grounds.get(&e.room).map(|g| g.worth > 0 && held);
+                    let patrol = || sweep::patrol(&scene, atlas, e, hunted);
+                    sweep::step(
+                        &sweep::Facts {
+                            time: world.time,
+                            standing: standing.clone(),
+                            aging_out: aging_out.clone(),
+                            asked: scene.spawning.iter().any(|c| c.engagement == e.id),
+                            arrived: members.iter().all(|c| c.pos.room == e.room),
+                            worth,
+                            elsewhere: scene.elsewhere(atlas, e, &candidates, &grounds),
+                            patrol: (worth == Some(false)).then(patrol).flatten(),
+                        },
+                        e,
+                    )
+                }
                 Objective::Stronghold => stronghold::step(&scene, declarations, &standing, e),
             }?;
 
@@ -411,9 +411,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
         .collect();
 
     let sweeping = stepped.iter().any(|(e, _)| e.objective == Objective::Sweep);
-    let won = || candidates.iter().filter(|c| c.3);
-    let swept = atlas::onward(won().map(|(r, w, k, _)| (*r, *w, *k)))
-        .or_else(|| atlas::onward(candidates.iter().map(|(r, w, k, _)| (*r, *w, *k))))
+    let swept = atlas::onward(candidates.iter().copied())
         .filter(|_| !sweeping)
         .map(|room| {
             let id = first_id + (opened.len() + declared.len()) as i32;
@@ -464,7 +462,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
                 }
             }
             Objective::Defend | Objective::Sweep if defend::overdue(&scene, &e) => {
-                let stands = sweep::beats(&scene, atlas, &e, (e.room, &grounds)).is_some();
+                let stands = sweep::holds(&scene, &e, (e.room, &grounds));
                 decided.extend(defend::late(&mut asked, (world.time, stands), &e))
             }
             Objective::Sweep
@@ -476,9 +474,8 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
                     || changed(&e, &events, &scene.by_id) =>
             {
                 let onward = || {
-                    (scene.elsewhere(atlas, &e, &candidates, &grounds)).or_else(|| {
-                        sweep::patrol(&scene, atlas, &e, (preyed, &declarations.enemies))
-                    })
+                    (scene.elsewhere(atlas, &e, &candidates, &grounds))
+                        .or_else(|| sweep::patrol(&scene, atlas, &e, hunted))
                 };
                 decided.extend(scene.swept(atlas, &mut asked, (&e, onward), (&mut free, &grounds)));
             }

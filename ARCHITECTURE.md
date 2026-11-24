@@ -543,28 +543,32 @@ with one phase machine per kind under `core/fight/kinds/`.
 - **`Sweep`** (`kinds/sweep.rs`): one active at a time on enemy-owned/reserved/
   worked rooms (the table's `Sweep` rows, §7.3; an owned room intel last saw
   with a tower is none, a siege's by `declarations.sieges` alone, owner
-  decision), priced by prey plus
-  exposed-source harvest over a hunter's life per walk tick: the output it
-  denies, never the escort it must beat (owner: pricing the escort made both
-  seats escalate in self-play). Its casts, tower squad included, and their
-  predicted losses cost no more than that worth less what it fields, and its
-  colonies' spawns cast them in the spawn time that life leaves
-  (`copies_within`, as an outpost `Defend`), each landing after its spawn and
-  the nearest colony's walk. Living sets spend their life in the enemy's field, rotating
+  decision), harassing his economy, never his guards (owner, 2026-11-24): it
+  is worth prey plus exposed-source harvest over a harasser's life per walk
+  tick, the output it denies; a body of ours fallen there short of its life
+  prices it held no longer than that body lived past its walk, but only
+  while its tombstone stands in sight (5 ticks a part). What stops a
+  re-cast is losing sight when our last body there dies, then the escort
+  check once the killer is seen again; a killer gone before we look leaves
+  the room at full worth (no state is kept). A body holds a room while it out-reaches every armed
+  body there, a keeper's or a third player's too, at that body's pace on any
+  ground and no charged tower stands; the set is the cheapest of `HARASSERS` (1A1M, a 1R2M kiter, bare:
+  §6.5's HEAL waived) that holds it and that worth pays, so a guarded room is
+  worth nothing and no sweep escalates. Its bodies strike only economy
+  bodies, and with none containers, scoring each tile against what the guards
+  strike. A room it no longer holds, or his safe mode covers (never his
+  others), sends the set onward at once. Living sets
+  spend their life in the enemy's field, rotating
   onward via `atlas::onward` (profitable rooms first, else stalest patrol, the
   rooms beside his worked ones among them, an unseen one as stale as the
   stalest seen, none a player not an enemy holds or reached only past a
   rival's towers; rooms
   with a tracker group still in `Lost` grace are not stale so a set never walks
   straight back into an escort it just left) rather than returning home; closes
-  on death, safe mode, no remaining targets, or its losses in a room past the
-  budget priced as it commits to that room (its predicted dead, as a
-  `Defend`'s; losses start afresh on each room, its budget the dead priced
-  choosing it, none for a patrol, and priced again on arrival); a re-price
-  counts each body it lost there at the largest body its bank casts against
-  the room's worth, so the dead never reopen it. Past the deadline a home's
-  `Defend` keeps, a forming set drops its unbegun casts and goes on only if
-  its standing bodies beat its room as they stand, else closes (its bodies
+  on its first loss in a room or with nowhere to go
+  (losses start afresh on each room; the log keeps their total). Past the
+  deadline a home's `Defend` keeps, a forming set drops its unbegun casts and
+  goes on only if its standing bodies hold its room, else closes (its bodies
   stood at home till they aged out).
 
 - **`Stronghold`** (`kinds/stronghold.rs`, L1–L3): opened on the table's
@@ -687,7 +691,8 @@ conflicts never silently cancel an act.
 - **Colony choice (`fight/price/casting.rs`):** picks the colony landing the body
   soonest (hops + spawn queue + energy refill time); home `Defend` casts at
   home. Bodies end with one `MOVE` (`with_move_last`) and carry `HEAL` when
-  leaving owned rooms (except siege dismantlers covered by medics).
+  leaving owned rooms (except siege dismantlers covered by medics and §6.2
+  sweep harassers).
 - **Boosts (`core/base/boost/mod.rs`):** `boost::boosted_by` gives each part type
   of a body, by its compound's `BOOSTS` rank, the strongest compound a
   colony's `Stock` covers for all its parts of that type, spending stock and

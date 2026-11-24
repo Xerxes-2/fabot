@@ -328,7 +328,7 @@ export const measures = {
   // The most re-prices while Fighting, and the most bodies held at once, of one engagement of `kind` (none named: any) opened in [from, to).
   repriced: (_, a, dir) => Math.max(0, ...rowsOf(dir).filter((e) => (!a.kind || e.kind === a.kind) && openedIn(a)(e)).map((e) => e.repriced ?? 0)),
   held: (_, a, dir) => Math.max(0, ...rowsOf(dir).filter((e) => (!a.kind || e.kind === a.kind) && openedIn(a)(e)).map((e) => e.held ?? 0)),
-  bodiesLost: (_, a, dir) => rowsOf(dir).filter(openedIn(a)).reduce((n, e) => n + (e.dead ?? 0), 0),
+  bodiesLost: (_, a, dir) => rowsOf(dir).filter(kindIn(a)).reduce((n, e) => n + (e.dead ?? 0), 0),
   defendsOpened: (_, a, dir) => defendsIn(dir, a).length,
   // The cost of the bodies of ours `room`'s Defends drew, each once.
   defendSpent: (_, a, dir) => costOf(livesOf(dir).filter((b) => b.ours && drawnBy(dir, a).has(b.name))),
@@ -422,6 +422,8 @@ export const measures = {
   bareMost: (_, a, dir) => Math.max(0, ...rowsOf(dir).filter(kindIn(a)).map((e) => e.bare ?? 0)),
   spared: (_, a, dir) => rowsOf(dir).filter(kindIn(a)).reduce((n, e) => n + (e.spared ?? 0), 0),
   killedBeside: (_, a, dir) => rowsOf(dir).filter(kindIn(a)).reduce((n, e) => n + (e.killed ?? 0), 0),
+  // The cost of the bodies of ours its engagements drew, each once.
+  drewCost: (_, a, dir) => costOf(livesOf(dir).filter((b) => b.ours && new Set(rowsOf(dir).filter(kindIn(a)).flatMap((e) => e.drew)).has(b.name))),
   // The most ticks a Defend opened in `room` in [from, to) stood answered on casts none of which stood.
   waitedMost: (_, a, dir) => Math.max(0, ...defendsIn(dir, a).map((e) => e.waited ?? 0)),
   // Over the Defends that drafted a body in [from, to) and never stood down, the most ticks from

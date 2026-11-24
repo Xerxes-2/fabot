@@ -1,0 +1,19 @@
+{
+  "why": "Two seats of ours harass each other (sweep-casts-what-its-spawns-land's self-play start). A sweep casts the cheapest harasser that out-reaches a room's armed bodies, never a set that beats them, and its bodies never trade with them: on main d561ef96 alpha's and beta's sweeps drew 38,600 and 36,290 energy of bodies, after 21,070 and 19,400. Each seat's engagements, Defends answering the other's harassers among them, lose no more than 40 bodies (main 20 and 25; after 11 and 15)",
+  "modules": ["fight"],
+  "start": {
+    "gen": 7,
+    "seed": 1,
+    "players": [
+      { "name": "alpha", "declarations": { "enemies": ["beta"] } },
+      { "name": "beta", "declarations": { "enemies": ["alpha"] } }
+    ]
+  },
+  "ticks": 30000,
+  "assert": [
+    { "measure": "bodiesLost", "max": 40 },
+    { "measure": "bodiesLost", "seat": "beta", "max": 40 },
+    { "measure": "drewCost", "kind": "sweep", "max": 30000 },
+    { "measure": "drewCost", "kind": "sweep", "seat": "beta", "max": 30000 }
+  ]
+}

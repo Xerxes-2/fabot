@@ -37,8 +37,8 @@ impl Asked {
     }
 }
 
-/// What a sweep reads of a room once a tick: its escort and marks (prey
-/// first) outside its barriers, what strikes each tile, what holding it is
+/// What a sweep reads of a room once a tick: its escort, its marks (prey,
+/// else containers) outside its barriers, what strikes each tile, what holding it is
 /// worth and where the hunt stands.
 pub(super) struct Hunting {
     pub(super) escort: Vec<Creep>,
@@ -47,7 +47,6 @@ pub(super) struct Hunting {
     pub(super) worth: i32,
     pub(super) at: Pos,
     pub(super) walk: Option<i32>,
-    pub(super) spawning: i32,
 }
 
 pub(super) struct Scene<'a> {
@@ -194,12 +193,12 @@ impl<'a> Scene<'a> {
     /// `was`: last tick's groups (§6.1), the only record of where a body stood.
     pub(super) fn ground(&self, atlas: &Atlas, room: &Room, was: &[Group]) -> Hunting {
         let reached = atlas.from_exits(room.name);
-        // Denied only once a body stands there: its life less the most a body
-        // spawns in and its walk.
+        // Denied only once a body stands there: its life less the most a
+        // harasser spawns in and its walk.
         let e = fresh(0, Objective::Sweep, room.name, 0, Tactic::Kite);
-        let colonies = self.colonies_of(atlas, &e);
         let walk = self.nearest(atlas, &e).map(|(walk, _)| walk);
-        let spawn = engine::SPAWN_TICKS_PER_PART * engine::MAX_BODY_PARTS as i32;
+        let parts = sweep::HARASSERS.iter().map(|b| b.len()).max().unwrap_or(0);
+        let spawn = engine::SPAWN_TICKS_PER_PART * parts as i32;
         let held = walk.map_or(0, |w| engine::CREEP_LIFETIME - spawn - w);
         let all = sweep::prey(room);
         let prey: Vec<&Creep> = all
@@ -208,12 +207,9 @@ impl<'a> Scene<'a> {
             .filter(|c| siege::beside(&reached, &c.pos))
             .collect();
         let exposed = siege::exposed_in(&reached, room);
-        let escort: Vec<Creep> = self.foes[&room.name]
-            .iter()
+        let escort: Vec<Creep> = (room.hostiles())
             .filter(|h| {
-                matches!(h.owner, Owner::Enemy(_) | Owner::Invader)
-                    && self.armed.contains(&h.id)
-                    && !self.cores.contains(&h.id)
+                (self.armed.contains(&h.id) || fabot_base::world::hostiles::strikes(h))
                     && all.iter().all(|p| p.id != h.id)
             })
             .cloned()
@@ -272,17 +268,15 @@ impl<'a> Scene<'a> {
                 && before(&c.id)
                     .is_none_or(|p| p.room == c.pos.room && tiles::on_edge(tiles::of_pos(p)))
         };
-        let mut marks: Vec<tactics::Mark> = (prey.iter().copied())
-            .map(|c| (c, true))
-            .chain(escort.iter().map(|c| (c, false)))
-            .map(|(c, unarmed)| tactics::Mark {
+        let mut marks: Vec<tactics::Mark> = (prey.iter())
+            .map(|c| tactics::Mark {
                 id: c.id,
                 pos: c.pos,
                 worth: sweep::worth(c),
                 hits: c.hits,
                 massed: true,
                 shielded: shields.contains(&tiles::of_pos(&c.pos)),
-                fleeting: unarmed && dances(c),
+                fleeting: dances(c),
                 next: flight(c),
             })
             .collect();
@@ -309,7 +303,9 @@ impl<'a> Scene<'a> {
         );
         Hunting {
             threat: exchange::damage_map(room.name, &raid::charged(room), &foes),
-            worth: sweep::room_worth(room, &prey, &exposed, held),
+            worth: sweep::room_worth(room, &prey, &exposed, held)
+                * sweep::kept(room, held, walk.unwrap_or(0))
+                / held.max(1),
             at: exposed
                 .first()
                 .or(prey.first().map(|c| &c.pos))
@@ -318,7 +314,6 @@ impl<'a> Scene<'a> {
             escort,
             marks,
             walk,
-            spawning: spawn * self.spawns_in(&colonies),
         }
     }
 
