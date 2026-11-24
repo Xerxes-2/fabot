@@ -1,11 +1,11 @@
 {
-  "why": "an RCL2 colony casts the carriers what its digs leave on the ground needs, at home too, and none for dig its outposts' harvesters spend raising their containers",
+  "why": "an RCL2 colony casts the carriers what its digs leave on the ground needs, at home too, and none for dig its outposts' harvesters spend raising their containers. Read over the run: idle haulers in every window, task churn summed (d288c92e, before the fix: idle 79 in a window, churn 12,119; main seeds 1-5: 52, 3,561-3,913)",
   "modules": ["economy"],
   "start": { "room": "W9N8", "seed": 1 },
   "ticks": 7000,
   "assert": [
-    { "metric": "idle.hauler", "from": 1000, "to": 4000, "max": 65 },
-    { "metric": "churn.task", "from": 1000, "to": 4000, "max": 300 },
+    { "metric": "idle.hauler", "max": 65 },
+    { "metric": "churn.task", "total": true, "max": 6000 },
     { "measure": "homeLevel", "min": 3 }
   ]
 }
