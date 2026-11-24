@@ -87,10 +87,7 @@ pub(crate) fn holds(
 }
 
 /// Owner: small, cheap, fast bodies; the cheapest that holds a room is cast.
-pub const HARASSERS: [&[Part]; 2] = [
-    &[Part::Attack, Part::Move],
-    &[Part::RangedAttack, Part::Move, Part::Move],
-];
+pub const HARASSERS: [&[Part]; 2] = [&casting::DEFENDER, &casting::KITER];
 
 /// Capability, not intent: a guard it out-reaches at its pace never catches it.
 pub fn outreaches(ours: &Fighter, theirs: &Fighter) -> bool {

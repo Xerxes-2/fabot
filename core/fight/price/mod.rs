@@ -684,6 +684,8 @@ impl<'a> Scene<'a> {
 
         let blocks = if home {
             casting::affordable(capacity)
+        } else if self.defended.contains(&at) {
+            casting::defending(capacity)
         } else {
             casting::walking(capacity)
         };

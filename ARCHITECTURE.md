@@ -701,8 +701,12 @@ conflicts never silently cancel an act.
 - **Colony choice (`fight/price/casting.rs`):** picks the colony landing the body
   soonest (hops + spawn queue + energy refill time); home `Defend` casts at
   home. Bodies end with one `MOVE` (`with_move_last`) and carry `HEAL` when
-  leaving owned rooms (except siege dismantlers covered by medics and §6.2
-  sweep harassers).
+  walking into rival rooms (except siege dismantlers covered by medics and §6.2
+  sweep harassers). On our own ground a `Defend` prices the bare AM and 1R2M
+  only while its bank casts no ranged `HEAL` body (a RANGER, 700): a HEAL it
+  cannot cast answers no raid, but beside a RANGER bare bodies win a few ticks
+  sooner while no outpost heals them, so repeated raids wear them out, a wear
+  one exchange does not price (owner, 2026-11-24).
 - **Boosts (`core/base/boost/mod.rs`):** `boost::boosted_by` gives each part type
   of a body, by its compound's `BOOSTS` rank, the strongest compound a
   colony's `Stock` covers for all its parts of that type, spending stock and

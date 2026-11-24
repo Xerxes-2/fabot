@@ -33,7 +33,8 @@ const RANGER: [Part; 6] = [
     Part::RangedAttack,
     Part::Heal,
 ];
-const DEFENDER: [Part; 2] = [Part::Move, Part::Attack];
+pub const DEFENDER: [Part; 2] = [Part::Move, Part::Attack];
+pub const KITER: [Part; 3] = [Part::RangedAttack, Part::Move, Part::Move];
 
 /// v1's `guardCap`: a home's Defend never disengages, and its loss budget,
 /// not a yield, bounds what it asks (§6.2).
@@ -51,7 +52,7 @@ fn blocks_fit(capacity: i32, block: &[Part]) -> usize {
 }
 
 pub fn affordable(capacity: i32) -> Vec<Body> {
-    [&GUARD[..], &RANGER, &DEFENDER]
+    [&GUARD[..], &RANGER, &DEFENDER, &KITER]
         .into_iter()
         .flat_map(|block| {
             (1..=blocks_fit(capacity, block)).map(|n| engine::with_move_last(block.repeat(n)))
@@ -61,7 +62,7 @@ pub fn affordable(capacity: i32) -> Vec<Body> {
 
 /// Every body that walks into a rival room carries a HEAL (owner): shot up, it
 /// heals the damage instead of losing its MOVE to it and crawling. A home's
-/// Defend keeps `affordable`'s bare DEFENDER: it stands beside its towers.
+/// Defend keeps `affordable`'s bare bodies: they stand beside its towers.
 pub fn walking(capacity: i32) -> Vec<Body> {
     let mut out: Vec<Body> = affordable(capacity)
         .into_iter()
@@ -71,6 +72,15 @@ pub fn walking(capacity: i32) -> Vec<Body> {
     // `affordable`'s smallest HEAL is a RANGER at 700: the pair keeps a bank
     // under that answering.
     out.extend(biggest(capacity, &[Part::Move, Part::Attack]));
+    out
+}
+
+/// Bare bodies only short of a RANGER: a HEAL a bank cannot cast answers no raid (§6.5).
+pub fn defending(capacity: i32) -> Vec<Body> {
+    let mut out = walking(capacity);
+    if !out.iter().any(|b| b.contains(&Part::RangedAttack)) {
+        out.extend(affordable(capacity));
+    }
     out
 }
 
