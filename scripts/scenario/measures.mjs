@@ -367,6 +367,12 @@ export const measures = {
     const end = Math.max(...lives.map((b) => b.last));
     return lives.filter((b) => b.ours && b.last < end && b.ttl > 1 && b.at?.startsWith(`${a.room} `)).length;
   }),
+  // Fight bodies that died of age standing in their seat's room: cast for a fight that never took them.
+  agedAtHome: (_, __, dir) => {
+    const room = JSON.parse(readFileSync(join(dir, "seat.json"), "utf8")).room;
+    const last = new Map(livesOf(dir).filter((b) => b.ours && b.name.startsWith("fight-")).map((b) => [b.name, b]));
+    return [...last.values()].filter((b) => b.ttl <= AGED && b.at?.startsWith(room)).length;
+  },
   // Our bodies gone below full hits, with life left and no strike lately: recycled
   // wounded, since no other end leaves a body unstruck before its age.
   recycledWounded: (_, __, dir) => {

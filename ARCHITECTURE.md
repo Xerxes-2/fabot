@@ -502,9 +502,11 @@ with one phase machine per kind under `core/fight/kinds/`.
   is priced as it commits: its first answer to a raid, a newcomer group being
   a new raid. A re-price on a death or tracker event keeps it, or each death
   would lift it past every loss. An outpost fights on past its budget by
-  `OUTPOST_LOSSES` (2) bodies, then gives up: it disengages and closes only
-  once ours are home and `sightings` clears (closing sooner reopens on the
-  same raid with a fresh budget and feeds it bodies). Disengaged within that
+  `OUTPOST_LOSSES` (2) bodies, then gives up: it disengages, holding no
+  body (another answer drafts them, else they walk home and are recycled,
+  as none would fight for it), and closes only once `sightings` clears
+  (closing sooner reopens on the same raid with a fresh budget and feeds it
+  bodies). Disengaged within that
   bound, it re-forms and re-prices on the budget it kept the tick its raid's
   centre steps from off our ground back onto it (the crossing is the event;
   the centre is all a group keeps from one tick to the next). `❓` A raid

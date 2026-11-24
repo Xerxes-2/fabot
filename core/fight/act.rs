@@ -141,7 +141,7 @@ pub(super) fn act(
     let mut lookups = 0;
     let mut step = |sight: &mut tactics::Sight, c: &Creep| -> (Option<CreepAct>, Wish) {
         let Some(&e) = engaged_in.get(c.name.as_str()) else {
-            return (None, tactics::rest(sight, c, &scene.worked));
+            return (None, defend::idle(sight, scene, decided, c));
         };
 
         if let Some(acted) = stronghold::act(sight, scene, e, c) {
@@ -254,14 +254,9 @@ pub(super) fn act(
         (None, wish)
     };
 
-    let running = world
-        .rooms
-        .iter()
-        .any(|r| r.controller.as_ref().is_some_and(|c| c.our_safe_mode() > 0));
-
     let mut out = ModuleOutput::default();
 
-    if let Some(id) = defend::safe_mode(running, &homes_of(scene, decided)) {
+    if let Some(id) = defend::safe_mode(defend::running(world), &homes_of(scene, decided)) {
         out.actions
             .push(Action::Controller(id, ControllerAct::ActivateSafeMode));
     }
@@ -310,6 +305,7 @@ pub(super) fn act(
     out.telemetry.counts.push(("threatLookups", lookups));
     let patients = (&fighters[..], &world.creeps[..]);
     out.actions.extend(reflexes(chosen, patients, &incoming));
+    out.actions.extend(defend::recycles(scene, decided));
     out
 }
 

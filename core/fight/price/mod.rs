@@ -487,9 +487,7 @@ impl<'a> Scene<'a> {
             return Some(e.clone());
         };
 
-        let joining = self.joining(atlas, e, free);
         let mut fielding: Vec<Fighter> = (e.ours.keys())
-            .chain(&joining)
             .filter_map(|n| self.ours.get(n.as_str()))
             .map(|c| self.fighter(c))
             .collect();
@@ -497,7 +495,7 @@ impl<'a> Scene<'a> {
         fielding.extend(casts.map(|c| fighter::cast(&c.body)));
 
         let capacity = self.capacity_of(atlas, e);
-        let Some(set) = self.hunt(ground, room, &fielding, capacity) else {
+        let Some(mut set) = self.hunt(ground, room, &fielding, capacity) else {
             if fielding.is_empty() {
                 return Some(Engagement {
                     unanswered: true,
@@ -508,6 +506,23 @@ impl<'a> Scene<'a> {
             let onward = onward().filter(|_| !e.ours.is_empty());
             return onward.map(|r| sweep::onto(r, self.world.time, e));
         };
+
+        // A body it takes in stands for a harasser it would cast, never beside one.
+        let shaped = |n: &String| {
+            self.ours
+                .get(n.as_str())
+                .is_some_and(|c| sweep::harasser(c))
+        };
+        let joining: Vec<String> = (self.joining(atlas, e, free).into_iter())
+            .filter(shaped)
+            .take(usize::from(!set.is_empty()))
+            .collect();
+        if let Some(c) = joining.first().and_then(|n| self.ours.get(n.as_str())) {
+            fielding.push(self.fighter(c));
+            set = self
+                .hunt(ground, room, &fielding, capacity)
+                .unwrap_or_default();
+        }
 
         // A set walks in as one; in its room each body's step is its own.
         let together = e.ours.len() + joining.len() + set.len() > 1;

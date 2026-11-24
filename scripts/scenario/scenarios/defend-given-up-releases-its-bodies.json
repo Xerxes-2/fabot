@@ -1,0 +1,10 @@
+{
+  "why": "an outpost Defend that gives up holds no body: its bodies are free for another Defend or sweep to draft (a re-answer may take them back), and those none drafts walk home and are recycled, so none ages out at home held by an answer that will not fight (a big ranged, healer and melee Invader raid on an RCL4 colony's outpost beats its set: main held 22 bodies disengaged 696 ticks and 20 died of age at home; now 0)",
+  "modules": ["fight"],
+  "start": { "room": "W8N3", "seed": 1, "node": "E1", "invaders": "W7N3:100000:1000", "wave": "ranged:big,healer:big,melee:big" },
+  "ticks": 4000,
+  "assert": [
+    { "measure": "bodiesLost", "max": 3 },
+    { "measure": "agedAtHome", "max": 0 }
+  ]
+}

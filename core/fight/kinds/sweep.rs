@@ -10,7 +10,7 @@ use fabot_base::declarations::{Declarations, OpKind};
 use fabot_base::intel::Row;
 use fabot_base::tiles;
 use fabot_base::vocabulary::Part;
-use fabot_base::world::{Creep, Fallen, Owner, Pos, Room, RoomName, Source, hostiles};
+use fabot_base::world::{Creep, Fallen, Owner, Pos, Room, RoomName, Source, body_kinds, hostiles};
 use fabot_base::{engine, grid};
 use fabot_exchange::Fighter;
 use fabot_tactics::Tactic;
@@ -81,6 +81,12 @@ pub(crate) fn holds(
 
 /// Owner: small, cheap, fast bodies; the cheapest that holds a room is cast.
 pub const HARASSERS: [&[Part]; 2] = [&casting::DEFENDER, &casting::KITER];
+
+/// A body a sweep takes in: no dearer than a harasser it would cast.
+pub(crate) fn harasser(c: &Creep) -> bool {
+    let cost = engine::body_cost(&body_kinds(c));
+    HARASSERS.iter().any(|h| cost <= engine::body_cost(h))
+}
 
 /// Capability, not intent: a guard it out-reaches at its pace never catches it.
 pub fn outreaches(ours: &Fighter, theirs: &Fighter) -> bool {

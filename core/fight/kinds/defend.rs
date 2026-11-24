@@ -1,19 +1,22 @@
 /// `Defend` (`ARCHITECTURE.md` §6.2): a phase moves on an event or a deadline,
 /// never a clock; `step` closes it with None.
 use std::borrow::Borrow;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::super::scene::{Asked, Scene};
 use super::super::shape::{Cast, Engagement, Group, Objective, Phase, Slot, enter};
+use super::sweep;
+use fabot_base::intents::{Action, SpawnAct};
 use fabot_base::tiles::{self};
 use fabot_base::vocabulary::Part;
+use fabot_base::wish::Wish;
 use fabot_base::world::{
     Controller, Creep, Fallen, Id, Oven, Owner, Pos, RoomName, Spawn, Structure, StructureType,
-    cast,
+    World, cast,
 };
 use fabot_base::{declarations, engine};
 use fabot_exchange::Outcome;
-use fabot_tactics::Tactic;
+use fabot_tactics::{self as tactics, Tactic};
 
 /// What a `Defend` may fight as, in the order its ties fall to (§6.3).
 pub const CANDIDATES: &[Tactic] = &[
@@ -50,10 +53,52 @@ pub fn give_up(held: bool, time: i32, e: &Engagement) -> Engagement {
             ..e.clone()
         }
     } else {
-        enter(Phase::Disengaging, time, e)
+        Engagement {
+            ours: BTreeMap::new(),
+            ..enter(Phase::Disengaging, time, e)
+        }
     };
     next.plan.offers.clear();
     next
+}
+
+/// Cast by a Defend standing given up, drafted by no answer since and no sweep's to take.
+fn released(decided: &[Engagement], c: &Creep) -> bool {
+    // An id is reused once closed: a body asked before this Defend opened is not its.
+    let gave_up = |(asked, id): (i32, i32)| {
+        (decided.iter()).any(|e| {
+            e.id == id
+                && e.opened <= asked
+                && e.objective == Objective::Defend
+                && e.phase == Phase::Disengaging
+        })
+    };
+    let drafted = (decided.iter()).any(|e| e.ours.contains_key(&c.name));
+    !drafted && !sweep::harasser(c) && cast_of(&c.name).is_some_and(gave_up)
+}
+
+/// A released body walks home to a spawn and is recycled there; any other rests.
+pub(crate) fn idle(
+    sight: &mut tactics::Sight,
+    scene: &Scene,
+    decided: &[Engagement],
+    c: &Creep,
+) -> Wish {
+    let spawn = (scene.world.spawns.iter()).find(|s| s.pos.room == c.pos.room);
+    match (released(decided, c), spawn) {
+        (true, Some(s)) => tactics::toward(sight, c, &s.pos, engine::MELEE_RANGE),
+        (true, None) => tactics::retreat(sight, c),
+        (false, _) => tactics::rest(sight, c, &scene.worked),
+    }
+}
+
+pub(crate) fn recycles(scene: &Scene, decided: &[Engagement]) -> Vec<Action> {
+    let beside =
+        |c: &Creep| (scene.world.spawns.iter()).find(|s| s.pos.within(engine::MELEE_RANGE, &c.pos));
+    (scene.world.creeps.iter())
+        .filter(|c| released(decided, c))
+        .filter_map(|c| Some(Action::Spawn(beside(c)?.id, SpawnAct::RecycleCreep(c.id))))
+        .collect()
 }
 
 pub fn stands_alone(time: i32, e: &Engagement) -> Engagement {
@@ -74,7 +119,11 @@ pub(crate) fn overdue(scene: &Scene, e: &Engagement) -> bool {
     let landing: i32 = (casts.iter())
         .map(|c| engine::SPAWN_TICKS_PER_PART * c.body.len() as i32)
         .sum();
-    let asked = casts.iter().filter_map(|c| asked_at(&c.name)).max();
+    let asked = casts
+        .iter()
+        .filter_map(|c| cast_of(&c.name))
+        .map(|(t, _)| t)
+        .max();
     let spawns: Vec<&Spawn> = (scene.world.spawns.iter())
         .filter(|s| casts.iter().any(|c| c.room == s.pos.room))
         .collect();
@@ -116,12 +165,9 @@ pub(crate) fn cast_name(time: i32, engagement: i32, slot: Slot) -> String {
     format!("{}{time}-{engagement}-{slot}", declarations::FIGHT_PREFIX)
 }
 
-pub(crate) fn asked_at(name: &str) -> Option<i32> {
-    name.strip_prefix(declarations::FIGHT_PREFIX)?
-        .split('-')
-        .next()?
-        .parse()
-        .ok()
+pub(crate) fn cast_of(name: &str) -> Option<(i32, i32)> {
+    let mut parts = name.strip_prefix(declarations::FIGHT_PREFIX)?.split('-');
+    Some((parts.next()?.parse().ok()?, parts.next()?.parse().ok()?))
 }
 
 /// A body its spawn began before the ask was in its price; one begun after, or a
@@ -378,6 +424,13 @@ fn last_resort(home: &Home) -> bool {
             || razed(home))
 }
 
+pub(crate) fn running(world: &World) -> bool {
+    world
+        .rooms
+        .iter()
+        .any(|r| r.controller.as_ref().is_some_and(|c| c.our_safe_mode() > 0))
+}
+
 pub fn safe_mode(running: bool, homes: &[Home]) -> Option<Id> {
     let claimer =
         |c: &Controller, h: &Creep| h.live(Part::Claim) > 0 && h.pos.within(CLAIMER_REACH, &c.pos);
@@ -620,14 +673,14 @@ mod tests {
     }
 
     #[test]
-    fn a_cast_name_gives_back_the_tick_it_was_asked() {
+    fn a_cast_name_gives_back_the_tick_and_engagement_it_was_asked_for() {
         for (time, engagement, slot) in [(0, 1, 0), (27808, 12, 3), (i32::MAX, i32::MAX, Slot::MAX)]
         {
             let name = cast_name(time, engagement, slot);
             assert!(declarations::fights(&name));
-            assert_eq!(asked_at(&name), Some(time));
+            assert_eq!(cast_of(&name), Some((time, engagement)));
         }
-        assert_eq!(asked_at("harvester-10-Spawn1"), None);
+        assert_eq!(cast_of("harvester-10-Spawn1"), None);
     }
 
     proptest! {
