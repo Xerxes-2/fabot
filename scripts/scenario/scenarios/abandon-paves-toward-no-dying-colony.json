@@ -1,0 +1,15 @@
+{
+  "why": "an outpost's road is paved toward the colony its haul goes to, never toward a colony being abandoned: W3N1, abandoned with its roads taken up, gets no road site though W2N1's controller lies beside it",
+  "modules": ["atlas", "layout", "economy"],
+  "start": {
+    "world": "scripts/scenario/worlds/outpost-post-across-the-border.json",
+    "seed": 1,
+    "declarations": {
+      "outposts": [{ "room": "W2N1", "controller": { "id": "b0248", "x": 2, "y": 23 }, "sources": [{ "id": "b0247", "x": 47, "y": 21 }] }],
+      "abandon": ["W3N1"]
+    },
+    "roadless": ["W3N1"]
+  },
+  "ticks": 300,
+  "assert": [{ "measure": "sitesAtEnd", "room": "W3N1", "kind": "road", "max": 0 }]
+}

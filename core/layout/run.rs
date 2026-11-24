@@ -61,16 +61,12 @@ pub fn decide(ctx: &mut Context, standing: &mut LayoutState) -> ModuleOutput {
         .filter(|i| matches!(i, Action::Room(_, RoomAct::CreateSite(..))))
         .count() as i32;
 
-    let piles = |room| {
-        (ctx.declarations.colonies.iter())
-            .find(|p| p.room == room)?
-            .pile
-    };
+    let planned = |room| fabot_atlas::plan_of(ctx.declarations, &[], room);
     let sites = remote::sites(
         ctx.atlas,
         world,
         ctx.derived,
-        (&home, &piles),
+        (&home, &planned),
         &colonies
             .iter()
             .filter_map(|c| c.plan.as_ref())

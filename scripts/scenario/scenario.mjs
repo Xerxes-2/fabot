@@ -26,7 +26,7 @@
 // A scenario file: { "why": the invariant, "modules": the core modules it tests, "nightly"?, "start": { "gen"? (sim --gen's map, which picks the room) or "room", "seed",
 // "late"?, "node"?, "invaders"? (room:every[:first],…), "wave"? (role[:size],…), "core"? (room:tick,…), "stronghold"? ("room:tick:level[:deploy],…"), "resetEvery"? (soak:many's --reset-every), "unsafe"?, "ended"?,
 // "opponents"? (sim's scripted rivals, `sim/src/rival`), "players"? and "sectors"? (soak.mjs's: our bot in every seat; an assert's "seat" names the one it reads, unset the first) } or { "world": a capture-shaped file
-// (crafted ones under worlds/), "seed", "room"?, "node"?, "late"? (a world with no home of ours, as a recipe's), "ended"?, "invaders"?, "wave"?, "opponents"? (the world's own users), "declarations"? (in place of the world's), "memory"? (keys of Memory.v2 beside the world's), "gcl"? (in place of the world's), "level"? ({ room: its controller level in place of the world's }) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "room"?, "kind"?, "name"?, "act"? }] };
+// (crafted ones under worlds/), "seed", "room"?, "node"?, "late"? (a world with no home of ours, as a recipe's), "ended"?, "invaders"?, "wave"?, "opponents"? (the world's own users), "declarations"? (in place of the world's), "memory"? (keys of Memory.v2 beside the world's), "gcl"? (in place of the world's), "level"? ({ room: its controller level in place of the world's }), "roadless"? ([room]: every road in each taken up) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "room"?, "kind"?, "name"?, "act"? }] };
 // a measure is one of `measures` below, read off the soak's output over ticks
 // [from, to), counted from the run's first tick; { "metric": a name the bot's
 // metrics carry (`core/observe/metrics.rs`), "room"?, "total"? } bounds its worst
@@ -121,13 +121,13 @@ for (const s of scenarios) for (const a of s.assert) if (a.metric !== undefined)
 for (const s of scenarios) for (const a of s.assert) if (!measures[a.measure]) fail(`${s.name}: no measure ${a.measure}`);
 for (const s of scenarios) for (const a of s.assert) if (a.each && !events[a.each]) fail(`${s.name}: no occurrence ${a.each}; the occurrences: ${Object.keys(events).join(", ")}`);
 for (const { name, start } of scenarios)
-  if (start.world && Object.keys(start).some((k) => !["world", "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "follow", "ended", "memory", "gcl", "stock", "level"].includes(k))) fail(`${name}: a "world" start takes a "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "follow", "ended", "memory", "gcl", "stock", "level" and nothing else`);
+  if (start.world && Object.keys(start).some((k) => !["world", "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "follow", "ended", "memory", "gcl", "stock", "level", "roadless"].includes(k))) fail(`${name}: a "world" start takes a "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "follow", "ended", "memory", "gcl", "stock", "level", "roadless" and nothing else`);
 for (const { name, start } of scenarios)
   if (!start.world && (start.declarations || start.memory || start.gcl)) fail(`${name}: "declarations", "memory" and "gcl" take a "world" start`);
 
 const tag = (opponents = []) => (opponents.length ? `-o${createHash("sha256").update(JSON.stringify(opponents)).digest("hex").slice(0, 8)}` : "");
-const recipe = ({ gen, sectors, players, world, room, seed, late = 0, node, invaders, wave, core, stronghold, unsafe, ended, declarations, memory, stock, gcl, level, follow, resetEvery }, opponents) =>
-  `${[gen !== undefined && `gen${gen}`, sectors && `x${sectors}`, world && basename(world, ".json"), room].filter(Boolean).join("-")}${declarations ? `-d${createHash("sha256").update(JSON.stringify(declarations)).digest("hex").slice(0, 8)}` : ""}${memory ? `-m${createHash("sha256").update(JSON.stringify(memory)).digest("hex").slice(0, 8)}` : ""}${stock ? `-k${createHash("sha256").update(JSON.stringify(stock)).digest("hex").slice(0, 8)}` : ""}${gcl ? `-g${gcl}` : ""}${level ? `-r${Object.entries(level).flat().join("_")}` : ""}-s${seed}${late ? `l${late}` : ""}${node ? `-${node}` : ""}${invaders ? `-i${invaders.replace(/[:,]/g, "_")}` : ""}${wave ? `-w${wave.replace(/[:,]/g, "_")}` : ""}${core ? `-c${core.replace(/[:,]/g, "_")}` : ""}${stronghold ? `-h${stronghold.replace(/[:,]/g, "_")}` : ""}${unsafe ? "-u" : ""}${ended ? "-e" : ""}${follow ? `-f${follow.join("_")}` : ""}${resetEvery ? `-x${resetEvery}` : ""}${players ? `-p${createHash("sha256").update(JSON.stringify(players)).digest("hex").slice(0, 8)}` : ""}${tag(opponents)}`;
+const recipe = ({ gen, sectors, players, world, room, seed, late = 0, node, invaders, wave, core, stronghold, unsafe, ended, declarations, memory, stock, gcl, level, roadless, follow, resetEvery }, opponents) =>
+  `${[gen !== undefined && `gen${gen}`, sectors && `x${sectors}`, world && basename(world, ".json"), room].filter(Boolean).join("-")}${declarations ? `-d${createHash("sha256").update(JSON.stringify(declarations)).digest("hex").slice(0, 8)}` : ""}${memory ? `-m${createHash("sha256").update(JSON.stringify(memory)).digest("hex").slice(0, 8)}` : ""}${stock ? `-k${createHash("sha256").update(JSON.stringify(stock)).digest("hex").slice(0, 8)}` : ""}${gcl ? `-g${gcl}` : ""}${level ? `-r${Object.entries(level).flat().join("_")}` : ""}${roadless ? `-n${roadless.join("_")}` : ""}-s${seed}${late ? `l${late}` : ""}${node ? `-${node}` : ""}${invaders ? `-i${invaders.replace(/[:,]/g, "_")}` : ""}${wave ? `-w${wave.replace(/[:,]/g, "_")}` : ""}${core ? `-c${core.replace(/[:,]/g, "_")}` : ""}${stronghold ? `-h${stronghold.replace(/[:,]/g, "_")}` : ""}${unsafe ? "-u" : ""}${ended ? "-e" : ""}${follow ? `-f${follow.join("_")}` : ""}${resetEvery ? `-x${resetEvery}` : ""}${players ? `-p${createHash("sha256").update(JSON.stringify(players)).digest("hex").slice(0, 8)}` : ""}${tag(opponents)}`;
 const sim = flags["--bot"] ? resolve(flags["--bot"]) : simBinary() ?? fail("sim did not build");
 if (!existsSync(sim)) fail(`--bot: no sim at ${sim}`);
 const simName = flags["--bot"] ? basename(sim) : `sim-${createHash("sha256").update(readFileSync(sim)).digest("hex").slice(0, 8)}`;
@@ -143,7 +143,7 @@ for (const s of scenarios) {
 if (runs.size && !buildPlan()) fail("the plan tool did not build");
 const started = Date.now();
 const play = async ({ name, start, ticks }) => {
-  if (start.world && (start.declarations || start.memory || start.gcl || start.stock || start.level)) {
+  if (start.world && (start.declarations || start.memory || start.gcl || start.stock || start.level || start.roadless)) {
     const world = join(REPO, "soak-runs", `world-${name}.json`);
     mkdirSync(dirname(world), { recursive: true });
     const crafted = JSON.parse(readFileSync(resolve(REPO, start.world), "utf8"));
@@ -158,6 +158,11 @@ const play = async ({ name, start, ticks }) => {
       const controller = crafted.rooms.find((r) => r.name === room)?.objects.find((o) => o.type === "controller");
       if (!controller) fail(`${name}: "level" names ${room}, which holds no controller in ${start.world}`);
       Object.assign(controller, { level, progress: 0 });
+    }
+    for (const room of start.roadless ?? []) {
+      const r = crafted.rooms.find((r) => r.name === room);
+      if (!r) fail(`${name}: "roadless" names ${room}, which is not in ${start.world}`);
+      r.objects = r.objects.filter((o) => o.type !== "road");
     }
     writeFileSync(world, JSON.stringify({ ...crafted, gcl: start.gcl ?? crafted.gcl, memory: { ...crafted.memory, v2 }, declarations: start.declarations ?? crafted.declarations }));
     start = { ...start, world };

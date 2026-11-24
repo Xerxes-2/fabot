@@ -2,8 +2,8 @@
 //! road are placed off the haul's own walk home.
 use std::collections::BTreeMap;
 
-use fabot_atlas::{self as atlas, Atlas, Mover, Tree};
-use fabot_base::declarations;
+use fabot_atlas::{self as atlas, Atlas, Mover};
+use fabot_base::declarations::{self, ColonyPlan};
 use fabot_base::grid::Footprint;
 use fabot_base::intents::{Action, RoomAct};
 use fabot_base::tiles::{self, Tile, TileSet};
@@ -98,11 +98,11 @@ fn place(
     }
 }
 
-fn sink_for<'t>(
+/// The haul's end, at the colony Economy hauls to (`atlas::server`).
+fn sink_for<'p>(
     atlas: &mut Atlas,
-    trees: &dyn Fn(RoomName) -> Option<&'t Tree>,
-    (homes, bank): (&[Pos], &dyn Fn(RoomName) -> Option<Pos>),
-    rooms: &BTreeMap<RoomName, &Room>,
+    (world, derived): (&World, &atlas::Derived),
+    planned: &dyn Fn(RoomName) -> Option<&'p ColonyPlan>,
     room: &Room,
 ) -> Option<Pos> {
     let from = room
@@ -110,26 +110,22 @@ fn sink_for<'t>(
         .as_ref()
         .map(|c| c.pos)
         .or_else(|| room.sources.first().map(|s| s.pos))?;
+    let claim = (room.controller.as_ref()).is_some_and(|c| c.owner.is_ours());
+    let home = derived.colonies[atlas::server(atlas, derived, planned, (&from, claim))?];
 
-    let sink = |i: usize| {
-        let home = rooms.get(&homes[i].room)?;
-        (home.structures.iter())
-            .find(|s| s.kind == StructureType::Storage && s.owner.is_ours())
-            .map(|s| s.pos)
-            .or_else(|| bank(home.name))
-    };
-
-    let i = atlas::nearest(atlas, trees, homes, |i| sink(i).is_some(), &from)?;
-    sink(i)
+    (world.room(home)?.structures.iter())
+        .find(|s| s.kind == StructureType::Storage && s.owner.is_ours())
+        .map(|s| s.pos)
+        .or_else(|| planned(home)?.pile)
 }
 
 /// v1's seat: the shortest walk out toward home. The owner's rule: the walk
 /// is paved once its container stands.
-pub fn sites(
+pub fn sites<'p>(
     atlas: &mut Atlas,
     world: &World,
     derived: &atlas::Derived,
-    (planned, piles): (&[Action], &dyn Fn(RoomName) -> Option<Pos>),
+    (planned, plan_of): (&[Action], &dyn Fn(RoomName) -> Option<&'p ColonyPlan>),
     plans: &[&Plan],
     mut budget: i32,
 ) -> Vec<Action> {
@@ -156,17 +152,6 @@ pub fn sites(
         }
     }
 
-    let homes: Vec<Pos> = colonies
-        .iter()
-        .filter_map(|c| {
-            world
-                .spawns
-                .iter()
-                .find(|s| &s.pos.room == c)
-                .map(|s| s.pos)
-        })
-        .collect();
-
     for o in outposts {
         let Some(&room) = rooms.get(&o.room) else {
             continue;
@@ -176,8 +161,7 @@ pub fn sites(
         opened(&mut taken, &mut pending, planned, room);
 
         if budget > 0 && pending[&room.name] < SITES_IN_FLIGHT {
-            let trees = |room| derived.tree(room);
-            let sink = sink_for(atlas, &trees, (&homes, piles), &rooms, room);
+            let sink = sink_for(atlas, (world, derived), plan_of, room);
 
             if let Some(sink) = sink {
                 let home = atlas::target_at(&sink, 1);

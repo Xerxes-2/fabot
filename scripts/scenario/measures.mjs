@@ -273,7 +273,7 @@ export const measures = {
   // Links standing beside a source's container.
   postedLinksAtEnd: (samples, a) => at(samples, a.to ?? Infinity).postedLinks,
   builtAtEnd: (samples, a) => at(samples, a.to ?? Infinity).built[a.kind] ?? 0,
-  sitesAtEnd: (samples, a) => at(samples, a.to ?? Infinity).queued?.[a.kind] ?? 0,
+  sitesAtEnd: (samples, a) => { const s = at(samples, a.to ?? Infinity); return (a.room ? s.homes?.[a.room] : s)?.queued?.[a.kind] ?? 0; },
   buriedAtEnd: (samples, a) => at(samples, a.to ?? Infinity).buried ?? Infinity,
   unroadedAtEnd: (samples, a) => at(samples, a.to ?? Infinity).unroaded ?? Infinity,
   oldestPayingSite: (samples, a) => Math.max(0, ...within(samples, a).map((s) => s.oldestPaying ?? 0)),
