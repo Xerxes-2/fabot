@@ -28,7 +28,6 @@ pub fn charged(room: &Room) -> Vec<Pos> {
         .collect()
 }
 
-/// His bodies that strike back.
 pub fn guards(room: &Room) -> Vec<Striker> {
     (room.hostiles())
         .map(Striker::of)
@@ -36,7 +35,7 @@ pub fn guards(room: &Room) -> Vec<Striker> {
         .collect()
 }
 
-pub fn breached(room: &Room, passable: impl Fn(Tile) -> bool, goal: &Pos) -> bool {
+pub fn unwalled(room: &Room, passable: impl Fn(Tile) -> bool) -> tiles::Table<u16> {
     let walls: BTreeSet<Tile> = room
         .structures
         .iter()
@@ -44,36 +43,10 @@ pub fn breached(room: &Room, passable: impl Fn(Tile) -> bool, goal: &Pos) -> boo
         .map(|s| tiles::of_pos(&s.pos))
         .collect();
     let open = |t: Tile| !walls.contains(&t) && passable(t);
-    let mut seen = [false; tiles::COUNT];
-    let mut edge: Vec<Tile> = Vec::new();
-
-    for tile in (0..tiles::COUNT).map(Tile::of_index) {
-        if tiles::on_edge(tile) && open(tile) {
-            seen[tile.index()] = true;
-            edge.push(tile);
-        }
-    }
-
-    let aim = tiles::of_pos(goal);
-
-    while let Some(tile) = edge.pop() {
-        if tiles::range(tile, aim) <= engine::MELEE_RANGE {
-            return true;
-        }
-
-        let next: Vec<Tile> = (tiles::around(tile))
-            .iter()
-            .copied()
-            .filter(|n| open(*n) && !seen[n.index()])
-            .collect();
-
-        for n in next {
-            seen[n.index()] = true;
-            edge.push(n);
-        }
-    }
-
-    false
+    tiles::reach(
+        tiles::all().filter(|t| tiles::on_edge(*t) && open(*t)),
+        open,
+    )
 }
 
 /// His charged tower first: it takes the most strike off the set per hit spent.

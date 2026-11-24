@@ -265,26 +265,17 @@ fn drawn(rules: &Rules, ground: &Ground, built: &Built) -> (Plan, Vec<Item>) {
         };
         let (seen, through) = (walk(true), walk(false));
         let beside = |t: Tile| tiles::within(1, t).into_iter().any(|n| seen[n]);
-        let mut pocket: Vec<Tile> = (items.iter())
+        let pocket = (items.iter())
             .filter(|i| !matches!(i.kind, Road | Rampart) && !beside(i.tile))
             .map(|i| i.tile)
             .chain(tiles::all().filter(|t| through[*t] && !seen[*t]))
-            .chain(tiles::all().filter(|t| free[*t] && tiles::on_edge(*t) && !seen[*t]))
-            .collect();
+            .chain(tiles::all().filter(|t| free[*t] && tiles::on_edge(*t) && !seen[*t]));
         let wall = |t: Tile| ring.iter().any(|r| r.tile == t && r.kind == Wall);
-        let mut inside = vec![false; tiles::COUNT];
-        pocket.retain(|t| !std::mem::replace(&mut inside[*t], true));
-        let mut k = 0;
-        while k < pocket.len() {
-            for &n in tiles::around(pocket[k]) {
-                if !seen[n] && ground.terrain[n] != place::WALL && !wall(n) && !inside[n] {
-                    inside[n] = true;
-                    pocket.push(n);
-                }
-            }
-            k += 1;
-        }
-        let near = |t: Tile| tiles::within(1, t).into_iter().any(|n| inside[n]);
+        let inside = tiles::reach(pocket, |n| {
+            !seen[n] && ground.terrain[n] != place::WALL && !wall(n)
+        });
+        let near =
+            |t: Tile| (tiles::within(1, t).into_iter()).any(|n| inside[n] != tiles::UNREACHED);
         let given: Vec<Item> = ring
             .extract_if(.., |r| r.kind == Wall && near(r.tile))
             .collect();

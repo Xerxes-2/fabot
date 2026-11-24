@@ -158,9 +158,11 @@ impl<'a> Scene<'a> {
                 .as_ref()
                 .is_some_and(|(_, (order, _))| order.is_empty());
             let towers = self.towers_in(room);
-            let breached = towers
-                .iter()
-                .all(|t| raid::breached(room, |tile| atlas.passable(room.name, tile), &t.pos));
+            let walked = raid::unwalled(room, |tile| atlas.passable(room.name, tile));
+            let breached = towers.iter().all(|t| {
+                let beside = tiles::within(engine::MELEE_RANGE, tiles::of_pos(&t.pos));
+                beside.into_iter().any(|n| walked[n] != tiles::UNREACHED)
+            });
             // A raid razes; the room his safe mode holds is drained instead,
             // as nothing a set shoots at there can fall (§6.2).
             let raid = (open && breached && !Scene::safe(room))
