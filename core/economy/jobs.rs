@@ -624,6 +624,18 @@ impl<'a> Jobs<'a> {
         });
         let mut i = kept.and_then(|t| self.valid(ci, takes, t, me));
         if i.is_none() {
+            // A load the body dies carrying is lost in its tombstone.
+            let walk = |a: &Pos, b: &Pos| slots::distance(self.atlas, a, b);
+            let lasts = |s: &Spot, to: Option<Pos>| {
+                to.is_none_or(|to| {
+                    let there = walk(&body.pos, &s.pos).filter(|n| *n <= body.ticks_to_live);
+                    let on = there.and_then(|n| Some(n + walk(&s.pos, &to)?));
+                    on.is_some_and(|n| n <= body.ticks_to_live)
+                })
+            };
+            let colony = &self.derived.colonies[ci];
+            let home = (self.derived.grounds[ci].deposit().map(|d| d.pos))
+                .or_else(|| colony.spawns.first().map(|s| s.pos));
             let ring = self.ring_open(ci);
             let on_demand = |s: &Spot| match s.of {
                 Of::Stock { pile } => !(pile && ring),
@@ -634,7 +646,9 @@ impl<'a> Jobs<'a> {
                 Task::Withdraw(id, r) | Task::Pickup(id, r) => Some((*id, *r)),
                 _ => None,
             };
-            i = self.pick(ci, takes, me, &|s| fits(s) && !on_demand(s));
+            i = self.pick(ci, takes, me, &|s| {
+                fits(s) && !on_demand(s) && lasts(s, home)
+            });
             let stocked = |r: ResourceType| {
                 takes
                     .iter()
@@ -650,8 +664,12 @@ impl<'a> Jobs<'a> {
                 })
                 && let Task::Refill(to, r) = &sinks[d].task
             {
-                let source =
-                    |s: &Spot| fits(s) && of(&s.task).is_some_and(|(id, x)| &x == r && id != *to);
+                let drop = Some(sinks[d].pos);
+                let source = |s: &Spot| {
+                    fits(s)
+                        && of(&s.task).is_some_and(|(id, x)| &x == r && id != *to)
+                        && lasts(s, drop)
+                };
                 i = self.pick(ci, takes, me, &source).or(i);
             }
         }
