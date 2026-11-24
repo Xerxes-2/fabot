@@ -201,7 +201,7 @@ fn boost_stop(
         }
         let mover = Mover {
             footprint: Footprint::One,
-            factor: grid::loaded_factor(&world::body_kinds(creep)),
+            factor: grid::factor_of(creep),
         };
         // Beside its lab it gives way to the carrier filling it; out of reach
         // it shoves through, or a carrier parked on the lab's one free side
