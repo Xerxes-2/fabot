@@ -14,7 +14,7 @@ use fabot_base::declarations::{
     ColonyPlan, Declarations, OpKind, Operation, Outpost, Planned, Stage,
 };
 use fabot_base::engine;
-use fabot_base::intel::Intel;
+use fabot_base::intel::{Intel, Row};
 use fabot_base::tiles;
 use fabot_base::tuning::Tuning;
 use fabot_base::vocabulary::{Part, ResourceType, multiple};
@@ -153,6 +153,17 @@ pub fn reserve(rules: &Rules, t: &Tuning, level: i32, threatened: bool) -> i32 {
     }
 }
 
+fn rival(world: &World, declarations: &Declarations, name: &str) -> bool {
+    name != world.me && !declarations.allies.contains(name)
+}
+
+pub fn rivals(world: &World, declarations: &Declarations, intel: &Intel) -> Vec<(RoomName, i32)> {
+    let theirs = |row: &&Row| (row.owner.as_deref()).is_some_and(|o| rival(world, declarations, o));
+    (intel.iter().filter(|(_, row)| row.level > 0 && theirs(row)))
+        .map(|(room, row)| (*room, row.level))
+        .collect()
+}
+
 /// Switched off, the choices are the operator's alone, but each colony keeps
 /// its plan: Economy reads its reserve and Layout drops a room without one.
 pub fn plan<'t>(
@@ -171,17 +182,14 @@ pub fn plan<'t>(
         expansion, piles, ..
     } = state;
     let mut misfiled = Vec::new();
-    let rival = |name: &str| name != world.me && !declarations.allies.contains(name);
-    let mut rivals: Vec<(RoomName, i32)> = Vec::new();
+    let rival = |name: &str| rival(world, declarations, name);
+    let rivals = rivals(world, declarations, intel);
     let mut theirs: BTreeSet<RoomName> = BTreeSet::new();
     for (room, row) in intel {
         let owner = row.owner.as_deref().filter(|_| row.level > 0);
         let reserver = (row.reservation.as_ref())
             .filter(|(user, lapse)| *lapse > world.time && user != screeps::INVADER_USERNAME)
             .map(|(user, _)| user.as_str());
-        if owner.is_some_and(rival) {
-            rivals.push((*room, row.level));
-        }
         if owner.is_some_and(|o| o != world.me) || reserver.is_some_and(rival) {
             theirs.insert(*room);
         }

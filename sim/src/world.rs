@@ -2,6 +2,7 @@
 //! our first spawn on it as `soak.mjs`'s respawn stands it.
 use std::sync::Arc;
 
+use fabot_base::tiles::{self, Tile};
 use fabot_base::world::{Pos, RoomName, Rules};
 use fabot_layout as layout;
 use krebs::scenario::GlobalScenario;
@@ -82,8 +83,20 @@ impl Map {
         self.objects.iter().filter(move |o| o["room"] == room)
     }
 
+    pub fn terrains(&self) -> Vec<(RoomName, screeps::LocalRoomTerrain)> {
+        let digits = |t: &str| t.bytes().map(|b| b - b'0').collect::<Vec<_>>();
+        (self.rooms.iter())
+            .filter_map(|(name, t)| Some((name.parse().ok()?, digits(t).try_into().ok()?)))
+            .map(|(name, bits)| (name, screeps::LocalRoomTerrain::new_from_bits(bits)))
+            .collect()
+    }
+
     /// The tile Layout's plan puts the first spawn on, as `soak.mjs` seats a respawn.
-    pub fn seat(&self, room: &str) -> Option<(i64, i64)> {
+    pub fn seat(&self, room: &str) -> Option<Tile> {
+        layout::first_spawn(&Rules::vanilla(), &self.bare(room)).map(|(_, tile, _)| tile)
+    }
+
+    pub fn bare(&self, room: &str) -> fabot_base::world::Room<'static> {
         let name = room.parse::<RoomName>().expect("a room name");
         let at = |o: &Value| {
             let xy = |k: &str| o[k].as_i64().expect("a tile") as i32;
@@ -97,15 +110,8 @@ impl Map {
         };
         let controller = *of("controller").first().expect("a controller");
         let terrain = self.terrain(room).iter().map(|b| b - b'0').collect();
-        let bare = layout::bare(
-            name,
-            terrain,
-            (controller, &of("source"), &of("mineral")),
-            1,
-        );
-        let (_, tile) = layout::first_spawn(&Rules::vanilla(), &bare)?;
-        let pos = fabot_base::tiles::to_pos(name, tile);
-        Some((i64::from(pos.x), i64::from(pos.y)))
+        let rocks = (controller, &of("source")[..], &of("mineral")[..]);
+        layout::bare(name, terrain, rocks, 1)
     }
 
     /// Each seat's user, its room's controller its own (at level 1 unless the world's already is), in safe
@@ -144,7 +150,8 @@ impl Map {
             if self.in_room(room).any(|o| o["type"] == "spawn") {
                 continue;
             }
-            let (x, y) = self.seat(room).expect("a plan");
+            let tile = self.seat(room).expect("a plan");
+            let (x, y) = (tiles::x_of(tile), tiles::y_of(tile));
             eprintln!("spawn at {x},{y}");
             objects.push(json!({ "_id": format!("f0000000000000000000{:04x}", 0xffff - i), "type": "spawn", "room": room, "x": x, "y": y,
             "name": "Spawn1", "user": uid, "store": { "energy": SPAWN_ENERGY_START }, "storeCapacityResource": { "energy": SPAWN_ENERGY_CAPACITY },

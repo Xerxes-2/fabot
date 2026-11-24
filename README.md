@@ -25,6 +25,7 @@ npm run smoke     # bundle runs four ticks against a stub game
 npm run build:sim # PGO native simulator (`sim/`, Rust port of official engine)
 npm run scenario  # scenario library (native `sim`)
 npm run soak:many # long-horizon economy soak across seat extremes
+npm run start-rooms -- <world.json>  # rank a first room by the bot's own claim rule
 npm run deploy    # build, smoke, upload to the live server
 npm run observe -- health
 ```

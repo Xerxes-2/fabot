@@ -346,15 +346,23 @@ fn in_sector((x, y): (i32, i32)) -> (i32, i32) {
     (local(x), local(y))
 }
 
+pub fn from_centre(c: (i32, i32)) -> i32 {
+    let (x, y) = in_sector(c);
+    (x - 5).abs().max((y - 5).abs())
+}
+
+pub fn from_highway(c: (i32, i32)) -> i32 {
+    let (x, y) = in_sector(c);
+    x.min(y).min(10 - x).min(10 - y)
+}
+
 #[inline]
 pub fn is_keeper_room(c: (i32, i32)) -> bool {
-    let (x, y) = in_sector(c);
-    (4..=6).contains(&x) && (4..=6).contains(&y) && (x, y) != (5, 5)
+    from_centre(c) == 1
 }
 
 pub fn has_controller(c: (i32, i32)) -> bool {
-    let (x, y) = in_sector(c);
-    x != 0 && y != 0 && !((4..=6).contains(&x) && (4..=6).contains(&y))
+    from_highway(c) > 0 && from_centre(c) > 1
 }
 
 /// Across rooms, where adjacent rooms' edge tiles are one tile.
@@ -371,20 +379,13 @@ pub fn seam_range(a: &Pos, b: &Pos) -> Option<i32> {
     }
 }
 
+const SIDES: [i32; 4] = [TOP, RIGHT, BOTTOM, LEFT];
+
 pub fn room_toward(name: RoomName, exit: i32) -> Option<RoomName> {
-    match exit {
-        1 | 3 | 5 | 7 => name.offset(dx(exit), dy(exit)),
-        _ => None,
-    }
+    (name.offset(dx(exit), dy(exit))).filter(|_| SIDES.contains(&exit))
 }
 
 pub fn exit_toward(from: RoomName, onto: RoomName) -> Option<i32> {
     let ((fx, fy), (tx, ty)) = (from.on_grid()?, onto.on_grid()?);
-    match (tx - fx, ty - fy) {
-        (0, -1) => Some(TOP),
-        (1, 0) => Some(RIGHT),
-        (0, 1) => Some(BOTTOM),
-        (-1, 0) => Some(LEFT),
-        _ => None,
-    }
+    (SIDES.into_iter()).find(|e| (dx(*e), dy(*e)) == (tx - fx, ty - fy))
 }

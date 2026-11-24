@@ -100,6 +100,69 @@ fn free(world: &World, row: &Row) -> bool {
         && !row.worker.as_ref().is_some_and(theirs)
 }
 
+fn apart(owned: &BTreeSet<RoomName>, room: RoomName) -> bool {
+    owned.iter().all(|c| tiles::rooms_apart(*c, room) >= 2)
+}
+
+fn copies(
+    world: &World,
+    owned: &BTreeSet<RoomName>,
+    ore: ResourceType,
+    but: Option<RoomName>,
+) -> usize {
+    (owned.iter().filter(|c| Some(**c) != but))
+        .filter_map(|c| world.room(*c))
+        .filter(|r| r.minerals.iter().any(|m| m.resource == Some(ore)))
+        .count()
+}
+
+pub fn claimable(
+    world: &World,
+    (owned, rivals): (&BTreeSet<RoomName>, &[(RoomName, i32)]),
+    declarations: &Declarations,
+    (name, row): (RoomName, &Row),
+) -> bool {
+    let threat = declarations.tuning.expand_threat_rooms;
+    row.controller.is_some()
+        && row.sources.as_ref().is_some_and(|s| s.len() >= 2)
+        && free(world, row)
+        && apart(owned, name)
+        && !declarations.avoid.contains(&name)
+        && !world.closed.contains(&name)
+        && !declarations.sieges.contains(&name)
+        // A rival this near raids a young room before its towers stand.
+        && !(rivals.iter()).any(|(t, _)| tiles::rooms_apart(*t, name) <= threat)
+}
+
+pub fn facts(
+    world: &World,
+    (owned, worked): (&BTreeSet<RoomName>, &dyn Fn(RoomName) -> bool),
+    intel: &Intel,
+    (name, row): (RoomName, &Row),
+    (crossings, failed): (i32, f64),
+) -> Facts {
+    let mut free_near = 0;
+    for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+        let Some(next) = name.offset(dx, dy) else {
+            continue;
+        };
+        if let Some(r) = (intel.get(&next)).filter(|r| r.controller.is_some() && free(world, r))
+            && apart(owned, next)
+            && !worked(next)
+        {
+            free_near += r.sources.as_ref().map_or(0, Vec::len);
+        }
+    }
+    Facts {
+        sources: row.sources.as_ref().map_or(0, Vec::len),
+        free_near,
+        crossings,
+        worth: season::worth(name),
+        failed,
+        mineral: (row.mineral).map_or(0.0, |m| mineral_worth(m, copies(world, owned, m, None))),
+    }
+}
+
 /// One an operation holds (`outposts::busy`) sponsors nothing: a siege's successors lagged.
 fn spare(world: &World, p: &ColonyPlan, busy: &BTreeSet<RoomName>) -> Option<i32> {
     let r = world.room(p.room)?;
@@ -158,7 +221,7 @@ pub fn book(
 
 /// Layout plans the room before it is claimed: one it cannot fit is never
 /// taken (The International's).
-fn fits(world: &World, outpost: &Outpost, intel: &Intel, terrain: &LocalRoomTerrain) -> bool {
+pub fn fits(world: &World, outpost: &Outpost, intel: &Intel, terrain: &LocalRoomTerrain) -> bool {
     let mut room = intel::blind(outpost, intel, world, &Declarations::default());
     room.terrain = Some(terrain);
     (ground::of_room(&room).and_then(|g| plan::first_of(&world.rules, &g)))
@@ -281,38 +344,8 @@ pub fn step<'t>(
             .sum()
     };
     let sponsors = sponsors(world, plans, busy, tuning.sponsor_margin);
-    let apart_from_ours = |room: RoomName| {
-        derived
-            .owned
-            .iter()
-            .all(|c| tiles::rooms_apart(*c, room) >= 2)
-    };
-    let free_near = |room: RoomName| -> usize {
-        let mut n = 0;
-        for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
-            let Some(next) = room.offset(dx, dy) else {
-                continue;
-            };
-            let worked = (declarations.outposts.iter().chain(outposts)).any(|o| o.room == next);
-            if let Some(row) = intel
-                .get(&next)
-                .filter(|r| r.controller.is_some() && free(world, r))
-                && apart_from_ours(next)
-                && !worked
-            {
-                n += row.sources.as_ref().map_or(0, Vec::len);
-            }
-        }
-        n
-    };
-
-    let copies = |mineral: ResourceType, but: Option<RoomName>| {
-        (derived.owned.iter())
-            .filter(|c| Some(**c) != but)
-            .filter_map(|c| world.room(*c))
-            .filter(|r| r.minerals.iter().any(|m| m.resource == Some(mineral)))
-            .count()
-    };
+    let worked =
+        |room: RoomName| (declarations.outposts.iter().chain(outposts)).any(|o| o.room == room);
     let mut scored: Vec<(f64, Outpost)> = Vec::new();
     for (home, tree) in derived.trees.iter().filter(|(h, _)| sponsors.contains(h)) {
         for dx in -REACH_HOPS..=REACH_HOPS {
@@ -327,27 +360,13 @@ pub fn step<'t>(
                 let (Some(controller), Some(sources)) = (&row.controller, &row.sources) else {
                     continue;
                 };
-                if sources.len() < 2
-                    || !free(world, row)
-                    || !apart_from_ours(name)
-                    || declarations.avoid.contains(&name)
-                    || world.closed.contains(&name)
-                    || declarations.sieges.contains(&name)
-                    // A rival this near raids a young room before its towers stand.
-                    || (rivals.iter())
-                        .any(|(t, _)| tiles::rooms_apart(*t, name) <= tuning.expand_threat_rooms)
+                if !claimable(world, (&derived.owned, rivals), declarations, (name, row))
                     || scored.iter().any(|(_, o)| o.room == name)
                 {
                     continue;
                 }
-                let facts = Facts {
-                    sources: sources.len(),
-                    free_near: free_near(name),
-                    crossings,
-                    worth: season::worth(name),
-                    failed: failed(name),
-                    mineral: (row.mineral).map_or(0.0, |m| mineral_worth(m, copies(m, None))),
-                };
+                let ours = (&derived.owned, &worked as &dyn Fn(RoomName) -> bool);
+                let facts = facts(world, ours, intel, (name, row), (crossings, failed(name)));
                 let outpost = Outpost {
                     room: name,
                     controller: controller.clone(),
@@ -380,8 +399,9 @@ pub fn step<'t>(
             crossings: 0,
             worth: season::worth(room.name),
             failed: 0.0,
-            mineral: (room.minerals.first().and_then(|m| m.resource))
-                .map_or(0.0, |m| mineral_worth(m, copies(m, Some(room.name)))),
+            mineral: (room.minerals.first().and_then(|m| m.resource)).map_or(0.0, |m| {
+                mineral_worth(m, copies(world, &derived.owned, m, Some(room.name)))
+            }),
         })
     };
     // Before RCL6's extractor and terminal a colony is cheap to give up for a

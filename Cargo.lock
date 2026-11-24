@@ -652,6 +652,7 @@ dependencies = [
  "fabot-fight",
  "fabot-layout",
  "fabot-observe",
+ "fabot-strategy",
  "fabot-tactics",
  "libc",
  "mimalloc",

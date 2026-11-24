@@ -71,16 +71,16 @@ pub fn bare(
     }
 }
 
-/// A room's plan and the tile it puts the first spawn on.
+/// A room's plan, the tile it puts the first spawn on and the plan's score.
 pub fn first_spawn(
     rules: &fabot_base::world::Rules,
     room: &fabot_base::world::Room,
-) -> Option<(Plan, fabot_base::tiles::Tile)> {
-    let plan = plan::of_ground(rules, &ground::of_room(room)?)?;
+) -> Option<(Plan, fabot_base::tiles::Tile, f64)> {
+    let (plan, score) = plan::of_ground(rules, &ground::of_room(room)?)?;
     let tile = plan
         .items
         .iter()
         .find(|i| i.kind == fabot_base::world::StructureType::Spawn)?
         .tile;
-    Some((plan, tile))
+    Some((plan, tile, score))
 }

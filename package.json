@@ -23,7 +23,8 @@
     "watch:sim": "node scripts/sim/soak.mjs --watch",
     "metrics:baseline": "node scripts/metrics-baseline.mjs",
     "scenario": "node scripts/scenario/scenario.mjs",
-    "exchange": "node scripts/sim/exchange.mjs"
+    "exchange": "node scripts/sim/exchange.mjs",
+    "start-rooms": "node scripts/start-rooms.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",

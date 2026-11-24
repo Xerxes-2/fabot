@@ -34,7 +34,8 @@
     "sim/src/rival": 587,
     "sim/src/capture": 344,
     "sim/src/read": 414,
-    "sim/src/seat": 117
+    "sim/src/seat": 117,
+    "sim/src/start": 207
   },
   "comments": {
     "_default": 7

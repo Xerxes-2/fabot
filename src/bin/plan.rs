@@ -46,7 +46,7 @@ fn main() {
     let room = layout::bare(name, terrain, rocks, level);
 
     let rules = Rules::vanilla();
-    let (plan, first_spawn) = layout::first_spawn(&rules, &room).unwrap();
+    let (plan, first_spawn, _) = layout::first_spawn(&rules, &room).unwrap();
 
     let mut built: Vec<Structure> = Vec::new();
     let build = |built: &mut Vec<Structure>, kind: StructureType, tile: Tile| {

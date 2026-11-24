@@ -83,6 +83,15 @@ fn price(c: &Candidate, capacity: i32, walk: i32) -> Price {
     }
 }
 
+fn price_at(world: &World, c: &Candidate, walk: i32) -> Price {
+    price(c, world.room(c.home).map_or(0, |r| r.energy_capacity), walk)
+}
+
+/// The energy a tick `c` nets its home, as `chosen` ranks it.
+pub fn net(world: &World, c: &Candidate) -> f64 {
+    price_at(world, c, c.walk).net
+}
+
 /// An operation holds only the colonies it casts from: a claim its sponsor; a
 /// siege from its declaration and a stronghold while answered, the colonies
 /// Fight casts it from at rest, since between waves none is owed; a sweep
@@ -177,9 +186,8 @@ pub fn chosen(
         spawn_left.insert(room, left);
     }
     let mut cpu_left = world.cpu_limit * tuning.outpost_cpu_share;
-    let capacity = |home: RoomName| world.room(home).map_or(0, |r| r.energy_capacity);
     let mut priced: Vec<(Price, Candidate)> = (candidates.into_iter())
-        .map(|c| (price(&c, capacity(c.home), c.walk), c))
+        .map(|c| (price_at(world, &c, c.walk), c))
         .collect();
     priced.sort_by(|(pa, a), (pb, b)| {
         (b.declared.cmp(&a.declared))
@@ -190,7 +198,7 @@ pub fn chosen(
     let mut rising: BTreeSet<RoomName> = BTreeSet::new();
     for (p, c) in priced {
         let left = spawn_left.entry(c.home).or_default();
-        let walked = price(&c, capacity(c.home), c.walked).spawn;
+        let walked = price_at(world, &c, c.walked).spawn;
         let spawn = walked + spend(c.home, p.net);
         let unpaid = p.net <= 0.0 || spawn > *left || p.cpu > cpu_left;
         // A busy home holds back a new room, not the spawn time it ranks for.

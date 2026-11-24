@@ -17,6 +17,7 @@ mod reset;
 mod rival;
 mod sample;
 mod seat;
+mod start;
 mod view;
 mod watch;
 mod world;
@@ -216,8 +217,10 @@ impl Engine {
 }
 
 fn main() {
-    if std::env::args().nth(1).as_deref() == Some("duel") {
-        return duel::main();
+    match std::env::args().nth(1).as_deref() {
+        Some("duel") => return duel::main(),
+        Some("start-rooms") => return start::main(),
+        _ => {}
     }
     let args = args();
     let read = || world::read(&args.world);
@@ -228,20 +231,7 @@ fn main() {
     eprintln!("colony: {room}; output {}", args.out);
     let mut k = map.stand(&seats, args.seed, args.ended, args.badge.clone());
     let mut watch = (args.watch).map(|(port, every)| watch::Watch::open(&k, &room, port, every));
-    let terrains: Vec<_> = (map.rooms.iter())
-        .filter_map(|(name, t)| {
-            let bits: Box<[u8; fabot_base::tiles::COUNT]> = t
-                .bytes()
-                .map(|b| b - b'0')
-                .collect::<Vec<_>>()
-                .try_into()
-                .ok()?;
-            Some((
-                name.parse().ok()?,
-                screeps::LocalRoomTerrain::new_from_bits(bits),
-            ))
-        })
-        .collect();
+    let terrains = map.terrains();
 
     let closed: BTreeSet<_> = map.closed.iter().filter_map(|r| r.parse().ok()).collect();
     let maps = || driver::Maps(terrains.clone(), closed.clone());

@@ -406,10 +406,11 @@ impl Drawing {
     }
 }
 
-pub fn of_ground(rules: &Rules, ground: &Ground) -> Option<Plan> {
-    let mut budget = usize::MAX;
-    match Drawing::of(ground).advance(rules, ground, &mut budget) {
-        Drawn::Done(plan) => plan,
+/// The best variation's plan and its score.
+pub fn of_ground(rules: &Rules, ground: &Ground) -> Option<(Plan, f64)> {
+    let (mut drawing, mut budget) = (Drawing::of(ground), usize::MAX);
+    match drawing.advance(rules, ground, &mut budget) {
+        Drawn::Done(plan) => Some((plan?, drawing.best?.0)),
         Drawn::Drawing => None,
     }
 }
@@ -671,7 +672,7 @@ mod tests {
     fn every_structure_and_exit_is_walked_to_from_the_core_and_the_ring_from_it_or_an_exit() {
         let rules = Rules::vanilla();
         let pocketed = fx::pocketed();
-        let drawn = (of_ground(&rules, &pocketed).map(|p| (pocketed, p)))
+        let drawn = (of_ground(&rules, &pocketed).map(|(p, _)| (pocketed, p)))
             .into_iter()
             .chain(
                 fx::samples(4)
@@ -741,7 +742,7 @@ mod tests {
             ) else {
                 continue;
             };
-            let whole = of_ground(&rules, &a);
+            let whole = of_ground(&rules, &a).map(|(p, _)| p);
             let mut drawing = Drawing::of(&b);
             let spread = loop {
                 if let Drawn::Done(done) = drawing.advance(&rules, &b, &mut 1) {
