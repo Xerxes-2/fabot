@@ -21,7 +21,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { bugs, misses, outcome, report, stood } from "./prediction.mjs";
+import { COMPOUNDS, bugs, misses, outcome, report, stood } from "./prediction.mjs";
 import { simBinary } from "./run.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -55,14 +55,6 @@ const between = (a, b) => a + Math.floor(random() * (b - a + 1));
 const pick = (xs) => xs[Math.floor(random() * xs.length)];
 const repeat = (part, n) => Array(n).fill(part);
 
-const COMPOUNDS = {
-  tough: ["GO", "GHO2", "XGHO2"],
-  attack: ["UH", "UH2O", "XUH2O"],
-  ranged_attack: ["KO", "KHO2", "XKHO2"],
-  heal: ["LO", "LHO2", "XLHO2"],
-  move: ["ZO", "ZHO2", "XZHO2"],
-  work: ["ZH", "ZH2O", "XZH2O"],
-};
 const KINDS = {
   melee: () => ({ attack: between(2, 8) }),
   ranged: () => ({ ranged_attack: between(1, 6) }),

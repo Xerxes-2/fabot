@@ -138,7 +138,7 @@ impl Lives {
                 life["last"] = json!(time);
                 life["ttl"] = json!(num(o, atom!("ageTime")) - time as f64);
                 life["hits"] = json!(num(o, atom!("hits")));
-                life["boosts"] = json!(boosts(o).into_iter().collect::<BTreeSet<_>>().len());
+                life["boosts"] = json!(boosts(o).into_iter().collect::<BTreeSet<_>>());
                 let ticks = &mut life["rooms"][room.name];
                 *ticks = json!(ticks.as_u64().unwrap_or(0) + 1);
                 for act in acts(o) {

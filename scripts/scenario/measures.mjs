@@ -2,7 +2,7 @@
 // these per scenario, and `npm run soak` and soak:many hold `invariants`.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { bugs, outcome, tested } from "../sim/prediction.mjs";
+import { BOOST_MINERAL, COMPOUNDS, bugs, outcome, tested } from "../sim/prediction.mjs";
 
 // Ticks are counted from the bot's first, so a window means the same on every start.
 const linesOf = (path) =>
@@ -76,6 +76,14 @@ const outposts = (key) => (samples, a) => {
   return Object.keys(last.rooms).slice(1).reduce((n, r) => n + last.rooms[r][key] - (first.rooms[r]?.[key] ?? 0), 0);
 };
 const at = (samples, t) => samples.find((s) => s.t >= t) ?? samples.at(-1);
+const PART = { t: "tough", a: "attack", r: "ranged_attack", h: "heal", m: "move" };
+const heldWhenShort = (samples, b) => {
+  const home = b.entered[0][0];
+  const left = b.entered.find(([r]) => r !== home)?.[1] ?? b.last;
+  const made = (samples.findLast((s) => s.t <= left) ?? samples[0]).rooms[home]?.made ?? {};
+  const parts = (p) => [...b.body].filter((x) => x === p).length;
+  return Object.entries(PART).some(([p, part]) => parts(p) && !COMPOUNDS[part].some((c) => b.boosts.includes(c)) && COMPOUNDS[part].some((c) => (made[c] ?? 0) >= BOOST_MINERAL * parts(p)));
+};
 const kindIn = (a) => (e) => (!a.kind || e.kind === a.kind) && openedIn(a)(e);
 const openedIn = (a) => (e) => (!a.room || e.room === a.room) && e.opened >= (a.from ?? 0) && e.opened < (a.to ?? Infinity);
 const within = (samples, a) => samples.filter((s) => s.t >= (a.from ?? 0) && s.t < (a.to ?? Infinity));
@@ -208,10 +216,10 @@ export const measures = {
   boosted: (samples) => Math.max(0, ...samples.map((s) => s.boosted ?? 0)),
   // The most compounds one of our bodies carried at once.
   boostedWith: (samples) => Math.max(0, ...samples.map((s) => s.boostedWith ?? 0)),
-  // Our fight bodies whose life ended boosted short of a compound for each TOUGH, RANGED, HEAL,
-  // MOVE and ATTACK type they carry: read on a home holding every T3 combat boost.
-  boostedShort: (_, __, dir) =>
-    livesOf(dir).filter((b) => b.ours && b.name.startsWith("fight-") && b.boosts > 0 && b.boosts < new Set([...b.body].filter((p) => "trhma".includes(p))).size).length,
+  // Our fight bodies that left home boosted, but short of a part type its stores still held a compound for
+  // then: one held off its lab, not one the stock ran out for.
+  boostedShort: (samples, __, dir) =>
+    livesOf(dir).filter((b) => b.ours && b.name.startsWith("fight-") && b.boosts.length > 0 && heldWhenShort(samples, b)).length,
   // What `room`'s storage, terminal, labs, factory and power spawn hold at the window's end, and the non-energy of it.
   heldAtEnd: on("room to", (samples, a) => at(samples, a.to ?? Infinity).rooms[a.room]?.held ?? Infinity),
   oresAtEnd: on("room to", (samples, a) => at(samples, a.to ?? Infinity).rooms[a.room]?.ores ?? 0),

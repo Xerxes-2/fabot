@@ -2,6 +2,17 @@
 // `npm run exchange`'s duels and the scenarios' engagements. A row is
 // { p: what Exchange predicted, { kind: win|kite|lose, ticks, dead, hits },
 // a: what happened, { won: true, false or null (both stood, or its rival left), left?, unresolved?, ticks, dead, hits } }.
+// Each combat part's boosts by tier, and the mineral one boosted part takes (LAB_BOOST_MINERAL).
+export const COMPOUNDS = {
+  tough: ["GO", "GHO2", "XGHO2"],
+  attack: ["UH", "UH2O", "XUH2O"],
+  ranged_attack: ["KO", "KHO2", "XKHO2"],
+  heal: ["LO", "LHO2", "XLHO2"],
+  move: ["ZO", "ZHO2", "XZHO2"],
+  work: ["ZH", "ZH2O", "XZH2O"],
+};
+export const BOOST_MINERAL = 30;
+
 export const outcome = (a) => (a.won === true ? "won" : a.won === false ? "lost" : a.left ? "left" : a.unresolved ? "unresolved" : "stood");
 
 // An engagement's outcome, off the facts `scripts/scenario/engaged.mjs` or the bot's
