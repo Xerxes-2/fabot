@@ -115,7 +115,7 @@ pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
         _ if facts.safe => None,
         _ if let Some(room) = onward => Some(onto(*room, facts.time, e)),
         _ if e.unanswered && facts.elsewhere.is_some() => None,
-        Some(false) if facts.elsewhere.is_some() || hollow => None,
+        Some(false) => None,
         None if hollow && !e.unanswered => None,
         _ if e.phase == Phase::Forming && !facts.asked && !e.ours.is_empty() => {
             Some(enter(Phase::Approaching, facts.time, e))
