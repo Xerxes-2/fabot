@@ -31,7 +31,7 @@ export const SIM_MEASURES = new Set([
   "spawnStuck", "scoutsCast", "scoutStill", "scoutTicksIn", "reserverOnPost", "castIn", "bodiesOut", "bodiesStruck", "struckOn",
   "deathsError", "attackersAtEnd", "creepsLostBeforeSafeMode", "predictedWinsLost", "engagements", "repriced", "held", "oscillation", "bodiesLost", "waitedMost", "safeModes",
   "closedOnCore", "strongholdMisread", "strongholdDeploying", "strongholdFallenAt", "lootTaken", "boostedShort", "diedIn", "crossed", "heldPastWave", "idleMost", "answeredMost", "sentTo", "sentBack", "draftedAfterOthers", "arrivedApart", "signsSent", "signedInRun",
-  "each", "liveEngagements", "sweptIn", "setMost", "formingMost", "bareMost", "spared", "killedBeside", "drewCost", "liveAstray", "liveEnergy", "defendsOpened", "defendSpent", "rivalSpent", "answeredAfter", "recycledWounded", "culled",
+  "each", "liveEngagements", "sweptIn", "formingMost", "bareMost", "killedBeside", "drewCost", "liveAstray", "liveEnergy", "defendsOpened", "defendSpent", "rivalSpent", "answeredAfter", "recycledWounded", "culled",
 ]);
 
 /** Whether a `worlds/`-shaped world holds a spawn of ours: a capture, not a map. */
@@ -146,12 +146,13 @@ async function engaged(out) {
   const rows = [];
   // Every room's objects of the tick being fed: an engagement closes inside `fights.tick`.
   let tick = { objects: [] };
-  const fights = engagements((row) => rows.push(JSON.stringify(row) + "\n"), async (rooms) => tick.objects.filter((o) => !rooms || rooms.includes(o.room)));
+  const theirs = new Map(jsonLines(join(out, "bodies.jsonl")).filter((b) => !b.ours).map((b) => [b.name, b.body]));
+  const fights = engagements((row) => rows.push(JSON.stringify(row) + "\n"), async (rooms) => tick.objects.filter((o) => !rooms || rooms.includes(o.room)), (name) => theirs.get(name) ?? "");
   // Streamed: a long run's file outgrows the 512 MB one string holds.
   const ticks = async function* (file) {
     for await (const line of createInterface({ input: createReadStream(join(out, file)) })) if (line) yield JSON.parse(line);
   };
-  for await (tick of ticks("fight.jsonl")) await fights.tick(tick.t, tick.fight, tick.objects, new Set(tick.struck));
+  for await (tick of ticks("fight.jsonl")) await fights.tick(tick.t, tick.fight, tick.objects, tick.struck);
   await fights.end();
   writeFileSync(join(out, "engagements.jsonl"), rows.join(""));
   // The bot's own `engagements.log` rows (segment 4), as each tick closed them.

@@ -1,6 +1,6 @@
 //! A tick as `engine/engaged.mjs` reads it, a line of `fight.jsonl` while an
 //! engagement is open and on the tick after: Fight's Memory, the bodies, cores
-//! and tombstones standing, and who struck or healed.
+//! and tombstones standing, and who struck or healed whom.
 use krebs::atom;
 use serde_json::{Value, json};
 
@@ -29,9 +29,9 @@ pub fn row(v: &View, memory: &str, t: u64, open: &mut bool) -> Option<Value> {
                 "ttl": num(o, atom!("creepTicksToLive")) })
         })
         .collect();
-    let struck: Vec<&str> = (v.rooms.iter().flat_map(Room::events))
+    let struck: Vec<Value> = (v.rooms.iter().flat_map(Room::events))
         .filter(|e| matches!(e.kind, EVENT_ATTACK | EVENT_HEAL))
-        .map(|e| e.by)
+        .map(|e| json!([e.by, e.data["targetId"]]))
         .collect();
     Some(json!({ "t": t, "fight": m["v2"]["fight"], "objects": objects, "struck": struck }))
 }

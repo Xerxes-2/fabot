@@ -535,7 +535,6 @@ impl Sampler {
             ("mineralHeld", json!(self.lives.mineral_held)),
             ("sent", json!(self.sent_of.get("energy"))),
             ("sentOf", json!(self.sent_of)),
-            ("others", json!({})),
             ("signsSent", json!(self.signs_sent)),
         ] {
             row.insert(k.into(), value);
