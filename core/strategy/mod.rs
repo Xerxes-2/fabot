@@ -99,7 +99,8 @@ pub fn wall(
     (rival, level): (i32, i32),
     threatened: bool,
 ) -> (i32, bool) {
-    let capacity = screeps::SPAWN_ENERGY_CAPACITY as i32
+    let capacity = rules.allowed(StructureType::Spawn, rival)
+        * screeps::SPAWN_ENERGY_CAPACITY as i32
         + rules.allowed(StructureType::Extension, rival) * engine::extension_energy(rival);
     let pairs = |part: Part| {
         (capacity / engine::body_cost(&[part, Part::Move])).min(engine::MAX_BODY_PARTS as i32 / 2)
