@@ -1802,6 +1802,7 @@ fn spots_of(grounds: &[Ground], claims: &[Controller], bodies: &[Body]) -> HashM
             .chain(g.terminal.iter().map(|x| (x.id, x.pos)))
             .chain(g.boost_lab.iter().map(|x| (x.id, x.pos)))
             .chain(g.ores.iter().map(|x| (x.0, x.1)))
+            .chain(g.loot.iter().map(|x| (x.0, x.1)))
             .chain(g.controller.iter().map(|x| (x.id, x.pos)));
         found.extend(ids.map(|(id, pos)| (Target::Object(id), pos)));
     }

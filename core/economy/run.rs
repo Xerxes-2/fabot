@@ -92,8 +92,8 @@ fn spot_of(derived: &Derived, task: &Task) -> Option<Pos> {
     }
 }
 
-/// What a store, link, lab or container holds of `r`: the engine refuses a
-/// draw from nothing.
+/// What a store, link, lab, container or tombstone holds of `r`: the engine
+/// refuses a draw from nothing.
 fn holds(derived: &Derived, id: task::Target, r: ResourceType) -> i32 {
     let object = id.object();
     derived
@@ -112,6 +112,10 @@ fn holds(derived: &Derived, id: task::Target, r: ResourceType) -> i32 {
                 .filter(|o| Some(o.0) == object && o.2 == r)
                 .map(|o| o.3)
                 .sum::<i32>();
+            let loot = (g.loot.iter())
+                .filter(|l| Some(l.0) == object && l.2 == r)
+                .map(|l| l.3)
+                .sum::<i32>();
             let labs = (g.labs.iter())
                 .filter(|l| Some(l.id) == object)
                 .filter_map(|l| l.held.filter(|h| h.0 == r).map(|h| h.1))
@@ -129,6 +133,7 @@ fn holds(derived: &Derived, id: task::Target, r: ResourceType) -> i32 {
                 + ores.max(0) * i32::from(stored == 0 && terminal == 0)
                 + labs
                 + mined
+                + loot
         })
         .sum::<i32>()
         + (derived.pickups.iter().flat_map(|p| &p.loot))
