@@ -1,0 +1,39 @@
+{
+  "why": "a lab a body waits at is fed before the spawn ring while the colony casts: W8N3 stood as node M7 on the centre-first planner's layout, pinned in the world so no planner change moves it, answers a big ranged Invader raid with boosted rangers whose lab starts empty. Ranked level with the ring, the lab lost every carrier to the ring the casts kept open (c63be5bf: the first lab held its XLHO2 from t2159 while no carrier took its energy until t2315, boostedWith 1, boostedShort 3)",
+  "modules": [
+    "atlas",
+    "economy",
+    "exchange",
+    "fight",
+    "layout",
+    "mv",
+    "strategy",
+    "tactics"
+  ],
+  "start": {
+    "world": "scripts/scenario/worlds/w8n3-m7-centred-labs.json",
+    "seed": 1,
+    "invaders": "W8N2:1000:2000",
+    "wave": "ranged:big,healer:big"
+  },
+  "ticks": 4000,
+  "assert": [
+    {
+      "measure": "boostedWith",
+      "min": 3
+    },
+    {
+      "measure": "boostedShort",
+      "max": 0
+    },
+    {
+      "measure": "predictedWinsLost",
+      "room": "W8N2",
+      "max": 0
+    },
+    {
+      "measure": "bodiesLost",
+      "max": 1
+    }
+  ]
+}

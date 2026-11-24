@@ -497,8 +497,9 @@ impl<'a> Jobs<'a> {
                 3 + i32::from(g.raided) + i32::from(5 * lacks > 4 * engine::TOWER_CAPACITY),
                 lacks,
             ),
-            // A body ages at it; under the ring a spawning colony never fills it.
-            Of::Lab => (5, s.amount / 30),
+            // A body ages at it, so it goes before the ring: level with it, the
+            // ring's weight outbids it while a spawning colony keeps it open.
+            Of::Lab => (6, s.amount / 30),
             Of::Reagent => {
                 let held = engine::LAB_MINERAL_CAPACITY - lacks;
                 let low = i32::from(held <= engine::LAB_REACTION_AMOUNT);
