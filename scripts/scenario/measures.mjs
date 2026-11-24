@@ -413,14 +413,11 @@ export const measures = {
   // one with no core stayed open after its group was last seen.
   heldPastWave: (samples, _, dir) => Math.max(0, ...rowsOf(dir).filter((e) => !e.core).map((e) => (e.closed ?? samples.at(-1).t) - (e.seen ?? e.opened))),
   idleMost: (_, __, dir) => Math.max(0, ...rowsOf(dir).map((e) => e.idle ?? 0)),
-  // Of the engagements of `kind` (any, unnamed) opened in [from, to): the most bodies one held and
-  // asked at once, the most ticks one formed answered, a sweep's most ticks on end in a room with no
-  // rival creep, the ticks each rival body that is no fight's stood unhurt beside a sweep, and
-  // those whose tombstones stood beside it (`engaged.mjs`).
-  setMost: (_, a, dir) => Math.max(0, ...rowsOf(dir).filter(kindIn(a)).map((e) => e.set ?? 0)),
+  // Of the engagements of `kind` (any, unnamed) opened in [from, to): the most ticks one formed
+  // answered, a sweep's most ticks on end in a room with no rival creep, and the rival bodies that
+  // are no fight's whose tombstones stood beside it (`engaged.mjs`).
   formingMost: (_, a, dir) => Math.max(0, ...rowsOf(dir).filter(kindIn(a)).map((e) => e.forming ?? 0)),
   bareMost: (_, a, dir) => Math.max(0, ...rowsOf(dir).filter(kindIn(a)).map((e) => e.bare ?? 0)),
-  spared: (_, a, dir) => rowsOf(dir).filter(kindIn(a)).reduce((n, e) => n + (e.spared ?? 0), 0),
   killedBeside: (_, a, dir) => rowsOf(dir).filter(kindIn(a)).reduce((n, e) => n + (e.killed ?? 0), 0),
   // The cost of the bodies of ours its engagements drew, each once.
   drewCost: (_, a, dir) => costOf(livesOf(dir).filter((b) => b.ours && new Set(rowsOf(dir).filter(kindIn(a)).flatMap((e) => e.drew)).has(b.name))),

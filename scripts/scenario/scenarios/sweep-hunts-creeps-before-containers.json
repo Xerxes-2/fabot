@@ -1,5 +1,5 @@
 {
-  "why": "A mark's worth is energy: a container's is its build cost by the share of its hits left, and while a creep is a mark no structure is, so hunters strike the workers rather than plink a 250k-hit container beside them (sweep-casts-what-its-spawns-land's self-play start). Alpha's sweeps saw 10 of beta's bodies that are no fight's die beside them on the commit before (c45a8705: 9), 53 after (39 once a sweep closes past each room's loss budget)",
+  "why": "A mark's worth is energy: a container's is its build cost by the share of its hits left, and while a creep is a mark no structure is, so hunters strike the workers rather than plink a 250k-hit container beside them (sweep-casts-what-its-spawns-land's self-play start). `plinked` is a stricter proxy for the marks Hunt holds (`Scene::ground`, kept in no output): a sweep body's strikes on what was no creep that tick or the one before, in a room where his prey (`sweep::prey`) stood anywhere, where Hunt counts only prey beside the tiles it reaches and a shot at a body under his rampart lands on the rampart. On a2295a64, before, each seat's sweeps plinked on every seed 1-5; main 0. Bodies of his that are no fight's dying beside alpha's sweeps are a guardrail, not a separator (the pre-fix build kills as many): 22-32 on main seeds 1-5, bound about 30% under the least, 22 x 0.7 = 15, so a sweep that never strikes fails",
   "modules": ["fight"],
   "start": {
     "gen": 7,
@@ -10,5 +10,9 @@
     ]
   },
   "ticks": 30000,
-  "assert": [{ "measure": "killedBeside", "kind": "sweep", "min": 30 }]
+  "assert": [
+    { "each": "engagement", "where": { "kind": "sweep" }, "assert": { "plinked": { "max": 0 } } },
+    { "each": "engagement", "seat": "beta", "where": { "kind": "sweep" }, "assert": { "plinked": { "max": 0 } } },
+    { "measure": "killedBeside", "kind": "sweep", "min": 15 }
+  ]
 }
