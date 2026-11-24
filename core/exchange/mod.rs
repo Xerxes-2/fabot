@@ -229,6 +229,8 @@ struct Price {
     shield: i32,
     tough: i32,
     hits: i32,
+    /// What `hits` heals back to: struck under its heal, the raid regrows.
+    whole: i32,
     /// It dismantles: a raid dealing our bodies nothing is won only by outhealing it.
     breaches: bool,
     dismantlers: Vec<(Fighter, i32)>,
@@ -348,6 +350,12 @@ fn price_as(
             .iter()
             .map(|h| h.f.hits - fighter::tough_hits(&h.f))
             .sum(),
+        whole: (striking.iter())
+            .map(|h| {
+                let full = engine::PART_HITS * h.f.body.len() as i32;
+                full - engine::tough_hits(&h.f.body, &h.f.boosts, full)
+            })
+            .sum(),
         dismantlers: raid
             .iter()
             .filter(|h| h.f.work > 0)
@@ -436,6 +444,8 @@ struct Fight {
     losses: Losses,
 }
 
+const HITS: usize = 2;
+
 /// The raid's layers (ramparts, TOUGH, hits) struck at `dealt` for `span`
 /// ticks: Ok the tick it falls, else what is left of them.
 fn spend(price: &Price, dealt: i32, span: f64, layers: &[f64]) -> Result<f64, Vec<f64>> {
@@ -457,7 +467,9 @@ fn spend(price: &Price, dealt: i32, span: f64, layers: &[f64]) -> Result<f64, Ve
             spent += took;
         } else {
             let mut rest = vec![0.0; i];
-            rest.push(if rate <= 0.0 {
+            rest.push(if rate < 0.0 && i == HITS {
+                (layer - left * rate).min(f64::from(price.whole).max(layer))
+            } else if rate <= 0.0 {
                 layer
             } else {
                 layer - left * rate
@@ -1717,6 +1729,38 @@ mod tests {
             towers: Vec::new(),
             ..s.clone()
         }
+    }
+
+    fn healing(healing: i32, whole: i32) -> Price {
+        Price {
+            damage: 0,
+            healing,
+            tough_healing: healing,
+            shield: 0,
+            tough: 0,
+            hits: 0,
+            whole,
+            breaches: false,
+            dismantlers: Vec::new(),
+            razing: 0,
+        }
+    }
+
+    #[test]
+    fn a_raid_heals_back_what_our_strike_falls_short_of_up_to_whole_and_never_below_it() {
+        let hits = |layer: f64| vec![0.0, 0.0, layer];
+        let left = |price: &Price, dealt: i32, span: f64, layer: f64| {
+            spend(price, dealt, span, &hits(layer)).unwrap_err()[HITS]
+        };
+
+        assert_eq!(left(&healing(300, 5000), 200, 10.0, 350.0), 1350.0);
+        assert_eq!(left(&healing(300, 1000), 200, 10.0, 350.0), 1000.0);
+        assert_eq!(left(&healing(300, 5000), 100, f64::INFINITY, 350.0), 5000.0);
+        // Struck at its heal for ever: it holds what it has.
+        assert_eq!(left(&healing(300, 5000), 300, f64::INFINITY, 350.0), 350.0);
+        // A dismantle-only raid's razing layer stands with no striker's whole.
+        assert_eq!(left(&healing(0, 0), 0, f64::INFINITY, 4000.0), 4000.0);
+        assert_eq!(left(&healing(300, 0), 0, 10.0, 4000.0), 4000.0);
     }
 
     #[test]
