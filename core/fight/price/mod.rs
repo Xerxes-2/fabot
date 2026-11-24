@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 
 mod account;
@@ -415,7 +416,7 @@ impl<'a> Scene<'a> {
         grounds: &BTreeMap<RoomName, Hunting>,
         stirred: &BTreeSet<RoomName>,
     ) -> Vec<(RoomName, i32, i32)> {
-        grounds
+        let mut found: Vec<_> = grounds
             .iter()
             .filter(|(name, g)| {
                 stirred.contains(*name) && g.worth > 0 && !self.avoid.contains(*name)
@@ -434,7 +435,9 @@ impl<'a> Scene<'a> {
                 self.hunt(g, room, &[], capacity)?;
                 Some((*name, g.worth, walk))
             })
-            .collect()
+            .collect();
+        found.sort_by_key(|&(room, worth, walk)| (Reverse(atlas::rate(worth, walk)), walk, room));
+        found
     }
 
     pub(super) fn armed_seen(&self, g: &Group) -> bool {
@@ -452,20 +455,19 @@ impl<'a> Scene<'a> {
         &self,
         atlas: &Atlas,
         e: &Engagement,
-        candidates: &[(RoomName, i32, i32)],
+        (candidates, claimed): (&[(RoomName, i32, i32)], &BTreeSet<RoomName>),
         grounds: &BTreeMap<RoomName, Hunting>,
     ) -> Option<RoomName> {
         let ours = self.members_of(e);
-        let held =
-            (candidates.iter())
-                .filter(|c| c.0 != e.room)
-                .filter_map(|&(room, worth, walk)| {
-                    if ours.is_empty() {
-                        return Some((room, worth, walk));
-                    }
-                    let walk = self.walk_of(atlas, e, room)?;
-                    sweep::holds(self, e, (room, grounds)).then_some((room, worth, walk))
-                });
+        let held = (candidates.iter())
+            .filter(|c| !claimed.contains(&c.0))
+            .filter_map(|&(room, worth, walk)| {
+                if ours.is_empty() {
+                    return Some((room, worth, walk));
+                }
+                let walk = self.walk_of(atlas, e, room)?;
+                sweep::holds(self, e, (room, grounds)).then_some((room, worth, walk))
+            });
         atlas::onward(held)
     }
 

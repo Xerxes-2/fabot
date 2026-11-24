@@ -84,9 +84,9 @@ fn price(c: &Candidate, capacity: i32, walk: i32) -> Price {
 }
 
 /// An operation holds only the colonies it casts from: a claim its sponsor; a
-/// siege from its declaration, and a sweep while its engagement is answered (a
-/// Sweep row is every room intel saw an enemy in), the colonies Fight casts it
-/// from at rest, since between waves none is owed; a Defend its owed casts
+/// siege from its declaration and a stronghold while answered, the colonies
+/// Fight casts it from at rest, since between waves none is owed; a sweep
+/// none (a harasser spawns in a few ticks a life); a Defend its owed casts
 /// (`ColonyPlan.owes`).
 pub fn busy(
     atlas: &mut Atlas,
@@ -107,7 +107,8 @@ pub fn busy(
         .map(|o| o.room)
         .chain(
             (engagements.iter())
-                .filter(|e| e.objective != Objective::Defend && !e.unanswered)
+                .filter(|e| !matches!(e.objective, Objective::Defend | Objective::Sweep))
+                .filter(|e| !e.unanswered)
                 .map(|e| e.room),
         )
         .collect();

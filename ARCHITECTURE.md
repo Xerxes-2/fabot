@@ -540,7 +540,7 @@ with one phase machine per kind under `core/fight/kinds/`.
   tower attack), the drain gives up and holds the edge without casting more —
   staying open so the room does not reopen afresh. Breach barrier order is
   derived from `Exchange` on open/events, never stored stale.
-- **`Sweep`** (`kinds/sweep.rs`): one active at a time on enemy-owned/reserved/
+- **`Sweep`** (`kinds/sweep.rs`): one a room on enemy-owned/reserved/
   worked rooms (the table's `Sweep` rows, §7.3; an owned room intel last saw
   with a tower is none, a siege's by `declarations.sieges` alone, owner
   decision), harassing his economy, never his guards (owner, 2026-11-24): it
@@ -552,20 +552,22 @@ with one phase machine per kind under `core/fight/kinds/`.
   check once the killer is seen again; a killer gone before we look leaves
   the room at full worth (no state is kept). A body holds a room while it out-reaches every armed
   body there, a keeper's or a third player's too, at that body's pace on any
-  ground and no charged tower stands; the set is the cheapest of `HARASSERS` (1A1M, a 1R2M kiter, bare:
-  §6.5's HEAL waived) that holds it and that worth pays, so a guarded room is
-  worth nothing and no sweep escalates. Its bodies strike only economy
-  bodies, and with none containers, scoring each tile against what the guards
-  strike. A room it no longer holds, or his safe mode covers (never his
-  others), sends the set onward at once. Living sets
+  ground and no charged tower stands; the set is the cheapest of
+  `HARASSERS` (1A1M, a 1R2M kiter, bare: §6.5's HEAL waived) that holds it
+  and that worth pays, so a guarded room is worth nothing and no sweep
+  escalates. Rooms open in `atlas::onward`'s order while our spawns cast
+  every sweep's harassers within a full body's spawn time a spawn. Its bodies
+  strike only economy bodies, and with none containers, scoring each tile
+  against what the guards strike. A room it no longer holds, or his safe
+  mode covers (never his others), sends the set onward at once. Living sets
   spend their life in the enemy's field, rotating
   onward via `atlas::onward` (profitable rooms first, else stalest patrol, the
   rooms beside his worked ones among them, an unseen one as stale as the
-  stalest seen, none a player not an enemy holds or reached only past a
-  rival's towers; rooms
+  stalest seen, none another sweep holds or took this tick, a player not an
+  enemy holds or reached only past a rival's towers; rooms
   with a tracker group still in `Lost` grace are not stale so a set never walks
   straight back into an escort it just left) rather than returning home; closes
-  on its first loss in a room or with nowhere to go
+  unanswered, on its first loss in a room or with nowhere to go
   (losses start afresh on each room; the log keeps their total). Past the
   deadline a home's `Defend` keeps, a forming set drops its unbegun casts and
   goes on only if its standing bodies hold its room, else closes (its bodies
@@ -765,11 +767,11 @@ expansion, and operation priorities.
   one room's bodies at once; young homes open all paying ones because waiting on
   containers delays RCL3. An operation holds only the colonies it casts from
   (`outposts::busy`): a claim's sponsor until its spawn stands; a siege from its
-  operation row to its engagement's close, answered or not, and a sweep only
-  while its engagement is answered (its row is every room intel saw an enemy in,
-  and a starved sweep casts nothing), every colony Fight's `colony_for` picks at
-  rest for some body (`fight::casting::homes`: none nearer out-banks it), since
-  between waves no cast is owed; a Defend its owed casts (`ColonyPlan.owes`).
+  operation row to its engagement's close, answered or not, and a stronghold
+  while answered, every colony Fight's `colony_for` picks at rest for some
+  body (`fight::casting::homes`: none nearer out-banks it), since between
+  waves no cast is owed; a sweep none (a harasser spawns in a few ticks a
+  life); a Defend its owed casts (`ColonyPlan.owes`).
   Held, they add no new outposts and sponsor nothing, while the others keep
   growing.
 - **Expansion (`strategy::expand`):** automatic, one in flight. On due ticks

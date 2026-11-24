@@ -2,10 +2,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::super::casting;
-use super::super::scene::{Hunting, Scene};
-use super::super::shape::{Engagement, Phase, enter};
+use super::super::scene::{Hunting, Scene, fresh};
+use super::super::shape::{Engagement, Objective, Phase, enter};
 use super::defend;
 use fabot_atlas::{self as atlas, Atlas};
+use fabot_base::declarations::{Declarations, OpKind};
 use fabot_base::intel::Row;
 use fabot_base::tiles;
 use fabot_base::vocabulary::Part;
@@ -109,14 +110,84 @@ pub fn kept(room: &Room, held: i32, walk: i32) -> i32 {
         .max(0)
 }
 
+/// How many more harassers our spawns cast beside the sweeps fielded, within
+/// a full body's spawn time a spawn, as a set's casts were bounded before.
+pub(crate) fn room_for(scene: &Scene, sweeps: &[&Engagement]) -> i32 {
+    let homes: Vec<&Room> = (scene.world.rooms.iter())
+        .filter(|r| scene.homes.contains(&r.name))
+        .collect();
+    let spawn = engine::SPAWN_TICKS_PER_PART * engine::MAX_BODY_PARTS as i32;
+    let ticks = |body: &[Part]| engine::SPAWN_TICKS_PER_PART * body.len() as i32;
+    let fielded: i32 = (sweeps.iter())
+        .flat_map(|e| scene.members_of(e))
+        .map(|c| ticks(&fabot_base::world::body_kinds(c)))
+        .chain(
+            scene
+                .spawning
+                .iter()
+                .filter(|c| sweeps.iter().any(|e| e.id == c.engagement))
+                .map(|c| ticks(&c.body)),
+        )
+        .sum();
+    let largest = HARASSERS
+        .iter()
+        .max_by_key(|b| b.len())
+        .copied()
+        .unwrap_or_default();
+    casting::copies_within(i32::MAX, spawn * scene.spawns_in(&homes) - fielded, largest)
+}
+
+pub(crate) fn worth_held(
+    scene: &Scene,
+    e: &Engagement,
+    grounds: &BTreeMap<RoomName, Hunting>,
+) -> Option<bool> {
+    let held = scene.members_of(e).is_empty() || holds(scene, e, (e.room, grounds));
+    grounds.get(&e.room).map(|g| g.worth > 0 && held)
+}
+
+pub(crate) fn opened(
+    scene: &Scene,
+    (candidates, claimed): (&[(RoomName, i32, i32)], &mut BTreeSet<RoomName>),
+    (engagements, first, declarations): (&[Engagement], i32, &Declarations),
+) -> Vec<(Engagement, bool)> {
+    let sweeps: Vec<&Engagement> = (engagements.iter())
+        .filter(|e| e.objective == Objective::Sweep)
+        .collect();
+    (candidates.iter())
+        .map(|(room, ..)| *room)
+        .filter(|room| claimed.insert(*room))
+        .take(room_for(scene, &sweeps).max(0) as usize)
+        .enumerate()
+        .map(|(i, room)| {
+            let e = fresh(
+                first + i as i32,
+                Objective::Sweep,
+                room,
+                scene.world.time,
+                Tactic::Kite,
+            );
+            (
+                Engagement {
+                    priority: declarations
+                        .priority(OpKind::Sweep, room)
+                        .unwrap_or_default(),
+                    ..e
+                },
+                false,
+            )
+        })
+        .collect()
+}
+
 /// Stalest first, beside his worked rooms too (his farther ones lie past our scouts), an
-/// unseen one as stale as the stalest seen; none held by a player not an enemy, past a
+/// unseen one as stale as the stalest seen; none a sweep holds or a player not an enemy, past a
 /// rival's towers, or where the tracker holds an armed group (owner: the escort it left).
 pub(crate) fn patrol(
     scene: &Scene,
     atlas: &Atlas,
     e: &Engagement,
-    (preyed, enemies): (&[RoomName], &BTreeSet<String>),
+    (preyed, enemies, held): (&[RoomName], &BTreeSet<String>, &BTreeSet<RoomName>),
 ) -> Option<RoomName> {
     let from = scene.members_of(e).first()?.pos.room;
     let towered: BTreeSet<RoomName> = (scene.intel.iter())
@@ -129,7 +200,7 @@ pub(crate) fn patrol(
     let open = (beside.flatten())
         .filter(|r| tiles::has_controller(r.coords()) && !scene.worked.contains(r))
         .chain(preyed.iter().copied())
-        .filter(|r| *r != e.room && !towered.contains(r) && !scene.homes.contains(r))
+        .filter(|r| !held.contains(r) && !towered.contains(r) && !scene.homes.contains(r))
         .filter(|r| (scene.by_id.values()).all(|g| g.room() != *r || !scene.armed_seen(g)));
     let rows: Vec<_> = (open.map(|r| (r, scene.intel.get(&r))))
         .filter(|(_, row)| {
@@ -184,7 +255,7 @@ pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
     match facts.worth {
         _ if defend::beaten(e) => None,
         _ if let Some(room) = onward => Some(onto(*room, facts.time, e)),
-        _ if e.unanswered && facts.elsewhere.is_some() => None,
+        _ if e.unanswered => None,
         Some(false) => None,
         None if hollow && !e.unanswered => None,
         _ if e.phase == Phase::Forming && !facts.asked && !e.ours.is_empty() => {

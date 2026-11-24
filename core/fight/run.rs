@@ -6,7 +6,7 @@ use super::kinds::{defend, raid, siege, stronghold, sweep};
 use super::scene::{Hunting, Scene, fresh};
 use super::shape::{Cast, Engagement, FightState, Group, Objective, Phase};
 use super::{casting, open, tracker};
-use fabot_atlas::{self as atlas, Atlas, Context};
+use fabot_atlas::{Atlas, Context};
 use fabot_base::declarations::{self, OpKind};
 use fabot_base::engine;
 use fabot_base::intents::{Ask, ModuleOutput, Rank};
@@ -77,7 +77,6 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
     let world = context.world;
     let declarations = context.declarations;
     let preyed: &[RoomName] = &declarations.rooms(OpKind::Sweep).collect::<Vec<_>>();
-    let hunted = (preyed, &declarations.enemies);
     let sightings = context.sightings;
     let intel = context.intel;
     let atlas: &mut Atlas = &mut *context.atlas;
@@ -272,6 +271,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
         })
         .map(|e| e.id)
         .collect();
+    let mut claimed: BTreeSet<RoomName> = sweeps().map(|e| e.room).collect();
     let candidates = scene.candidates(atlas, &grounds, &stirred);
 
     // The edge each siege would drain at: his border tile his towers reach,
@@ -313,10 +313,9 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
                 }
                 Objective::Sweep => {
                     let members = scene.members_of(e);
-                    let held = members.is_empty() || sweep::holds(&scene, e, (e.room, &grounds));
-                    let worth = grounds.get(&e.room).map(|g| g.worth > 0 && held);
-                    let patrol = || sweep::patrol(&scene, atlas, e, hunted);
-                    sweep::step(
+                    let worth = sweep::worth_held(&scene, e, &grounds);
+                    let at = (preyed, &declarations.enemies, &claimed);
+                    let next = sweep::step(
                         &sweep::Facts {
                             time: world.time,
                             standing: standing.clone(),
@@ -324,11 +323,15 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
                             asked: scene.spawning.iter().any(|c| c.engagement == e.id),
                             arrived: members.iter().all(|c| c.pos.room == e.room),
                             worth,
-                            elsewhere: scene.elsewhere(atlas, e, &candidates, &grounds),
-                            patrol: (worth == Some(false)).then(patrol).flatten(),
+                            elsewhere: scene.elsewhere(atlas, e, (&candidates, &claimed), &grounds),
+                            patrol: (worth == Some(false))
+                                .then(|| sweep::patrol(&scene, atlas, e, at))
+                                .flatten(),
                         },
                         e,
-                    )
+                    );
+                    claimed.extend(next.as_ref().map(|n| n.room));
+                    next
                 }
                 Objective::Stronghold => stronghold::step(&scene, declarations, &standing, e),
             }?;
@@ -410,17 +413,9 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
         })
         .collect();
 
-    let sweeping = stepped.iter().any(|(e, _)| e.objective == Objective::Sweep);
-    let swept = atlas::onward(candidates.iter().copied())
-        .filter(|_| !sweeping)
-        .map(|room| {
-            let id = first_id + (opened.len() + declared.len()) as i32;
-            let e = fresh(id, Objective::Sweep, room, world.time, Tactic::Kite);
-            let priority = declarations
-                .priority(OpKind::Sweep, room)
-                .unwrap_or_default();
-            (Engagement { priority, ..e }, false)
-        });
+    let first = first_id + (opened.len() + declared.len()) as i32;
+    let at = (&engagements[..], first, declarations);
+    let swept = sweep::opened(&scene, (&candidates, &mut claimed), at);
 
     let committed: BTreeSet<&String> = stepped.iter().flat_map(|(e, _)| e.ours.keys()).collect();
 
@@ -473,11 +468,14 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
                     || cornered.contains(&e.id)
                     || changed(&e, &events, &scene.by_id) =>
             {
+                let at = (preyed, &declarations.enemies, &claimed);
                 let onward = || {
-                    (scene.elsewhere(atlas, &e, &candidates, &grounds))
-                        .or_else(|| sweep::patrol(&scene, atlas, &e, hunted))
+                    (scene.elsewhere(atlas, &e, (&candidates, &claimed), &grounds))
+                        .or_else(|| sweep::patrol(&scene, atlas, &e, at))
                 };
-                decided.extend(scene.swept(atlas, &mut asked, (&e, onward), (&mut free, &grounds)));
+                let next = scene.swept(atlas, &mut asked, (&e, onward), (&mut free, &grounds));
+                claimed.extend(next.as_ref().map(|n| n.room));
+                decided.extend(next);
             }
             Objective::Defend
                 if left

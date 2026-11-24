@@ -1566,11 +1566,19 @@ impl Atlas {
 pub fn onward(candidates: impl Iterator<Item = (RoomName, i32, i32)>) -> Option<RoomName> {
     candidates
         .filter(|(_, worth, _)| *worth > 0)
-        .max_by_key(|(room, worth, walk)| {
-            let rate = i64::from(*worth) * 1000 / i64::from(walk + engine::ROOM_SIDE);
-            (rate, std::cmp::Reverse(*walk), std::cmp::Reverse(*room))
+        .max_by_key(|&(room, worth, walk)| {
+            (
+                rate(worth, walk),
+                std::cmp::Reverse(walk),
+                std::cmp::Reverse(room),
+            )
         })
         .map(|(room, _, _)| room)
+}
+
+/// What `onward` ranks by: worth a tick of the walk, a room's crossing counted.
+pub fn rate(worth: i32, walk: i32) -> i64 {
+    i64::from(worth) * 1000 / i64::from(walk + engine::ROOM_SIDE)
 }
 
 #[cfg(test)]
