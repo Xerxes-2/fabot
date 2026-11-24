@@ -47,7 +47,8 @@ export function engagements(write, at) {
         open.set(e.id, rec);
         for (const m of (fight.groups ?? []).find((g) => g.id === e.group)?.members ?? []) rec.members.add(m);
         rec.predicted = e.predicted;
-        rec.dead = Math.max(rec.dead, e.lost);
+        // A sweep's `lost` is its room's; the dead of the rooms it left are its log's (`leftDead`).
+        rec.dead = Math.max(rec.dead, e.lost + (e.actual?.leftDead ?? 0));
         rec.rooms.add(e.room);
         const ours = namesOf(e.ours);
         for (const n of ours) rec.ours.add(n);

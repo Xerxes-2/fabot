@@ -130,6 +130,11 @@ fn passed_over(time: i32, since: i32, landing: i32, (ovens, idle): (&[&Oven], bo
     time > since + landing && (idle || ovens.iter().any(|o| began(&o) > since))
 }
 
+/// Its losses past the budget priced as it committed: a Defend's and a sweep's.
+pub fn beaten(e: &Engagement) -> bool {
+    e.lost > e.budget
+}
+
 const OUTPOST_LOSSES: i32 = 2;
 
 pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
@@ -165,7 +170,7 @@ pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
             .or_else(quit);
     }
 
-    if facts.group.is_some() && e.lost > e.budget {
+    if facts.group.is_some() && beaten(e) {
         return if facts.held || e.lost >= OUTPOST_LOSSES {
             quit()
         } else {

@@ -425,7 +425,7 @@ impl<'a> Scene<'a> {
     }
 
     pub(super) fn spent(&self, e: &Engagement) -> bool {
-        self.homes.contains(&e.room) && e.lost > e.budget
+        self.homes.contains(&e.room) && defend::beaten(e)
     }
 
     pub(super) fn asked(&self) -> Asked {

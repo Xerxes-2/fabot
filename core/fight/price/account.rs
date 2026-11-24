@@ -24,6 +24,8 @@ pub struct Actual {
     pub rivals: BTreeSet<String>,
     /// Of the bodies cast for it: a free body it drafts is not charged.
     pub energy: i32,
+    /// Our dead in the rooms a sweep moved on from, which its `lost` no longer holds.
+    pub left_dead: i32,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub gave_up: bool,
 }

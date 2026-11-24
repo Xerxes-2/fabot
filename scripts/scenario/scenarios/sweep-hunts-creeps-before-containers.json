@@ -1,5 +1,5 @@
 {
-  "why": "A mark's worth is energy: a container's is its build cost by the share of its hits left, and while a creep is a mark no structure is, so hunters strike the workers rather than plink a 250k-hit container beside them (sweep-casts-what-its-spawns-land's self-play start). Alpha's sweeps saw 10 of beta's bodies that are no fight's die beside them on the commit before (c45a8705: 9), 53 after (28 once a sweep closes past its loss budget)",
+  "why": "A mark's worth is energy: a container's is its build cost by the share of its hits left, and while a creep is a mark no structure is, so hunters strike the workers rather than plink a 250k-hit container beside them (sweep-casts-what-its-spawns-land's self-play start). Alpha's sweeps saw 10 of beta's bodies that are no fight's die beside them on the commit before (c45a8705: 9), 53 after (39 once a sweep closes past each room's loss budget)",
   "modules": ["fight"],
   "start": {
     "gen": 7,
@@ -10,5 +10,5 @@
     ]
   },
   "ticks": 30000,
-  "assert": [{ "measure": "killedBeside", "kind": "sweep", "min": 20 }]
+  "assert": [{ "measure": "killedBeside", "kind": "sweep", "min": 30 }]
 }

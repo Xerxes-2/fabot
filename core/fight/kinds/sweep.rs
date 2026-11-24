@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::super::casting;
 use super::super::scene::{Hunting, Scene};
 use super::super::shape::{Engagement, Phase, enter};
+use super::defend;
 use fabot_atlas::{self as atlas, Atlas};
 use fabot_base::engine;
 use fabot_base::intel::Row;
@@ -25,8 +26,8 @@ pub struct Facts {
     pub worth: Option<bool>,
     pub safe: bool,
     /// The candidate a set beats that pays most a tick of its walk.
-    pub elsewhere: Option<RoomName>,
-    pub patrol: Option<RoomName>,
+    pub elsewhere: Option<(RoomName, i32)>,
+    pub patrol: Option<(RoomName, i32)>,
 }
 
 pub fn prey<'a>(room: &'a Room) -> Vec<&'a Creep> {
@@ -71,24 +72,25 @@ pub fn yield_of(s: &Source, held: i32) -> i32 {
     s.energy_capacity * held.max(0) / engine::SOURCE_REGEN_TIME
 }
 
-/// Whether `e`'s bodies beat `room`'s escort as they stand, casting none.
+/// The dead `e`'s bodies are priced to lose beating `room` as they stand; None if they lose.
 pub(crate) fn beats(
     scene: &Scene,
     atlas: &Atlas,
     e: &Engagement,
     (room, grounds): (RoomName, &BTreeMap<RoomName, Hunting>),
-) -> bool {
+) -> Option<i32> {
     let ours: Vec<Fighter> = (scene.members_of(e).into_iter())
         .map(casting::fighter_of)
         .collect();
-    let boosts = scene.boosts_for(atlas, e, &scene.boosts);
-    match (scene.in_sight(room), grounds.get(&room)) {
-        (Some(r), Some(g)) => {
-            !ours.is_empty()
-                && (scene.hunt(g, r, ours, 0, &boosts)).is_some_and(|p| p.set.is_empty())
-        }
-        _ => false,
+    if ours.is_empty() {
+        return None;
     }
+    let boosts = scene.boosts_for(atlas, e, &scene.boosts);
+    let (r, g) = (scene.in_sight(room)?, grounds.get(&room)?);
+    let priced = scene.hunt(g, r, ours, (0, lost_cost(e)), &boosts);
+    priced
+        .filter(|p| p.set.is_empty())
+        .map(|p| p.outcome.losses().dead)
 }
 
 /// Stalest first, beside his worked rooms too (his farther ones lie past our scouts), an
@@ -99,7 +101,7 @@ pub(crate) fn patrol(
     atlas: &Atlas,
     e: &Engagement,
     (preyed, enemies): (&[RoomName], &BTreeSet<String>),
-) -> Option<RoomName> {
+) -> Option<(RoomName, i32)> {
     let from = scene.members_of(e).first()?.pos.room;
     let towered: BTreeSet<RoomName> = (scene.intel.iter())
         .filter(|(_, row)| row.towered)
@@ -135,13 +137,28 @@ pub(crate) fn patrol(
             engine::ROOM_SIDE * crossed,
         ))
     }))
+    .map(|room| (room, 0))
 }
 
-/// Never home (owner).
-pub fn onto(room: RoomName, time: i32, e: &Engagement) -> Engagement {
+/// A body lost spent the worth of the largest body its bank casts.
+pub fn lost_cost(e: &Engagement) -> i32 {
+    let cast = casting::walking(e.capacity)
+        .iter()
+        .map(|b| engine::body_cost(b))
+        .max();
+    e.lost * cast.unwrap_or(0)
+}
+
+/// Never home (owner); each room's losses are its own, its budget the dead priced choosing it.
+pub fn onto((room, budget): (RoomName, i32), time: i32, e: &Engagement) -> Engagement {
+    let mut actual = e.actual.clone();
+    actual.left_dead += e.lost;
     Engagement {
         room,
         unanswered: false,
+        lost: 0,
+        budget,
+        actual,
         ..enter(Phase::Approaching, time, e)
     }
 }
@@ -160,7 +177,7 @@ pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
         .filter(|_| !e.ours.is_empty());
 
     match facts.worth {
-        _ if facts.safe => None,
+        _ if facts.safe || defend::beaten(e) => None,
         _ if let Some(room) = onward => Some(onto(*room, facts.time, e)),
         _ if e.unanswered && facts.elsewhere.is_some() => None,
         Some(false) => None,

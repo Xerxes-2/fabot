@@ -464,7 +464,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
                 }
             }
             Objective::Defend | Objective::Sweep if defend::overdue(&scene, &e) => {
-                let stands = sweep::beats(&scene, atlas, &e, (e.room, &grounds));
+                let stands = sweep::beats(&scene, atlas, &e, (e.room, &grounds)).is_some();
                 decided.extend(defend::late(&mut asked, (world.time, stands), &e))
             }
             Objective::Sweep

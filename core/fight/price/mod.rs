@@ -390,12 +390,12 @@ impl<'a> Scene<'a> {
         ground: &Hunting,
         room: &Room,
         ours: Vec<Fighter>,
-        capacity: i32,
+        (capacity, lost): (i32, i32),
         boosts: &Stock,
     ) -> Option<casting::Pricing> {
         let at = &ground.at;
         let fielded: i32 = ours.iter().map(|f| engine::body_cost(&f.body)).sum();
-        let worth = (ground.worth - fielded).max(0);
+        let worth = (ground.worth - fielded - lost).max(0);
         let spawning = ground.spawning
             - (ours.iter().filter(|f| f.pos.is_none()))
                 .map(|f| engine::SPAWN_TICKS_PER_PART * f.body.len() as i32)
@@ -471,7 +471,9 @@ impl<'a> Scene<'a> {
                 let walk = g.walk?;
                 let capacity = self.capacity_of(atlas, &e);
                 let boosts = self.boosts_for(atlas, &e, &self.boosts);
-                let won = self.hunt(g, room, Vec::new(), capacity, &boosts).is_some();
+                let won = self
+                    .hunt(g, room, Vec::new(), (capacity, 0), &boosts)
+                    .is_some();
                 Some((*name, g.worth, walk, won))
             })
             .collect()
@@ -494,20 +496,20 @@ impl<'a> Scene<'a> {
         e: &Engagement,
         candidates: &[(RoomName, i32, i32, bool)],
         grounds: &BTreeMap<RoomName, Hunting>,
-    ) -> Option<RoomName> {
+    ) -> Option<(RoomName, i32)> {
         let ours = self.members_of(e);
-        let beats = |room: RoomName| sweep::beats(self, atlas, e, (room, grounds));
-        let won = candidates
-            .iter()
-            .filter(|c| c.0 != e.room && if ours.is_empty() { c.3 } else { beats(c.0) });
-        atlas::onward(won.filter_map(|(room, worth, walk, _)| {
-            let walk = if ours.is_empty() {
-                Some(*walk)
-            } else {
-                self.walk_of(atlas, e, *room)
-            };
-            Some((*room, *worth, walk?))
-        }))
+        let won: Vec<(RoomName, i32, i32, i32)> = (candidates.iter())
+            .filter(|c| c.0 != e.room)
+            .filter_map(|&(room, worth, walk, won)| {
+                if ours.is_empty() {
+                    return won.then_some((room, worth, walk, 0));
+                }
+                let dead = sweep::beats(self, atlas, e, (room, grounds))?;
+                Some((room, worth, self.walk_of(atlas, e, room)?, dead))
+            })
+            .collect();
+        let room = atlas::onward(won.iter().map(|w| (w.0, w.1, w.2)))?;
+        won.iter().find(|w| w.0 == room).map(|w| (room, w.3))
     }
 
     /// Priced at open, on arrival and on an event in its room, and again as
@@ -516,7 +518,7 @@ impl<'a> Scene<'a> {
         &self,
         atlas: &Atlas,
         asked: &mut Asked,
-        (e, onward): (&Engagement, impl FnOnce() -> Option<RoomName>),
+        (e, onward): (&Engagement, impl FnOnce() -> Option<(RoomName, i32)>),
         (free, grounds): (&mut Vec<String>, &BTreeMap<RoomName, Hunting>),
     ) -> Option<Engagement> {
         let (Some(room), Some(ground)) = (self.in_sight(e.room), grounds.get(&e.room)) else {
@@ -539,7 +541,13 @@ impl<'a> Scene<'a> {
             outcome,
             boosted,
             ..
-        }) = self.hunt(ground, room, fielding.clone(), capacity, &boosts)
+        }) = self.hunt(
+            ground,
+            room,
+            fielding.clone(),
+            (capacity, sweep::lost_cost(e)),
+            &boosts,
+        )
         else {
             if fielding.is_empty() {
                 return Some(Engagement {
@@ -582,6 +590,9 @@ impl<'a> Scene<'a> {
             order: casting::kill_order(escort),
             offers,
         };
+        if e.unanswered || e.since == self.world.time {
+            next.budget = e.lost + outcome.losses().dead;
+        }
         next.unanswered = false;
         next.capacity = capacity;
         next.predicted = if e.unanswered && !escort.is_empty() {

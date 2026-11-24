@@ -191,7 +191,7 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
 | Store | Shape | Owner | Lives in | Why |
 |---|---|---|---|---|
 | `assignments` | creep → `Assignment` (slot, task; `slot\|task` text only in `memory.rs`) | Economy | Memory | sticky slot + task across ticks |
-| `fight.engagements` | list of `Engagement` (§6.2), with open tick (never moved), each body's slot, and the plan's boosted slots with the colony each is cast and boosted at (`Plan.boosts`, written when the set is priced and cast) | Fight | Memory | active combat commitments (without heap-only `offers`); a home's deaths since open are its raid's; a body is boosted only as its price chose, at the colony that cast it, which no tick can re-derive (owner; old Memory without it reads as no boosts); `actual` (first contact, the last sighting of a rival whose death was seen, whether one left sight unseen dying, rivals at contact, energy cast, gave up), set on those events while open, read only into `engagements.log` and never decided on (owner) |
+| `fight.engagements` | list of `Engagement` (§6.2), with open tick (never moved), each body's slot, and the plan's boosted slots with the colony each is cast and boosted at (`Plan.boosts`, written when the set is priced and cast) | Fight | Memory | active combat commitments (without heap-only `offers`); a home's deaths since open are its raid's; a body is boosted only as its price chose, at the colony that cast it, which no tick can re-derive (owner; old Memory without it reads as no boosts); `actual` (first contact, the last sighting of a rival whose death was seen, whether one left sight unseen dying, rivals at contact, energy cast, gave up, a sweep's dead in the rooms it moved on from, its log's dead with `lost`), set on those events while open, read only into `engagements.log` and never decided on (owner) |
 | `fight.groups` | list of `Group` (§6.1) | Fight | Memory | hostile cluster identity across ticks |
 | `fight.casts` | pending casts by engagement and slot | Fight | Memory | prevent double-casting while spawning |
 | `fight.due` | colonies with imminent siege successor | Fight | Memory | feeds `ColonyPlan.owes` and `.fights` (§5) |
@@ -551,7 +551,12 @@ with one phase machine per kind under `core/fight/kinds/`.
   rival's towers; rooms
   with a tracker group still in `Lost` grace are not stale so a set never walks
   straight back into an escort it just left) rather than returning home; closes
-  on death, safe mode, or no remaining targets. Past the deadline a home's
+  on death, safe mode, no remaining targets, or its losses in a room past the
+  budget priced as it commits to that room (its predicted dead, as a
+  `Defend`'s; losses start afresh on each room, its budget the dead priced
+  choosing it, none for a patrol, and priced again on arrival); a re-price
+  counts each body it lost there at the largest body its bank casts against
+  the room's worth, so the dead never reopen it. Past the deadline a home's
   `Defend` keeps, a forming set drops its unbegun casts and goes on only if
   its standing bodies beat its room as they stand, else closes (its bodies
   stood at home till they aged out).

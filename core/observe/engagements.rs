@@ -59,7 +59,7 @@ pub fn rows(closed: &[Closed], time: i32) -> Vec<String> {
                 seen: e.actual.seen,
                 closed: time,
                 predicted: e.predicted.as_ref()?,
-                dead: e.lost,
+                dead: e.lost + e.actual.left_dead,
                 energy: e.actual.energy,
                 disengaged: e.phase == Phase::Disengaging,
                 gave_up: e.actual.gave_up,
