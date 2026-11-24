@@ -246,7 +246,7 @@ fn server(
     (derived, declarations): (&Derived, &Declarations),
     at: (&Pos, bool),
 ) -> Option<usize> {
-    let planned = |room| (declarations.colonies.iter()).find(|p| p.room == room);
+    let planned = |room| atlas::plan_of(declarations, &[], room);
     atlas::server(atlas, derived.ours, &planned, at)
 }
 

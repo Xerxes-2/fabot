@@ -1540,7 +1540,7 @@ pub fn homes(
     let colony_rooms: Vec<&Room> = (ours.colonies.iter())
         .filter_map(|name| world.room(*name))
         .collect();
-    let plan_of = |room: RoomName| (declarations.colonies.iter()).find(|p| p.room == room);
+    let plan_of = |room: RoomName| atlas::plan_of(declarations, &[], room);
     let colonies: Vec<Colony> = (colony_rooms.iter())
         .filter_map(|room| {
             Some(Colony {
@@ -1689,7 +1689,7 @@ pub fn of_world<'t>(
     (intel, scouts): (&Intel, &[Scout]),
 ) -> Derived<'t> {
     let mut homes = homes;
-    let plan_of = |room: RoomName| (declarations.colonies.iter()).find(|p| p.room == room);
+    let plan_of = |room: RoomName| atlas::plan_of(declarations, &[], room);
     for c in &mut homes.colonies {
         let plan = plan_of(c.room);
         c.reserve = plan.map_or(0, |p| p.reserve);

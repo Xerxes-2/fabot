@@ -344,7 +344,7 @@ fn crossed(
     worked: (&[Outpost], Option<&Outpost>),
     theirs: &BTreeSet<RoomName>,
 ) -> Vec<Operation> {
-    let planned = |room| (declarations.colonies.iter().chain(plans)).find(|p| p.room == room);
+    let planned = |room| atlas::plan_of(declarations, plans, room);
     let worked: Vec<(&Outpost, bool)> = self::worked(derived, declarations, worked).collect();
     let mut crossed = BTreeSet::new();
     for (o, claim) in &worked {

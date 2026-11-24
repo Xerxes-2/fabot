@@ -697,27 +697,31 @@ expansion, and operation priorities.
   `enemies`, and declared sieges' owners. A stranger is fought where it threatens
   us or works an owned or worked room (an outpost is ours to defend), never
   followed out or hunted.
-- **Colony plans & outposts (`strategy::plan`, `strategy::outposts`):**
-  rebuilt each tick under operator overrides (**operator rows always win**).
-  Outposts run from RCL2 through RCL8 (an RCL8 controller takes 15 of a
-  two-source home's 20/tick, leaving nothing to bank for boosts, labs, or
-  ramparts without outposts): operator rows first, then standing outposts
-  (containers at all sources), then highest net energy/spawn-tick within
-  `cpu_limit / 2` and spawn `spare`. Each outpost is priced with the spenders
-  its dig casts (2 parts per energy/tick) because a fixed half leaves spawns idle
-  at RCL3–6 and full life past RCL6 starves hauling; a young home reserves half
-  its spawns' life for workers so its pile does not decay unspent. Stocked homes
-  add one non-standing outpost at a time so spawns absorb one room's bodies at
-  once; young homes open all paying ones because waiting on containers delays
-  RCL3. An operation holds only the colonies it casts from (`outposts::busy`):
-  a claim's sponsor until its spawn stands; a siege from its operation row
-  to its engagement's close, answered or not, and a sweep only while its
-  engagement is answered (its row is every room intel saw an enemy in, and a
-  starved sweep casts nothing), every colony Fight's `colony_for` picks at
-  rest for some body (`fight::casting::homes`: none nearer out-banks it),
-  since between waves no cast is owed; a
-  Defend its owed casts (`ColonyPlan.owes`). Held, they add no new outposts
-  and sponsor nothing, while the others keep growing.
+- **Colony plans & outposts (`strategy::plan`, `strategy::outposts`):** rebuilt
+  each tick under operator overrides (**operator rows always win**). Outposts
+  run from RCL2 through RCL8 (an RCL8 controller takes 15 of a two-source home's
+  20/tick, leaving nothing to bank for boosts, labs, or ramparts without
+  outposts): operator rows first, then highest net energy/spawn-tick within
+  `cpu_limit / 2` and spawn `spare` of the colony that walks to it
+  (`atlas::server`, Economy's choice too), a room without containers at all
+  sources net of them over one creep life (its haul is priced unroaded, so a
+  road repays itself), so a better room displaces a standing one only once it
+  repays its setup within a life. A busy home's held-back room keeps its spawn
+  time, so busy never swaps which others are worked. Each outpost is priced with
+  the spenders its dig casts (2 parts per energy/tick) because a fixed half
+  leaves spawns idle at RCL3–6 and full life past RCL6 starves hauling; a young
+  home reserves half its spawns' life for workers so its pile does not decay
+  unspent. Stocked homes add one non-standing outpost at a time so spawns absorb
+  one room's bodies at once; young homes open all paying ones because waiting on
+  containers delays RCL3. An operation holds only the colonies it casts from
+  (`outposts::busy`): a claim's sponsor until its spawn stands; a siege from its
+  operation row to its engagement's close, answered or not, and a sweep only
+  while its engagement is answered (its row is every room intel saw an enemy in,
+  and a starved sweep casts nothing), every colony Fight's `colony_for` picks at
+  rest for some body (`fight::casting::homes`: none nearer out-banks it), since
+  between waves no cast is owed; a Defend its owed casts (`ColonyPlan.owes`).
+  Held, they add no new outposts and sponsor nothing, while the others keep
+  growing.
 - **Expansion (`strategy::expand`):** automatic, one in flight. On due ticks
   (100) while GCL allows and `bucket >= expandBucket` (9000), a non-busy RCL4+
   sponsor with storage holding `reserve + sponsorMargin` scores free 2-source rooms

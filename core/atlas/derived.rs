@@ -70,6 +70,14 @@ pub fn nearest<'t>(
     })
 }
 
+pub fn plan_of<'a>(
+    declarations: &'a Declarations,
+    plans: &'a [ColonyPlan],
+    room: RoomName,
+) -> Option<&'a ColonyPlan> {
+    (declarations.colonies.iter().chain(plans)).find(|p| p.room == room)
+}
+
 /// The colony a claim is served from, its claimer, raising and pioneers alike
 /// (§5), so the claim holds that one alone (§7.2): the nearest stocked, else
 /// the nearest whose bank casts a claimer, so no claim waits on a storage.

@@ -35,6 +35,7 @@ struct Price {
     net: f64,
     spawn: f64,
     cpu: f64,
+    value: f64,
 }
 
 fn price(c: &Candidate, capacity: i32, walk: i32) -> Price {
@@ -69,10 +70,16 @@ fn price(c: &Candidate, capacity: i32, walk: i32) -> Price {
         bodies += 1.0;
     }
     let lost = if c.contested { upkeep } else { 0.0 };
+    let net = n * f64::from(rate) - upkeep - lost;
+    let spawn = parts * f64::from(engine::SPAWN_TICKS_PER_PART);
+    // Its haul is priced unroaded, so a road repays itself and is no setup.
+    let setup = n * f64::from(engine::CONTAINER_BUILD_COST) / life;
+    let unbuilt = if c.stands { 0.0 } else { setup };
     Price {
-        net: n * f64::from(rate) - upkeep - lost,
-        spawn: parts * f64::from(engine::SPAWN_TICKS_PER_PART),
+        net,
+        spawn,
         cpu: bodies * INTENT_CPU,
+        value: (net - unbuilt) / spawn.max(1.0),
     }
 }
 
@@ -87,11 +94,8 @@ pub fn busy(
     (declarations, claimed): (&Declarations, Option<&Outpost>),
     (operations, engagements): (&[Operation], &[Engagement]),
 ) -> BTreeSet<RoomName> {
-    // Merged as `Declarations::planned` merges them, so Economy picks the same.
     let given_up = |room| {
-        (declarations.colonies.iter().chain(plans))
-            .find(|p| p.room == room)
-            .is_some_and(|p| p.stage == Stage::Abandon)
+        (atlas::plan_of(declarations, plans, room)).is_some_and(|p| p.stage == Stage::Abandon)
     };
     let mut serving = BTreeSet::new();
     for c in expand::raising(derived, declarations, claimed) {
@@ -176,11 +180,9 @@ pub fn chosen(
     let mut priced: Vec<(Price, Candidate)> = (candidates.into_iter())
         .map(|c| (price(&c, capacity(c.home), c.walk), c))
         .collect();
-    let value = |p: &Price| p.net / p.spawn.max(1.0);
     priced.sort_by(|(pa, a), (pb, b)| {
         (b.declared.cmp(&a.declared))
-            .then(b.stands.cmp(&a.stands))
-            .then(value(pb).total_cmp(&value(pa)))
+            .then(pb.value.total_cmp(&pa.value))
             .then(a.outpost.room.cmp(&b.outpost.room))
     });
     let mut out = Vec::new();
@@ -190,8 +192,9 @@ pub fn chosen(
         let walked = price(&c, capacity(c.home), c.walked).spawn;
         let spawn = walked + spend(c.home, p.net);
         let unpaid = p.net <= 0.0 || spawn > *left || p.cpu > cpu_left;
+        // A busy home holds back a new room, not the spawn time it ranks for.
         let yields = busy.contains(&c.home) && !c.stands;
-        if !c.declared && (unpaid || yields || rising.contains(&c.home)) {
+        if !c.declared && (unpaid || rising.contains(&c.home)) {
             continue;
         }
         if !c.stands && stocked(c.home) {
@@ -199,7 +202,7 @@ pub fn chosen(
         }
         *left -= spawn;
         cpu_left -= p.cpu;
-        if !c.declared {
+        if !c.declared && !yields {
             out.push(c.outpost);
         }
     }
@@ -207,12 +210,12 @@ pub fn chosen(
 }
 
 pub fn survey(
-    (world, atlas): (&World, &Atlas),
+    (world, atlas): (&World, &mut Atlas),
     derived: &Derived,
     (declarations, plans, claimed): (&Declarations, &[ColonyPlan], Option<RoomName>),
     intel: &Intel,
 ) -> Vec<Candidate> {
-    let mut by_room: BTreeMap<RoomName, Candidate> = BTreeMap::new();
+    let mut by_room: BTreeMap<RoomName, Vec<Candidate>> = BTreeMap::new();
     let taken = |room: &RoomName| {
         derived.owned.contains(room)
             || declarations.avoid.contains(room)
@@ -299,14 +302,20 @@ pub fn survey(
                     }
                     _ => continue,
                 };
-                if by_room
-                    .get(&name)
-                    .is_none_or(|held| held.walk > candidate.walk)
-                {
-                    by_room.insert(name, candidate);
-                }
+                by_room.entry(name).or_default().push(candidate);
             }
         }
     }
-    by_room.into_values().collect()
+    // Charged to the colony Economy hauls it home to; one no colony walks to
+    // is no outpost unless the operator declared it.
+    let planned = |room| atlas::plan_of(declarations, plans, room);
+    (by_room.into_values())
+        .filter_map(|homes| {
+            let at = homes[0].outpost.controller.pos;
+            let server = atlas::server(atlas, derived, &planned, (&at, false));
+            let server = server.map(|ci| derived.colonies[ci]);
+            let c = (homes.into_iter()).min_by_key(|c| (Some(c.home) != server, c.walk))?;
+            (Some(c.home) == server || c.declared).then_some(c)
+        })
+        .collect()
 }
