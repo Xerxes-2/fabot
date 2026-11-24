@@ -46,20 +46,6 @@ impl Bunker {
     }
 }
 
-/// The hits `raw` damage takes off `f`, its boosted TOUGH taking its share first.
-fn struck_off(f: &Fighter, raw: i32) -> i32 {
-    let n = f.body.len();
-    let mut left = f64::from(raw);
-    let mut lost = 0.0;
-    for (i, part) in f.body.iter().enumerate() {
-        let ratio = damage_ratio(*part, f.boosts.get(i).copied().flatten());
-        let off = (left * ratio).min(f64::from(engine::part_hits_at(n, f.hits, i)));
-        lost += off;
-        left -= off / ratio;
-    }
-    (lost + left).round() as i32
-}
-
 fn live(f: &Fighter) -> Fighter {
     fighter::of_parts(&f.body, &f.boosts, f.hits, f.pos)
 }
@@ -90,7 +76,7 @@ pub fn outcome(ours: &Side, bunker: &Bunker, terrain: Terrain) -> Outcome {
             engine::RANGED_RANGE,
         );
         let max = engine::PART_HITS * struck.body.len() as i32;
-        let taken = struck_off(struck, bunker.strike);
+        let taken = engine::damage_taken(&struck.body, &struck.boosts, struck.hits, bunker.strike);
         struck.hits = (struck.hits - taken + heal).min(max).max(0);
         dealt += shot - bunker.repair;
         if dealt >= bunker.hits {
