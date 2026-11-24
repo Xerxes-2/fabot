@@ -152,10 +152,7 @@ fn enter(phase: Phase, time: i32, e: &Engagement) -> Engagement {
 }
 
 pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
-    let mut next = e.clone();
-    next.ours.retain(|n, _| facts.standing.contains(n));
-    next.lost = e.lost + (e.ours.len() - next.ours.len()) as i32;
-    next.ours.retain(|n, _| !facts.aging_out.contains(n));
+    let mut next = super::pruned(e, &facts.standing, &facts.aging_out);
     next.ignored = match (facts.bounced, facts.drawn) {
         (true, true) => 0,
         (true, false) if facts.charged => (e.ignored + 1).min(IGNORED),

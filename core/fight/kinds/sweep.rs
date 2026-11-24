@@ -230,11 +230,7 @@ pub fn onto(room: RoomName, time: i32, e: &Engagement) -> Engagement {
 }
 
 pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
-    let mut next = e.clone();
-    next.ours.retain(|n, _| facts.standing.contains(n));
-    next.lost = e.lost + (e.ours.len() - next.ours.len()) as i32;
-    next.ours.retain(|n, _| !facts.aging_out.contains(n));
-    let e = &next;
+    let e = &super::pruned(e, &facts.standing, &facts.aging_out);
 
     let hollow = e.ours.is_empty() && !facts.asked;
     let onward = (facts.elsewhere.as_ref())

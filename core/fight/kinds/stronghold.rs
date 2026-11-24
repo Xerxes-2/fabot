@@ -27,17 +27,11 @@ pub(crate) fn step(
     scene: &Scene,
     declarations: &Declarations,
     standing: &BTreeSet<String>,
+    aging_out: &BTreeSet<String>,
     e: &Engagement,
 ) -> Option<Engagement> {
     let time = scene.world.time;
-    let mut next = e.clone();
-    next.ours.retain(|n, _| standing.contains(n));
-    next.lost = e.lost + (e.ours.len() - next.ours.len()) as i32;
-    let living = |n: &String| {
-        (scene.ours.get(n.as_str()))
-            .is_some_and(|c| c.ticks_to_live > engine::AGED_OUT_TICKS_TO_LIVE)
-    };
-    next.ours.retain(|n, _| living(n));
+    let next = super::pruned(e, standing, aging_out);
     let asked = scene.spawning.iter().any(|c| c.engagement == e.id);
     let declared = declarations.priority(OpKind::Stronghold, e.room).is_some();
     let held = scene

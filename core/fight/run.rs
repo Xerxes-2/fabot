@@ -333,7 +333,9 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
                     claimed.extend(next.as_ref().map(|n| n.room));
                     next
                 }
-                Objective::Stronghold => stronghold::step(&scene, declarations, &standing, e),
+                Objective::Stronghold => {
+                    stronghold::step(&scene, declarations, &standing, &aging_out, e)
+                }
             }?;
 
             Some((
