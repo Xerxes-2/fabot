@@ -322,7 +322,7 @@ fn razed(home: &Home) -> bool {
     // A raider steps a tile a tick from its kill; past a few it is not told from a stranger.
     let fell = |(pos, f): &&(Pos, Fallen)| {
         f.died >= home.opened
-            && f.ticks_to_live > engine::AGED_OUT_TICKS_TO_LIVE
+            && f.lived().is_some()
             && reaches(false, KILL_DRIFT.min(home.time - f.died), &raid, pos)
     };
     // Two of the dig fallen within a tombstone's life: a raid camping a

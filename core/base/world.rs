@@ -286,11 +286,7 @@ impl Owner {
     }
 
     pub fn is_theirs(&self) -> bool {
-        !self.is_ours() && !self.is_nobody()
-    }
-
-    pub fn is_nobody(&self) -> bool {
-        *self == Owner::Nobody
+        !self.is_ours() && *self != Owner::Nobody
     }
 
     /// The username behind the stance; none for an Invader, a keeper or an
@@ -506,6 +502,13 @@ pub struct Fallen {
     pub body: Vec<Part>,
     pub ticks_to_live: i32,
     pub died: i32,
+}
+
+impl Fallen {
+    pub fn lived(&self) -> Option<i32> {
+        (self.ticks_to_live > engine::AGED_OUT_TICKS_TO_LIVE)
+            .then(|| engine::lifetime(self.body.iter().copied()) - self.ticks_to_live)
+    }
 }
 
 /// A tombstone or a ruin.

@@ -131,7 +131,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
     let aging_out: BTreeSet<String> = world
         .creeps
         .iter()
-        .filter(|c| c.ticks_to_live <= 1)
+        .filter(|c| c.ticks_to_live <= engine::AGED_OUT_TICKS_TO_LIVE)
         .map(|c| c.name.clone())
         .collect();
 

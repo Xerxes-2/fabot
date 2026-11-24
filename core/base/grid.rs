@@ -50,16 +50,12 @@ pub fn factor_of(creep: &Creep) -> FatigueFactor {
 }
 
 pub fn empty_factor(body: &[Part]) -> FatigueFactor {
-    let mut weight = 0;
-    let mut moves = 0;
-    for part in body {
-        match part {
-            Part::Move => moves += 1,
-            Part::Carry => (),
-            _ => weight += 1,
-        }
+    let carry = body.iter().filter(|p| **p == Part::Carry).count() as i32;
+    let loaded = loaded_factor(body);
+    FatigueFactor {
+        weight: loaded.weight - carry,
+        ..loaded
     }
-    FatigueFactor { weight, moves }
 }
 
 #[inline]

@@ -527,7 +527,7 @@ fn body_of(
 }
 
 fn reservable(c: &Controller) -> bool {
-    c.owner.is_nobody() && c.reservation.as_ref().is_none_or(|(by, _)| by.is_ours())
+    c.owner == Owner::Nobody && c.reservation.as_ref().is_none_or(|(by, _)| by.is_ours())
 }
 
 pub fn invader_held(c: &Controller) -> bool {

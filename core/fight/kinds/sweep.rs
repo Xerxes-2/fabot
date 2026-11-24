@@ -10,7 +10,7 @@ use fabot_base::declarations::{Declarations, OpKind};
 use fabot_base::intel::Row;
 use fabot_base::tiles;
 use fabot_base::vocabulary::Part;
-use fabot_base::world::{Creep, Owner, Pos, Room, RoomName, Source};
+use fabot_base::world::{Creep, Fallen, Owner, Pos, Room, RoomName, Source};
 use fabot_base::{engine, grid};
 use fabot_exchange::Fighter;
 use fabot_tactics::Tactic;
@@ -101,8 +101,8 @@ pub fn outreaches(ours: &Fighter, theirs: &Fighter) -> bool {
 /// Of `held`, what a body of ours that fell in `room` short of its life held past its walk.
 pub fn kept(room: &Room, held: i32, walk: i32) -> i32 {
     (room.remains.iter().filter_map(|r| r.fallen.as_ref()))
-        .filter(|f| f.ticks_to_live > 0)
-        .map(|f| engine::CREEP_LIFETIME - f.ticks_to_live - walk)
+        .filter_map(Fallen::lived)
+        .map(|lived| lived - walk)
         .fold(held, i32::min)
         .max(0)
 }
@@ -262,5 +262,36 @@ pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
             Some(enter(Phase::Fighting, facts.time, e))
         }
         _ => Some(e.clone()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fabot_base::world::{Id, Remains, Store};
+
+    fn fell(body: Vec<Part>, ticks_to_live: i32) -> Room<'static> {
+        let mut room = Room::empty(RoomName::W1N1);
+        room.remains.push(Remains {
+            id: Id::from("t1"),
+            pos: Pos::new(RoomName::W1N1, 25, 25),
+            store: Store::empty(),
+            fallen: Some(Fallen {
+                body,
+                ticks_to_live,
+                died: 0,
+            }),
+            theirs: None,
+        });
+        room
+    }
+
+    #[test]
+    fn a_body_is_kept_for_its_own_lifetime_and_an_aged_out_one_was_never_cut_short() {
+        let held = engine::CREEP_LIFETIME;
+        let aged_out = fell(vec![Part::Move], engine::AGED_OUT_TICKS_TO_LIVE);
+        assert_eq!(kept(&aged_out, held, 0), held);
+        let reserver = fell(vec![Part::Claim, Part::Move], 100);
+        assert_eq!(kept(&reserver, held, 0), engine::CLAIM_LIFETIME - 100);
     }
 }
