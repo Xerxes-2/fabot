@@ -51,9 +51,9 @@ pub struct RoomGrid {
     /// Our creeps are no wall (who yields is `Move`'s call); a creep not ours
     /// yields to nothing we decide, so a step never lands on its tile.
     held: Option<Rc<Table<Weight>>>,
-    floods: RefCell<HashMap<FloodKey, Rc<Table<i32>>>>,
+    floods: Floods,
     /// Floods round `held` or danger: they read what moves, so never kept.
-    live: RefCell<HashMap<FloodKey, Rc<Table<i32>>>>,
+    live: Floods,
     /// The open tiles a keeper strikes, walled.
     pub struck: Option<Rc<TileSet>>,
     /// The weights without creeps or strikes: what stands once out of sight.
@@ -257,17 +257,23 @@ impl RoomGrid {
             true => &self.live,
             false => &self.floods,
         };
-        if let Some(dist) = floods.borrow().get(&key as &dyn Keyed) {
+        if let Some(k) = floods.borrow().get(&key as &dyn Keyed) {
+            k.unasked.set(0);
             let fresh = |dist: &Table<i32>| *dist == self.fresh(mover, key).0;
             assert!(
-                !check || fresh(dist),
+                !check || fresh(&k.value),
                 "a kept flood differs from a fresh one"
             );
-            return (dist.clone(), true, 0);
+            return (k.value.clone(), true, 0);
         }
         let (dist, relaxed) = self.fresh(mover, key);
         let dist = Rc::new(dist);
-        floods.borrow_mut().insert(key.kept(), dist.clone());
+        let kept = Kept {
+            read: (),
+            value: dist.clone(),
+            unasked: Cell::new(0),
+        };
+        floods.borrow_mut().insert(key.kept(), kept);
         (dist, false, relaxed)
     }
 
@@ -343,7 +349,9 @@ pub struct Atlas {
     pub check: bool,
 }
 
-type Carried<K, T> = RefCell<HashMap<K, Kept<T>>>;
+type Carried<K, T, R = Reads> = RefCell<HashMap<K, Kept<T, R>>>;
+/// A room's floods read its weights alone, which the room's grid keys.
+type Floods = Carried<FloodKey, Rc<Table<i32>>, ()>;
 
 /// A walk toward `to` from `room`, by its region `way`'s way on, else by any.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -396,8 +404,8 @@ impl PartialEq for RoomRead {
 }
 
 #[derive(Clone, Debug)]
-struct Kept<T> {
-    read: Reads,
+struct Kept<T, R = Reads> {
+    read: R,
     value: T,
     unasked: Cell<u32>,
 }
@@ -694,10 +702,6 @@ impl Atlas {
         }
     }
 
-    /// ~10 kB each. A dropped resource's tile is a new goal, so a room's keys
-    /// are unbounded; past this the room floods afresh.
-    const KEPT_FLOODS: usize = 500;
-
     fn reused(previous: Option<&RoomGrid>, weights: Table<Weight>) -> Rc<Table<Weight>> {
         match previous {
             Some(grid) if *grid.weights == weights => grid.weights.clone(),
@@ -705,19 +709,10 @@ impl Atlas {
         }
     }
 
-    /// The floods `previous` kept, while its weights hold and the room's
-    /// keys stay bounded.
-    fn kept(
-        previous: Option<RoomGrid>,
-        weights: &Rc<Table<Weight>>,
-    ) -> RefCell<HashMap<FloodKey, Rc<Table<i32>>>> {
+    /// The floods `previous` kept, while its weights hold.
+    fn kept(previous: Option<RoomGrid>, weights: &Rc<Table<Weight>>) -> Floods {
         match previous {
-            Some(grid)
-                if grid.floods.borrow().len() < Atlas::KEPT_FLOODS
-                    && Rc::ptr_eq(&grid.weights, weights) =>
-            {
-                grid.floods
-            }
+            Some(grid) if Rc::ptr_eq(&grid.weights, weights) => Atlas::asked_floods(grid.floods),
             _ => RefCell::default(),
         }
     }
@@ -858,7 +853,7 @@ impl Atlas {
                 (weights, struck)
             };
             let grid = match previous.rooms.remove(&c) {
-                Some(grid)
+                Some(mut grid)
                     if !grid.seen && grid.blind == blind && grid.placed.as_deref() == placed =>
                 {
                     if previous.check {
@@ -866,9 +861,7 @@ impl Atlas {
                         let fresh = (weights == *grid.weights) && struck == grid.struck;
                         assert!(fresh, "a kept unseen grid differs from a fresh one");
                     }
-                    if grid.floods.borrow().len() >= Atlas::KEPT_FLOODS {
-                        grid.floods.borrow_mut().clear();
-                    }
+                    grid.floods = Atlas::asked_floods(grid.floods);
                     grid.live.take();
                     grid
                 }
@@ -1086,7 +1079,19 @@ impl Atlas {
         }
     }
 
-    fn unasked<K, T>(mut carried: Carried<K, T>, ticks: u32) -> Carried<K, T> {
+    /// Past `MOST_FLOODS`, the least lately asked go first.
+    fn asked_floods(floods: Floods) -> Floods {
+        let mut floods = Atlas::unasked(floods, Atlas::FLOOD_TICKS);
+        let table = floods.get_mut();
+        if table.len() > Atlas::MOST_FLOODS {
+            let mut ages: Vec<u32> = table.values().map(|k| k.unasked.get()).collect();
+            let (_, &mut oldest, _) = ages.select_nth_unstable(Atlas::MOST_FLOODS);
+            table.retain(|_, k| k.unasked.get() < oldest);
+        }
+        floods
+    }
+
+    fn unasked<K, T, R>(mut carried: Carried<K, T, R>, ticks: u32) -> Carried<K, T, R> {
         (carried.get_mut()).retain(|_, k| k.unasked.replace(k.unasked.get() + 1) < ticks);
         carried
     }
@@ -1375,6 +1380,12 @@ impl Atlas {
 
     /// A body asks its walks at its choice of work, about once a trip.
     const TRIP_TICKS: u32 = 100;
+
+    /// A room's goals come back a few trips apart: at `TRIP_TICKS` a soak floods 15% more.
+    const FLOOD_TICKS: u32 = 300;
+
+    /// ~10 kB each, and wasm keeps its high-water mark: twice a soak's busiest room.
+    const MOST_FLOODS: usize = 2000;
 
     /// `ticks_to` off `tree`, grown from the target's room: each room the
     /// mover's walk from where it lands to where the tree leaves it.
