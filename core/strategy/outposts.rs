@@ -22,7 +22,7 @@ pub struct Candidate {
     pub home: RoomName,
     /// One way, in ticks.
     pub walk: i32,
-    /// Before a storage, the unroaded path the young home's budget charges.
+    /// The path the spawn budget charges: unroaded while young, paved once stocked.
     pub walked: i32,
     /// Another player's bodies work it: ours are lost once a life.
     pub contested: bool,
@@ -242,9 +242,7 @@ pub fn survey(
         let walked = |hops: i32, outpost: &Outpost| {
             let path = |at: &Pos| {
                 let line = straight(at)?;
-                let path = young
-                    .then(|| atlas.ticks_bare(REACH_HOPS, at, spawn))
-                    .flatten();
+                let path = atlas.ticks_bare(!young, REACH_HOPS, at, spawn);
                 Some(path.map_or(line, |w| w.max(line)))
             };
             mean_of(hops, outpost, &path)

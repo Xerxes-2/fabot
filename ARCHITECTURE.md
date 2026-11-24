@@ -140,7 +140,7 @@ segments over multiple ticks (economy first); a cold tick never spends more than
 | `Bindings` / `app` | `fabot` | Screeps JS API seam, packed `read.js`, `driver.rs` | `Game`, `RawMemory` | `Game`, `RawMemory`, segments |
 | `Engine` | `fabot-base` | Game formulas & non-global server constants (vanilla tables from `screeps-game-api`) | — | — |
 | `World` | `fabot-base` | Single-pass tick snapshot, event-log strikes/destroys, per-tick `rules` (`CONTROLLER_STRUCTURES`) | `Game` | — |
-| `Atlas` | `fabot-atlas` | Room graph (region nodes, border-stretch crossings, keeper-strike avoidance, blind keeper penalty, a room intel last saw with towers that fire on us (a live stronghold's, a non-ally player's) never crossed, only reached) and per-room tile grid (creep-free weights, reverse floods, seats, footprint queries; a hostile's tile is walled only in this tick's step floods and passability, never in a kept flood, so one moving redoes no flood, tree or walk); out-of-sight grids hold what stood when last seen (else terrain) struck where intel places the keepers (`atlas.unseen`); a walk can run on terrain alone (`bare`) | `World`, `terrain`, `intel.rooms`, `Declarations` (colony plans, for `server`) | flood table, `atlas.carried` |
+| `Atlas` | `fabot-atlas` | Room graph (region nodes, border-stretch crossings, keeper-strike avoidance, blind keeper penalty, a room intel last saw with towers that fire on us (a live stronghold's, a non-ally player's) never crossed, only reached) and per-room tile grid (creep-free weights, reverse floods, seats, footprint queries; a hostile's tile is walled only in this tick's step floods and passability, never in a kept flood, so one moving redoes no flood, tree or walk); out-of-sight grids hold what stood when last seen (else terrain) struck where intel places the keepers (`atlas.unseen`); a walk can run on terrain alone, as it lies or paved (`bare`) | `World`, `terrain`, `intel.rooms`, `Declarations` (colony plans, for `server`) | flood table, `atlas.carried` |
 | `Economy` | `fabot-economy` | Slots, casts, sticky tasks, logistics dispatcher, links, labs, terminals, abandon | `Derived`, `Atlas`, `declarations`, `EconomyState`, Strategy's `scouts` | tasks, casts, `assignments` |
 | `Layout` | `fabot-layout` | Colony placement plan (Hivemind planner + xxscreeps JPS), rampart ring, construction sites, buried-road destroy, tower firing | `Derived`, `Atlas`, `declarations` | sites, destroys, tower actions, `standing.layout` |
 | `Exchange` | `fabot-exchange` | Pure combat arithmetic (`outcome`, `cheapest_win`, breach planning, a stronghold's run) | fighters, terrain | — |
@@ -214,7 +214,7 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
 | `atlas.floods` | per-room cached reverse floods (bounded per room) | Atlas | heap | reused while room weights hold |
 | `atlas.unseen` | out-of-sight room grid + the keeper posts and blind flag it was struck from | Atlas | heap | keyed by those posts, not by sight alone, so intel arriving after a cold tick strikes a keeper room pre-read blind |
 | `atlas.carried` | carried room trees & outpost road walks + room-read fingerprints | Atlas | heap | a search reads no room past its hops so a carried value equals a fresh one while those read the same (saving ~1/10 of decide); drops the tick after going unasked |
-| `atlas.towards` | per target tile, room and region, on the room's weights or its terrain alone (`bare`): the walk toward it, its weights, seeds and room read | Atlas | heap | a body asks at its choice of work, so a walk is dropped only `TRIP_TICKS` unasked (at most the targets asked in that span × the rooms of their trees); recomputed when its weights or seeds change |
+| `atlas.towards` | per target tile, room and region, on the room's weights or its terrain alone, as it lies or paved (`bare`): the walk toward it, its weights, seeds and room read | Atlas | heap | a body asks at its choice of work, so a walk is dropped only `TRIP_TICKS` unasked (at most the targets asked in that span × the rooms of their trees); recomputed when its weights or seeds change |
 | `atlas.reads` | last tick's room reads around each asked room and hops | Atlas | heap | an unchanged read is handed on as last tick's `Rc`, so a kept walk or tree checks its rooms by address; dropped the tick after going unread |
 | `terrain` | room → `LocalRoomTerrain` (borrowed by `World`) + `getRoomStatus` | World | heap | terrain never changes and status only when novice/respawn ends (prefetched to `SIEGE_HOPS` to avoid seam calls); rooms of foreign status are never routed/served (engine traps creeps on exit) and unread rooms never observed (off-shard refuses observer) |
 | `buffers` | emptied `World` lists from last tick | World | heap | capacity reuse without allocation (§9.2) |
@@ -716,7 +716,10 @@ expansion, and operation priorities.
   20/tick, leaving nothing to bank for boosts, labs, or ramparts without
   outposts): operator rows first, then highest net energy/spawn-tick within
   `cpu_limit / 2` and spawn `spare` of the colony that walks to it
-  (`atlas::server`, Economy's choice too), a room without containers at all
+  (`atlas::server`, Economy's choice too; its haul charged on the terrain path,
+  unroaded while young and paved once stocked, as Economy casts the carriers
+  that path needs only while spawn time is left and the rest of the dig
+  decays), a room without containers at all
   sources net of them over one creep life (its haul is priced unroaded, so a
   road repays itself), so a better room displaces a standing one only once it
   repays its setup within a life. A busy home's held-back room keeps its spawn

@@ -61,7 +61,7 @@ pub struct RoomGrid {
     standing: Rc<Table<Weight>>,
     /// Terrain alone: a walk on it reads no structure seen, so a reset moves
     /// it only through the room tree it crosses.
-    bare: Rc<Table<Weight>>,
+    bare: [Rc<Table<Weight>>; 2],
     seats: Vec<(Tile, Weight)>,
     /// Out of sight, the keepers' posts the strikes were placed from.
     placed: Option<Vec<Post>>,
@@ -353,7 +353,7 @@ struct Toward {
     max_hops: i32,
     room: Coords,
     way: Option<usize>,
-    bare: bool,
+    bare: Option<bool>,
 }
 
 /// A room's flood off its weights (by address) and the ticks its exits are
@@ -721,8 +721,16 @@ impl Atlas {
         }
     }
 
-    fn bare(last: Option<&RoomGrid>, terrain: &[u8]) -> Rc<Table<Weight>> {
-        last.map_or_else(|| Rc::new(Atlas::ground(terrain)), |g| g.bare.clone())
+    fn bare(last: Option<&RoomGrid>, terrain: &[u8]) -> [Rc<Table<Weight>>; 2] {
+        last.map_or_else(
+            || {
+                let paved: Vec<u8> = (terrain.iter())
+                    .map(|t| t & fabot_base::world::terrain::WALL)
+                    .collect();
+                [Atlas::ground(terrain), Atlas::ground(&paved)].map(Rc::new)
+            },
+            |g| g.bare.clone(),
+        )
     }
 
     fn ground(terrain: &[u8]) -> Table<Weight> {
@@ -1424,12 +1432,9 @@ impl Atlas {
         if let Some(dist) = held.clone().filter(|_| !self.check) {
             return dist;
         }
-        let weights = (self.rooms.get(&key.room)).map(|g| {
-            if key.bare {
-                g.bare.clone()
-            } else {
-                g.weights.clone()
-            }
+        let weights = (self.rooms.get(&key.room)).map(|g| match key.bare {
+            Some(paved) => g.bare[usize::from(paved)].clone(),
+            None => g.weights.clone(),
         });
         let mut seeds = Vec::new();
         // No way leads out of the tree's root: its walk needs no tree.
@@ -1521,15 +1526,15 @@ impl Atlas {
     /// `toward`'s ticks at `from`; a tile no body stands on (a structure's)
     /// is a step past its nearest.
     pub fn ticks_toward(&self, max_hops: i32, to: &Pos, from: &Pos) -> Option<i32> {
-        self.ticks_on_way(max_hops, to, from, false)
+        self.ticks_on_way(max_hops, to, from, None)
     }
 
-    /// `ticks_toward` on terrain alone.
-    pub fn ticks_bare(&self, max_hops: i32, to: &Pos, from: &Pos) -> Option<i32> {
-        self.ticks_on_way(max_hops, to, from, true)
+    /// `ticks_toward` on terrain alone, or `paved`, as if every open tile were.
+    pub fn ticks_bare(&self, paved: bool, max_hops: i32, to: &Pos, from: &Pos) -> Option<i32> {
+        self.ticks_on_way(max_hops, to, from, Some(paved))
     }
 
-    fn ticks_on_way(&self, max_hops: i32, to: &Pos, from: &Pos, bare: bool) -> Option<i32> {
+    fn ticks_on_way(&self, max_hops: i32, to: &Pos, from: &Pos, bare: Option<bool>) -> Option<i32> {
         let key = Toward {
             to: *to,
             max_hops,
