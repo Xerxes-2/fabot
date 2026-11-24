@@ -1,10 +1,11 @@
 // The line and comment-share ceilings in scripts/ceilings.json, checked, and
-// no issue or ADR citation in code. A directory's line count is every line of
-// every .rs beneath it, minus the files of any row beneath it: a `<dir>/*`
-// row holds each of its files to its own ceiling, a `<dir>` row its whole
-// tree. A comment share is per directory of the bot's
-// source (`src`, `core`, `sim`), over its own .rs files. Neither counts a `#[cfg(test)]` item nor
-// a crate's suites under `core/<crate>/tests`. Exits non-zero on any breach.
+// no issue or ADR citation in code, nor a combat rule constant outside engine
+// and world. A directory's line count is every line of every .rs beneath it,
+// minus the files of any row beneath it: a `<dir>/*` row holds each of its
+// files to its own ceiling, a `<dir>` row its whole tree. A comment share is
+// per directory of the bot's source (`src`, `core`, `sim`), over its own .rs
+// files. Neither counts a `#[cfg(test)]` item nor a crate's suites under
+// `core/<crate>/tests`. Exits non-zero on any breach.
 //
 // Usage: node scripts/ceiling.mjs
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -84,6 +85,36 @@ for (const [file, n, line] of cited)
 if (cited.length > 0) {
   console.error(
     `ceiling: ${cited.length} issue/ADR citation(s) in code; git log carries them (AGENTS.md)`,
+  );
+  process.exit(1);
+}
+
+// Combat rules live in engine and world alone; others call their functions.
+const RULE_HOMES = ["core/base/engine.rs", "core/base/world.rs"];
+const RULE =
+  /\b(?:RANGED_)?(?:ATTACK|HEAL)_POWER\b|\bRANGED_MASS_ATTACK_POWER\w*|\bTOWER_(?:POWER_\w+|FALLOFF\w*|OPTIMAL_RANGE)\b/g;
+const RULE_ALLOWED = {
+  // The tower's reach, not its falloff damage.
+  "core/atlas/derived.rs": ["TOWER_FALLOFF_RANGE"],
+  "core/fight/kinds/siege.rs": ["TOWER_FALLOFF_RANGE"],
+};
+const ruled = ROOTS.flatMap(rsFiles)
+  .filter((file) => !RULE_HOMES.includes(file))
+  .flatMap((file) =>
+    readFileSync(file, "utf8")
+      .split("\n")
+      .map((line, i) => [file, i + 1, line])
+      .filter(([, , line]) =>
+        (line.match(RULE) ?? []).some(
+          (name) => !RULE_ALLOWED[file]?.includes(name),
+        ),
+      ),
+  );
+for (const [file, n, line] of ruled)
+  console.error(`RULE ${file}:${n}: ${line.trim()}`);
+if (ruled.length > 0) {
+  console.error(
+    `ceiling: ${ruled.length} combat rule constant(s) outside engine/world; call engine::strike_at / heal_at / mass_at / tower_attack_at`,
   );
   process.exit(1);
 }
