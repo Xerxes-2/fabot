@@ -54,8 +54,8 @@ pub struct Jobs<'a> {
     takes: Vec<Vec<Spot>>,
     booked_load: HashMap<Task, i32>,
     digging: HashMap<Id, i32>,
-    /// Per colony: a carrier stands, so a worker refills the ring only
-    /// without one.
+    /// Per colony: a carrier stands, so a worker refills the ring and fetches
+    /// its own only without one.
     carried: Vec<bool>,
     /// Worker id to the carrier holding a load for it.
     booked: BTreeMap<Id, Id>,
@@ -752,7 +752,7 @@ impl<'a> Jobs<'a> {
             return Supply::Meet(*carrier);
         }
         let g = &self.derived.grounds[slot.colony];
-        if upgrades && g.feed.is_some() {
+        if upgrades && g.feed.is_some() && self.carried[slot.colony] {
             Supply::Wait(work)
         } else {
             Supply::Own

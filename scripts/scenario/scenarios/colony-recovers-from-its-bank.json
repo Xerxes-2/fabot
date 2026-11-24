@@ -1,0 +1,7 @@
+{
+  "why": "a colony recovers from the bank it holds: after a wipe an RCL3 home banking on a pile holds one harvester on one source and one worker at its empty controller container, with the bank at 300 of 800 and no carrier; the other source's harvester and every hauler (800) wait on the bank, the floors see a source dug and the worker as the carrier, so the worker must refill the ring itself (old: it waited at the container for haulers, the bank stayed at 300 and nothing was cast in 1300 ticks)",
+  "modules": ["economy"],
+  "start": { "world": "scripts/scenario/worlds/bank-after-a-wipe.json", "seed": 1 },
+  "ticks": 1000,
+  "assert": [{ "measure": "castIn", "name": "hauler-", "room": "W1N1", "min": 1 }]
+}
