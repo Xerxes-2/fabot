@@ -59,7 +59,7 @@ const [cmd, ...args] = process.argv.slice(2);
 if (cmd === "replay") {
   const traced = args.includes("--trace") ? args[args.indexOf("--trace") + 1] : undefined;
   if (!args[0] || (args.includes("--trace") && !traced)) fail("usage: observe replay <capture.jsonl> [--trace <creep>]");
-  replay(args[0], traced);
+  await replay(args[0], traced);
   process.exit(0);
 }
 if (cmd === "exchange" && args[0]) {

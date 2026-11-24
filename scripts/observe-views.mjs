@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { getHeapStatistics } from "node:v8";
 import { load, stand } from "./bench-game.mjs";
+import { ticksOf } from "./capture-read.mjs";
 import { RECORDER, unpack } from "./recorder.mjs";
 import { bodies, defenders, formation, history, razes, strikes, towers } from "./room-history.mjs";
 import { fail, segmentReads } from "./screeps-api.mjs";
@@ -330,12 +331,10 @@ export function views({ api, shard, url, token, memory, raw }) {
 const NEIGHBOURS = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
 
 // A gap in the capture's ticks reloads the bundle, as a global reset would.
-export function replay(file, traced, bundle = new URL("../dist/main.js", import.meta.url).pathname) {
+export async function replay(file, traced, bundle = new URL("../dist/main.js", import.meta.url).pathname) {
   let bot, last;
   globalThis.fabotTrace = true;
-  for (const line of readFileSync(file, "utf8").split("\n").filter(Boolean)) {
-    const tick = JSON.parse(line);
-    for (const r of tick.rooms) r.terrain = Uint8Array.from(r.terrain, Number);
+  for await (const tick of ticksOf([file])) {
     if (last !== tick.time - 1) {
       bot = load(bundle);
       console.log(`-- bundle loaded cold at t${tick.time}`);

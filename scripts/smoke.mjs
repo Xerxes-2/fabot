@@ -4,10 +4,13 @@
 //
 // Usage: node scripts/smoke.mjs [bundle]   (after `npm run build`)
 import { createRequire } from "node:module";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { getHeapStatistics } from "node:v8";
 import { createContext, runInContext } from "node:vm";
 import { stand } from "./bench-game.mjs";
+import { replay } from "./observe-views.mjs";
 import { RECORDER, unpack } from "./recorder.mjs";
 
 const fail = (msg) => {
@@ -256,6 +259,13 @@ if (direct.join() !== "0,-5,1,1,-8,0") fail(`a tower whose lookup threw and a re
 stand(recorded, [], getHeapStatistics, () => 0);
 const again = globalThis.__fabotRead().slice(0, 2).map((each) => (typeof each === "string" ? each : Array.from(each)));
 if (JSON.stringify(again) !== JSON.stringify(pass)) fail(`the recorded tick reads otherwise: ${JSON.stringify(again).slice(0, 200)}`);
+
+// A sim capture (`sim/src/capture`) traced: terrain on its full tick alone, then a change.
+const dir = mkdtempSync(join(tmpdir(), "smoke-"));
+const later = { ...recorded, time: 104, objects: {}, gone: [] };
+const ticks = [{ ...recorded, full: true, terrain: { W1N1: "0".repeat(2500) } }, later];
+writeFileSync(join(dir, "capture.jsonl"), ticks.map((t) => JSON.stringify(t)).join("\n"));
+await replay(join(dir, "capture.jsonl"), "a", new URL(bundle, import.meta.url).pathname).finally(() => rmSync(dir, { recursive: true }));
 
 const version = readFileSync(new URL(bundle, import.meta.url), "utf8").split("\n")[0];
 console.log(`smoke: 4 ticks clean, and after a trap and a timeout (${version.match(/"(.*)"/)?.[1] ?? "unnamed"})`);
