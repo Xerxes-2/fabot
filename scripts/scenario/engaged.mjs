@@ -43,7 +43,7 @@ export function engagements(write, at) {
       const asked = new Set((fight?.casts ?? []).map((c) => c.engagement));
       for (const e of fight?.engagements ?? []) {
         now.add(e.id);
-        const rec = open.get(e.id) ?? { id: e.id, kind: e.kind ?? "defend", room: e.room, opened: t, members: new Set(), ours: new Set(), rooms: new Set(), swing: {}, reached: {}, answered: false, gaveUp: false, disengaged: false, contact: null, seen: null, dead: 0, blind: 0, idle: 0, asking: 0, waited: 0, set: 0, formed: 0, forming: 0, empty: 0, bare: 0, spared: 0, tombs: new Set() };
+        const rec = open.get(e.id) ?? { id: e.id, kind: e.kind ?? "defend", room: e.room, opened: t, members: new Set(), ours: new Set(), rooms: new Set(), swing: {}, reached: {}, answered: false, gaveUp: false, disengaged: false, contact: null, seen: null, dead: 0, blind: 0, idle: 0, asking: 0, waited: 0, budget: 0, set: 0, formed: 0, forming: 0, empty: 0, bare: 0, spared: 0, tombs: new Set() };
         open.set(e.id, rec);
         for (const m of (fight.groups ?? []).find((g) => g.id === e.group)?.members ?? []) rec.members.add(m);
         rec.predicted = e.predicted;
@@ -67,6 +67,8 @@ export function engagements(write, at) {
         // `waited`: the most ticks on end a Defend stood answered on casts asked, none of its bodies standing.
         rec.asking = rec.kind === "defend" && !e.unanswered && !ours.length && asked.has(e.id) ? rec.asking + 1 : 0;
         rec.waited = Math.max(rec.waited, rec.asking);
+        // `budget`: the bodies its price let it lose when it last Formed, where it commits; one moved later is no commitment.
+        if (e.phase === "forming") rec.budget = e.budget ?? 0;
         // `set`: the most bodies it held and asked at once; `forming`: the most ticks on end it formed answered.
         rec.set = Math.max(rec.set, ours.length + (fight.casts ?? []).filter((c) => c.engagement === e.id).length);
         rec.formed = e.phase === "forming" && !e.unanswered ? rec.formed + 1 : 0;

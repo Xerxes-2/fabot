@@ -947,7 +947,9 @@ raze), offline one it outlived.
 
 **Scenario library (`npm run scenario`):** every live incident becomes a recipe
 scenario with outcome bounds (`scripts/scenario/scenarios/`). `jj ship` runs
-scenarios matching touched modules.
+scenarios matching touched modules. A bound guarding a rule holds over every
+occurrence in the run (`"each"`: each engagement, safe mode, outpost), not a value
+at a tick or in a window, so a trajectory that drifts moves no bound.
 
 **Soak & reading rules (`npm run soak`, `npm run soak:many`):**
 - Judged on the 30k-tick horizon by end RCL & progress, the tick each level is

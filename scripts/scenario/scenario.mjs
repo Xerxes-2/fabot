@@ -30,14 +30,16 @@
 // a measure is one of `measures` below, read off the soak's output over ticks
 // [from, to), counted from the run's first tick; { "metric": a name the bot's
 // metrics carry (`core/observe/metrics.rs`), "room"?, "total"? } bounds its worst
-// full window, or with "total" their sum, and fails when none was read.
+// full window, or with "total" their sum, and fails when none was read;
+// { "each": an occurrence `events` lists, "where"?: { field: a bound or a value }, "least"? (default 1),
+// "assert": { field: { "min"?, "max"? } } } holds each bound on every occurrence matching "where".
 // Exits non-zero when a bound fails or a soak does.
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { check, engagementsOf, measures, samplesOf, withAlways } from "./measures.mjs";
+import { breaches, check, engagementsOf, events, measures, occurrences, samplesOf, withAlways } from "./measures.mjs";
 import { report } from "../sim/prediction.mjs";
 import { sweep } from "./prune.mjs";
 import { unstood } from "../sim/node.mjs";
@@ -71,10 +73,11 @@ const library = readdirSync(LIBRARY)
   .filter((f) => f.endsWith(".json"))
   .map((f) => ({ name: basename(f, ".json"), ...JSON.parse(readFileSync(join(LIBRARY, f), "utf8")) }));
 for (const s of library) s.assert = withAlways(s.assert);
+for (const s of library) for (const a of s.assert) if (a.each) Object.assign(a, { measure: "each", max: 0 });
 for (const s of library)
   if (!s.modules?.length || s.modules.some((m) => !modules.includes(m))) fail(`${s.name}: "modules" must name some of ${modules.join(", ")}`);
 for (const s of library.filter((s) => s.name.startsWith("defend-")))
-  if (!s.assert.some((a) => a.measure === "bodiesLost" && a.max !== undefined)) fail(`${s.name}: a fight scenario bounds bodiesLost by a "max"`);
+  if (!s.assert.some((a) => (a.measure === "bodiesLost" && a.max !== undefined) || a.assert?.pastBudget?.max !== undefined)) fail(`${s.name}: a fight scenario bounds bodiesLost, or each engagement's pastBudget, by a "max"`);
 // What sim cannot stand or read (`scripts/sim/run.mjs`), or null.
 const unplayable = (s) =>
   Object.keys(s.start).filter((k) => !SIM_START.includes(k)).map((k) => `its start's ${k}`)[0] ||
@@ -116,6 +119,7 @@ sweep(join(REPO, "soak-runs"));
 
 for (const s of scenarios) for (const a of s.assert) if (a.metric !== undefined) a.measure = "metric";
 for (const s of scenarios) for (const a of s.assert) if (!measures[a.measure]) fail(`${s.name}: no measure ${a.measure}`);
+for (const s of scenarios) for (const a of s.assert) if (a.each && !events[a.each]) fail(`${s.name}: no occurrence ${a.each}; the occurrences: ${Object.keys(events).join(", ")}`);
 for (const { name, start } of scenarios)
   if (start.world && Object.keys(start).some((k) => !["world", "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "follow", "ended", "memory", "gcl", "stock", "level"].includes(k))) fail(`${name}: a "world" start takes a "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "follow", "ended", "memory", "gcl", "stock", "level" and nothing else`);
 for (const { name, start } of scenarios)
@@ -210,7 +214,9 @@ for (const s of scenarios) {
       against = `; base ${was} ${mark}`;
     }
     const window = a.from !== undefined || a.to !== undefined ? ` t${a.from ?? 0}-${a.to ?? s.ticks}` : "";
-    console.log(`${ok ? "pass" : "FAIL"} ${s.name}: ${a.metric ?? a.measure}${a.seat ? ` of ${a.seat}` : ""}${a.room ? ` in ${a.room}` : ""}${window} ${value} (${bound}${against})`);
+    const named = a.each ? `each ${a.each}${a.where ? ` ${JSON.stringify(a.where)}` : ""} ${JSON.stringify(a.assert)} (${occurrences(samples, a, at).length} seen), breaches` : a.metric ?? a.measure;
+    console.log(`${ok ? "pass" : "FAIL"} ${s.name}: ${named}${a.seat ? ` of ${a.seat}` : ""}${a.room ? ` in ${a.room}` : ""}${window} ${value} (${bound}${against})`);
+    if (a.each) for (const line of breaches(samples, a, at).slice(0, 5)) console.log(`  ${line}`);
   }
   const rows = s.assert.some((a) => a.measure === "predictedWinsLost") ? engagementsOf(dir) : [];
   if (rows.length) for (const line of [`${rows.length} engagements`, ...report(rows)]) console.log(`  ${s.name}: ${line}`);

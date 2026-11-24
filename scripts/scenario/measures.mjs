@@ -482,6 +482,69 @@ export const measures = {
     }),
 };
 
+// `OUTPOST_LOSSES` in `core/fight/kinds/defend.rs`: an outpost's Defend loses this past its budget before it quits.
+const OUTPOST_LOSSES = 2;
+const homesOf = (samples) => {
+  const last = samples.at(-1);
+  return new Set(Object.keys(last.homes ?? { [Object.keys(last.rooms)[0]]: last }));
+};
+// What an `each` assert reads: every occurrence in the run, `t` its run tick and `who` what it names.
+export const events = {
+  // Each engagement as `engaged.mjs` wrote it: `reach` the ticks from its opening to contact (to its
+  // close, or the run's end, without one), `pastBudget` its dead beyond those Defend quits at, `bug`
+  // a predicted Win or Kite lost (§10.1).
+  engagement: (samples, dir) => {
+    const [homes, end] = [homesOf(samples), samples.at(-1).t];
+    return rowsOf(dir).map((e) => ({
+      ...e,
+      t: e.opened,
+      who: `${e.kind} ${e.id} in ${e.room}`,
+      home: homes.has(e.room),
+      lasted: (e.closed ?? end) - e.opened,
+      reach: (e.contact ?? e.closed ?? end) - e.opened,
+      bug: bugs(tested([e])).length,
+      pastBudget: e.dead - (e.budget ?? 0) - (homes.has(e.room) ? 0 : OUTPOST_LOSSES),
+    }));
+  },
+  // Each home's safe mode, at the first sample it runs in: `killed`, our bodies killed there since
+  // the last Defend opened there before it; `exposure` and `exposedBefore`, the room's over the
+  // metric windows after it and from that Defend to it.
+  safeMode: (samples, dir) => {
+    const [offset, lives, rows, windows] = [offsetOf(samples), livesOf(dir), rowsOf(dir), windowsOf(dir, {})];
+    const of = (s, room) => s.homes?.[room] ?? s;
+    return [...homesOf(samples)].flatMap((room) =>
+      samples
+        .filter((s, i) => i > 0 && of(s, room).safeMode && !of(samples[i - 1], room).safeMode)
+        .map((s) => {
+          const raided = Math.max(0, ...rows.filter((e) => e.kind === "defend" && e.room === room && e.opened <= s.t).map((e) => e.opened));
+          const killed = lives.filter((b) => b.ours && b.at?.startsWith(`${room} `) && b.ttl > AGED && b.last - b.struckAt <= STRUCK_LATELY && b.last - offset >= raided && b.last - offset <= s.t);
+          const exposed = (w) => (w.row === room ? (w.values.exposure ?? 0) : 0);
+          const exposure = windows.filter((w) => w.start >= s.t).reduce((n, w) => n + exposed(w), 0);
+          const exposedBefore = windows.filter((w) => w.start < s.t && w.start + w.ticks > raided).reduce((n, w) => n + exposed(w), 0);
+          return { t: s.t, who: `safe mode in ${room}`, room, raided, killed: killed.length, exposure, exposedBefore };
+        }),
+    );
+  },
+  // Each room dug that is no home, over the run: `decayedShare`, the percent of its dug left to decay.
+  outpost: (samples) => {
+    const homes = homesOf(samples);
+    return Object.entries(samples.at(-1).rooms)
+      .filter(([room, r]) => !homes.has(room) && r.dug > 0)
+      .map(([room, r]) => ({ t: samples.find((s) => s.rooms[room]?.dug > 0).t, who: room, room, dug: r.dug, decayed: r.decayed, decayedShare: Math.round((100 * r.decayed) / r.dug) }));
+  },
+};
+// A field's bound: { min?, max? }, or the value it equals.
+const holds = (v, b) => (b !== null && typeof b === "object" ? v >= (b.min ?? -Infinity) && v <= (b.max ?? Infinity) : v === b);
+/** The occurrences an `each` assert reads: those of its kind matching `where`. */
+export const occurrences = (samples, a, dir) => events[a.each](samples, dir).filter((e) => Object.entries(a.where ?? {}).every(([k, b]) => holds(e[k], b)));
+/** An `each` assert's breaches, a line each: fewer occurrences matching `where` than `least` (default 1), or one breaking a bound in `assert`. */
+export const breaches = (samples, a, dir) => {
+  const seen = occurrences(samples, a, dir);
+  if (seen.length < (a.least ?? 1)) return [`${seen.length} ${a.each} seen, fewer than ${a.least ?? 1}`];
+  return seen.flatMap((e) => Object.entries(a.assert).filter(([k, b]) => !holds(e[k], b)).map(([k]) => `${e.who} t${e.t}: ${k} ${e[k]}`));
+};
+measures.each = (samples, a, dir) => breaches(samples, a, dir).length;
+
 // An act the engine refuses is a decision made on a wrong reading of the
 // world, and a fault a module that threw.
 const ALWAYS = [
