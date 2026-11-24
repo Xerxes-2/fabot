@@ -967,9 +967,7 @@ pub fn picked<'a>(
 }
 
 pub struct Priced {
-    /// What the rival spent on the bodies the engagement fights.
-    pub raid: i32,
-    /// Its bodies land as one, as a blob walks them in.
+    pub rival_spent: i32,
     pub together: bool,
     /// The set swings nothing, so it fights as one body.
     pub ranged: bool,
@@ -984,7 +982,6 @@ pub struct Priced {
 }
 
 impl Priced {
-    /// One arm as `outcome` prices `landed` against `theirs`, nothing in its set.
     pub fn arm(
         stance: Stance,
         (landed, theirs): (&Side, &Side),
@@ -992,7 +989,7 @@ impl Priced {
         outcome: Outcome,
     ) -> Priced {
         Priced {
-            raid: theirs
+            rival_spent: theirs
                 .bodies
                 .iter()
                 .map(|f| engine::body_cost(&f.body))
@@ -1017,11 +1014,11 @@ impl Priced {
         let (won, ticks) = (self.outcome.is_win(), self.outcome.ticks());
         let (value, ticks) = match (tactic, self.together) {
             // A post spends no ticks of the room: the raid comes to it.
-            (Tactic::Hold, false) if self.holds => (if won { self.raid } else { 0 }, 0),
+            (Tactic::Hold, false) if self.holds => (if won { self.rival_spent } else { 0 }, 0),
             _ if self.stance == Stance::Hold => return None,
-            (Tactic::Close, false) if won && !self.ranged => (self.raid, ticks),
+            (Tactic::Close, false) if won && !self.ranged => (self.rival_spent, ticks),
             (Tactic::Kite, false) if !won && !self.ranged => (0, ticks),
-            (Tactic::BlobClose, true) if won => (self.raid, ticks),
+            (Tactic::BlobClose, true) if won => (self.rival_spent, ticks),
             (Tactic::BlobKite, true) if !won && self.ranged => (0, ticks),
             _ => return None,
         };

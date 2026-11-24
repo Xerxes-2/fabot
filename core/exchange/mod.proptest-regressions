@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 207a9344baf952a88488c32b99f4566b87dbffbb8e55dfbfa43c50b2f392475c # shrinks to theirs = Side { bodies: [Fighter { body: [Attack], boosts: [None], hits: 100, pos: Some(Pos { room: "W1N1", x: 1, y: 1 }), attack: 1, ranged: 0, heal: 0, work: 0, reach: 1, gait: FatigueFactor { weight: 1, moves: 0 }, strikes_back: 30, invader: false, lab_wait: 0 }], ramparts: {}, towers: [], cast_walk: None, together: false }, ground = Terrain { weight: 1, run_off: 0 }, stance = Hold

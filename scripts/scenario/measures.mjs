@@ -395,6 +395,7 @@ export const measures = {
     return Math.max(0, (within(samples, a).find((s) => s.safeMode)?.t ?? Infinity) - kills[1]);
   },
   culled: (samples, a, dir) => culls(samples, a, dir).length,
+  safeModes: (samples, a) => within(samples, a).filter((s, i, w) => s.safeMode && i > 0 && !w[i - 1].safeMode).length,
   creepsLostBeforeSafeMode: (samples, a) => {
     const seen = within(samples, a);
     const safe = seen.findIndex((s) => s.safeMode);

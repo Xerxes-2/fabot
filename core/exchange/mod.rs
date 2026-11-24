@@ -28,6 +28,8 @@ pub struct Side {
     pub cast_walk: Option<i32>,
     /// It walks in as one, so no body is fed in alone.
     pub together: bool,
+    /// Our structures a raid razes for value, and their hits.
+    pub keeps: Vec<(Pos, i32)>,
 }
 
 /// `weight` is the step weight of the ground fought on; `run_off` the tiles a
@@ -533,7 +535,7 @@ fn focused_against(
         let (mut shield, mut elapsed, mut dead) = (f64::from(our_shield), 0.0, 0);
 
         loop {
-            if alive.is_empty() {
+            if alive.is_empty() && !whole.is_empty() {
                 return ends(false, Some(elapsed), dead, &[]);
             }
             let landed: Vec<(Focused, f64)> = (alive.iter())
@@ -1125,6 +1127,33 @@ fn towers_on(
     }
 }
 
+/// With none of ours fielded the raid strikes our nearest keep, its rampart
+/// first, from the tick it walks in (Consequence pricing, §6.3).
+fn razes(ours: &Side, theirs: &Side, terrain: Terrain, price: &Price, ticks: i32) -> bool {
+    let strike = price.damage + (price.dismantlers.iter()).map(|(_, d)| *d).sum::<i32>();
+    let walk = |h: &Fighter, at: &Pos| {
+        let gap = (h.pos.as_ref()?.crow_flies(at) - h.reach).max(0);
+        Some(gap * step_ticks(h.gait, terrain.weight)?)
+    };
+    let nearest = (ours.keeps.iter())
+        .filter_map(|(at, hits)| {
+            let first = theirs.bodies.iter().filter_map(|h| walk(h, at)).min()?;
+            Some((first, hits + ours.ramparts.get(at).copied().unwrap_or(0)))
+        })
+        .min_by_key(|(first, _)| *first);
+    nearest.is_some_and(|(first, cover)| {
+        i64::from(strike) * i64::from((ticks - first).max(0)) >= i64::from(cover)
+    })
+}
+
+/// Each loaded tower spends its energy a shot a tick; no hauler refill is counted.
+fn towers_last(towers: &[Tower], ticks: i32) -> bool {
+    let shots = i64::from(ticks) * i64::from(engine::TOWER_ENERGY_COST);
+    (towers.iter())
+        .filter(|t| t.energy >= engine::TOWER_ENERGY_COST)
+        .all(|t| shots <= i64::from(t.energy))
+}
+
 fn exchange(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> Outcome {
     let raid: Vec<Foe> = theirs
         .bodies
@@ -1301,7 +1330,10 @@ fn exchange(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> Out
             } else {
                 Outcome::Lose
             }
-        } else if fight.won {
+        } else if fight.won
+            && (!fighters.is_empty()
+                || towers_last(&ours.towers, ticks) && !razes(ours, theirs, terrain, price, ticks))
+        {
             Outcome::Win(ticks, fight.losses)
         } else {
             Outcome::Lose
@@ -1780,6 +1812,39 @@ mod tests {
 
     proptest! {
         #![proptest_config(fabot_base::testing::config(CASES))]
+
+        #[test]
+        fn towers_alone_win_against_a_raid_with_no_heal_they_outlast(
+            theirs in side(),
+            ground in terrain(),
+            stance in select(vec![Stance::Hold, Stance::Standoff]),
+            energy in [prop_oneof![1 => Just(1000), 3 => 0..=1000], prop_oneof![1 => Just(1000), 3 => 0..=1000]],
+        ) {
+            let unhealed = |f: &Fighter| {
+                let body: Vec<Part> = f.body.iter().copied().filter(|p| *p != Part::Heal).collect();
+                let hits = engine::PART_HITS * body.len() as i32;
+                (!body.is_empty()).then(|| fighter::of_parts(&body, &[], hits, f.pos))
+            };
+            let raid: Vec<Fighter> = theirs.bodies.iter().filter_map(unhealed).collect();
+            prop_assume!(!raid.is_empty());
+            let towers = Side {
+                towers: (energy.iter().zip([25, 30]))
+                    .map(|(energy, x)| Tower { pos: Pos::new(ROOM, x, 25), energy: *energy })
+                    .collect(),
+                ..Side::default()
+            };
+            let raid = Side { bodies: raid, ..Side::default() };
+
+            match outcome(stance, &towers, &raid, ground) {
+                Outcome::Win(ticks, _) => {
+                    let loaded = energy.iter().filter(|e| **e >= engine::TOWER_ENERGY_COST);
+                    for e in loaded {
+                        prop_assert!(ticks * engine::TOWER_ENERGY_COST <= *e, "dry by t{ticks}");
+                    }
+                }
+                _ => prop_assert!(energy != [1000, 1000], "full towers outlast every raid drawn"),
+            }
+        }
 
         #[test]
         fn a_fight_won_leaves_one_of_our_bodies_standing(

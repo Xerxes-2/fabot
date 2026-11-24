@@ -167,6 +167,10 @@ pub fn side_in(rules: &Rules, room: Option<&Room>, bodies: Vec<Fighter>) -> exch
                 energy: s.store.amount_of(ResourceType::Energy),
             })
             .collect(),
+        keeps: (room.iter().flat_map(|r| &r.structures))
+            .filter(|s| s.owner.is_ours() && crate::kinds::defend::keeps(s.kind))
+            .map(|s| (s.pos, s.hits))
+            .collect(),
         ..exchange::Side::default()
     }
 }

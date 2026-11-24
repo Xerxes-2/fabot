@@ -1,0 +1,15 @@
+{
+  "why": "small Invader waves (melee, healer, ranged) on an RCL4 home with its safe mode at hand are the towers' alone: no Defend casts or holds the colony's spend bodies, no safe mode is spent and nothing of the home is lost. Before towers alone could win, each wave asked a cast that held the economy and never landed (blocked.fight 16)",
+  "modules": ["atlas", "economy", "exchange", "fight", "layout", "mv", "observe", "strategy", "tactics"],
+  "start": { "room": "W8N3", "seed": 1, "node": "N3", "invaders": "W8N3:1000:1500", "ended": true },
+  "ticks": 3500,
+  "assert": [
+    { "metric": "blocked.fight", "room": "W8N3", "from": 1000, "to": 3500, "total": true, "max": 0 },
+    { "measure": "defendsOpened", "room": "W8N3", "from": 1000, "min": 2 },
+    { "measure": "safeModes", "from": 1000, "max": 0 },
+    { "measure": "spawnsLost", "max": 0 },
+    { "measure": "levelsLost", "max": 0 },
+    { "measure": "hostilesAtEnd", "max": 0 },
+    { "measure": "bodiesLost", "max": 0 }
+  ]
+}

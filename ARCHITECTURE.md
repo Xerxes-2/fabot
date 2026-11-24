@@ -613,6 +613,14 @@ and `cheapest_win` (adds only to already-standing `ours`).
   below a few ticks saved. `cheapest_win` also charges each cast it buys, by
   design, not a double charge: without the cast a survivor is free and the
   set grows to its cap; without the losses it buys bodies too cheap to survive.
+- **Towers alone:** with no body of ours fielded, towers that out-damage the
+  raid's heal win, within the energy each holds, and if the raid razes no
+  keep first.
+- `❓` Exchange prices our towers at our body's tile, though a set that
+  closes fights where the raid stands, often far weaker; counts a swinger's
+  strike-back whether or not the raid swings; and regrows a healed raid's
+  hits but not its TOUGH (fixed with `engine::strike_at` and the shared
+  `breaks()` target pick).
 - **Consequence pricing:** every threat, structure, and seat is valued in
   **energy/tick** (razed, killed, healed, or denied) — never by body parts or
   creep kind. Feature-keyed rules leave exploitable gaps; wrong choices are

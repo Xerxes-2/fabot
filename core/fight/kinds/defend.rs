@@ -306,7 +306,7 @@ fn razed(home: &Home) -> bool {
             || culled)
 }
 
-fn keeps(kind: StructureType) -> bool {
+pub(crate) fn keeps(kind: StructureType) -> bool {
     use StructureType::*;
     matches!(kind, Spawn | Tower | Storage | Terminal)
 }

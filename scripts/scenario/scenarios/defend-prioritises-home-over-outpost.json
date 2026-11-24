@@ -1,7 +1,7 @@
 {
-  "why": "Invader waves land on a home and both its outposts on one tick, each Defend asking the one spawn: Strategy's table ranks the home's first, so its body is drafted before the outposts' (with the ranks swapped the home never gets one and this fails), and nothing of the home is lost",
+  "why": "Invader waves its towers alone do not out-damage (four healers on a melee) land on a home and both its outposts on one tick, each Defend asking the one spawn: Strategy's table ranks the home's first, so its body is drafted before the outposts' (with the ranks swapped the home never gets one and this fails), and nothing of the home is lost",
   "modules": ["atlas", "exchange", "fight", "mv", "observe", "strategy", "tactics"],
-  "start": { "room": "W8N3", "seed": 1, "node": "E0", "invaders": "W8N3:4000:1000,W7N3:4000:1000,W8N2:4000:1000", "unsafe": true },
+  "start": { "room": "W8N3", "seed": 1, "node": "E0", "invaders": "W8N3:4000:1000,W7N3:4000:1000,W8N2:4000:1000", "wave": "melee,healer,healer,healer,healer", "unsafe": true },
   "ticks": 2500,
   "assert": [
     { "measure": "draftedAfterOthers", "room": "W8N3", "max": 0 },
