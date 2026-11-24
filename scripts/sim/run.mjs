@@ -23,7 +23,7 @@ export const SIM_START = ["gen", "room", "seed", "late", "node", "ended", "unsaf
 export const SIM_MEASURES = new Set([
   "metric", "spendError", "decayedAway", "roadsLost", "roadsAtEnd", "dug", "contactWait", "upgrade", "build", "linked", "builtAtEnd", "sitesAtEnd",
   "buriedAtEnd", "unroadedAtEnd", "oldestPayingSite", "extensionsBeforeContainer", "sourceContainersAtEnd", "postedLinksAtEnd",
-  "levelsLost", "spawnsLost", "fewestCreeps", "safeModeAfterCull", "rising", "outpostDug", "upgradeWhileQueued",
+  "levelsLost", "spawnsLost", "fewestCreeps", "safeModeAfterCull", "rising", "outpostDug", "outpostDecayed", "upgradeWhileQueued",
   "upgradeStall", "leastDowngrade", "coresAtEnd", "hostilesAtEnd", "hostileTicks", "floodsMost", "atlasMissRate",
   "threatLookupsMost", "parkedTicks", "outpostFlips", "slotIdsShared", "refusals", "faults", "heldAtEnd", "oresAtEnd", "homeLevel", "claimSafeMode", "claimLevelOf", "claimsOwned",
   "rcl2ToTower", "claimSpawned", "claimersCast", "made", "produced", "seenAt", "extractorToOre", "boosted", "boostedWith", "bounced", "stillLoaded", "mineralAside", "mineralHeld", "carriedOut", "castsBelow",

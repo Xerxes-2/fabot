@@ -64,6 +64,10 @@ const withCounts = (dir, a, f) => {
   const rows = countsOf(dir, a);
   return rows.length ? f(rows) : Infinity;
 };
+const outposts = (key) => (samples, a) => {
+  const [first, last] = [at(samples, a.from ?? 0), at(samples, a.to ?? Infinity)];
+  return Object.keys(last.rooms).slice(1).reduce((n, r) => n + last.rooms[r][key] - (first.rooms[r]?.[key] ?? 0), 0);
+};
 const at = (samples, t) => samples.find((s) => s.t >= t) ?? samples.at(-1);
 const openedIn = (a) => (e) => (!a.room || e.room === a.room) && e.opened >= (a.from ?? 0) && e.opened < (a.to ?? Infinity);
 const within = (samples, a) => samples.filter((s) => s.t >= (a.from ?? 0) && s.t < (a.to ?? Infinity));
@@ -254,11 +258,9 @@ export const measures = {
   leastDowngrade: (samples, a) => at(samples, a.to ?? Infinity).rooms[a.room]?.leastDowngrade ?? -Infinity,
   // Energy our bodies carried out of a home across its border.
   carriedOut: (samples, a) => (at(samples, a.to ?? Infinity).rooms[a.room]?.carriedOut ?? 0) - (at(samples, a.from ?? 0).rooms[a.room]?.carriedOut ?? 0),
-  // Energy dug in every room but the colony's own.
-  outpostDug: (samples, a) => {
-    const [first, last] = [at(samples, a.from ?? 0), at(samples, a.to ?? Infinity)];
-    return Object.keys(last.rooms).slice(1).reduce((n, r) => n + last.rooms[r].dug - (first.rooms[r]?.dug ?? 0), 0);
-  },
+  // Energy dug, or dropped and decayed, in every room but the colony's own.
+  outpostDug: outposts("dug"),
+  outpostDecayed: outposts("decayed"),
   dug: (samples, a) => (at(samples, a.to ?? Infinity).rooms[a.room]?.dug ?? 0) - (at(samples, a.from ?? 0).rooms[a.room]?.dug ?? 0),
   upgrade: (samples, a) => upgradedIn(at(samples, a.to ?? Infinity), a) - upgradedIn(at(samples, a.from ?? 0), a),
   // (none ever: Infinity)

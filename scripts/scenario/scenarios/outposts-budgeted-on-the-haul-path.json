@@ -1,7 +1,10 @@
 {
-  "why": "a stocked home budgets its outposts' haul on the path its carriers walk, not the straight line: on gen 5 E9S9 took E9S8 at a straight 58 ticks whose haul walks ~120 out its north gap, so Economy cast half the far carriers it needed and the outposts' dig decayed while upgraders drew the stock (main: upgrade 71k from t18000 to t24000, E8S9 and E9S8 decayed 23k)",
+  "why": "a stocked home budgets its outposts' haul on the path its carriers walk, not the straight line: on gen 5 E9S9 took E9S8 at a straight 58 ticks whose haul walks ~120 out its north gap, so Economy cast half the far carriers it needed and the outposts' dig decayed while upgraders drew the stock (before the haul fix, c45a8705: its outposts decayed 31k from t18000 to t24000)",
   "modules": ["strategy", "atlas", "economy"],
   "start": { "gen": 5, "seed": 1 },
   "ticks": 24000,
-  "assert": [{ "measure": "upgrade", "from": 18000, "to": 24000, "min": 100000 }]
+  "assert": [
+    { "measure": "outpostDecayed", "from": 18000, "to": 24000, "max": 10000 },
+    { "measure": "outpostDug", "from": 18000, "to": 24000, "min": 120000 }
+  ]
 }
