@@ -53,7 +53,7 @@ pub fn of_parts(
                 - part_count_in(body, Part::Carry),
             moves: power(Part::Move),
         },
-        strikes_back: engine::ATTACK_POWER * attack,
+        strikes_back: engine::strike_at(attack, 0, engine::MELEE_RANGE),
         invader: false,
         lab_wait: 0,
     }
@@ -100,39 +100,26 @@ pub fn kill_rank(f: &Fighter) -> (u8, bool, Reverse<i32>, Option<Pos>) {
         (false, true) => 1,
         (false, false) => 2,
     };
-    let damage = engine::ATTACK_POWER * f.attack + engine::RANGED_ATTACK_POWER * f.ranged;
+    let damage = damage_at(f, engine::MELEE_RANGE);
     let per_thousand_hits = 1000 * damage / f.hits.max(1);
     (band, f.heal == 0, Reverse(per_thousand_hits), f.pos)
 }
 
-pub fn swings(f: &Fighter, range: i32) -> bool {
-    f.attack > 0 && range <= engine::MELEE_RANGE
-}
-
-/// The engine's ATTACK and RANGED_ATTACK act in separate intent chains.
 pub fn damage_at(f: &Fighter, range: i32) -> i32 {
-    (if swings(f, range) {
-        engine::ATTACK_POWER * f.attack
-    } else {
-        0
-    }) + (if range <= engine::RANGED_RANGE {
-        engine::RANGED_ATTACK_POWER * f.ranged
-    } else {
-        0
-    })
+    engine::strike_at(f.attack, f.ranged, range)
 }
 
 /// A `heal` beside an `attack` drops the attack, so a body that swings heals nothing.
 pub fn heal_at(f: &Fighter, range: i32) -> i32 {
-    if swings(f, range) {
+    if f.attack > 0 && range <= engine::MELEE_RANGE {
         0
     } else {
-        engine::HEAL_POWER * f.heal
+        healing(f)
     }
 }
 
 pub fn healing(f: &Fighter) -> i32 {
-    engine::HEAL_POWER * f.heal
+    engine::heal_at(f.heal, engine::MELEE_RANGE)
 }
 
 pub fn damage_for(f: &Fighter, hits: i32) -> i32 {

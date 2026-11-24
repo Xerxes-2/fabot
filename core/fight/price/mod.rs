@@ -255,28 +255,30 @@ impl<'a> Scene<'a> {
 
             let towers: Vec<Pos> = self.towers_in(room).into_iter().map(|s| s.pos).collect();
 
-            let struck = |b: &Structure| exchange::tower_strike(&towers, &b.pos);
-
             let late = matches!(e.predicted, Some(Outcome::Win(ticks, _))
                 if e.phase == Phase::Fighting && self.world.time > e.since + ticks);
+
+            let (guards, reach) = match set.iter().all(|f| f.work == 0) {
+                true => (raid::guards(room), engine::RANGED_RANGE),
+                false => (Vec::new(), engine::MELEE_RANGE),
+            };
+            // Where the price stood the set: the struck's own tile holds no body.
+            let struck = |b: &Structure| {
+                (tiles::within(reach, tiles::of_pos(&b.pos)).into_iter())
+                    .filter(|t| atlas.passable(room.name, *t))
+                    .map(|t| exchange::struck(&towers, &guards, &tiles::to_pos(room.name, t)))
+                    .min()
+                    .unwrap_or(0)
+            };
 
             let event = left
                 || self.landed.iter().any(|c| c.engagement == e.id)
                 || late
-                || match self.next_struck(e) {
-                    Some(b) => {
-                        let guards = if set.iter().all(|f| f.work == 0) {
-                            raid::guards(room)
-                        } else {
-                            Vec::new()
-                        };
-
-                        struck(b) + exchange::guard_strike(&guards, &b.pos)
-                            > exchange::pooled_heal(set.len() as i32, &set)
-                            || self.unreached(atlas, room, b, &in_room)
-                    }
-                    None => false,
-                };
+                || self.next_struck(e).is_some_and(|b| {
+                    let priced = raid::hardest(room).filter(|_| reach == engine::RANGED_RANGE);
+                    struck(priced.unwrap_or(b)) > exchange::pooled_heal(set.len() as i32, &set)
+                        || self.unreached(atlas, room, b, &in_room)
+                });
 
             if !event {
                 return Some(e.clone());

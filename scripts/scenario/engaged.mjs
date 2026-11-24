@@ -13,7 +13,7 @@ export function engagements(write, at) {
   // it targeted, which catch a death that closed it before it counted one.
   async function close(rec, t) {
     const graves = (await at([...rec.rooms])).filter((o) => o.type === "tombstone" && o.ours && o.ttl > 1 && rec.ours.has(o.name));
-    const { members, ours, rooms, swing, blind, asking, reached, ...rest } = rec;
+    const { members, ours, rooms, swing, blind, asking, reached, fought, ...rest } = rec;
     const swung = Object.fromEntries(Object.entries(swing).map(([n, { ticks, swings }]) => [n, { ticks, swings }]));
     // `apart`: the ticks between the first and the last of its bodies coming within three of its raid.
     const ticks = Object.values(reached);
@@ -51,10 +51,14 @@ export function engagements(write, at) {
         rec.rooms.add(e.room);
         const ours = namesOf(e.ours);
         for (const n of ours) rec.ours.add(n);
+        rec.held = Math.max(rec.held ?? 0, ours.length);
         if (rec.ours.size) rec.drafted ??= t;
         rec.answered ||= !e.unanswered;
         rec.gaveUp ||= rec.answered && e.unanswered;
         rec.disengaged ||= e.phase === "disengaging";
+        // `repriced`: the ticks a Fighting engagement re-entered Fighting, the phase a re-price keeps.
+        if (e.phase === "fighting" && rec.fought !== undefined && rec.fought !== e.since) rec.repriced = (rec.repriced ?? 0) + 1;
+        rec.fought = e.phase === "fighting" ? e.since : undefined;
         // `idle`: the most ticks on end a Defend neither acted (held a body, asked one, saw its group) nor stood down.
         const sighted = (fight.groups ?? []).some((g) => g.id === e.group && g.seen === t);
         rec.blind = rec.kind !== "defend" || ours.length || asked.has(e.id) || sighted || e.phase === "disengaging" ? 0 : rec.blind + 1;

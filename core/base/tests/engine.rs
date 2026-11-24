@@ -50,8 +50,12 @@ fn a_towers_power_falls_from_range_5_to_range_20_and_stays() {
 
 #[test]
 fn a_mass_attack_falls_10_4_1_and_stops_past_three() {
-    let falloff: Vec<i32> = (1..=4).map(engine::mass_attack_power_at).collect();
-    assert_eq!(falloff, vec![10, 4, 1, 0]);
+    assert_eq!([1, 2, 3, 4].map(|r| engine::mass_at(2, r)), [20, 8, 2, 0]);
+}
+
+#[test]
+fn a_swing_lands_beside_and_a_shot_within_three() {
+    assert_eq!([1, 2, 4].map(|r| engine::strike_at(2, 4, r)), [100, 40, 0]);
 }
 
 #[test]

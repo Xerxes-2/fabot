@@ -112,12 +112,12 @@ pub fn wall(
         }
     };
     let work = pairs(Part::Work);
-    let heal = HEALERS
-        * pairs(Part::Heal)
-        * engine::HEAL_POWER
-        * boost(Part::Heal, ResourceType::CatalyzedLemergiumAlkalide);
-    let fire = rules.allowed(StructureType::Tower, level)
-        * engine::tower_attack_at(engine::TOWER_FALLOFF_RANGE);
+    let heal = engine::heal_at(
+        HEALERS * pairs(Part::Heal) * boost(Part::Heal, ResourceType::CatalyzedLemergiumAlkalide),
+        engine::MELEE_RANGE,
+    );
+    let fire =
+        rules.allowed(StructureType::Tower, level) * engine::tower_attack_at(engine::ROOM_SIDE);
     let hits = 2 * work * engine::PART_HITS;
     let held = if fire > heal {
         HOLD.min(hits / (fire - heal) + 1)

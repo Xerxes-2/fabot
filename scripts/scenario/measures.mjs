@@ -322,6 +322,9 @@ export const measures = {
   // over the engagements of `kind` (none named: every one); none seen: 0.
   oscillation: (_, a, dir) =>
     Math.max(0, ...rowsOf(dir).filter((e) => !a.kind || e.kind === a.kind).flatMap((e) => Object.values(e.swung).map((s) => Math.round((100 * s.swings) / Math.max(1, s.ticks))))),
+  // The most re-prices while Fighting, and the most bodies held at once, of one engagement of `kind` (none named: any) opened in [from, to).
+  repriced: (_, a, dir) => Math.max(0, ...rowsOf(dir).filter((e) => (!a.kind || e.kind === a.kind) && openedIn(a)(e)).map((e) => e.repriced ?? 0)),
+  held: (_, a, dir) => Math.max(0, ...rowsOf(dir).filter((e) => (!a.kind || e.kind === a.kind) && openedIn(a)(e)).map((e) => e.held ?? 0)),
   bodiesLost: (_, a, dir) => rowsOf(dir).filter(openedIn(a)).reduce((n, e) => n + (e.dead ?? 0), 0),
   defendsOpened: (_, a, dir) => defendsIn(dir, a).length,
   // The cost of the bodies of ours `room`'s Defends drew, each once.

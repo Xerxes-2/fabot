@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use fabot_base::grid::{self, FatigueFactor, Weight, step_ticks};
 use fabot_base::tiles::{self, Table, Tile};
 use fabot_base::vocabulary::Part;
-use fabot_base::world::{Pos, RoomName};
+use fabot_base::world::{Pos, RoomName, Striker};
 use fabot_base::{boost, engine};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -187,7 +187,7 @@ fn heal_onto(weight: i32, horizon: i32, healer: &Healer, target: &Foe) -> i32 {
             if range <= engine::MELEE_RANGE && healer.casts_heal {
                 fighter::healing(&healer.mender.f)
             } else if range <= engine::RANGED_RANGE && healer.casts_ranged_heal {
-                fighter::healing(&healer.mender.f) * engine::RANGED_HEAL_POWER / engine::HEAL_POWER
+                engine::heal_at(healer.mender.f.heal, engine::RANGED_RANGE)
             } else {
                 0
             }
@@ -260,16 +260,8 @@ fn price_as(
         let range = range_of(h);
 
         (
-            if range <= engine::MELEE_RANGE {
-                engine::ATTACK_POWER * h.f.attack
-            } else {
-                0
-            },
-            if range <= engine::RANGED_RANGE {
-                engine::RANGED_ATTACK_POWER * h.f.ranged
-            } else {
-                0
-            },
+            engine::strike_at(h.f.attack, 0, range),
+            engine::strike_at(0, h.f.ranged, range),
         )
     };
 
@@ -758,8 +750,8 @@ fn closes_in(fighter: &Fighter, hostile: &Fighter) -> bool {
         && (hostile.invader && hostile.heal == 0
             || fighter::damage_at(fighter, engine::RANGED_RANGE)
                 >= fighter::damage_at(fighter, engine::MELEE_RANGE)
-            || engine::ATTACK_POWER * hostile.attack
-                >= engine::RANGED_ATTACK_POWER * hostile.ranged)
+            || engine::strike_at(hostile.attack, 0, engine::MELEE_RANGE)
+                >= engine::strike_at(0, hostile.ranged, engine::RANGED_RANGE))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -869,7 +861,7 @@ fn hit_back(
         .map(|(h, ranges)| {
             (
                 h.f.clone(),
-                engine::ATTACK_POWER * h.f.attack,
+                engine::strike_at(h.f.attack, 0, engine::MELEE_RANGE),
                 ranges.clone(),
             )
         })
@@ -1094,7 +1086,7 @@ fn towers_on(
         loaded
             .iter()
             .map(|t| {
-                let here = range_to(&t.pos, &h.f).unwrap_or(engine::TOWER_FALLOFF_RANGE);
+                let here = range_to(&t.pos, &h.f).unwrap_or(engine::ROOM_SIDE);
 
                 let struck: Vec<i32> = strikes_from(h)
                     .iter()
@@ -1117,13 +1109,9 @@ fn towers_on(
     if loaded.is_empty() {
         0
     } else if striking.is_empty() {
-        loaded.len() as i32 * engine::tower_attack_at(engine::TOWER_FALLOFF_RANGE)
+        loaded.len() as i32 * engine::tower_attack_at(engine::ROOM_SIDE)
     } else {
-        striking
-            .iter()
-            .map(|h| on(h))
-            .min()
-            .unwrap_or(engine::TOWER_FALLOFF_RANGE)
+        striking.iter().map(|h| on(h)).min().unwrap_or(0)
     }
 }
 
@@ -1421,8 +1409,8 @@ pub fn pooled_heal(seated: i32, ours: &[Fighter]) -> i32 {
     let seated = seated.min(ours.len() as i32).max(0) as usize;
     let (beside, apart) = heals.split_at(seated);
 
-    engine::HEAL_POWER * beside.iter().map(|f| f.heal).sum::<i32>()
-        + engine::RANGED_HEAL_POWER * apart.iter().map(|f| f.heal).sum::<i32>()
+    engine::heal_at(beside.iter().map(|f| f.heal).sum(), engine::MELEE_RANGE)
+        + engine::heal_at(apart.iter().map(|f| f.heal).sum(), engine::RANGED_RANGE)
 }
 
 /// What towers deal a body at `at`, the one strike a breach is gated and
@@ -1434,26 +1422,14 @@ pub fn tower_strike(towers: &[Pos], at: &Pos) -> i32 {
         .sum()
 }
 
-/// What his armed bodies deal a body at `at` next tick: a swing beside it, a
-/// shot within three (owner, 2026-10-21).
-pub fn guard_strike(guards: &[(Pos, i32, i32)], at: &Pos) -> i32 {
-    guards
-        .iter()
-        .map(|(p, swing, shot)| {
-            let beside = if p.within(engine::MELEE_RANGE, at) {
-                *swing
-            } else {
-                0
-            };
-            let within = if p.within(engine::RANGED_RANGE, at) {
-                *shot
-            } else {
-                0
-            };
+/// What his armed bodies deal a body at `at` next tick, from where they stand
+/// (owner, 2026-10-21).
+pub fn guard_strike(guards: &[Striker], at: &Pos) -> i32 {
+    guards.iter().map(|g| g.on(at, false)).sum()
+}
 
-            beside + within
-        })
-        .sum()
+pub fn struck(towers: &[Pos], guards: &[Striker], at: &Pos) -> i32 {
+    tower_strike(towers, at) + guard_strike(guards, at)
 }
 
 /// The simple rule; a fire priced in ticks replaces it. A medic heals one body a
@@ -1476,7 +1452,7 @@ pub fn breach_plan(
     ground: &Ground,
     gait: FatigueFactor,
     towers: &[Pos],
-    guards: &[(Pos, i32, i32)],
+    guards: &[Striker],
     set: &[Fighter],
     seated: i32,
     seats: impl Fn(Tile) -> i32,
@@ -1484,11 +1460,7 @@ pub fn breach_plan(
     sources: &[(Tile, i32, i32)],
     goals: &[Tile],
 ) -> Option<(Vec<(Tile, Tile)>, i32)> {
-    let struck = |t: Tile| {
-        let at = tiles::to_pos(ground.room, t);
-
-        tower_strike(towers, &at) + guard_strike(guards, &at)
-    };
+    let struck = |t: Tile| struck(towers, guards, &tiles::to_pos(ground.room, t));
     let n = set.len() as i32;
     let abreast: BTreeMap<Tile, i32> = sources.iter().map(|(t, _, w)| (*t, *w)).collect();
     let goal: BTreeSet<Tile> = goals.iter().copied().collect();
@@ -1692,25 +1664,11 @@ pub fn damage_map(room: RoomName, towers: &[Pos], foes: &[Fighter]) -> Table<i32
     let mut map = tiles::table(0);
     for t in tiles::all() {
         let at = tiles::to_pos(room, t);
-        let struck = |range: i32, damage: fn(&Fighter) -> i32| {
-            foes.iter()
-                .filter(|f| {
-                    f.pos
-                        .as_ref()
-                        .is_some_and(|p| p.within(range + i32::from(f.gait.moves > 0), &at))
-                })
-                .map(damage)
-                .sum::<i32>()
-        };
-        map[t] = towers
-            .iter()
-            .filter_map(|p| p.range(&at))
-            .map(engine::tower_attack_at)
-            .sum::<i32>()
-            + struck(engine::MELEE_RANGE, |f| engine::ATTACK_POWER * f.attack)
-            + struck(engine::RANGED_RANGE, |f| {
-                engine::RANGED_ATTACK_POWER * f.ranged
-            });
+        let step = |f: &Fighter| i32::from(f.gait.moves > 0);
+        map[t] = tower_strike(towers, &at)
+            + (foes.iter())
+                .filter_map(|f| Some(fighter::damage_at(f, f.pos?.range(&at)? - step(f))))
+                .sum::<i32>();
     }
     map
 }
@@ -1801,7 +1759,7 @@ mod tests {
         let medic = fighter::cast(&[Part::Heal; 25]);
         // One medic seated beside a worker heals it as much as a tower strikes it,
         // so pooling alone would price the pair in.
-        let struck = engine::HEAL_POWER * 25;
+        let struck = engine::heal_at(25, engine::MELEE_RANGE);
 
         let one = [dismantler.clone(), dismantler.clone(), medic.clone()];
         let two = [dismantler.clone(), dismantler, medic.clone(), medic];

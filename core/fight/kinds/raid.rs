@@ -11,7 +11,7 @@ use fabot_base::intents::CreepAct;
 use fabot_base::tiles::{self, Tile};
 use fabot_base::vocabulary::{Part, ResourceType};
 use fabot_base::wish::Wish;
-use fabot_base::world::{self, Creep, Id, Pos, Room, Structure, StructureType};
+use fabot_base::world::{self, Creep, Id, Pos, Room, Striker, Structure, StructureType};
 use fabot_exchange::{self as exchange, Fighter, Ground, Losses, Outcome};
 use fabot_tactics::{self as tactics, Sight, Tactic};
 
@@ -28,15 +28,11 @@ pub fn charged(room: &Room) -> Vec<Pos> {
         .collect()
 }
 
-/// His bodies that strike back, at what they deal.
-pub fn guards(room: &Room) -> Vec<(Pos, i32, i32)> {
+/// His bodies that strike back.
+pub fn guards(room: &Room) -> Vec<Striker> {
     (room.hostiles())
-        .map(|h| {
-            let f = casting::fighter_of(h);
-
-            (h.pos, f.attack, f.ranged)
-        })
-        .filter(|(_, swing, shot)| *swing > 0 || *shot > 0)
+        .map(Striker::of)
+        .filter(|g| g.attack > 0 || g.ranged > 0)
         .collect()
 }
 
@@ -287,7 +283,7 @@ pub fn dance(sight: &mut Sight, room: &Room, members: &[&Creep], c: &Creep) -> W
 pub fn volley(sight: &Sight, room: &Room, c: &Creep) -> Option<CreepAct> {
     let spares = (sight.spared.get(&c.pos.room))
         .is_some_and(|s| s.iter().any(|p| c.pos.within(engine::RANGED_RANGE, p)));
-    let guns = c.live(Part::RangedAttack);
+    let guns = world::power(c, Part::RangedAttack);
     if guns == 0 {
         return None;
     }
@@ -325,10 +321,10 @@ pub fn volley(sight: &Sight, room: &Room, c: &Creep) -> Option<CreepAct> {
         (marks.iter().find(|m| m.4)).or_else(|| marks.iter().max_by(|a, b| dearest(a, b)))?;
     let volley: i32 = (marks.iter())
         .filter(|m| m.5)
-        .map(|m| m.2.min(guns * engine::mass_attack_power_at(m.1)))
+        .map(|m| m.2.min(engine::mass_at(guns, m.1)))
         .sum();
 
-    if !spares && volley > struck.2.min(guns * engine::RANGED_ATTACK_POWER) {
+    if !spares && volley > struck.2.min(engine::strike_at(0, guns, struck.1)) {
         Some(CreepAct::RangedMassAttack)
     } else {
         Some(CreepAct::RangedAttackCreep(struck.0))

@@ -1072,6 +1072,34 @@ pub fn power(creep: &Creep, part: Part) -> i32 {
     engine::power_at(&body_kinds(creep), &body_boosts(creep), creep.hits)(part)
 }
 
+/// A body's `power` to strike, read once for the many tiles it is asked about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Striker {
+    pub pos: Pos,
+    pub attack: i32,
+    pub ranged: i32,
+    pub moves: bool,
+}
+
+impl Striker {
+    pub fn of(creep: &Creep) -> Striker {
+        let (kinds, boosts) = (body_kinds(creep), body_boosts(creep));
+        let power = engine::power_at(&kinds, &boosts, creep.hits);
+        Striker {
+            pos: creep.pos,
+            attack: power(Part::Attack),
+            ranged: power(Part::RangedAttack),
+            moves: power(Part::Move) > 0,
+        }
+    }
+
+    /// `next`: after the step it can take toward `at` first.
+    pub fn on(&self, at: &Pos, next: bool) -> i32 {
+        let step = i32::from(next && self.moves);
+        (self.pos.range(at)).map_or(0, |r| engine::strike_at(self.attack, self.ranged, r - step))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{BodyPart, Creep, Id, Owner, Pos, Room, RoomName, Rules, Sightings, Store};

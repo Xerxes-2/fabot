@@ -113,7 +113,7 @@ pub fn core_as_hostile(core: &Structure) -> Creep {
 /// v1's guard on a core: a small one dies of age short of its 100,000 hits;
 /// none where ours raze `hits` in a life.
 pub fn razer(capacity: i32, hits: i32, ours: &[Fighter]) -> Vec<Body> {
-    let swing = engine::ATTACK_POWER * ours.iter().map(|f| f.attack).sum::<i32>();
+    let swing = engine::strike_at(ours.iter().map(|f| f.attack).sum(), 0, engine::MELEE_RANGE);
 
     biggest(capacity, &[Part::Move, Part::Attack])
         .filter(|_| swing * engine::CREEP_LIFETIME < hits)
@@ -349,7 +349,7 @@ pub fn pairs(capacity: i32) -> i32 {
 
 /// What his towers' volley on the gate has to fall under to be worth drawing.
 pub fn pair_heal(pairs: i32) -> i32 {
-    pairs * MEDIC_HEAL * engine::HEAL_POWER
+    engine::heal_at(pairs * MEDIC_HEAL, engine::MELEE_RANGE)
 }
 
 pub fn drains(capacity: i32) -> Vec<Body> {
@@ -362,7 +362,7 @@ pub fn drains(capacity: i32) -> Vec<Body> {
 pub fn squad(capacity: i32, strike: i32, worth: i32) -> Vec<Body> {
     // The towers' strike falls on one body; it and one body beside it heal it.
     // A body under no strike still takes one (owner).
-    let heal = (((strike + 2 * engine::HEAL_POWER - 1) / (2 * engine::HEAL_POWER)) as usize).max(1);
+    let heal = (strike.max(1) as usize).div_ceil(engine::heal_at(2, engine::MELEE_RANGE) as usize);
     let n = if strike > 0 { 2 } else { 1 };
     let body = |ranged: usize| -> Body {
         let mut b = vec![Part::RangedAttack; ranged];
@@ -380,17 +380,15 @@ pub fn squad(capacity: i32, strike: i32, worth: i32) -> Vec<Body> {
 }
 
 pub fn holds(set: &[Fighter], strike: i32) -> bool {
-    let lent = |i: usize| {
-        (0..set.len())
+    let held = |i: usize| {
+        let lent = (0..set.len())
             .filter(|j| *j != i)
             .map(|j| set[j].heal)
-            .max()
-            .unwrap_or(0)
+            .max();
+        engine::heal_at(set[i].heal + lent.unwrap_or(0), engine::MELEE_RANGE)
     };
 
-    !set.is_empty()
-        && (strike == 0
-            || (0..set.len()).all(|i| engine::HEAL_POWER * (set[i].heal + lent(i)) >= strike))
+    !set.is_empty() && (strike == 0 || (0..set.len()).all(|i| held(i) >= strike))
 }
 
 pub fn kill_order(hostiles: &[Creep]) -> Vec<Id> {

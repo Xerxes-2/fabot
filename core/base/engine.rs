@@ -130,11 +130,20 @@ pub fn safe_mode_downgrade_line(level: i32) -> i32 {
     controller_downgrade(level) / 2 - screeps::CONTROLLER_DOWNGRADE_SAFEMODE_THRESHOLD as i32
 }
 
-pub fn mass_attack_power_at(range: i32) -> i32 {
+/// `attack`, `ranged`: the parts' boosted counts, as `world::power` gives them.
+pub fn strike_at(attack: i32, ranged: i32, range: i32) -> i32 {
     match range {
-        0 | 1 => RANGED_ATTACK_POWER,
-        2 => screeps::RANGED_MASS_ATTACK_POWER_RANGE_2 as i32,
-        3 => screeps::RANGED_MASS_ATTACK_POWER_RANGE_3 as i32,
+        r if r <= MELEE_RANGE => ATTACK_POWER * attack + RANGED_ATTACK_POWER * ranged,
+        r if r <= RANGED_RANGE => RANGED_ATTACK_POWER * ranged,
+        _ => 0,
+    }
+}
+
+pub fn mass_at(ranged: i32, range: i32) -> i32 {
+    match range {
+        0 | 1 => RANGED_ATTACK_POWER * ranged,
+        2 => screeps::RANGED_MASS_ATTACK_POWER_RANGE_2 as i32 * ranged,
+        3 => screeps::RANGED_MASS_ATTACK_POWER_RANGE_3 as i32 * ranged,
         _ => 0,
     }
 }

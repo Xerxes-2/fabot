@@ -1,0 +1,10 @@
+{
+  "why": "a raid is priced against his armed bodies at what the engine deals, 10 a RANGED part within three: four standing guards (10 RANGED each) ring the spawn his charged tower covers, so the set pools more heal than the tower alone needs; before, they counted 1 a part and the raid walked in one body short. Once Fighting, a price that held is not re-priced each tick: the strike event read the struck structure's own tile, where no body stands, and re-fired every tick of the fight (118 re-prices, against 18)",
+  "modules": ["exchange", "fight"],
+  "start": { "world": "scripts/scenario/worlds/enemy-guarded-home.json", "room": "W8N3", "seed": 1, "node": "N6" },
+  "ticks": 3000,
+  "assert": [
+    { "measure": "held", "kind": "siege", "room": "W6N3", "min": 7 },
+    { "measure": "repriced", "kind": "siege", "room": "W6N3", "max": 30 }
+  ]
+}

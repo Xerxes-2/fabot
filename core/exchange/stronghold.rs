@@ -84,8 +84,11 @@ pub fn outcome(ours: &Side, bunker: &Bunker, terrain: Terrain) -> Outcome {
             return Outcome::Lose;
         };
         let heal = fighter::healing(&live(struck));
-        let shot: i32 =
-            standing.iter().map(|f| f.ranged).sum::<i32>() * engine::RANGED_ATTACK_POWER;
+        let shot = engine::strike_at(
+            0,
+            standing.iter().map(|f| f.ranged).sum(),
+            engine::RANGED_RANGE,
+        );
         let max = engine::PART_HITS * struck.body.len() as i32;
         let taken = struck_off(struck, bunker.strike);
         struck.hits = (struck.hits - taken + heal).min(max).max(0);
@@ -194,7 +197,8 @@ pub fn kit(strike: i32, stock: &Stock, capacity: i32) -> Option<Body> {
     let (heal, legs) = (times(Part::Heal), times(Part::Move));
     let passed = f64::from(strike) * ratio;
     let tough = (passed / f64::from(engine::PART_HITS)).ceil() as usize;
-    let heals = (passed / (f64::from(engine::HEAL_POWER) * heal)).ceil() as usize;
+    let heals =
+        (passed / (f64::from(engine::heal_at(1, engine::MELEE_RANGE)) * heal)).ceil() as usize;
     let moves = |rest: usize| (rest as f64 / legs).ceil() as usize;
     let most = engine::MAX_BODY_PARTS;
     let body = |guns: usize| {

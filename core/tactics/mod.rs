@@ -13,7 +13,7 @@ use fabot_base::intents::CreepAct;
 use fabot_base::tiles::Tile;
 use fabot_base::vocabulary::Part;
 use fabot_base::wish::Wish;
-use fabot_base::world::{self, Creep, Id, Pos, RoomName};
+use fabot_base::world::{self, Creep, Id, Pos, RoomName, Striker};
 use fabot_base::{engine, tiles};
 use fabot_mv::{blob, plan};
 
@@ -197,7 +197,7 @@ pub fn strike(sight: &Sight, order: &[Id], creep: &Creep, armed: bool) -> Vec<Cr
 
     let volley: i32 = within(engine::RANGED_RANGE)
         .filter_map(|h| creep.pos.range(&h.pos))
-        .map(engine::mass_attack_power_at)
+        .map(|r| engine::mass_at(1, r))
         .sum();
     let spares = sight
         .spared
@@ -206,7 +206,7 @@ pub fn strike(sight: &Sight, order: &[Id], creep: &Creep, armed: bool) -> Vec<Cr
 
     let ranged = match within(engine::RANGED_RANGE).next() {
         _ if creep.live(Part::RangedAttack) == 0 => None,
-        Some(_) if volley > engine::RANGED_ATTACK_POWER && !spares => {
+        Some(_) if volley > engine::strike_at(0, 1, engine::RANGED_RANGE) && !spares => {
             Some(CreepAct::RangedMassAttack)
         }
         head => head.map(|h| CreepAct::RangedAttackCreep(h.id)),
@@ -268,20 +268,6 @@ pub fn close(sight: &mut Sight, order: &[Id], centre: &Pos, enter: bool, creep: 
     aim(sight, order, centre, enter, creep, engine::MELEE_RANGE)
 }
 
-fn reach_next_tick(kind: Part, h: &Creep) -> Option<i32> {
-    let ranged = kind == Part::RangedAttack;
-    let range = if ranged {
-        engine::RANGED_RANGE
-    } else {
-        engine::MELEE_RANGE
-    };
-    (h.live(kind) > 0).then(|| range + h.live(Part::Move).min(1))
-}
-
-fn struck(kind: Part, h: &Creep, at: &Pos) -> bool {
-    reach_next_tick(kind, h).is_some_and(|r| at.within(r, &h.pos))
-}
-
 /// A tired body's step waits where it stands: the engine refuses it.
 fn step_to(creep: &Creep, tile: Tile) -> Wish {
     let moves = plan::can_move(creep, mover_of(creep).factor);
@@ -299,37 +285,11 @@ fn step_to(creep: &Creep, tile: Tile) -> Wish {
     }
 }
 
-/// The raid's strikes onto `at` next tick; none outside the raid's room, which
-/// costs a raid a tick to follow into.
-fn threat(raid: &[Creep], at: &Pos) -> i32 {
-    raid.iter()
-        .map(|h| {
-            let shot = if struck(Part::RangedAttack, h, at) {
-                engine::RANGED_ATTACK_POWER * h.live(Part::RangedAttack)
-            } else {
-                0
-            };
-
-            let swing = if struck(Part::Attack, h, at) {
-                engine::ATTACK_POWER * h.live(Part::Attack)
-            } else {
-                0
-            };
-
-            shot + swing
-        })
-        .sum()
-}
-
 /// A Doomed body, whose full hits fall within the line, fights on: stepping
 /// out cannot save it.
-fn rescued(raid: &[Creep], members: &[&Creep], creep: &Creep) -> bool {
-    let focus = raid
-        .iter()
-        .map(|h| {
-            engine::RANGED_ATTACK_POWER * h.live(Part::RangedAttack)
-                + engine::ATTACK_POWER * h.live(Part::Attack)
-        })
+fn rescued(strikers: &[Striker], members: &[&Creep], creep: &Creep) -> bool {
+    let focus = (strikers.iter())
+        .map(|h| engine::strike_at(h.attack, h.ranged, engine::MELEE_RANGE))
         .sum::<i32>()
         - members
             .iter()
@@ -340,36 +300,32 @@ fn rescued(raid: &[Creep], members: &[&Creep], creep: &Creep) -> bool {
             .map(|m| engine::heal_at(world::power(m, Part::Heal), engine::MELEE_RANGE))
             .sum::<i32>();
 
-    let ticks_out = 1 + raid
-        .iter()
-        .flat_map(|h| {
-            [
-                reach_next_tick(Part::RangedAttack, h),
-                reach_next_tick(Part::Attack, h),
-            ]
-        })
-        .flatten()
-        .fold(0, i32::max);
+    let reach = |h: &Striker| match (h.ranged, h.attack) {
+        (0, 0) => 0,
+        (0, _) => engine::MELEE_RANGE + i32::from(h.moves),
+        _ => engine::RANGED_RANGE + i32::from(h.moves),
+    };
+    let ticks_out = 1 + strikers.iter().map(reach).max().unwrap_or(0);
 
     focus > 0 && creep.hits < ticks_out * focus && creep.hits_max > ticks_out * focus
 }
 
 /// Only while a mate fights on: the gate never empties the line.
 pub fn exposed(sight: &Sight, raid_room: RoomName, members: &[&Creep], creep: &Creep) -> bool {
-    let raid = hostiles_in(sight, raid_room);
-
-    rescued(raid, members, creep)
-        && members
-            .iter()
-            .any(|m| m.name != creep.name && !rescued(raid, members, m))
+    let raid: Vec<Striker> = hostiles_in(sight, raid_room)
+        .iter()
+        .map(Striker::of)
+        .collect();
+    rescued(&raid, members, creep)
+        && (members.iter()).any(|m| m.name != creep.name && !rescued(&raid, members, m))
 }
 
-/// The tiles out of the raid's next reach, by ring, and the one beside the most mates.
+/// Tiles out of the raid's next reach (out of its room, a tick away), by ring, beside most mates.
 struct Safety<'a> {
     atlas: &'a Atlas,
     room: RoomName,
     raid_room: RoomName,
-    raid: &'a [Creep],
+    raid: Vec<Striker>,
     members: &'a [&'a Creep],
     creep: &'a Creep,
 }
@@ -378,7 +334,7 @@ impl Safety<'_> {
     fn safe(&self, at: (Tile, Option<Tile>)) -> bool {
         self.room != self.raid_room
             || at.1.is_some() && tiles::on_edge(at.0)
-            || threat(self.raid, &tiles::to_pos(self.room, at.0)) == 0
+            || (self.raid.iter()).all(|h| h.on(&tiles::to_pos(self.room, at.0), true) == 0)
     }
 
     fn apart(&self, tile: Tile) -> i32 {
@@ -434,7 +390,10 @@ pub fn step_back(
             atlas: &*sight.atlas,
             room,
             raid_room,
-            raid: hostiles_in(sight, raid_room),
+            raid: hostiles_in(sight, raid_room)
+                .iter()
+                .map(Striker::of)
+                .collect(),
             members,
             creep,
         };
@@ -608,7 +567,7 @@ pub fn drain(sight: &mut Sight, gate: &Gate, creep: &Creep) -> Wish {
     if creep.pos.room == gate.room {
         return step_to(creep, at);
     }
-    if creep.hits < engine::TOWER_POWER_ATTACK / 2 || at != gate.rest {
+    if creep.hits < engine::tower_attack_at(0) / 2 || at != gate.rest {
         return toward(sight, creep, &there(gate.rest), 0);
     }
     step_to(creep, gate.bounce)
@@ -958,7 +917,7 @@ pub fn hunt(
 ) -> (Option<CreepAct>, Wish, Vec<(Tile, i64)>) {
     let room = c.pos.room;
     let spared = sight.spared.get(&room).cloned().unwrap_or_default();
-    let parts = c.live(Part::RangedAttack);
+    let parts = world::power(c, Part::RangedAttack);
     let worth_of = |m: &Mark, damage: i32| {
         i64::from(damage.min(m.hits)) * i64::from(m.worth) / i64::from(m.hits.max(1))
     };
@@ -972,13 +931,7 @@ pub fn hunt(
         let hits = tiles.iter().flatten().filter_map(|p| at.range(p));
         hits.map(|r| worth_of(m, hit(r))).sum::<i64>() / n
     };
-    let shot = |r: i32| {
-        if r <= engine::RANGED_RANGE {
-            engine::RANGED_ATTACK_POWER * parts
-        } else {
-            0
-        }
-    };
+    let shot = |r: i32| engine::strike_at(0, parts, r);
     let landed = |at: &Pos, next: bool| -> (i64, Option<CreepAct>) {
         let single = (marks.iter())
             .map(|m| (share(m, at, next, &shot), m.id))
@@ -988,7 +941,7 @@ pub fn hunt(
             0
         } else {
             (marks.iter().filter(|m| m.massed))
-                .map(|m| share(m, at, next, &|r| parts * engine::mass_attack_power_at(r)))
+                .map(|m| share(m, at, next, &|r| engine::mass_at(parts, r)))
                 .sum()
         };
         match single {
@@ -997,9 +950,9 @@ pub fn hunt(
             _ => (0, None),
         }
     };
-    let swing = engine::ATTACK_POWER * c.live(Part::Attack);
+    let attack = world::power(c, Part::Attack);
     let swung = |at: &Pos| -> i64 {
-        let hit = |r: i32| if r <= engine::MELEE_RANGE { swing } else { 0 };
+        let hit = |r: i32| engine::strike_at(attack, 0, r);
         (marks.iter())
             .map(|m| share(m, at, true, &hit))
             .max()

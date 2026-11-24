@@ -639,10 +639,10 @@ fn strikes_of(world: &World) -> BTreeMap<Id, i32> {
     let mut strikes = BTreeMap::new();
     for (by, at) in &world.attacks {
         if let Some(c) = hostiles.get(by) {
-            *strikes.entry(*at).or_default() += engine::ATTACK_POWER
-                * world::power(c, Part::Attack)
-                + engine::RANGED_ATTACK_POWER * world::power(c, Part::RangedAttack)
-                + engine::DISMANTLE_POWER * world::power(c, Part::Work);
+            let striker = world::Striker::of(c);
+            *strikes.entry(*at).or_default() +=
+                engine::strike_at(striker.attack, striker.ranged, engine::MELEE_RANGE)
+                    + engine::DISMANTLE_POWER * world::power(c, Part::Work);
         }
     }
     strikes

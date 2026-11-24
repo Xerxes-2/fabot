@@ -3,7 +3,7 @@
 use fabot_base::engine;
 use fabot_base::intents::{Action, TowerAct};
 use fabot_base::vocabulary::{Part, ResourceType};
-use fabot_base::world::{self, Creep, Pos, Structure, power};
+use fabot_base::world::{self, Creep, Pos, Striker, Structure, power};
 
 fn range(a: &Creep, b: &Creep) -> i32 {
     a.pos.range(&b.pos).unwrap_or(i32::MAX)
@@ -14,21 +14,6 @@ fn heal_on(target: &Creep, hostiles: &[Creep]) -> i32 {
     hostiles
         .iter()
         .map(|h| engine::heal_at(power(h, Part::Heal), range(h, target)))
-        .sum()
-}
-
-fn ours_on(target: &Creep, ours: &[Creep]) -> i32 {
-    ours.iter()
-        .map(|c| {
-            let ranged = engine::RANGED_ATTACK_POWER * power(c, Part::RangedAttack);
-            match range(c, target) {
-                r if r <= engine::MELEE_RANGE => {
-                    engine::ATTACK_POWER * power(c, Part::Attack) + ranged
-                }
-                r if r <= engine::RANGED_RANGE => ranged,
-                _ => 0,
-            }
-        })
         .sum()
 }
 
@@ -62,6 +47,7 @@ pub fn fire(
     struck: &[Pos],
     ramparts: &[Structure],
 ) -> Vec<Action> {
+    let strikers: Vec<Striker> = ours.iter().map(Striker::of).collect();
     let mut targets: Vec<(&Creep, bool, i32, i32, i32)> = hostiles
         .iter()
         .map(|h| {
@@ -72,7 +58,7 @@ pub fn fire(
                 h.hits,
                 h.hits + heal,
             );
-            let dealt = ours_on(h, ours);
+            let dealt = strikers.iter().map(|c| c.on(&h.pos, false)).sum();
             (h, dealt > 0 || strikes(h, struck), heal, dealt, need)
         })
         .collect();
