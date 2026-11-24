@@ -537,7 +537,9 @@ const ALWAYS = [
   { measure: "refusals", max: 0 },
   { measure: "faults", max: 0 },
 ];
-export const withAlways = (asserts) => [...asserts, ...ALWAYS.filter((d) => !asserts.some((a) => a.measure === d.measure))];
+// The count ceilings every scenario holds; `floodsMost` and `threatLookupsMost` are not, as some soaks pass them.
+const CEILED = ["coldFloodsPerColony", "atlasMissRate"].map((measure) => ({ measure }));
+export const withAlways = (asserts) => [...asserts, ...[...ALWAYS, ...CEILED].filter((d) => !asserts.some((a) => a.measure === d.measure))];
 export const check = (samples, a, dir, max = a.max ?? Infinity) => {
   const value = measures[a.measure](samples, a, dir);
   const bound = [a.min !== undefined && `≥ ${a.min}`, max !== Infinity && `≤ ${max}`].filter(Boolean).join(", ");

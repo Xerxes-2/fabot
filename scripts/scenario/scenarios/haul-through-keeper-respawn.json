@@ -19,9 +19,6 @@
       "measure": "dug",
       "room": "W5S5",
       "min": 1
-    },
-    {
-      "measure": "atlasMissRate"
     }
   ]
 }
