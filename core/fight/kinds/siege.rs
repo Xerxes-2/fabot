@@ -126,7 +126,6 @@ pub fn tapped<'a>(room: &'a Room, target: Id) -> Option<&'a Controller> {
     declaimed(room).filter(|c| c.id == target)
 }
 
-/// The controller stands among the structures, a target only while tapped.
 pub fn stands(room: &Room, target: Id) -> bool {
     match &room.controller {
         Some(c) if c.id == target => tapped(room, target).is_some(),

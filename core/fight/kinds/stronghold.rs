@@ -42,7 +42,7 @@ pub(crate) fn step(
     let declared = declarations.priority(OpKind::Stronghold, e.room).is_some();
     let held = scene
         .in_sight(e.room)
-        .is_none_or(|r| core(r).is_some() || !loot(r).is_empty());
+        .is_none_or(|r| r.invader_core().is_some() || !loot(r).is_empty());
     let known = (scene.intel.get(&e.room)).is_some_and(|r| r.stronghold.is_some());
     let arrived = scene.members_of(&next).iter().any(|c| c.pos.room == e.room);
     let gone = next.ours.is_empty() && !asked && !(next.unanswered && known);
@@ -203,10 +203,6 @@ fn invader(s: &Structure, kind: StructureType) -> bool {
     s.kind == kind && s.owner == Owner::Invader
 }
 
-fn core<'a>(room: &'a Room) -> Option<&'a Structure> {
-    (room.structures.iter()).find(|s| invader(s, StructureType::InvaderCore) && s.level > 0)
-}
-
 fn rampart_at<'a>(room: &'a Room, at: &Pos) -> Option<&'a Structure> {
     (room.structures.iter()).find(|s| invader(s, StructureType::Rampart) && s.pos == *at)
 }
@@ -225,11 +221,17 @@ fn loot(room: &Room) -> Vec<Pos> {
         .collect()
 }
 
+/// A stronghold's ramparts stand to its collapse, its core gone or not.
+pub fn fallen_with_loot(room: &Room) -> bool {
+    let rampart = |s: &Structure| invader(s, StructureType::Rampart);
+    room.structures.iter().any(rampart) && room.invader_core().is_none() && !loot(room).is_empty()
+}
+
 /// The core's own rampart, then one over loot or over a walkable side of
 /// loot walled in on every side: the fewest hits, then the most it frees.
 fn mark(room: &Room, atlas: &Atlas) -> Option<(Id, Pos)> {
     let of = |s: &Structure| (s.id, s.pos);
-    if let Some(c) = core(room) {
+    if let Some(c) = room.invader_core() {
         return Some(of(rampart_at(room, &c.pos).unwrap_or(c)));
     }
     // A fallen core's garrison strikes nothing and stands where it was: off
@@ -296,7 +298,7 @@ pub(crate) fn incoming<'a>(
     (decided.iter())
         .filter(|e| e.objective == Objective::Stronghold)
         .filter_map(|e| Some((scene.in_sight(e.room)?, e)))
-        .filter(|(room, _)| core(room).is_some())
+        .filter(|(room, _)| room.invader_core().is_some())
         .flat_map(|(room, e)| {
             let towers: Vec<Pos> = scene.towers_in(room).iter().map(|t| t.pos).collect();
             let here = scene

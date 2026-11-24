@@ -55,13 +55,11 @@ pub fn step(world: &World, intel: &mut Intel) {
             }),
             mineral: (room.minerals.first())
                 .and_then(|m| Some((m.resource?, Some(tiles::of_pos(&m.pos))))),
-            stronghold: (room.structures.iter())
-                .find(|s| s.kind == StructureType::InvaderCore && s.level > 0)
-                .map(|s| Stronghold {
-                    level: s.level,
-                    deploys_at: world.time + s.deploy,
-                    collapses_at: world.time + s.collapse,
-                }),
+            stronghold: room.invader_core().map(|s| Stronghold {
+                level: s.level,
+                deploys_at: world.time + s.deploy,
+                collapses_at: world.time + s.collapse,
+            }),
             towered: (room.structures.iter())
                 .any(|s| s.kind == StructureType::Tower && !s.owner.is_ours()),
         };

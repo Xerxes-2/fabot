@@ -139,6 +139,7 @@ pub fn to_pos(room: RoomName, tile: Tile) -> Pos {
     Pos::new(room, x_of(tile), y_of(tile))
 }
 
+/// The engine's `getRangeTo`.
 #[inline]
 pub fn range(a: Tile, b: Tile) -> i32 {
     (x_of(a) - x_of(b)).abs().max((y_of(a) - y_of(b)).abs())

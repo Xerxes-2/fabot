@@ -566,6 +566,10 @@ impl Room<'_> {
     pub fn hostiles(&self) -> impl Iterator<Item = &Creep> {
         self.others.iter().filter(|c| !c.owner.is_ally())
     }
+
+    pub fn invader_core(&self) -> Option<&Structure> {
+        (self.structures.iter()).find(|s| s.kind == StructureType::InvaderCore && s.level > 0)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

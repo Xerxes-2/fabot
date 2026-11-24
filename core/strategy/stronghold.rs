@@ -7,8 +7,7 @@ use fabot_atlas::Derived;
 use fabot_base::declarations::{OpKind, Operation, SIEGE_HOPS};
 use fabot_base::engine;
 use fabot_base::intel::Intel;
-use fabot_base::vocabulary::ResourceType;
-use fabot_base::world::{Owner, Room, RoomName, StructureType, World};
+use fabot_base::world::{RoomName, World};
 use fabot_fight::kinds::stronghold;
 use fabot_fight::shape::{Cast, Engagement, Objective};
 
@@ -17,22 +16,6 @@ const MOST: i32 = 3;
 
 /// Its collapse leaves a cast its walk, its kill and the haul home.
 const LEFT: i32 = 2 * engine::CREEP_LIFETIME;
-
-/// A stronghold's ramparts stand to its collapse, its core gone or not.
-fn fallen_with_loot(room: &Room) -> bool {
-    let invader = |kind| {
-        let s = room.structures.iter();
-        s.filter(move |s| s.kind == kind && s.owner == Owner::Invader)
-    };
-    let loot = |store: &fabot_base::world::Store| {
-        (store.held.iter()).any(|(r, n)| *r != ResourceType::Energy && *n > 0)
-    };
-    invader(StructureType::Rampart).next().is_some()
-        && !invader(StructureType::InvaderCore).any(|c| c.level > 0)
-        && ((room.remains.iter()).any(|r| loot(&r.store))
-            || (room.structures.iter())
-                .any(|s| s.kind == StructureType::Container && loot(&s.store)))
-}
 
 /// Its loot is declared with it, so the haul is cast as the core falls.
 pub fn rows(
@@ -48,7 +31,7 @@ pub fn rows(
         .map(|e| e.room)
         .collect();
     let fallen: Vec<RoomName> = (world.rooms.iter())
-        .filter(|r| fallen_with_loot(r))
+        .filter(|r| stronghold::fallen_with_loot(r))
         .map(|r| r.name)
         .collect();
     let standing =

@@ -33,7 +33,6 @@ pub fn target_at(pos: &Pos, range: i32) -> Target {
     }
 }
 
-/// `trees` holds the homes' rooms'.
 pub fn nearest<'t>(
     atlas: &mut Atlas,
     trees: &dyn Fn(RoomName) -> Option<&'t Tree>,
@@ -183,8 +182,7 @@ fn danger(world: &World, owned: &BTreeSet<RoomName>, guarded: bool) -> Vec<(Room
         let guards = guards(world, r.name);
         let fallen = |o: &Owner, at: &Pos| {
             *o == Owner::Invader
-                && !(r.structures.iter())
-                    .any(|s| s.kind == StructureType::InvaderCore && s.level > 0)
+                && r.invader_core().is_none()
                 && (r.structures.iter())
                     .any(|s| s.kind == StructureType::Rampart && s.pos == *at && s.owner == *o)
         };
@@ -292,10 +290,7 @@ fn open(world: &World, sightings: &Sightings, owned: &BTreeSet<RoomName>, room: 
         return fabot_base::world::sightings::unarmed(sightings, world.time, room);
     };
 
-    let core = seen
-        .structures
-        .iter()
-        .any(|s| s.kind == StructureType::InvaderCore && s.level > 0);
+    let core = seen.invader_core().is_some();
     let foes: Vec<Creep> = seen.hostiles().cloned().collect();
     let guards = guards(world, room);
     let work: Vec<&Pos> = seen
