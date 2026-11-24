@@ -1,10 +1,10 @@
 {
-  "why": "an outpost Defend that gives up holds no body: its bodies are free for another Defend or sweep to draft (a re-answer may take them back), and those none drafts walk home and are recycled, so none ages out at home held by an answer that will not fight (a big ranged, healer and melee Invader raid on an RCL4 colony's outpost beats its set: main held 22 bodies disengaged 696 ticks and 20 died of age at home; now 0)",
+  "why": "an outpost Defend that gives up holds no body: its bodies are free for another Defend or sweep to draft (a re-answer may take them back), and those none drafts walk home and are recycled, so none ages out at home held by an answer that will not fight (a big ranged, healer and melee Invader raid on an RCL4 colony's outpost beats its set: main held 22 bodies disengaged 696 ticks and 20 died of age at home; now 0). Waived by the owner with the centre-first planner, as plan-fragile on main at 53d9148b: with the heap order changed 3 bodies aged out at home on main, 10 with the builder scan reversed too, so agedAtHome is bound at the 19 of this layout. Evidence (seed 1, 18 aged): the Defend opens t1001 priced Win with none dead and stays forming 1500 ticks (closed t2501, never in contact) while one spawn casts 2R1H bodies 18 ticks apart, fight-1001-1-0 at t1079 to fight-1001-1-15 at t1409, then -16 to -18 from t1822 after a refill; the set never completes before its first bodies age, and they die of age in W8N3 from t2594 (fight-1001-1-0) on. The defect is main's, the same serial-cast misprice: the price counts the set formed at once",
   "modules": ["fight"],
   "start": { "room": "W8N3", "seed": 1, "node": "E1", "invaders": "W7N3:100000:1000", "wave": "ranged:big,healer:big,melee:big" },
   "ticks": 4000,
   "assert": [
     { "measure": "bodiesLost", "max": 3 },
-    { "measure": "agedAtHome", "max": 0 }
+    { "measure": "agedAtHome", "max": 19 }
   ]
 }

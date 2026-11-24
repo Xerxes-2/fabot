@@ -93,7 +93,7 @@ impl Map {
 
     /// The tile Layout's plan puts the first spawn on, as `soak.mjs` seats a respawn.
     pub fn seat(&self, room: &str) -> Option<Tile> {
-        layout::first_spawn(&Rules::vanilla(), &self.bare(room)).map(|(_, tile, _)| tile)
+        layout::first_spawn(&Rules::vanilla(), &self.bare(room)).map(|(_, tile)| tile)
     }
 
     pub fn bare(&self, room: &str) -> fabot_base::world::Room<'static> {

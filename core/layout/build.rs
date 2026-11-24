@@ -1,12 +1,11 @@
-//! Hivemind's room variation builder and its tower step (MIT, © David
-//! Franke), step for step: one variation's plan, as labels.
+//! Hivemind's room builder and its tower step (MIT, © David Franke), step
+//! for step: the plan around one centre, as labels.
 use fabot_base::tiles::{self, Tile, index};
 use fabot_base::world::Rules;
 
 use super::cut::{self, Rect};
 use super::ground::Ground;
 use super::place::{BLOCKED, Labels, Manager, ROAD, SWAMP, WALL, area, xy};
-use super::score::effect;
 
 const ENDANGERED: u8 = 0;
 const SAFE: u8 = 1;
@@ -75,10 +74,36 @@ pub fn exit_centers(terrain: &[u8]) -> Vec<Tile> {
     centers
 }
 
-pub struct Variation {
-    pub center: Tile,
-    /// The sources (by index) whose harvest bay seats a spawn.
-    pub spawns: Vec<bool>,
+/// Every tile Hivemind lets a core stand on, the least road cost first, then
+/// the shortest longest road (`ARCHITECTURE.md` §5): ranked on the ground
+/// alone, so no road tie of a build moves the centre.
+pub fn centers(ground: &Ground, walls: &[u8], exits: &[u8]) -> Vec<Tile> {
+    let open = |t: Tile| ground.terrain[t] & WALL == 0;
+    let roads = Manager::new(&ground.terrain, walls, exits);
+    let walks: Vec<_> = (ground.sources.iter().chain(&ground.controller))
+        .map(|r| roads.road_from(*r))
+        .collect();
+    // Each source's energy walks to the core, and all of it on to the controller.
+    let more = (ground.sources.len() as u32).saturating_sub(1);
+    let walk = |t: Tile| {
+        let upgrade = walks.last().map_or(0, |w| w[t]);
+        walks
+            .iter()
+            .map(|w| w[t])
+            .fold(0, u32::saturating_add)
+            .saturating_add(more.saturating_mul(upgrade))
+    };
+    let longest = |t: Tile| walks.iter().map(|w| w[t]).max();
+    let mut cores: Vec<Tile> = tiles::all()
+        .filter(|t| open(*t) && (3..255).contains(&walls[*t]) && exits[*t] > 8)
+        .collect();
+    cores.sort_by_key(|t| (walk(*t), longest(*t), *t));
+    cores
+}
+
+pub(super) fn effect(a: Tile, b: Tile) -> f64 {
+    let r = (tiles::range(a, b) + 2).clamp(5, 20);
+    1.0 - f64::from(r - 5) / 15.0
 }
 
 pub struct Built {
@@ -326,39 +351,30 @@ impl Builder<'_> {
         self.m.place(index(cx - 1, cy), "link.storage");
     }
 
-    fn bay(&mut self, bay: Tile, spawn: bool, source: bool, id: Option<usize>) {
-        let near_exit = source && !spawn;
-        let (bx, by) = xy(bay);
-        if spawn && self.more("spawn") {
-            area(bx, by, 1, |x, y| {
-                if self.m.wall(x, y)
-                    || !self.m.buildable(x, y, false, near_exit)
-                    || (x, y) == (bx, by)
-                {
-                    return true;
-                }
-                let mut placed = false;
-                area(x, y, 1, |x2, y2| {
-                    if (x2, y2) == (bx, by) || !self.m.plan.has("road", index(x2, y2)) {
-                        return true;
-                    }
-                    let n = self.m.plan.count("spawn");
-                    self.m.place(index(x, y), &format!("spawn.{n}"));
-                    self.m.place(index(x, y), "spawn");
-                    placed = true;
-                    false
-                });
-                !placed
-            });
+    /// The tiles around a bay, lowest first so no scan order picks them.
+    fn seats(&self, bay: Tile, source: bool) -> Vec<Tile> {
+        let mut seats: Vec<Tile> = (tiles::around(bay).iter().copied())
+            .filter(|t| {
+                self.m
+                    .buildable(tiles::x_of(*t), tiles::y_of(*t), false, source)
+            })
+            .collect();
+        seats.sort_unstable();
+        seats
+    }
+
+    fn bay(&mut self, bay: Tile, source: bool, id: Option<usize>) {
+        let road = |n: &Tile| *n != bay && self.m.plan.has("road", *n);
+        let door = (self.seats(bay, source).into_iter())
+            .find(|t| !source && tiles::around(*t).iter().any(road));
+        if let Some(t) = door.filter(|_| self.more("spawn")) {
+            let n = self.m.plan.count("spawn");
+            self.m.place(t, &format!("spawn.{n}"));
+            self.m.place(t, "spawn");
         }
 
         let mut linked = !self.more("link") || !source;
-        area(bx, by, 1, |x, y| {
-            if self.m.wall(x, y) || !self.m.buildable(x, y, false, near_exit) || (x, y) == (bx, by)
-            {
-                return true;
-            }
-            let t = index(x, y);
+        for t in self.seats(bay, source) {
             if linked {
                 self.m.place(t, "extension");
                 if source {
@@ -376,23 +392,18 @@ impl Builder<'_> {
                 }
                 linked = true;
             }
-            true
-        });
+        }
     }
 
-    fn harvest_bays(&mut self, spawns: &[bool]) {
-        for (i, h) in self.harvest.clone().into_iter().enumerate() {
-            let spawn = spawns.get(i).copied().unwrap_or(false);
+    fn harvest_bays(&mut self) {
+        for h in self.harvest.clone() {
             for t in self.m.road(h, &self.entrances, false) {
                 self.m.plan_at(t, "road", Some(ROAD));
                 self.m.plan_at(t, "road.source", None);
-                if spawn {
-                    self.protect(t, 0);
-                }
             }
             self.m.plan_at(h, "container.source", None);
             self.m.plan_at(h, "container", None);
-            self.bay(h, spawn, true, None);
+            self.bay(h, true, None);
         }
     }
 
@@ -499,7 +510,7 @@ impl Builder<'_> {
             };
             self.m.access_road(pos);
             self.m.plan_at(pos, "bay_center", Some(ROAD));
-            self.bay(pos, true, false, Some(id));
+            self.bay(pos, false, Some(id));
             id += 1;
             self.protect(pos, RAMPART_DISTANCE);
             self.m.start(None);
@@ -863,8 +874,8 @@ impl Builder<'_> {
     }
 }
 
-/// One variation's plan; None where Hivemind's builder throws.
-pub fn build(rules: &Rules, ground: &Ground, dist: (&[u8], &[u8]), v: &Variation) -> Option<Built> {
+/// The plan around one centre; None where Hivemind's builder throws.
+pub fn build(rules: &Rules, ground: &Ground, dist: (&[u8], &[u8]), center: Tile) -> Option<Built> {
     let controller = ground.controller?;
     let terrain = &ground.terrain[..];
     let safe = safe_sides(terrain);
@@ -882,7 +893,6 @@ pub fn build(rules: &Rules, ground: &Ground, dist: (&[u8], &[u8]), v: &Variation
     for c in &centers {
         b.m.plan_at(*c, "exit", None);
     }
-    let center = v.center;
     let (cx, cy) = xy(center);
     b.entrances = vec![
         index(cx + 2, cy),
@@ -895,7 +905,7 @@ pub fn build(rules: &Rules, ground: &Ground, dist: (&[u8], &[u8]), v: &Variation
     b.upgrader(controller)?;
     b.exits(&centers);
     b.core(center);
-    b.harvest_bays(&v.spawns);
+    b.harvest_bays();
     b.parking(center);
     b.labs();
     b.bays(center);

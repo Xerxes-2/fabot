@@ -3,7 +3,7 @@
 //! as its plan's integer keys are.
 use std::collections::{BTreeMap, BTreeSet};
 
-use fabot_base::tiles::{self, Tile, index};
+use fabot_base::tiles::{self, Table, Tile, index};
 
 use super::path::{Goal, Search};
 
@@ -131,10 +131,11 @@ impl<'a> Manager<'a> {
         let mut matrix = vec![0u8; tiles::COUNT];
         for t in tiles::all() {
             let (x, y) = xy(t);
-            matrix[t.index()] = if terrain[t.index()] & WALL != 0 {
-                THROUGH_WALL
-            } else if x == 0 || y == 0 || x == 49 || y == 49 {
+            // The engine builds nothing on the edge, a wall's road neither.
+            matrix[t.index()] = if x == 0 || y == 0 || x == 49 || y == 49 {
                 BLOCKED
+            } else if terrain[t.index()] & WALL != 0 {
+                THROUGH_WALL
             } else if exits[t.index()] <= 2 {
                 DISCOURAGED * 2
             } else {
@@ -243,13 +244,9 @@ impl<'a> Manager<'a> {
 
     pub fn next_spot(&mut self) -> Option<Tile> {
         loop {
-            let mut best: Option<usize> = None;
-            for (i, s) in self.spots.iter().enumerate().filter(|(_, s)| s.alive) {
-                if best.is_none_or(|b| self.spots[b].range == 0 || s.range < self.spots[b].range) {
-                    best = Some(i);
-                }
-            }
-            let i = best?;
+            let (i, _) = (self.spots.iter().enumerate())
+                .filter(|(_, s)| s.alive)
+                .min_by_key(|(_, s)| (s.range, s.tile))?;
             let (tile, range, node) = (self.spots[i].tile, self.spots[i].range, self.spots[i].node);
             self.spots[i].alive = false;
             self.open[tile.index()] = None;
@@ -325,14 +322,21 @@ impl<'a> Manager<'a> {
             }
         }
         let goals: Vec<Goal> = to.iter().map(|t| Goal { tile: *t, range: 0 }).collect();
-        let search = Search {
-            terrain: self.terrain,
-            matrix: &matrix,
+        Self::paved(self.terrain, &matrix).run(from, &goals).path
+    }
+
+    /// What a road from beside `rock` costs to each tile, before any is planned.
+    pub fn road_from(&self, rock: Tile) -> Table<u32> {
+        Self::paved(self.terrain, &self.matrix).from(rock)
+    }
+
+    fn paved<'b>(terrain: &'b [u8], matrix: &'b [u8]) -> Search<'b> {
+        Search {
+            terrain,
+            matrix,
             plain: 2,
             swamp: 2,
-            weight: 0.9,
-        };
-        search.run(from, &goals).path
+        }
     }
 
     pub fn accessible(&self, from: Tile) -> bool {
@@ -344,7 +348,6 @@ impl<'a> Manager<'a> {
             matrix: &self.matrix,
             plain: 1,
             swamp: 1,
-            weight: 1.2,
         };
         let found = search.run(from, &goals);
         !found.incomplete

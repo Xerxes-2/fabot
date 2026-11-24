@@ -142,7 +142,7 @@ segments over multiple ticks (economy first); a cold tick never spends more than
 | `World` | `fabot-base` | Single-pass tick snapshot, event-log strikes/destroys, per-tick `rules` (`CONTROLLER_STRUCTURES`) | `Game` | — |
 | `Atlas` | `fabot-atlas` | Room graph (region nodes, border-stretch crossings, keeper-strike avoidance, blind keeper penalty, a room intel last saw with towers that fire on us (a live stronghold's, a non-ally player's) never crossed, only reached) and per-room tile grid (creep-free weights, reverse floods, seats, footprint queries; a hostile's tile is walled only in this tick's step floods and passability, never in a kept flood, so one moving redoes no flood, tree or walk); out-of-sight grids hold what stood when last seen (else terrain) struck where intel places the keepers (`atlas.unseen`); a walk can run on terrain alone, as it lies or paved (`bare`) | `World`, `terrain`, `intel.rooms`, `Declarations` (colony plans, for `server`) | flood table, `atlas.carried` |
 | `Economy` | `fabot-economy` | Slots, casts, sticky tasks, logistics dispatcher, links, labs, terminals, abandon | `Derived`, `Atlas`, `declarations`, `EconomyState`, Strategy's `scouts` | tasks, casts, `assignments` |
-| `Layout` | `fabot-layout` | Colony placement plan (Hivemind planner + xxscreeps JPS), rampart ring, construction sites, buried-road and off-plan wall destroy, tower firing | `Derived`, `Atlas`, `declarations` | sites, destroys, tower actions, `standing.layout` |
+| `Layout` | `fabot-layout` | Colony placement plan (Hivemind's builder, centre first), rampart ring, construction sites, buried-road and off-plan wall destroy, tower firing | `Derived`, `Atlas`, `declarations` | sites, destroys, tower actions, `standing.layout` |
 | `Exchange` | `fabot-exchange` | Pure combat arithmetic (`outcome`, `cheapest_win`, breach planning, a stronghold's run) | fighters, terrain | — |
 | `Fight` | `fabot-fight` | Hostile `Tracker`, engagements (`kinds/`: defend, siege, sweep, raid, stronghold), casting | `Derived`, `Atlas`, `Exchange`, `declarations` (its operations table), `intel`, `FightState` | fight actions, asks, wishes, casts, `FightState` |
 | `Tactics` | `fabot-tactics` | Per-creep combat actions, stepping, and the operator's tactic rules (`ruling`, `checked`) (no `Fight` import) | `Atlas`, `Move`, `Sight` + plan | creep actions, wishes |
@@ -206,7 +206,7 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
 | `recorder` | deflated `read.js` pass + Memory + intel ring | Main | segments 10–14 | live capture for benchmark & replay (§9.1) |
 | `engagements.log` | the last 200 engagements closed (an unpriced row evicted before any priced one, owner), a JSON row a line: id, kind, room, rivals, tactic, opened, contact, seen, closed, `predicted` (priced only), our dead, energy cast, and how it ended (`disengaged`, `gaveUp`, `left`, `safe`; none: its rival's death seen) | Observe (rows Fight's closes) | segment 4, written on a close (rows closed before a reset's first read wait in heap) | live `Exchange` error tracking (§10.1): an engagement's prediction goes with it, and 200 rows (~230 B each) fit one segment |
 | `metrics` | open window sums & per-creep/site/room deltas (a creep's task, load and tile, and the ticks they held) | Observe | heap | incremental tick deltas; a body stuck on its task is read across ticks |
-| `standing.layout` | per-room layout plan & incremental drawing state + ground key + `cold` (drawn with no standing held: a reset or a new colony) | Layout | heap | rebuilds at 4 variations/tick after reset; `cold` marks the first plan `piles` is checked against |
+| `standing.layout` | per-room layout plan & incremental drawing state + ground key + `cold` (drawn with no standing held: a reset or a new colony) | Layout | heap | rebuilds at 4 centres/tick after reset; `cold` marks the first plan `piles` is checked against |
 | `scouts` | scout targets | Strategy | heap (this tick) | derived from intel for Economy |
 | `homes` | the colonies' own economy facts (`derived::Homes`) | Economy | heap (this tick) | read once by `economy::spare` before outposts are picked, finished by Economy's `of_world` |
 | `sightings` | room → armed hostile / core id → expiry tick | World | heap | vision grace for stood-down outposts |
@@ -374,29 +374,37 @@ pricer would cost ~2× CPU and 580 lines for no gain).
 
 ### Layout & ramparts
 
-- **Room planner (`layout/`):** step-for-step copy of Hivemind's planner (a
-  partial copy misses its placement order) on xxscreeps' JPS/A* Dial-heap
-  pathfinder (`layout/path.rs`; notices in `THIRD_PARTY_NOTICES`),
-  spread at 4 variations/tick in `standing.layout`. Reads terrain/rocks alone.
+- **Room planner (`layout/`):** step-for-step copy of Hivemind's builder (a
+  partial copy misses its placement order) around one centre chosen first:
+  of the tiles Hivemind lets a core stand on, the least road cost its
+  energy pays (each source's to it, all of it on to the controller; a road
+  may tunnel a wall as Hivemind's do), then the shortest longest road; the
+  next of ten where a whole plan does not fit or a
+  structure takes the centre (the pile a colony banks on); spread at 4
+  centres/tick in `standing.layout`. Reads terrain/rocks alone. Every tie
+  falls to the lowest tile, not to a scan or heap order: roads are least-cost
+  paths (`layout/path.rs`), building spots flood nearest first, a bay's seats
+  are taken lowest first. Hivemind instead builds ~40 variations and keeps
+  the best scored, which score close together, so any builder or pathfinder
+  change moved the centre in 40% of rooms and every spawn with it (a reversed
+  builder scan cost Hivemind's plan 23% of W9N8's soak score).
   Structures build at the RCL Hivemind's room manager first unlocks them
   (towers, spawns, harvest bays from RCL3, extension bays in order; plain roads
   at RCL4 behind storage, swamp roads to sources/controller from RCL2). Key
-  departures: near-exit source fallback (3 tiles vs 6); harvest-bay spawn built
-  after extension bays; heavier source/controller distance weights (`0.02` vs
-  Hivemind's `0.003`/`0.002`) to the first-built spawn because until RCL7 that
-  spawn's haul is the economy (Hivemind's weights lose 95k on soak); multi-seat
-  source container before extensions; no
+  departures: near-exit source fallback (3 tiles vs 6); no harvest-bay spawn;
+  multi-seat source container before extensions; no
   labs below RCL8; nuker last; unreachable cut pockets kept unroaded; source
   links never split a 1-wide post; a quad or decorative wall closing a
   structure in gives way, as does one closing in what only an ore's post
   leads to (its digger yields only to a chain two weights heavier) or cuts the
   core off an exit (its outposts may lie only that way), and a pocket of roads and ramparts no walk reaches
   is dropped (Hivemind checks neither, and our kept cut pockets get sealed).
-  `❓` The plan is chaotic under any builder or pathfinder change: each
-  variation's greedy build carries every road into its later steps (spawn,
-  bays, ramparts, towers), and the best variations score close together. So a
-  planner change re-baselines with a broad soak. The open fixes are choosing
-  the anchor first, canonical roads, or scoring only what a road tie cannot move.
+  `❓` The planner ranks a tunnel at path cost (wall 30), not its upkeep
+  (×150, ×750 on swamp+wall): Hivemind's matrix is kept whole, so a centre
+  whose roads tunnel can win (E3S9, gen 1141).
+  `❓` The faithful port ramps a single-source room slower than the old planner
+  where its centre sits farther from the source: E23S9 soak:many −3.6% to −4.9%
+  (RCL2 t900 vs t800), owner-accepted 2026-11-26 as the port's measured cost.
   `❓` The source container's seat (`build::harvest_spot`, Hivemind's most free
   neighbours) is not checked for being the only way between two parts of the
   room; the seat a source is dug from before it (`Atlas::bare_post`) is.
@@ -686,6 +694,11 @@ and `cheapest_win` (adds only to already-standing `ours`).
   (§6.4). `❓` Rangers in a mixed `BlobClose`
   still walk into melee reach; to be solved with the outpost-defence duo
   redesign.
+  `❓` A blob's lead flips between two bodies when their lags cross near a
+  raid's swings (each tick an A-B-A swap); both raid-measured fixes regressed main.
+  `❓` Defence outcomes move with any plan change that moves no rule: under a
+  reversed builder scan or heap order main loses boosted bodies, lets a raid stand
+  1580 ticks, ages bodies out at home and answers one outpost raid of two (owner waived).
   `❓` A `Close` set priced landing together reaches the raid apart where
   the raid walks onto its nearer body (a pair 1 tick apart at landing met it
   6 apart); option: price a non-together arm as if the raid closes on the
@@ -757,7 +770,10 @@ conflicts never silently cancel an act.
   cannot cancel: a home raided on the tick an outpost's cast begins is drafted
   after it (defend-prioritises-home-over-outpost seed 1: 65 ticks), and a raid
   that appears unseen waits behind economy bodies already spawning
-  (boost-labs-fed-while-the-ring-casts: two haulers, 89 ticks).
+  (boost-labs-fed-while-the-ring-casts: two haulers, 89 ticks). The home
+  Defend's raid is unpriced t1001-1003 (no winning price before t1004), so a
+  spawn free on the raid's tick begins an outpost's body first (seed 6: its
+  W7N3 body fight-1001-2-0 began t1002, the home's t1050).
 - **Colony choice (`fight/price/casting.rs`):** picks the colony landing the body
   soonest (hops + spawn queue + energy refill time); home `Defend` casts at
   home. Bodies end with one `MOVE` (`with_move_last`) and carry `HEAL` when

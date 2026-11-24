@@ -1,6 +1,6 @@
-//! Hivemind's room plan (MIT, © David Franke): every variation built and
-//! scored as its planner does, the best one taken, and each structure given
-//! the level its room manager builds it at.
+//! Hivemind's room plan (MIT, © David Franke): built around the first
+//! centre that fits one, each structure given the level its room manager
+//! builds it at.
 use fabot_atlas::Atlas;
 use fabot_base::engine;
 use fabot_base::tiles::{self, Tile};
@@ -9,7 +9,6 @@ use fabot_base::world::{Built as _, Rules, StructureType};
 use super::build::{self, Built};
 use super::ground::Ground;
 use super::place::{self, Labels, SWAMP};
-use super::score;
 use super::shape::{self, Item, Plan};
 
 pub fn level_of(rules: &Rules, kind: StructureType, rank: i32) -> i32 {
@@ -70,15 +69,7 @@ fn order(plan: &Labels, kind: &str, level: i32, controller: Option<Tile>) -> Vec
             .collect()
     };
     let mut out: Vec<Tile> = match kind {
-        // Our pioneers dig from any tile beside a source, so a harvest bay's
-        // spawn is built after the extension bays' (Hivemind builds its first).
-        "spawn" => {
-            let harvest = plan.of("harvester");
-            let (bay, dug): (Vec<Tile>, Vec<Tile>) = (numbered(kind).into_iter())
-                .partition(|t| harvest.iter().all(|h| tiles::range(*h, *t) > 1));
-            bay.into_iter().chain(dug).collect()
-        }
-        "tower" => numbered(kind),
+        "spawn" | "tower" => numbered(kind),
         "extension" => {
             let mut v = if level >= 3 {
                 both("extension.harvester", "extension")
@@ -347,18 +338,22 @@ fn reached<'a>(
         .collect()
 }
 
-/// Hivemind's search, a few variations a tick as its planner spreads them.
+/// As many centres as Hivemind's planner tries: its weighted one and one per
+/// ninth of the room.
+const TRIES: usize = 10;
+
+/// The search, a few centres a tick as Hivemind's planner spreads them.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Drawing {
     walls: Vec<u8>,
     exits: Vec<u8>,
     next: usize,
-    best: Option<(f64, usize)>,
+    held: Option<Plan>,
 }
 
 pub enum Drawn {
     Drawing,
-    /// The first of the best scored, or none where no variation fits.
+    /// None where no centre builds.
     Done(Option<Plan>),
 }
 
@@ -369,51 +364,48 @@ impl Drawing {
             walls,
             exits,
             next: 0,
-            best: None,
+            held: None,
         }
     }
 
-    /// Builds variations while `budget` lasts.
+    /// Builds the centres in rank order while `budget` lasts, taking the
+    /// first that fits a whole plan and leaves its centre to the pile a
+    /// colony banks on before storage, else the first built.
     pub fn advance(&mut self, rules: &Rules, ground: &Ground, budget: &mut usize) -> Drawn {
         let dist = (&self.walls[..], &self.exits[..]);
-        let variations = score::variations(ground, dist.0, dist.1);
-        while self.next < variations.len() {
+        let centers = build::centers(ground, dist.0, dist.1);
+        while let Some(center) = centers.get(self.next).filter(|_| self.next < TRIES) {
             if *budget == 0 {
                 return Drawn::Drawing;
             }
             *budget -= 1;
-            if let Some(b) = build::build(rules, ground, dist, &variations[self.next]) {
-                let s = score::score(rules, &b, &ground.terrain, dist.1, ground);
-                if self.best.is_none_or(|(top, _)| s > top) {
-                    self.best = Some((s, self.next));
-                }
-            }
             self.next += 1;
+            if let Some(b) = build::build(rules, ground, dist, *center) {
+                let plan = to_plan(rules, ground, &b);
+                if plan.unfit.is_empty() && plan.pile().is_some() {
+                    return Drawn::Done(Some(plan));
+                }
+                self.held.get_or_insert(plan);
+            }
         }
-        let best = self
-            .best
-            .and_then(|(_, i)| build::build(rules, ground, dist, &variations[i]));
-        Drawn::Done(best.map(|b| to_plan(rules, ground, &b)))
+        Drawn::Done(self.held.take())
     }
 }
 
-/// The best variation's plan and its score.
-pub fn of_ground(rules: &Rules, ground: &Ground) -> Option<(Plan, f64)> {
-    let (mut drawing, mut budget) = (Drawing::of(ground), usize::MAX);
-    match drawing.advance(rules, ground, &mut budget) {
-        Drawn::Done(plan) => Some((plan?, drawing.best?.0)),
+pub fn of_ground(rules: &Rules, ground: &Ground) -> Option<Plan> {
+    let mut budget = usize::MAX;
+    match Drawing::of(ground).advance(rules, ground, &mut budget) {
+        Drawn::Done(plan) => plan,
         Drawn::Drawing => None,
     }
 }
 
-/// The first variation alone: whether a room fits a whole plan, at a
+/// The first centre alone: whether a room fits a whole plan, at a
 /// fraction of the search.
 pub fn first_of(rules: &Rules, ground: &Ground) -> Option<Plan> {
     let (walls, exits) = place::distances(&ground.terrain);
-    let v = score::variations(ground, &walls, &exits)
-        .into_iter()
-        .next()?;
-    build::build(rules, ground, (&walls, &exits), &v).map(|b| to_plan(rules, ground, &b))
+    let center = *build::centers(ground, &walls, &exits).first()?;
+    build::build(rules, ground, (&walls, &exits), center).map(|b| to_plan(rules, ground, &b))
 }
 
 #[cfg(test)]
@@ -654,7 +646,7 @@ mod tests {
     fn every_structure_and_exit_is_walked_to_from_the_core_and_the_ring_from_it_or_an_exit() {
         let rules = Rules::vanilla();
         let pocketed = fx::pocketed();
-        let drawn = (of_ground(&rules, &pocketed).map(|(p, _)| (pocketed, p)))
+        let drawn = (of_ground(&rules, &pocketed).map(|p| (pocketed, p)))
             .into_iter()
             .chain(
                 fx::samples(4)
@@ -694,13 +686,10 @@ mod tests {
         let grounds = rooms.filter_map(|c| ground::of_room(&c.room));
         for ground in grounds.chain([fx::nook()]) {
             let (walls, exits) = place::distances(&ground.terrain);
-            let Some(v) = score::variations(&ground, &walls, &exits)
-                .into_iter()
-                .next()
-            else {
+            let Some(center) = build::centers(&ground, &walls, &exits).first().copied() else {
                 continue;
             };
-            let Some(b) = build::build(&rules, &ground, (&walls, &exits), &v) else {
+            let Some(b) = build::build(&rules, &ground, (&walls, &exits), center) else {
                 continue;
             };
             use StructureType::{Rampart, Road, Wall};
@@ -724,7 +713,7 @@ mod tests {
             ) else {
                 continue;
             };
-            let whole = of_ground(&rules, &a).map(|(p, _)| p);
+            let whole = of_ground(&rules, &a);
             let mut drawing = Drawing::of(&b);
             let spread = loop {
                 if let Drawn::Done(done) = drawing.advance(&rules, &b, &mut 1) {

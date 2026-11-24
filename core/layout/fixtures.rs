@@ -233,11 +233,9 @@ pub fn samples(seed: u64) -> impl Iterator<Item = Colony> {
     std::iter::from_fn(move || Some(colony(&mut rng)))
 }
 
-/// The first variation's plan: every invariant holds of each variation, and
-/// the whole search is forty of them.
 pub fn plan_of(colony: &Colony) -> Option<(Ground, Plan)> {
     let ground = ground::of_room(&colony.room)?;
-    let plan = plan::first_of(&Rules::vanilla(), &ground)?;
+    let plan = plan::of_ground(&Rules::vanilla(), &ground)?;
     Some((ground, plan))
 }
 

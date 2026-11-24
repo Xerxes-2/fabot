@@ -1,12 +1,10 @@
-//! xxscreeps' `PathFinder.search` (Marcel Laverdet's A* and jump point search
-//! over a Dial heap) inside one room, with no ops limit as there, so a ported
-//! planner draws the roads its original draws: ties fall as that heap lets them.
-use fabot_base::tiles::{self, Tile};
+//! The planner's one path search: least cost inside one room, every tie
+//! settled by the tiles alone, so a road is the same whatever order a search
+//! visits them in.
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 
-const OBSTACLE: u32 = u32::MAX;
-/// One room, at world coordinates 50..100 so a step off it lands in another,
-/// which a one-room search never loads.
-const BASE: i32 = 50;
+use fabot_base::tiles::{self, Table, Tile};
 
 pub struct Goal {
     pub tile: Tile,
@@ -20,479 +18,111 @@ pub struct Search<'a> {
     pub matrix: &'a [u8],
     pub plain: u32,
     pub swamp: u32,
-    pub weight: f64,
 }
 
+/// `incomplete`: no goal reached, so the path ends nearest one.
 pub struct Found {
     pub path: Vec<Tile>,
     pub incomplete: bool,
 }
 
-#[derive(Clone, Copy, PartialEq)]
-struct P {
-    x: i32,
-    y: i32,
-}
-
-const NULL: P = at(0, 0);
-
-const fn at(x: i32, y: i32) -> P {
-    P { x, y }
-}
-
-fn border(v: i32) -> bool {
-    (v + 1) % 50 < 2
-}
-
-fn near_border(v: i32) -> bool {
-    (v + 2) % 50 < 4
-}
-
-struct Run<'a> {
-    s: &'a Search<'a>,
-    weight: f64,
-    goals: Vec<(P, u32)>,
-    scores: Vec<u32>,
-    heap: Heap,
-    open: Vec<u8>,
-    parents: Vec<usize>,
-}
-
-impl Run<'_> {
-    fn index(p: P) -> usize {
-        ((p.x - BASE) * 50 + (p.y - BASE)) as usize
-    }
-
-    fn pos(index: usize) -> P {
-        at((index / 50) as i32 + BASE, (index % 50) as i32 + BASE)
-    }
-
-    fn look(&self, p: P) -> u32 {
-        if !(BASE..BASE + 50).contains(&p.x) || !(BASE..BASE + 50).contains(&p.y) {
-            return OBSTACLE;
-        }
-        let t = tiles::index(p.x - BASE, p.y - BASE);
-        match self.s.matrix[t.index()] {
-            255 => OBSTACLE,
-            0 => match self.s.terrain[t.index()] {
-                0 => self.s.plain,
-                2 => self.s.swamp,
-                _ => OBSTACLE,
-            },
-            c => u32::from(c),
-        }
-    }
-
-    fn heuristic(&self, p: P) -> u32 {
-        (self.goals.iter())
-            .map(|(g, range)| {
-                let dist = (p.x - g.x).unsigned_abs().max((p.y - g.y).unsigned_abs());
-                dist.saturating_sub(*range)
-            })
-            .min()
-            .unwrap_or(u32::MAX)
-    }
-
-    fn weighted(&self, p: P) -> u32 {
-        (f64::from(self.heuristic(p)) * self.weight) as u32
-    }
-
-    fn push(&mut self, parent: usize, node: P, g: u32) {
-        let index = Run::index(node);
-        if self.open[index] == 2 {
-            return;
-        }
-        let f = self.weighted(node).wrapping_add(g);
-        if self.open[index] == 0 || self.scores[index] > f {
-            self.scores[index] = f;
-            self.heap.push((index, f));
-            self.open[index] = 1;
-            self.parents[index] = parent;
-        }
-    }
-
-    fn astar(&mut self, index: usize, p: P, g: u32) {
-        for d in 1..=8 {
-            let n = at(p.x + tiles::dx(d), p.y + tiles::dy(d));
-            let edge = |v: i32, nv: i32, same: bool| -> bool {
-                (v % 50 == 0 && (nv % 50 == 49 && !same || nv == v))
-                    || (v % 50 == 49 && (nv % 50 == 0 && !same || nv == v))
-            };
-            if p.x % 50 == 0 || p.x % 50 == 49 {
-                if edge(p.x, n.x, p.y == n.y) {
-                    continue;
-                }
-            } else if (p.y % 50 == 0 || p.y % 50 == 49) && edge(p.y, n.y, p.x == n.x) {
-                continue;
-            }
-            let c = self.look(n);
-            if c != OBSTACLE {
-                self.push(index, n, g + c);
-            }
-        }
-    }
-
-    fn jump_x(&self, cost: u32, mut p: P, dx: i32) -> P {
-        let mut up = self.look(at(p.x, p.y - 1));
-        let mut down = self.look(at(p.x, p.y + 1));
-        loop {
-            if self.heuristic(p) == 0 || near_border(p.x) {
-                break;
-            }
-            let cu = self.look(at(p.x + dx, p.y - 1));
-            let cd = self.look(at(p.x + dx, p.y + 1));
-            if (cu != OBSTACLE && up != cost) || (cd != OBSTACLE && down != cost) {
-                break;
-            }
-            up = cu;
-            down = cd;
-            p.x += dx;
-            let c = self.look(p);
-            if c == OBSTACLE {
-                return NULL;
-            } else if c != cost {
-                break;
-            }
-        }
-        p
-    }
-
-    fn jump_y(&self, cost: u32, mut p: P, dy: i32) -> P {
-        let mut left = self.look(at(p.x - 1, p.y));
-        let mut right = self.look(at(p.x + 1, p.y));
-        loop {
-            if self.heuristic(p) == 0 || near_border(p.y) {
-                break;
-            }
-            let cl = self.look(at(p.x - 1, p.y + dy));
-            let cr = self.look(at(p.x + 1, p.y + dy));
-            if (cl != OBSTACLE && left != cost) || (cr != OBSTACLE && right != cost) {
-                break;
-            }
-            left = cl;
-            right = cr;
-            p.y += dy;
-            let c = self.look(p);
-            if c == OBSTACLE {
-                return NULL;
-            } else if c != cost {
-                break;
-            }
-        }
-        p
-    }
-
-    fn jump_xy(&self, cost: u32, mut p: P, dx: i32, dy: i32) -> P {
-        let mut px = self.look(at(p.x - dx, p.y));
-        let mut py = self.look(at(p.x, p.y - dy));
-        loop {
-            if self.heuristic(p) == 0 || near_border(p.x) || near_border(p.y) {
-                break;
-            }
-            if (self.look(at(p.x - dx, p.y + dy)) != OBSTACLE && px != cost)
-                || (self.look(at(p.x + dx, p.y - dy)) != OBSTACLE && py != cost)
-            {
-                break;
-            }
-            px = self.look(at(p.x, p.y + dy));
-            py = self.look(at(p.x + dx, p.y));
-            if (py != OBSTACLE && self.jump_x(cost, at(p.x + dx, p.y), dx) != NULL)
-                || (px != OBSTACLE && self.jump_y(cost, at(p.x, p.y + dy), dy) != NULL)
-            {
-                break;
-            }
-            p.x += dx;
-            p.y += dy;
-            let c = self.look(p);
-            if c == OBSTACLE {
-                return NULL;
-            } else if c != cost {
-                break;
-            }
-        }
-        p
-    }
-
-    fn jump(&self, cost: u32, p: P, dx: i32, dy: i32) -> P {
-        match (dx, dy) {
-            (_, 0) => self.jump_x(cost, p, dx),
-            (0, _) => self.jump_y(cost, p, dy),
-            _ => self.jump_xy(cost, p, dx, dy),
-        }
-    }
-
-    fn jump_neighbor(&mut self, p: P, index: usize, n: P, g: u32, cost: u32, n_cost: u32) {
-        let mut n = n;
-        let mut g = g;
-        if n_cost != cost || border(n.x) || border(n.y) {
-            if n_cost == OBSTACLE {
-                return;
-            }
-            g += n_cost;
-        } else {
-            n = self.jump(n_cost, n, n.x - p.x, n.y - p.y);
-            if n == NULL {
-                return;
-            }
-            let range = (n.x - p.x).unsigned_abs().max((n.y - p.y).unsigned_abs());
-            g += n_cost * (range - 1) + self.look(n);
-        }
-        self.push(index, n, g);
-    }
-
-    fn jps(&mut self, index: usize, p: P, g: u32) {
-        let parent = Run::pos(self.parents[index]);
-        let dx = (p.x - parent.x).signum();
-        let dy = (p.y - parent.y).signum();
-
-        let special: Vec<P> = match (p.x % 50, p.y % 50) {
-            (0, _) if dx == -1 => vec![at(p.x - 1, p.y)],
-            (0, _) if dx == 1 => vec![at(p.x + 1, p.y - 1), at(p.x + 1, p.y), at(p.x + 1, p.y + 1)],
-            (0, _) => Vec::new(),
-            (49, _) if dx == 1 => vec![at(p.x + 1, p.y)],
-            (49, _) if dx == -1 => {
-                vec![at(p.x - 1, p.y - 1), at(p.x - 1, p.y), at(p.x - 1, p.y + 1)]
-            }
-            (49, _) => Vec::new(),
-            (_, 0) if dy == -1 => vec![at(p.x, p.y - 1)],
-            (_, 0) if dy == 1 => vec![at(p.x - 1, p.y + 1), at(p.x, p.y + 1), at(p.x + 1, p.y + 1)],
-            (_, 49) if dy == 1 => vec![at(p.x, p.y + 1)],
-            (_, 49) if dy == -1 => {
-                vec![at(p.x - 1, p.y - 1), at(p.x, p.y - 1), at(p.x + 1, p.y - 1)]
-            }
-            _ => Vec::new(),
-        };
-        if !special.is_empty() {
-            for n in special {
-                let c = self.look(n);
-                if c != OBSTACLE {
-                    self.push(index, n, g + c);
-                }
-            }
-            return;
-        }
-
-        let border_dx = match p.x % 50 {
-            1 => -1,
-            48 => 1,
-            _ => 0,
-        };
-        let border_dy = match p.y % 50 {
-            1 => -1,
-            48 => 1,
-            _ => 0,
-        };
-
-        let cost = self.look(p);
-        if dx != 0 {
-            let n = at(p.x + dx, p.y);
-            let c = self.look(n);
-            if c != OBSTACLE {
-                if border_dy == 0 {
-                    self.jump_neighbor(p, index, n, g, cost, c);
-                } else {
-                    self.push(index, n, g + c);
-                }
-            }
-        }
-        if dy != 0 {
-            let n = at(p.x, p.y + dy);
-            let c = self.look(n);
-            if c != OBSTACLE {
-                if border_dx == 0 {
-                    self.jump_neighbor(p, index, n, g, cost, c);
-                } else {
-                    self.push(index, n, g + c);
-                }
-            }
-        }
-
-        let forced = |run: &mut Self, n: P| {
-            let c = run.look(n);
-            run.jump_neighbor(p, index, n, g, cost, c);
-        };
-        if dx != 0 {
-            if dy != 0 {
-                let n = at(p.x + dx, p.y + dy);
-                if self.look(n) != OBSTACLE {
-                    forced(self, n);
-                }
-                if self.look(at(p.x - dx, p.y)) != cost {
-                    forced(self, at(p.x - dx, p.y + dy));
-                }
-                if self.look(at(p.x, p.y - dy)) != cost {
-                    forced(self, at(p.x + dx, p.y - dy));
-                }
-            } else {
-                if border_dy == 1 || self.look(at(p.x, p.y + 1)) != cost {
-                    forced(self, at(p.x + dx, p.y + 1));
-                }
-                if border_dy == -1 || self.look(at(p.x, p.y - 1)) != cost {
-                    forced(self, at(p.x + dx, p.y - 1));
-                }
-            }
-        } else {
-            if border_dx == 1 || self.look(at(p.x + 1, p.y)) != cost {
-                forced(self, at(p.x + 1, p.y + dy));
-            }
-            if border_dx == -1 || self.look(at(p.x - 1, p.y)) != cost {
-                forced(self, at(p.x - 1, p.y + dy));
-            }
-        }
-    }
-}
-
-/// xxscreeps' Dial heap: a window of 256 last-in-first-out buckets, the
-/// scores outside it in a binary heap.
-#[derive(Default)]
-struct Heap {
-    buckets: Vec<Vec<(usize, u32)>>,
-    count: usize,
-    base: u32,
-    overflow: Vec<(usize, u32)>,
-}
-
-const WINDOW: u32 = 256;
-
-impl Heap {
-    fn push(&mut self, value: (usize, u32)) {
-        if self.buckets.is_empty() {
-            self.buckets = vec![Vec::new(); WINDOW as usize];
-        }
-        let key = value.1;
-        if key < self.base || key - self.base >= WINDOW {
-            self.overflow.push(value);
-            let last = self.overflow.len() - 1;
-            self.sift_up(last);
-        } else {
-            self.buckets[(key % WINDOW) as usize].push(value);
-            self.count += 1;
-        }
-    }
-
-    fn sift_up(&mut self, mut pos: usize) {
-        let val = self.overflow[pos];
-        while pos != 0 {
-            let parent = (pos - 1) / 2;
-            if self.overflow[parent].1 > val.1 {
-                self.overflow[pos] = self.overflow[parent];
-                pos = parent;
-            } else {
-                break;
-            }
-        }
-        self.overflow[pos] = val;
-    }
-
-    fn pop_overflow(&mut self) -> (usize, u32) {
-        let h = &mut self.overflow;
-        let size = h.len();
-        let top = h[0];
-        let mut hole = 0;
-        loop {
-            let (left, right) = (hole * 2 + 1, hole * 2 + 2);
-            if right < size {
-                let larger = if h[left].1 > h[right].1 { right } else { left };
-                h[hole] = h[larger];
-                hole = larger;
-            } else {
-                if left < size {
-                    h[hole] = h[left];
-                    hole = left;
-                }
-                break;
-            }
-        }
-        h[hole] = h[size - 1];
-        self.sift_up(hole);
-        self.overflow.pop();
-        top
-    }
-
-    fn pop(&mut self) -> Option<(usize, u32)> {
-        if self.count == 0 {
-            let top = *self.overflow.first()?;
-            self.base = self.base.max(top.1);
-            return Some(self.pop_overflow());
-        }
-        while self.buckets[(self.base % WINDOW) as usize].is_empty() {
-            self.base += 1;
-        }
-        if self.overflow.first().is_some_and(|o| o.1 < self.base) {
-            return Some(self.pop_overflow());
-        }
-        self.count -= 1;
-        self.buckets[(self.base % WINDOW) as usize].pop()
+/// The engine never steps along an exit edge from a tile on it.
+fn steps(from: Tile, onto: Tile) -> bool {
+    let edge = |v: i32| v == 0 || v == tiles::SIDE - 1;
+    let (x, y) = (tiles::x_of(from), tiles::y_of(from));
+    if edge(x) {
+        tiles::x_of(onto) != x
+    } else {
+        !edge(y) || tiles::y_of(onto) != y
     }
 }
 
 impl Search<'_> {
-    pub fn run(&self, origin: Tile, goals: &[Goal]) -> Found {
-        let p = |t: Tile| at(tiles::x_of(t) + BASE, tiles::y_of(t) + BASE);
-        let weight = self.weight.clamp(1.0, 9.0);
-        let mut run = Run {
-            s: self,
-            weight,
-            goals: goals.iter().map(|g| (p(g.tile), g.range)).collect(),
-            scores: vec![0; tiles::COUNT],
-            heap: Heap::default(),
-            open: vec![0; tiles::COUNT],
-            parents: vec![usize::MAX; tiles::COUNT],
-        };
-        let origin = p(origin);
-        if goals.is_empty() || run.heuristic(origin) == 0 {
-            return Found {
-                path: Vec::new(),
-                incomplete: false,
-            };
+    fn cost(&self, t: Tile) -> Option<u32> {
+        match self.matrix[t] {
+            255 => None,
+            0 => match self.terrain[t] {
+                0 => Some(self.plain),
+                2 => Some(self.swamp),
+                _ => None,
+            },
+            c => Some(u32::from(c)),
         }
-        let mut min_node = Run::index(origin);
-        let mut min_h = u32::MAX;
-        run.open[min_node] = 2;
-        run.scores[min_node] = run.weighted(origin);
-        run.astar(min_node, origin, 0);
-        while let Some((index, f)) = run.heap.pop() {
-            if run.scores[index] != f {
+    }
+
+    /// Each tile's least cost from `seeds`, until `stop` takes one.
+    fn flood(
+        &self,
+        seeds: impl IntoIterator<Item = Tile>,
+        mut stop: impl FnMut(Tile, u32) -> bool,
+    ) -> (Table<u32>, Table<bool>) {
+        let mut dist = tiles::table(u32::MAX);
+        let mut done = tiles::table(false);
+        let mut heap: BinaryHeap<_> = seeds.into_iter().map(|t| Reverse((0, t))).collect();
+        for Reverse((_, t)) in &heap {
+            dist[*t] = 0;
+        }
+        while let Some(Reverse((d, t))) = heap.pop() {
+            if std::mem::replace(&mut done[t], true) {
                 continue;
             }
-            run.open[index] = 2;
-            let at = Run::pos(index);
-            let h = run.heuristic(at);
-            let g = f.wrapping_sub(run.weighted(at));
-            if h == 0 {
-                min_node = index;
-                min_h = 0;
+            if stop(t, d) {
                 break;
-            } else if h < min_h {
-                min_node = index;
-                min_h = h;
             }
-            if weight == 1.0 {
-                run.astar(index, at, g);
-            } else {
-                run.jps(index, at, g);
+            for &n in tiles::around(t) {
+                if let Some(c) = self.cost(n).filter(|_| steps(t, n))
+                    && d + c < dist[n]
+                {
+                    dist[n] = d + c;
+                    heap.push(Reverse((d + c, n)));
+                }
             }
         }
+        (dist, done)
+    }
 
-        let mut path: Vec<Tile> = Vec::new();
-        let tile = |q: P| tiles::index(q.x - BASE, q.y - BASE);
-        let mut index = min_node;
-        let mut here = Run::pos(index);
-        while here != origin {
-            path.push(tile(here));
-            index = run.parents[index];
-            let next = Run::pos(index);
-            let (sx, sy) = ((next.x - here.x).signum(), (next.y - here.y).signum());
-            while (next.x - here.x).abs().max((next.y - here.y).abs()) > 1 {
-                here = at(here.x + sx, here.y + sy);
-                path.push(tile(here));
-            }
-            here = next;
+    /// Each tile's least cost from beside `rock`.
+    pub fn from(&self, rock: Tile) -> Table<u32> {
+        self.flood(tiles::around(rock).iter().copied(), |_, _| false)
+            .0
+    }
+
+    pub fn run(&self, origin: Tile, goals: &[Goal]) -> Found {
+        let short = |t: Tile| {
+            (goals.iter())
+                .map(|g| (tiles::range(t, g.tile) as u32).saturating_sub(g.range))
+                .min()
+                .unwrap_or(u32::MAX)
+        };
+        let mut nearest = (short(origin), 0, origin);
+        let mut end = None;
+        let (dist, done) = self.flood([origin], |t, d| {
+            end = (short(t) == 0).then_some(t);
+            nearest = nearest.min((short(t), d, t));
+            end.is_some()
+        });
+
+        // Back from the end, a straight line kept where it ties, then the
+        // lowest tile.
+        let mut path = Vec::new();
+        let mut at = end.unwrap_or(nearest.2);
+        let mut ahead: Option<Tile> = None;
+        while at != origin {
+            path.push(at);
+            let into = self.cost(at).map_or(u32::MAX, |c| dist[at] - c);
+            let straight =
+                |p: Tile| ahead.is_none_or(|a| tiles::direction(p, at) != tiles::direction(at, a));
+            let back = (tiles::around(at).iter().copied())
+                .filter(|p| done[*p] && dist[*p] == into && steps(*p, at))
+                .min_by_key(|p| (straight(*p), *p));
+            let Some(p) = back else { break };
+            ahead = Some(at);
+            at = p;
         }
         path.reverse();
         Found {
             path,
-            incomplete: min_h != 0,
+            incomplete: end.is_none(),
         }
     }
 }

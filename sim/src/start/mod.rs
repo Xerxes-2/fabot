@@ -22,10 +22,10 @@ use crate::seat::Seat;
 use crate::view::View;
 use crate::world::{self, Map};
 
-const HEADER: [&str; 23] = [
-    "rank", "room", "value", "claim", "score", "src", "near", "mineral", "ore", "season", "plan",
-    "spawn", "outposts", "out-src", "out-net", "exits", "swamp%", "centre", "highway", "keepers",
-    "rival", "reserved", "home",
+const HEADER: [&str; 22] = [
+    "rank", "room", "value", "claim", "score", "src", "near", "mineral", "ore", "season", "spawn",
+    "outposts", "out-src", "out-net", "exits", "swamp%", "centre", "highway", "keepers", "rival",
+    "reserved", "home",
 ];
 
 pub fn main() {
@@ -105,7 +105,7 @@ fn rank(map: &Map, maps: &Maps, room: &str) -> Option<(f64, Vec<String>)> {
     let claimable =
         fits && expand::claimable(&world, (&none, &rivals), &declarations, (name, &row));
 
-    let (plan, spawn, quality) = layout::first_spawn(&Rules::vanilla(), &map.bare(room))?;
+    let (plan, spawn) = layout::first_spawn(&Rules::vanilla(), &map.bare(room))?;
     // Banking on its pile at RCL2, when Strategy first opens outposts (§7.2).
     let colony = ColonyPlan {
         room: name,
@@ -163,7 +163,6 @@ fn rank(map: &Map, maps: &Maps, room: &str) -> Option<(f64, Vec<String>)> {
         row.mineral.map_or("-".to_string(), |(m, _)| m.to_string()),
         format!("{:.1}", facts.mineral),
         format!("{:.1}", facts.worth),
-        format!("{quality:.2}"),
         format!("{},{}", tiles::x_of(spawn), tiles::y_of(spawn)),
         (chosen.iter().map(|o| o.room.to_string()))
             .collect::<Vec<_>>()

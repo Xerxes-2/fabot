@@ -27,7 +27,7 @@ pub struct Colony {
 }
 
 /// `ARCHITECTURE.md` §5: Hivemind's search spread over ticks.
-const VARIATIONS_PER_TICK: usize = 4;
+const CENTRES_PER_TICK: usize = 4;
 
 pub fn colonies(
     world: &World,
@@ -37,7 +37,7 @@ pub fn colonies(
 ) -> (Vec<Colony>, BTreeMap<RoomName, Standing>) {
     let mut next: BTreeMap<RoomName, Standing> = BTreeMap::new();
     let mut found: Vec<Colony> = Vec::new();
-    let mut budget = VARIATIONS_PER_TICK;
+    let mut budget = CENTRES_PER_TICK;
 
     for room in owned.iter().filter_map(|name| world.room(*name)) {
         let Some(colony) = plans.iter().find(|p| p.room == room.name) else {
