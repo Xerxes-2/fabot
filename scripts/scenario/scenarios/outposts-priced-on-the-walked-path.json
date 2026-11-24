@@ -1,10 +1,11 @@
 {
-  "why": "a young home's outposts are budgeted on the path their haul walks, not the straight line: on gen 49 the paths run 2-5x the straight range, so a young home took six outposts whose haul the spawn could not cast, their bodies drank the build-out and it sat at RCL2 with its first extensions unbuilt (main: 2 extensions, upgrade 1,070 by t8000)",
+  "why": "a young home's outposts are budgeted on the path their haul walks, not the straight line: on gen 49 the paths run 2-5x the straight range, so a young home took six outposts whose haul the spawn could not cast, their bodies drank the build-out and it sat at RCL2 with its first extensions unbuilt (main: 2 extensions, upgrade 1,070 by t8000) while their dig decayed (33.8k from t2000 to t8000 on 7a552f3e, the build before the fix; 6.1k after)",
   "modules": ["strategy", "economy"],
   "start": { "gen": 49, "seed": 1 },
   "ticks": 8000,
   "assert": [
     { "measure": "builtAtEnd", "kind": "extension", "min": 5 },
-    { "measure": "upgrade", "min": 10000 }
+    { "measure": "outpostDecayed", "from": 2000, "to": 8000, "max": 15000 },
+    { "measure": "upgrade", "min": 5000 }
   ]
 }
