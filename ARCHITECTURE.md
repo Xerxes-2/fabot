@@ -635,6 +635,10 @@ and `cheapest_win` (adds only to already-standing `ours`).
   swing's reach, then kites (§6.4). `❓` Rangers in a mixed `BlobClose`
   still walk into melee reach; to be solved with the outpost-defence duo
   redesign.
+  `❓` A `Close` set priced landing together reaches the raid apart where
+  the raid walks onto its nearer body (a pair 1 tick apart at landing met it
+  6 apart); option: price a non-together arm as if the raid closes on the
+  nearest body.
 - **Focus:** the Exchange prices the kill our bodies strike: both rank the
   raid by `fighter::kill_rank`.
 - **Parts:** our bodies strike, heal and hit back only with the parts their
