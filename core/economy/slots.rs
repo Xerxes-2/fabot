@@ -7,6 +7,7 @@ use fabot_atlas::{self as atlas, Atlas, Mover, Target};
 use fabot_base::declarations::{self, Declarations};
 use fabot_base::engine;
 use fabot_base::grid::{self, Footprint};
+use fabot_base::tiles;
 use fabot_base::tuning::Tuning;
 use fabot_base::vocabulary::{Part, part_count_in};
 use fabot_base::world::{Controller, Id, Pos, RoomName, Spawn, StructureType};
@@ -110,27 +111,15 @@ pub fn distance(atlas: &Atlas, a: &Pos, b: &Pos) -> Option<i32> {
     Some(atlas.ticks_toward(declarations::REACH_HOPS, b, a)? + 1)
 }
 
-/// No `distance` is shorter: an exit and its landing lie as one tile.
-fn apart(a: &Pos, b: &Pos) -> i32 {
-    let side = engine::ROOM_SIDE - 1;
-    let at = |p: &Pos| {
-        (
-            side * p.room.coords().0 + p.x,
-            side * p.room.coords().1 + p.y,
-        )
-    };
-    let ((ax, ay), (bx, by)) = (at(a), at(b));
-    (ax - bx).abs().max((ay - by).abs())
-}
-
-/// The first least `(rank, ticks)` of `ends`, walked only while `apart` can win.
+/// The first least `(rank, ticks)` of `ends`, walked only while `seam_range`,
+/// which no `distance` undercuts, can win.
 pub fn nearest<R: Ord, T>(
     from: &Pos,
     ends: impl Iterator<Item = (R, Pos, T)>,
     ticks: impl Fn(&Pos) -> Option<i32>,
 ) -> Option<(T, i32)> {
     let mut ends: Vec<(R, i32, usize, Pos, T)> = (ends.enumerate())
-        .map(|(i, (rank, at, end))| (rank, apart(from, &at), i, at, end))
+        .map(|(i, (rank, at, end))| (rank, tiles::seam_range(from, &at).unwrap_or(0), i, at, end))
         .collect();
     ends.sort_unstable_by(|a, b| (&a.0, a.1, a.2).cmp(&(&b.0, b.1, b.2)));
     let mut best: Option<(usize, i32)> = None;
@@ -1516,7 +1505,7 @@ mod tests {
             for a in &ends {
                 for b in &ends {
                     let d = distance(&atlas, a, b);
-                    prop_assert!(d.is_none_or(|d| d >= apart(a, b)), "{:?} {:?} {:?}", a, b, d);
+                    prop_assert!(d.is_none_or(|d| d >= tiles::seam_range(a, b).unwrap_or(0)), "{:?} {:?} {:?}", a, b, d);
                 }
                 let ranked = (ends.iter().enumerate()).map(|(i, b)| (i % 3, *b, i));
                 let least = (ends.iter().enumerate())

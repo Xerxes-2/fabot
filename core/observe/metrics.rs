@@ -11,6 +11,7 @@ use fabot_base::HashMap;
 use fabot_base::declarations::{self, Declarations, Refused};
 use fabot_base::engine;
 use fabot_base::intents::{Action, CreepAct, Refusal, SpawnAct, TowerAct};
+use fabot_base::tiles;
 use fabot_base::vocabulary::{Part, ResourceType::Energy};
 use fabot_base::world::{
     Controller, Creep, Id, Owner, Pos, Room, RoomName, Rules, StructureType, World, hostiles,
@@ -786,16 +787,16 @@ fn dwell(sums: &mut Sums, seen: &Seen) {
     }
 }
 
-fn reach(a: RoomName, b: RoomName) -> i32 {
-    let ((ax, ay), (bx, by)) = (a.coords(), b.coords());
-    (ax - bx).abs().max((ay - by).abs())
-}
-
 /// No colony owns an outpost, so exposure counts one against the nearest;
 /// by room distance, as metrics has no Atlas to walk.
 fn exposure(sums: &mut Sums, seen: &Seen) {
     let colonies = &seen.derived.colonies;
-    let nearest = |room: RoomName| colonies.iter().copied().min_by_key(|c| reach(*c, room));
+    let nearest = |room: RoomName| {
+        colonies
+            .iter()
+            .copied()
+            .min_by_key(|c| tiles::rooms_apart(*c, room))
+    };
     for colony in colonies {
         let Some(r) = seen.world.room(*colony) else {
             continue;

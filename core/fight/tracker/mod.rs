@@ -37,9 +37,7 @@ pub fn linked(a: &Pos, b: &Pos) -> bool {
     if a.room == b.room {
         a.within(REACH, b)
     } else {
-        let (ax, ay) = world_of(a);
-        let (bx, by) = world_of(b);
-        (ax - bx).abs() <= 1 && (ay - by).abs() <= 1
+        a.crow_flies(b) <= 1
     }
 }
 
@@ -351,12 +349,6 @@ mod tests {
         groups.iter().filter(|g| g.last_seen == tick).collect()
     }
 
-    fn distance(a: &Pos, b: &Pos) -> i32 {
-        let (ax, ay) = world_of(a);
-        let (bx, by) = world_of(b);
-        (ax - bx).abs().max((ay - by).abs())
-    }
-
     fn shuffled<T: Clone>(of: &[T], order: &[Index]) -> Vec<T> {
         let mut out = of.to_vec();
         for i in (1..out.len()).rev() {
@@ -440,7 +432,7 @@ mod tests {
                 let ps = positions(g);
                 ps.iter().all(|a| {
                     ps.iter()
-                        .all(|b| distance(&a.pos, &b.pos) <= REACH * (ps.len() as i32 - 1))
+                        .all(|b| a.pos.crow_flies(&b.pos) <= REACH * (ps.len() as i32 - 1))
                 })
             };
 
