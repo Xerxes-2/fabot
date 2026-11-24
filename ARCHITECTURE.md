@@ -497,17 +497,23 @@ with one phase machine per kind under `core/fight/kinds/`.
   structure-less hostiles; Source Keepers never (`hostiles::foe`); the same
   rooms are the ground it pursues on). Phases: `Forming →
   Approaching → Fighting → Pursuing → Disengaging → closed`. Its loss budget
-  is priced as it commits (answered from unanswered, or the tick it enters
-  `Forming`); a re-price on a death or tracker event keeps it, or each death
-  would lift it past every loss. An outpost whose
-  losses exceed budget while it has lost fewer than two (`OUTPOST_LOSSES = 2`)
-  re-forms and re-prices; it closes only once ours are home and `sightings`
-  clears (closing sooner reopens on the same raid with a fresh budget and feeds
-  it bodies). Blind, with no body of ours standing or asked, it re-forms and
-  re-prices the raid `sightings.last` remembers after each loss or age-out
-  while it has lost fewer than two, until the sighting expires, and casts and
-  seeks it as a seen one; with none remembered, or a re-price casting nothing,
-  it disengages and keeps its budget the same way. A body with nothing alive but MOVE,
+  is priced as it commits: its first answer to a raid, a newcomer group being
+  a new raid. A re-price on a death or tracker event keeps it, or each death
+  would lift it past every loss. An outpost fights on past its budget by
+  `OUTPOST_LOSSES` (2) bodies, then gives up: it disengages and closes only
+  once ours are home and `sightings` clears (closing sooner reopens on the
+  same raid with a fresh budget and feeds it bodies). Blind, with no body of
+  ours standing or asked, it re-forms and re-prices the raid
+  `sightings.last` remembers after each loss or age-out while it has lost
+  fewer than two, until the sighting expires, and casts and seeks it as a
+  seen one; with none remembered, or a re-price casting nothing,
+  it disengages and keeps its budget the same way (`❓` a raider that steps
+  from a room in sight into one out of sight leaves no sighting, so its room
+  going dark next tick closes its Defend blind: keeping it needs the
+  glimpse's tick, a §4 change). A home is the owner's exception: it quits at lost >
+  budget (no margin) and, given up, answers its raid anew with a fresh budget. `❓` A fight against a core alone
+  never sets `predicted`, so each re-answer after a starved one re-prices its
+  budget. A body with nothing alive but MOVE,
   TOUGH and CARRY counts as lost to an outpost (nothing there heals it; it can
   end no raid) and no engagement drafts it until healed. A fight body no
   engagement holds rests in any outpost or claim it stands in (one walked

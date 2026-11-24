@@ -763,7 +763,8 @@ impl<'a> Scene<'a> {
                     order: casting::kill_order(&kin),
                     offers,
                 };
-                if e.unanswered || (e.phase == Phase::Forming && e.since == self.world.time) {
+                let first_answer = e.predicted.is_none() || self.homes.contains(&e.room);
+                if e.unanswered && first_answer {
                     next.budget = e.lost + price.outcome.losses().dead;
                 }
                 next.unanswered = false;

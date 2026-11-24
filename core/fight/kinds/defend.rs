@@ -201,12 +201,9 @@ pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
             .or_else(quit);
     }
 
-    if facts.group.is_some() && beaten(e) {
-        return if facts.held || e.lost >= OUTPOST_LOSSES {
-            quit()
-        } else {
-            toward(Phase::Forming)
-        };
+    let spent = e.budget + if facts.held { 0 } else { OUTPOST_LOSSES };
+    if facts.group.is_some() && e.lost > spent {
+        return quit();
     }
 
     let left = facts.group.as_ref().is_some_and(|g| g.room() != e.room);
@@ -751,7 +748,7 @@ mod tests {
         #[test]
         fn an_outpost_defend_beaten_past_its_bound_holds_while_the_raid_stands(
             phase in select(PHASES.to_vec()),
-            lost in OUTPOST_LOSSES..=OUTPOST_LOSSES + 2,
+            lost in 1..=OUTPOST_LOSSES + 6,
             budget in 0..=3,
             (west, grouped) in any::<(bool, bool)>(),
             [in_reach, home, asked, on_our_ground, clear, remembered] in any::<[bool; 6]>(),
@@ -785,10 +782,14 @@ mod tests {
                 remembered,
             };
 
-            let beaten = facts.group.is_some() && e.lost > e.budget;
+            let beaten = facts.group.is_some() && e.lost > e.budget + OUTPOST_LOSSES;
             if e.phase == Phase::Disengaging || beaten {
                 let next = step(&facts, &e).expect("a raid still standing keeps its room held");
                 prop_assert_eq!(next.phase, Phase::Disengaging);
+            }
+            let next = step(&facts, &e).filter(|n| n.phase == Phase::Forming);
+            if facts.group.is_some() && let Some(next) = next {
+                prop_assert_eq!(next.since, e.since, "a seen raid never re-forms");
             }
         }
 
