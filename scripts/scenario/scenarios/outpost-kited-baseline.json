@@ -49,58 +49,67 @@
       "measure": "dug",
       "room": "W8N2",
       "from": 1500,
-      "to": 5800
+      "to": 5800,
+      "report": true
     },
     {
       "measure": "hostileTicks",
       "room": "W7N3",
       "from": 1500,
-      "to": 5800
+      "to": 5800,
+      "report": true
     },
     {
       "measure": "defendsOpened",
       "room": "W7N3",
       "from": 1500,
-      "to": 5800
+      "to": 5800,
+      "report": true
     },
     {
       "metric": "fight.flips",
       "room": "W7N3",
       "from": 1500,
       "to": 5800,
-      "total": true
+      "total": true,
+      "report": true
     },
     {
       "measure": "defendSpent",
       "room": "W7N3",
       "from": 1500,
-      "to": 5800
+      "to": 5800,
+      "report": true
     },
     {
       "measure": "bodiesLost",
       "room": "W7N3",
       "from": 1500,
-      "to": 5800
+      "to": 5800,
+      "report": true
     },
     {
       "metric": "loss.player",
       "room": "W7N3",
       "from": 1500,
       "to": 5800,
-      "total": true
+      "total": true,
+      "report": true
     },
     {
       "measure": "rivalSpent",
       "name": "harass",
       "from": 1500,
-      "to": 5800
+      "to": 5800,
+      "report": true
     },
     {
       "measure": "answeredAfter",
       "name": "harass",
       "room": "W7N3",
       "from": 1500,
-      "to": 5800
+      "to": 5800,
+      "report": true
     }
   ]
 }

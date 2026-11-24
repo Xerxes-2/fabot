@@ -184,8 +184,11 @@ export function runSim(bin, { world, gen, sectors, room, node, ticks, seed = 1, 
       const args = [...where, "--ticks", String(ticks), "--seed", String(seed), "--late", String(late), "--every", "100", "--out", out, ...(follow.length ? ["--follow", follow.join(",")] : []), ...(ended ? ["--ended"] : []), "--reset-every", String(resetEvery), ...(capture ? ["--capture", capture] : []), "--rivals", JSON.stringify(seats(rivals)), ...(seated ? ["--players", seated] : []),
         "--npc", JSON.stringify(npc(invaders, bodies(wave), core, stronghold, ticks)), ...(watch ? ["--watch", "--port", String(watch.port), "--tick-ms", String(watch.ms), ...(watch.badge ? ["--badge", watch.badge] : [])] : [])];
       const dirs = [out, ...JSON.parse(players ?? "[]").slice(1).map((p) => join(out, p.name))];
-      spawn(bin, args, { stdio: watch ? "inherit" : "ignore" })
-        .on("exit", (code, signal) => (code === 0 || (watch && signal === "SIGINT" && existsSync(join(out, "timing.json"))) ? Promise.all(dirs.map(engaged)).then(() => finish(0), fail) : finish(code ?? -1, `sim ${signal ? `killed by ${signal}` : `exited ${code}`}`)))
+      const sim = spawn(bin, args, { stdio: watch ? "inherit" : ["ignore", "ignore", "pipe"] });
+      let said = "";
+      sim.stderr?.on("data", (d) => (said = (said + d).slice(-2000)));
+      sim
+        .on("close", (code, signal) => (code === 0 || (watch && signal === "SIGINT" && existsSync(join(out, "timing.json"))) ? Promise.all(dirs.map(engaged)).then(() => finish(0), fail) : finish(code ?? -1, `sim ${signal ? `killed by ${signal}` : `exited ${code}`}${said && `:\n${said.trimEnd()}`}`)))
         .on("error", fail);
     };
     if (gen !== undefined) return play(["--gen", String(gen), ...(sectors ? ["--sectors", sectors] : [])]);

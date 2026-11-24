@@ -52,7 +52,8 @@
       "measure": "dug",
       "room": "W8N2",
       "from": 2000,
-      "to": 8000
+      "to": 8000,
+      "report": true
     },
     {
       "measure": "hostileTicks",
@@ -65,25 +66,29 @@
       "measure": "defendsOpened",
       "room": "W7N3",
       "from": 2000,
-      "to": 8000
+      "to": 8000,
+      "report": true
     },
     {
       "measure": "defendSpent",
       "room": "W7N3",
       "from": 2000,
-      "to": 8000
+      "to": 8000,
+      "report": true
     },
     {
       "measure": "bodiesLost",
       "room": "W7N3",
       "from": 2000,
-      "to": 8000
+      "to": 8000,
+      "report": true
     },
     {
       "measure": "rivalSpent",
       "name": "harass",
       "from": 2000,
-      "to": 8000
+      "to": 8000,
+      "report": true
     },
     {
       "measure": "answeredAfter",

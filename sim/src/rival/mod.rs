@@ -31,6 +31,7 @@ enum Role {
 
 /// `scripts/sim/run.mjs`'s seat: the user it stood, its room, its `opponent.js` config and raid.
 #[derive(Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct Rival {
     id: String,
     room: String,
@@ -48,6 +49,7 @@ pub struct Rival {
 /// Bodies stood on the run's tick `first` (and each `every` after) in `room`, each part as
 /// `{ type, hits, boost? }`.
 #[derive(Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 struct Raid {
     first: u64,
     every: Option<u64>,

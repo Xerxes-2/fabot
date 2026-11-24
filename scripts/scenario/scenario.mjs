@@ -26,7 +26,7 @@
 // A scenario file: { "why": the invariant, "modules": the core modules it tests, "nightly"?, "start": { "gen"? (sim --gen's map, which picks the room) or "room", "seed",
 // "late"?, "node"?, "invaders"? (room:every[:first],…), "wave"? (role[:size],…), "core"? (room:tick,…), "stronghold"? ("room:tick:level[:deploy],…"), "resetEvery"? (soak:many's --reset-every), "unsafe"?, "ended"?,
 // "opponents"? (sim's scripted rivals, `sim/src/rival`), "players"? and "sectors"? (soak.mjs's: our bot in every seat; an assert's "seat" names the one it reads, unset the first) } or { "world": a capture-shaped file
-// (crafted ones under worlds/), "seed", "room"?, "node"?, "late"? (a world with no home of ours, as a recipe's), "ended"?, "invaders"?, "wave"?, "opponents"? (the world's own users), "declarations"? (in place of the world's), "memory"? (keys of Memory.v2 beside the world's), "gcl"? (in place of the world's), "level"? ({ room: its controller level in place of the world's }), "roadless"? ([room]: every road in each taken up) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "room"?, "kind"?, "name"? }] };
+// (crafted ones under worlds/), "seed", "room"?, "node"?, "late"? (a world with no home of ours, as a recipe's), "ended"?, "invaders"?, "wave"?, "opponents"? (the world's own users), "declarations"? (in place of the world's), "memory"? (keys of Memory.v2 beside the world's), "gcl"? (in place of the world's), "level"? ({ room: its controller level in place of the world's }), "roadless"? ([room]: every road in each taken up) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"? (or "report": true, printed and bounding nothing), "room"?, "kind"?, "name"? }] };
 // a measure is one of `measures` below, read off the soak's output over ticks
 // [from, to), counted from the run's first tick; { "metric": a name the bot's
 // metrics carry (`core/observe/metrics.rs`), "room"?, "total"? } bounds its worst
@@ -39,7 +39,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import { availableParallelism } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { breaches, check, engagementsOf, events, measures, occurrences, samplesOf, withAlways } from "./measures.mjs";
+import { breaches, check, engagementsOf, events, measures, occurrences, roomsOf, samplesOf, withAlways } from "./measures.mjs";
 import { report } from "../sim/prediction.mjs";
 import { sweep } from "./prune.mjs";
 import { unstood } from "../sim/node.mjs";
@@ -72,6 +72,18 @@ const modules = readdirSync(CORE).filter((m) => m !== "tick" && m !== "base" && 
 const library = readdirSync(LIBRARY)
   .filter((f) => f.endsWith(".json"))
   .map((f) => ({ name: basename(f, ".json"), ...JSON.parse(readFileSync(join(LIBRARY, f), "utf8")) }));
+for (const s of library)
+  if (Object.keys(s).some((k) => !["name", "why", "modules", "nightly", "start", "ticks", "assert"].includes(k))) fail(`${s.name}: a scenario takes "why", "modules", "nightly", "start", "ticks", "assert" and nothing else`);
+for (const s of library)
+  for (const a of s.assert) {
+    if (a.metric !== undefined) a.measure = "metric";
+    if (!a.each && !measures[a.measure]) fail(`${s.name}: no measure ${a.measure}`);
+    const keys = a.each ? (events[a.each] ? ["each", "where", "assert", "least", "seat"] : fail(`${s.name}: no occurrence ${a.each}; the occurrences: ${Object.keys(events).join(", ")}`)) : ["measure", "min", "max", "seat", "report", ...(measures[a.measure].reads ?? [])];
+    const stray = Object.keys(a).find((k) => !keys.includes(k));
+    if (stray) fail(`${s.name}: ${a.each ? `each ${a.each}` : a.measure} reads no "${stray}", only ${keys.join(", ")}`);
+    if (a.report !== undefined && (a.report !== true || a.min !== undefined || a.max !== undefined || countCeilings[a.measure] !== undefined)) fail(`${s.name}: ${a.measure}: "report" takes only true, with no "min"/"max", on a measure with no count ceiling`);
+    if (!a.each && !a.report && a.min === undefined && a.max === undefined && countCeilings[a.measure] === undefined) fail(`${s.name}: ${a.measure} has no bound: a "min" or a "max", or "report": true to print it alone`);
+  }
 for (const s of library) s.assert = withAlways(s.assert);
 for (const s of library) for (const a of s.assert) if (a.each) Object.assign(a, { measure: "each", max: 0 });
 for (const s of library)
@@ -84,7 +96,6 @@ const unplayable = (s) =>
   (s.start.node && unstood(s.start.node)) ||
   (s.start.opponents ?? []).map(unseated).find(Boolean) ||
   (s.start.world && Object.keys(JSON.parse(readFileSync(resolve(REPO, s.start.world), "utf8")).segments ?? {}).some((k) => k !== "2") && "a capture's segments beside intel's") ||
-  (s.assert.some((a) => a.who) && "a measure of an opponent's side (`who`), which sim samples nowhere") ||
   null;
 for (const s of library) if (unplayable(s)) fail(`${s.name}: ${unplayable(s)}`);
 
@@ -116,13 +127,10 @@ const jobs = Number(flags["--jobs"] ?? availableParallelism());
 
 sweep(join(REPO, "soak-runs"));
 
-for (const s of scenarios) for (const a of s.assert) if (a.metric !== undefined) a.measure = "metric";
-for (const s of scenarios) for (const a of s.assert) if (!measures[a.measure]) fail(`${s.name}: no measure ${a.measure}`);
-for (const s of scenarios) for (const a of s.assert) if (a.each && !events[a.each]) fail(`${s.name}: no occurrence ${a.each}; the occurrences: ${Object.keys(events).join(", ")}`);
 for (const { name, start } of scenarios)
   if (start.world && Object.keys(start).some((k) => !["world", "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "follow", "ended", "memory", "gcl", "stock", "level", "roadless"].includes(k))) fail(`${name}: a "world" start takes a "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "follow", "ended", "memory", "gcl", "stock", "level", "roadless" and nothing else`);
 for (const { name, start } of scenarios)
-  if (!start.world && (start.declarations || start.memory || start.gcl)) fail(`${name}: "declarations", "memory" and "gcl" take a "world" start`);
+  if (!start.world && (start.declarations || start.memory || start.gcl || start.stock || start.level || start.roadless)) fail(`${name}: "declarations", "memory", "gcl", "stock", "level" and "roadless" take a "world" start`);
 
 const tag = (opponents = []) => (opponents.length ? `-o${createHash("sha256").update(JSON.stringify(opponents)).digest("hex").slice(0, 8)}` : "");
 const recipe = ({ gen, sectors, players, world, room, seed, late = 0, node, invaders, wave, core, stronghold, unsafe, ended, declarations, memory, stock, gcl, level, roadless, follow, resetEvery }, opponents) =>
@@ -195,7 +203,7 @@ for (const s of scenarios) {
     console.log(`FAIL ${s.name}: the soak failed (exit ${run.code}); see ${dir}`);
     continue;
   }
-  const read = new Map();
+  const [read, roomsAt] = [new Map(), new Map()];
   const seat = (dir, a) => {
     const at = a.seat ? join(dir, a.seat) : dir;
     if (!read.has(at)) read.set(at, samplesOf(at));
@@ -205,6 +213,11 @@ for (const s of scenarios) {
   const base = baseDir && existsSync(join(baseDir, "samples.jsonl"));
   for (const a of s.assert) {
     const [samples, at] = seat(dir, a);
+    if (a.room && !(roomsAt.get(at) ?? roomsAt.set(at, roomsOf(at)).get(at)).has(a.room)) {
+      failed++;
+      console.log(`FAIL ${s.name}: ${a.measure} in ${a.room}, a room the run never names`);
+      continue;
+    }
     const { value, ok, bound } = check(samples, a, at, a.max ?? countCeilings[a.measure]);
     if (!ok) failed++;
     let against = "";
@@ -213,13 +226,13 @@ for (const s of scenarios) {
       const was = measures[a.measure](baseSamples, a, baseAt);
       // A bound below says more is better; a bound above, less.
       const better = a.min !== undefined ? value > was : value < was;
-      const mark = value === was ? "=" : better ? "better" : "WORSE";
-      if (value !== was) moved[better ? "better" : "worse"]++;
+      const mark = value === was ? "=" : a.report ? "moved" : better ? "better" : "WORSE";
+      if (value !== was && !a.report) moved[better ? "better" : "worse"]++;
       against = `; base ${was} ${mark}`;
     }
     const window = a.from !== undefined || a.to !== undefined ? ` t${a.from ?? 0}-${a.to ?? s.ticks}` : "";
     const named = a.each ? `each ${a.each}${a.where ? ` ${JSON.stringify(a.where)}` : ""} ${JSON.stringify(a.assert)} (${occurrences(samples, a, at).length} seen), breaches` : a.metric ?? a.measure;
-    console.log(`${ok ? "pass" : "FAIL"} ${s.name}: ${named}${a.seat ? ` of ${a.seat}` : ""}${a.room ? ` in ${a.room}` : ""}${window} ${value} (${bound}${against})`);
+    console.log(`${a.report ? "report" : ok ? "pass" : "FAIL"} ${s.name}: ${named}${a.seat ? ` of ${a.seat}` : ""}${a.room ? ` in ${a.room}` : ""}${window} ${value} (${bound}${against})`);
     if (a.each) for (const line of breaches(samples, a, at).slice(0, 5)) console.log(`  ${line}`);
   }
   const rows = s.assert.some((a) => a.measure === "predictedWinsLost") ? engagementsOf(dir) : [];
