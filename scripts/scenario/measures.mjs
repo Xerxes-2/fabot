@@ -23,7 +23,7 @@ const livesOf = (dir) => linesOf(join(dir, "bodies.jsonl"));
 // Each named body's cost once, however many times it left and came back.
 const costOf = (lives) => [...new Map(lives.map((b) => [b.name, b.cost])).values()].reduce((n, c) => n + c, 0);
 // A body's game tick less this, the run's tick.
-const offsetOf = (samples) => samples[0].time - samples[0].t;
+export const offsetOf = (samples) => samples[0].time - samples[0].t;
 const defendsIn = (dir, a) => rowsOf(dir).filter((e) => e.kind === "defend" && openedIn(a)(e));
 const drawnBy = (dir, a) => new Set(defendsIn(dir, a).flatMap((e) => e.drew));
 // The ticks our bodies that dig or carry were killed in `room` from `from` on, soonest first.
@@ -39,6 +39,8 @@ const culls = (samples, a, dir) => {
     .sort((x, y) => x - y);
 };
 const scoutsOf = (dir) => livesOf(dir).filter((b) => b.ours && b.name.startsWith("scout-"));
+// Rival bodies `uid`'s seat killed: what struck them last was its.
+export const killedBy = (deaths, uid) => deaths.filter((d) => d.user !== uid && d.by?.[1] === uid);
 export const samplesOf = (dir) => readFileSync(join(dir, "samples.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
 // soak:many's columns beside worth, off a run's metrics and its last sample:
 // the worth is not to be read once the ledger is open past a percent of what was dug.
@@ -420,8 +422,8 @@ export const measures = {
   heldPastWave: (samples, _, dir) => Math.max(0, ...rowsOf(dir).filter((e) => !e.core).map((e) => (e.closed ?? samples.at(-1).t) - (e.seen ?? e.opened))),
   idleMost: (_, __, dir) => Math.max(0, ...rowsOf(dir).map((e) => e.idle ?? 0)),
   // Of the engagements of `kind` (any, unnamed) opened in [from, to): the most ticks one formed
-  // answered, a sweep's most ticks on end in a room with no rival creep, and the rival bodies that
-  // are no fight's whose tombstones stood beside it (`engaged.mjs`).
+  // answered, a sweep's most ticks on end in a room with no rival creep, and the bodies ours
+  // killed beside it (`engaged.mjs`).
   formingMost: on("room kind from to", (_, a, dir) => Math.max(0, ...rowsOf(dir).filter(kindIn(a)).map((e) => e.forming ?? 0))),
   bareMost: on("room kind from to", (_, a, dir) => Math.max(0, ...rowsOf(dir).filter(kindIn(a)).map((e) => e.bare ?? 0))),
   killedBeside: on("room kind from to", (_, a, dir) => rowsOf(dir).filter(kindIn(a)).reduce((n, e) => n + (e.killed ?? 0), 0)),

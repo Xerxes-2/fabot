@@ -1,5 +1,5 @@
 {
-  "why": "Two seats of ours harass each other (sweep-casts-what-its-spawns-land's self-play start). A sweep casts the cheapest harasser that out-reaches a room's armed bodies, one a room within its spawns' share: no sweep asks more than one body at once (`askedMost`). On d561ef96, before, alpha's sweeps asked several at once on every seed 1-5 (beta on 4). Bodies lost and sweep cost are guardrails about 30% over the seed maxima: bodies 55 alpha, 57 beta, sweep cost 46,780 energy. Across harmless plan perturbations of seed 1 (builder scan reversed, pathfinder heap order, wall road cost, every combination, on main and the centre-first planner) bodies lost reach 60 alpha and 71 beta, so 78 and 92. No bound on his economy bodies dying beside beta's sweeps: that count measured kills by Defend bodies the sweeps absorbed, and once a sweep takes in only harasser-shaped bodies it fell (28 -> 10 here), and over 16 paired self-play seeds the rival's economy bodies killed fell too (24.3 -> 18.4 a seed, 95% interval -9.9..-2.4) while the rival's harvest showed no measurable change (+0.7%, 95% interval -19k..+63k of 2.8M dug); a harassment guard should read the harvest it denies",
+  "why": "Two seats of ours harass each other (sweep-casts-what-its-spawns-land's self-play start). A sweep casts the cheapest harasser that out-reaches a room's armed bodies, one a room within its spawns' share: no sweep asks more than one body at once (`askedMost`). On d561ef96, before, alpha's sweeps asked several at once on every seed 1-5 (beta on 4). Bodies lost and sweep cost are guardrails about 30% over the seed maxima: bodies, as the bot's close rows count them with a close's last tick's dead, 11 alpha and 15 beta, so 14 and 19 (12 and 16 on the count before, which took our tombstones in an engagement's rooms), sweep cost 46,780 energy. Across harmless plan perturbations of seed 1 (builder scan reversed, pathfinder heap order, wall road cost, every combination, on main and the centre-first planner) bodies lost reached 60 alpha and 71 beta on the count before, which missed a close's last tick's dead; the perturbations are not yet read on the close rows' count, so the bounds are 1.3x its seed 1-5 maxima alone, 14 alpha and 19 beta. No bound on his economy bodies dying beside beta's sweeps: that count measured kills by Defend bodies the sweeps absorbed, and once a sweep takes in only harasser-shaped bodies it fell (28 -> 10 here), and over 16 paired self-play seeds the rival's economy bodies killed fell too (24.3 -> 18.4 a seed, 95% interval -9.9..-2.4) while the rival's harvest showed no measurable change (+0.7%, 95% interval -19k..+63k of 2.8M dug); a harassment guard should read the harvest it denies",
   "modules": ["fight", "strategy"],
   "start": {
     "gen": 7,
@@ -13,8 +13,8 @@
   "assert": [
     { "each": "engagement", "where": { "kind": "sweep" }, "assert": { "askedMost": { "max": 1 } } },
     { "each": "engagement", "seat": "beta", "where": { "kind": "sweep" }, "assert": { "askedMost": { "max": 1 } } },
-    { "measure": "bodiesLost", "max": 78 },
-    { "measure": "bodiesLost", "seat": "beta", "max": 92 },
+    { "measure": "bodiesLost", "max": 14 },
+    { "measure": "bodiesLost", "seat": "beta", "max": 19 },
     { "measure": "drewCost", "kind": "sweep", "max": 61000 },
     { "measure": "drewCost", "kind": "sweep", "seat": "beta", "max": 61000 }
   ]

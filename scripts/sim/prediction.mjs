@@ -17,7 +17,7 @@ export const outcome = (a) => (a.won === true ? "won" : a.won === false ? "lost"
 
 // An engagement's outcome, off the facts `scripts/scenario/engaged.mjs` or the bot's
 // `engagements.log` writes. Won: its rival dead at the close. Left: closed
-// while its rival stands (`outlived`), or with a rival body not seen to die
+// while its rival stands, or with a rival body not seen to die
 // (`left`, the bot's): no evidence for a Win. Lost: after contact it disengaged, or
 // gave up (a home's turned unanswered after it was answered), whatever came
 // after; one that quit before contact, none of ours dead, tested no
@@ -25,7 +25,7 @@ export const outcome = (a) => (a.won === true ? "won" : a.won === false ? "lost"
 // from first contact to the rival's last sighting, as `sim duel` reads a duel.
 export function engagement(e) {
   const quit = e.disengaged || e.gaveUp;
-  const left = !quit && e.closed !== null && Boolean(e.outlived || e.left);
+  const left = !quit && e.closed !== null && Boolean(e.left);
   const won = quit ? (e.contact === null && e.dead === 0 ? null : false) : e.closed !== null && !left ? true : null;
   const end = won === true ? e.seen + 1 : e.closed;
   return { won, left, unresolved: won === null && e.closed === null && e.answered, ticks: won === null || e.contact === null || end === null ? null : end - e.contact, dead: e.dead };

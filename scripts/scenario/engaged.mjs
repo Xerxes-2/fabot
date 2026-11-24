@@ -1,7 +1,7 @@
 // Each engagement Fight held, its row in `engagements.jsonl` written at its
 // close: what `prediction.mjs` and `measures.mjs` read its outcome from. A
 // tick's objects are plain, whichever engine read them:
-// { id, name, room, x, y, hits, hitsMax, type, ours, ttl (a tombstone's life left) }.
+// { id, name, room, x, y, type, ours, spent }.
 // An engagement's bodies by slot; a bundle older than slots lists the names.
 const namesOf = (ours) => (Array.isArray(ours) ? ours : Object.keys(ours));
 const near = (a, b, r) => a.room === b.room && Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) <= r;
@@ -9,22 +9,23 @@ const near = (a, b, r) => a.room === b.room && Math.max(Math.abs(a.x - b.x), Mat
 // `OUTPOST_LOSSES` in `core/fight/kinds/defend.rs`: an outpost's Defend loses this past its budget before it quits.
 export const OUTPOST_LOSSES = 2;
 
-// `write` takes each row; `at(rooms)` resolves to the objects of `rooms`, of every room when none is named;
-// `bodyOf(name)` is a rival body's part letters (`bodies.jsonl`).
-export function engagements(write, at, bodyOf = () => "") {
+// `write` takes each row; `bodyOf(name)` is a rival body's part letters (`bodies.jsonl`); `offset`, the
+// bot's game tick less the run's; `closes`, the bot's `engagements.log` rows (segment 4) by `${id} ${closed}`;
+// `killedAt(t)`, the rival bodies our seat killed at run tick `t` (seat.json's `deaths`).
+export function engagements(write, bodyOf, offset, closes, killedAt) {
   const open = new Map();
   let lastCreeps = new Set();
-  // `dead`: its own count, or our bodies' tombstones with life left in the rooms
-  // it targeted, which catch a death that closed it before it counted one.
-  async function close(rec, t) {
-    const graves = (await at([...rec.rooms])).filter((o) => o.type === "tombstone" && o.ours && o.ttl > 1 && rec.ours.has(o.name));
-    const { members, ours, rooms, swing, blind, asking, reached, fought, formed, empty, tombs, was, off, formedSince, formingSet, ...rest } = rec;
+  const run = (time) => (time == null ? null : time - offset);
+  // `merged`: `run::merged` folded it into an older open Defend on its raid (the older one's group holds
+  // its raid's bodies, or its `ours` its bodies), so it did not close and writes no row.
+  function close(rec, t, merged) {
+    const row = t === null ? undefined : closes.get(`${rec.id} ${t + offset}`);
+    if (t !== null && !row && merged) return;
+    if (t !== null && !row) throw new Error(`engagement ${rec.id} closed at t${t} with no engagements.log row`);
+    if (row) Object.assign(rec, { contact: run(row.contact), seen: run(row.seen), gaveUp: Boolean(row.gaveUp), dead: row.dead, left: Boolean(row.left) });
+    const { members, ours, standing, raid, rooms, swing, blind, asking, fought, formed, empty, kills, was, off, formedSince, formingSet, ...rest } = rec;
     const swung = Object.fromEntries(Object.entries(swing).map(([n, { ticks, swings }]) => [n, { ticks, swings }]));
-    // `apart`: the ticks between the first and the last of its bodies coming within three of its raid.
-    const ticks = Object.values(reached);
-    rest.apart = ticks.length ? Math.max(...ticks) - Math.min(...ticks) : 0;
-    const outlived = t === null || (await at()).some((o) => members.has(o.id));
-    write({ ...rest, dead: Math.max(rest.dead, graves.length), swung, closed: t, outlived, drew: [...ours], rooms: [...rooms] });
+    write({ ...rest, swung, closed: t, drew: [...ours], rooms: [...rooms] });
   }
   // ibex's A-B-A oscillation. A swing that struck or healed on both its steps,
   // or stepped over a room's edge (out of the towers' reach), is a dance that
@@ -43,7 +44,7 @@ export function engagements(write, at, bodyOf = () => "") {
   }
   return {
     // `strikes`: [by, target id] of each attack or heal the tick's event logs show.
-    async tick(t, fight, objects, strikes) {
+    tick(t, fight, objects, strikes) {
       const now = new Set();
       const asked = new Set((fight?.casts ?? []).map((c) => c.engagement));
       const struck = new Set(strikes.map(([by]) => by));
@@ -52,19 +53,21 @@ export function engagements(write, at, bodyOf = () => "") {
       const preyIn = new Set(objects.filter((o) => o.type === "creep" && !o.ours && /[wck]/.test(bodyOf(o.name)) && !/[ar]/.test(bodyOf(o.name))).map((o) => o.room));
       for (const e of fight?.engagements ?? []) {
         now.add(e.id);
-        const rec = open.get(e.id) ?? { id: e.id, kind: e.kind ?? "defend", room: e.room, opened: t, members: new Set(), ours: new Set(), rooms: new Set(), swing: {}, reached: {}, answered: false, gaveUp: false, disengaged: false, contact: null, seen: null, dead: 0, blind: 0, idle: 0, asking: 0, waited: 0, budget: 0, formed: 0, forming: 0, empty: 0, bare: 0, askedMost: 0, plinked: 0, tombs: new Set() };
+        const rec = open.get(e.id) ?? { id: e.id, kind: e.kind ?? "defend", room: e.room, opened: t, members: new Set(), ours: new Set(), rooms: new Set(), swing: {}, answered: false, disengaged: false, blind: 0, idle: 0, asking: 0, waited: 0, budget: 0, formed: 0, forming: 0, empty: 0, bare: 0, askedMost: 0, plinked: 0, kills: new Set() };
         open.set(e.id, rec);
-        for (const m of (fight.groups ?? []).find((g) => g.id === e.group)?.members ?? []) rec.members.add(m);
-        rec.predicted = e.predicted;
+        // Its raid's bodies and its own this tick: what `run::merged` hands the older Defend.
+        const raiders = (fight.groups ?? []).find((g) => g.id === e.group)?.members ?? [];
+        for (const m of raiders) rec.members.add(m);
+        [rec.predicted, rec.group, rec.standing, rec.raid] = [e.predicted, e.group, namesOf(e.ours), raiders];
         // A sweep's `lost` is its room's; the dead of the rooms it left are its log's (`leftDead`).
-        rec.dead = Math.max(rec.dead, e.lost + (e.actual?.leftDead ?? 0));
+        rec.dead = e.lost + (e.actual?.leftDead ?? 0);
+        [rec.contact, rec.seen, rec.gaveUp] = [run(e.actual?.contact), run(e.actual?.seen), Boolean(e.actual?.gaveUp)];
         rec.rooms.add(e.room);
         const ours = namesOf(e.ours);
         for (const n of ours) rec.ours.add(n);
         rec.held = Math.max(rec.held ?? 0, ours.length);
         if (rec.ours.size) rec.drafted ??= t;
         rec.answered ||= !e.unanswered;
-        rec.gaveUp ||= rec.answered && e.unanswered;
         rec.disengaged ||= e.phase === "disengaging";
         // `repriced`: the ticks a Fighting engagement re-entered Fighting, the phase a re-price keeps.
         if (e.phase === "fighting" && rec.fought !== undefined && rec.fought !== e.since) rec.repriced = (rec.repriced ?? 0) + 1;
@@ -82,7 +85,6 @@ export function engagements(write, at, bodyOf = () => "") {
         rec.formed = e.phase === "forming" && !e.unanswered ? rec.formed + 1 : 0;
         rec.forming = Math.max(rec.forming, rec.formed);
         const theirs = objects.filter((o) => rec.members.has(o.id));
-        if (theirs.length) rec.seen = t;
         // `beside`: the ticks a Defend that disengaged as its raid stepped out stood so with its raid back in its room.
         const raid = (fight.groups ?? []).find((g) => g.id === e.group);
         // Given up past its losses it is not one the raid's return re-answers.
@@ -91,14 +93,11 @@ export function engagements(write, at, bodyOf = () => "") {
         if (rec.kind === "defend" && rec.off && e.phase === "disengaging" && raid?.room === e.room) rec.beside = (rec.beside ?? 0) + 1;
         rec.core ||= theirs.some((o) => o.type === "invaderCore");
         const bodies = objects.filter((o) => o.type === "creep" && o.ours && ours.includes(o.name));
-        for (const o of bodies) if (theirs.some((h) => near(h, o, 3))) rec.reached[o.name] ??= t;
-        const close = bodies.some((o) => theirs.some((h) => near(h, o, 3)));
         // `strayed`: the ticks a body of a fighting blob stood in its raid's room out of a shot's range of it
         // and of every mate in one, as a ranged heal reaches.
         const fighting = bodies.filter((o) => theirs.some((h) => near(h, o, 3)));
         const apart = bodies.some((o) => o.room === e.room && !fighting.some((m) => near(m, o, 3)));
         if (apart && fighting.length && e.phase === "fighting" && e.tactic.startsWith("blob")) rec.strayed = (rec.strayed ?? 0) + 1;
-        if (rec.contact === null && (close || theirs.some((h) => h.hits < h.hitsMax))) rec.contact = t;
         swinging(rec, bodies, t, struck);
         // `raised`: the re-prices a forming Defend raised its set on after the tick it began forming.
         const set = ours.length + (fight.casts ?? []).filter((c) => c.engagement === e.id).length;
@@ -113,9 +112,9 @@ export function engagements(write, at, bodyOf = () => "") {
         const rivals = held ? objects.filter((o) => o.type === "creep" && !o.ours && o.room === e.room) : [];
         rec.empty = held && !rivals.length ? rec.empty + 1 : 0;
         rec.bare = Math.max(rec.bare, rec.empty);
-        // `killed`: the rival bodies that are no fight's whose tombstones stood beside it.
-        if (held) for (const o of objects) if (o.type === "tombstone" && !o.ours && o.room === e.room && !o.name.startsWith("fight-")) rec.tombs.add(o.id);
-        rec.killed = rec.tombs.size;
+        // `killed`: the rival bodies our seat killed beside it.
+        if (held) for (const d of killedAt(t)) if (d.room === e.room) rec.kills.add(`${d.user} ${d.name}`);
+        rec.killed = rec.kills.size;
         rec.askedMost = Math.max(rec.askedMost, (fight.casts ?? []).filter((c) => c.engagement === e.id).length);
         // `plinked`: its bodies' strikes on what was no creep then or a tick before, where prey stood (`Scene::ground`'s marks).
         const roomOf = new Map(bodies.map((o) => [o.id, o.room]));
@@ -125,11 +124,14 @@ export function engagements(write, at, bodyOf = () => "") {
       for (const [id, rec] of open)
         if (!now.has(id)) {
           open.delete(id);
-          await close(rec, t);
+          const raid = (e) => (fight?.groups ?? []).find((g) => g.id === e.group)?.members ?? [];
+          const older = (fight?.engagements ?? []).filter((e) => (e.kind ?? "defend") === "defend" && e.id < rec.id);
+          const merged = older.some((e) => raid(e).some((m) => rec.raid.includes(m)) || namesOf(e.ours).some((n) => rec.standing.includes(n)));
+          close(rec, t, rec.kind === "defend" && merged);
         }
     },
-    async end() {
-      for (const rec of open.values()) await close(rec, null);
+    end() {
+      for (const rec of open.values()) close(rec, null);
     },
   };
 }

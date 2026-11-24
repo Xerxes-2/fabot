@@ -1,5 +1,5 @@
 {
-  "why": "A mark's worth is energy: a container's is its build cost by the share of its hits left, and while a creep is a mark no structure is, so hunters strike the workers rather than plink a 250k-hit container beside them (sweep-casts-what-its-spawns-land's self-play start). `plinked` is a stricter proxy for the marks Hunt holds (`Scene::ground`, kept in no output): a sweep body's strikes on what was no creep that tick or the one before, in a room where his prey (`sweep::prey`) stood anywhere, where Hunt counts only prey beside the tiles it reaches and a shot at a body under his rampart lands on the rampart. On a2295a64, before, each seat's sweeps plinked on every seed 1-5; main 0. Bodies of his that are no fight's dying beside alpha's sweeps are a guardrail, not a separator (the pre-fix build kills as many): 22-32 on main seeds 1-5, bound about 30% under the least, 22 x 0.7 = 15, so a sweep that never strikes fails",
+  "why": "A mark's worth is energy: a container's is its build cost by the share of its hits left, and while a creep is a mark no structure is, so hunters strike the workers rather than plink a 250k-hit container beside them (sweep-casts-what-its-spawns-land's self-play start). `plinked` is a stricter proxy for the marks Hunt holds (`Scene::ground`, kept in no output): a sweep body's strikes on what was no creep that tick or the one before, in a room where his prey (`sweep::prey`) stood anywhere, where Hunt counts only prey beside the tiles it reaches and a shot at a body under his rampart lands on the rampart. On a2295a64, before, each seat's sweeps plinked on every seed 1-5; main 0. His bodies alpha's seat kills in a held sweep's room (destroyed the tick a body or tower of alpha's struck them last, the sweep's or not) are a guardrail, not a separator (the pre-fix build kills as many): 19-33 on seeds 1-5, bound about 30% under the least, 19 x 0.7 = 13, so a seat whose sweeps hold rooms it never strikes in fails (the count before also took in his bodies dying unstruck beside them, age-out and recycle: 35-49, bound 15)",
   "modules": ["fight"],
   "start": {
     "gen": 7,
@@ -13,6 +13,6 @@
   "assert": [
     { "each": "engagement", "where": { "kind": "sweep" }, "assert": { "plinked": { "max": 0 } } },
     { "each": "engagement", "seat": "beta", "where": { "kind": "sweep" }, "assert": { "plinked": { "max": 0 } } },
-    { "measure": "killedBeside", "kind": "sweep", "min": 15 }
+    { "measure": "killedBeside", "kind": "sweep", "min": 13 }
   ]
 }

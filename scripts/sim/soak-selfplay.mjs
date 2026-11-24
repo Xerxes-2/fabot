@@ -134,7 +134,9 @@ async function smellsOf(dir) {
   });
   worst("set over bank", overset, (e) => e.over, (e) => `${e.kind} #${e.id} ${e.room} set ${e.cost}e/${e.parts} parts; bank+dig pays ${e.pays}e, spawn share ${e.spawnTime} ticks`);
 
-  const theirDeaths = seat.deaths.filter((d) => d.user !== seat.uid);
+  // seat.json holds every room's deaths: a raid's are those in the rooms the seat follows.
+  const followed = new Set(Object.keys(samples.at(-1).rooms));
+  const theirDeaths = seat.deaths.filter((d) => d.user !== seat.uid && followed.has(d.room));
   // Economy bodies: no strike or heal, not a lone MOVE (a scout).
   const economy = samples.map((s) => ({ t: s.t, n: s.bodies.filter((b) => { const l = b.split(" ")[1] ?? ""; return !fights(l) && l !== "m"; }).length }));
   let peak = 0;

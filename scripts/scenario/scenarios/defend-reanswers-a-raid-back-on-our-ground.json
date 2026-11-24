@@ -1,5 +1,5 @@
 {
-  "why": "a Defend whose raid stepped off our ground answers it again, on the budget it kept, once it is back, and a raid on the edge tile facing our ground has not left it (sweep-casts-what-its-spawns-land's self-play start, each seat harassing the other's outposts). On main beta's Defends stood disengaged 76 ticks with their raid back in their room, now 0; bodies lost 43/43 on main, 50/39 with this alone, 24/22 with the blob formation beside it (guardrails as sweep-harasses-in-self-play's)",
+  "why": "a Defend whose raid stepped off our ground answers it again, on the budget it kept, once it is back, and a raid on the edge tile facing our ground has not left it (sweep-casts-what-its-spawns-land's self-play start, each seat harassing the other's outposts). On main beta's Defends stood disengaged 76 ticks with their raid back in their room, now 0; bodies lost 43/43 on main, 50/39 with this alone, 24/22 with the blob formation beside it (guardrails as sweep-harasses-in-self-play's, about 1.3x the seed 1-5 maxima as the bot's close rows count them: alpha 11, so 14, and beta 15, so 19)",
   "modules": ["fight"],
   "start": {
     "gen": 7,
@@ -11,8 +11,8 @@
   },
   "ticks": 30000,
   "assert": [
-    { "measure": "bodiesLost", "max": 72 },
-    { "measure": "bodiesLost", "seat": "beta", "max": 74 },
+    { "measure": "bodiesLost", "max": 14 },
+    { "measure": "bodiesLost", "seat": "beta", "max": 19 },
     { "measure": "disengagedBeside", "max": 0 },
     { "measure": "disengagedBeside", "seat": "beta", "max": 0 }
   ]

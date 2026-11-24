@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { BUILT, US, built, near, standNode } from "./node.mjs";
 import { seatTile } from "../scenario/seat-tile.mjs";
 import { engagements } from "../scenario/engaged.mjs";
+import { killedBy, offsetOf } from "../scenario/measures.mjs";
 
 const SAFE_MODE_DURATION = 20000;
 
@@ -130,22 +131,28 @@ function npc(invaders = "", wave, core = "", stronghold = "", ticks) {
 
 /** A seat's `engagements.jsonl` off the ticks sim wrote to `fight.jsonl`, and `segment4.jsonl` off `cpu.jsonl`. */
 async function engaged(out) {
-  const rows = [];
-  // Every room's objects of the tick being fed: an engagement closes inside `fights.tick`.
-  let tick = { objects: [] };
-  const theirs = new Map(jsonLines(join(out, "bodies.jsonl")).filter((b) => !b.ours).map((b) => [b.name, b.body]));
-  const fights = engagements((row) => rows.push(JSON.stringify(row) + "\n"), async (rooms) => tick.objects.filter((o) => !rooms || rooms.includes(o.room)), (name) => theirs.get(name) ?? "");
   // Streamed: a long run's file outgrows the 512 MB one string holds.
   const ticks = async function* (file) {
     for await (const line of createInterface({ input: createReadStream(join(out, file)) })) if (line) yield JSON.parse(line);
   };
-  for await (tick of ticks("fight.jsonl")) await fights.tick(tick.t, tick.fight, tick.objects, tick.struck);
-  await fights.end();
-  writeFileSync(join(out, "engagements.jsonl"), rows.join(""));
   // The bot's own `engagements.log` rows (segment 4), as each tick closed them.
-  const closed = [];
-  for await (const t of ticks("cpu.jsonl")) for (const r of t.closed ?? []) closed.push(r + "\n");
+  const [closed, closes] = [[], new Map()];
+  let offset = 0;
+  for await (const t of ticks("cpu.jsonl")) {
+    offset = t.time - t.t;
+    for (const r of t.closed ?? []) closed.push(r + "\n");
+    for (const r of (t.closed ?? []).map((r) => JSON.parse(r))) closes.set(`${r.id} ${r.closed}`, r);
+  }
   writeFileSync(join(out, "segment4.jsonl"), closed.join(""));
+  const rows = [];
+  const theirs = new Map(jsonLines(join(out, "bodies.jsonl")).filter((b) => !b.ours).map((b) => [b.name, b.body]));
+  // A death's tick is the sampler's view's, as a sample's `time` is.
+  const [seat, viewed] = [JSON.parse(readFileSync(join(out, "seat.json"), "utf8")), offsetOf(jsonLines(join(out, "samples.jsonl")))];
+  const kills = Map.groupBy(killedBy(seat.deaths, seat.uid), (d) => d.t - viewed);
+  const fights = engagements((row) => rows.push(JSON.stringify(row) + "\n"), (name) => theirs.get(name) ?? "", offset, closes, (t) => kills.get(t) ?? []);
+  for await (const tick of ticks("fight.jsonl")) fights.tick(tick.t, tick.fight, tick.objects, tick.struck);
+  fights.end();
+  writeFileSync(join(out, "engagements.jsonl"), rows.join(""));
 }
 
 /** This tree's sim (`npm run build:sim`), its path; null when it did not build. */

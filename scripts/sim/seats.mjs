@@ -5,7 +5,7 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { samplesOf } from "../scenario/measures.mjs";
+import { killedBy, samplesOf } from "../scenario/measures.mjs";
 import { engagement } from "./prediction.mjs";
 
 const lines = (path) => (existsSync(path) ? readFileSync(path, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : []);
@@ -22,7 +22,7 @@ export function seats(out) {
   const all = seatDirs(out).map((dir) => ({ dir, ...JSON.parse(readFileSync(join(dir, "seat.json"), "utf8")) })).sort((a, b) => Number(a.uid.slice(1)) - Number(b.uid.slice(1)));
   const names = Object.fromEntries(all.map((s) => [s.uid, s.name]));
   const who = (by) => (by ? `${by[0] === "tower" ? "tower " : ""}${names[by[1]] ?? { 2: "Invader", 3: "Keeper" }[by[1]] ?? by[1]}` : "unseen");
-  // Each seat sees deaths only around its own rooms: one seen by several is one death.
+  // Each seat writes every room's deaths: one several wrote is one death.
   const seen = new Map();
   for (const d of all.flatMap((s) => s.deaths)) if (!seen.get(`${d.t} ${d.user} ${d.name}`)?.by) seen.set(`${d.t} ${d.user} ${d.name}`, d);
   const deaths = [...seen.values()];
@@ -33,7 +33,7 @@ export function seats(out) {
     const bodies = lines(join(dir, "bodies.jsonl")).filter((b) => b.ours);
     const engaged = lines(join(dir, "engagements.jsonl")).map(engagement);
     const lost = deaths.filter((d) => d.user === uid);
-    const killed = deaths.filter((d) => d.user !== uid && d.by?.[1] === uid);
+    const killed = killedBy(deaths, uid);
     return {
       name, room, t: last.t, rcl: last.rcl, progress: last.progress, controller: last.worth.controller,
       levels: Object.fromEntries(JSON.parse(readFileSync(join(dir, "levels.json"), "utf8")).filter((l) => l.rcl > 0).map((l) => [l.rcl, l.t])),
