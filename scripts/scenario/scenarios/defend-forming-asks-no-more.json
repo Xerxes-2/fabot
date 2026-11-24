@@ -1,0 +1,11 @@
+{
+  "why": "a Defend's re-price while it forms asks no more bodies than its answer did, so a raid that grows while the set forms is fought by the set first answered: three Invader waves (a ranged and a melee each) land in W8N3 E1's outpost W7N3 40 ticks apart and merge into one raid. On the release change its Defend raised its set twice as the waves merged and the raid stood 433 ticks; now it raises none and the raid stands 236 (bodies lost 0 -> 3)",
+  "modules": ["fight"],
+  "start": { "room": "W8N3", "seed": 1, "node": "E1", "invaders": "W7N3:100000:1000,W7N3:100000:1040,W7N3:100000:1080", "wave": "ranged,melee" },
+  "ticks": 4000,
+  "assert": [
+    { "measure": "bodiesLost", "max": 4 },
+    { "measure": "hostileTicks", "room": "W7N3", "max": 300 },
+    { "each": "engagement", "where": { "kind": "defend" }, "assert": { "raised": { "max": 0 } } }
+  ]
+}

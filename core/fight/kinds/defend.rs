@@ -224,6 +224,10 @@ pub(crate) fn returned(scene: &Scene, was: &[Group], e: &Engagement) -> bool {
     scene.by_id.get(&e.group).is_some_and(on) && !(was.iter()).any(|g| g.id == e.group && on(g))
 }
 
+pub(crate) fn answers(e: &Engagement, time: i32, first: bool) -> bool {
+    e.phase != Phase::Forming || e.since == time || first || e.unanswered
+}
+
 const OUTPOST_LOSSES: i32 = 2;
 
 pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
@@ -670,6 +674,25 @@ mod tests {
             passed_over(121, since, 108, (&[], true)),
             "a spawn short of the cast's energy, past the landing"
         );
+    }
+
+    #[test]
+    fn a_forming_defend_casts_only_at_an_answer() {
+        let forming = Engagement {
+            phase: Phase::Forming,
+            since: 10,
+            predicted: Some(Outcome::Lose),
+            unanswered: false,
+            ..crate::scene::fresh(1, Objective::Defend, RoomName::W1N1, 0, Tactic::Close)
+        };
+        assert!(answers(&forming, 10, false), "the tick it began forming");
+        assert!(!answers(&forming, 11, false), "a re-price while it forms");
+        assert!(answers(&forming, 11, true), "its first answer");
+        let starved = Engagement {
+            unanswered: true,
+            ..forming
+        };
+        assert!(answers(&starved, 11, false), "one it stood unanswered on");
     }
 
     #[test]

@@ -762,6 +762,11 @@ impl<'a> Scene<'a> {
                     return self.priced_after(atlas, asked, e, free, declarations, held);
                 }
 
+                let first_answer = e.predicted.is_none() || self.homes.contains(&e.room);
+                // An arm needing bodies its answer never asked is not one it carries: it waits.
+                if !defend::answers(e, self.world.time, first_answer) && !price.set.is_empty() {
+                    return e.clone();
+                }
                 free.retain(|n| !joining.contains(n));
                 let boosts = self.ask(
                     atlas,
@@ -781,7 +786,6 @@ impl<'a> Scene<'a> {
                     order: casting::kill_order(&kin),
                     offers,
                 };
-                let first_answer = e.predicted.is_none() || self.homes.contains(&e.room);
                 if e.unanswered && first_answer {
                     next.budget = e.lost + price.outcome.losses().dead;
                 }

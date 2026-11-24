@@ -3,6 +3,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { BOOST_MINERAL, COMPOUNDS, bugs, outcome, tested } from "../sim/prediction.mjs";
+import { OUTPOST_LOSSES } from "./engaged.mjs";
 
 // Ticks are counted from the bot's first, so a window means the same on every start.
 const linesOf = (path) =>
@@ -478,8 +479,6 @@ export const measures = {
     })),
 };
 
-// `OUTPOST_LOSSES` in `core/fight/kinds/defend.rs`: an outpost's Defend loses this past its budget before it quits.
-const OUTPOST_LOSSES = 2;
 const homesOf = (samples) => {
   const last = samples.at(-1);
   return new Set(Object.keys(last.homes ?? { [Object.keys(last.rooms)[0]]: last }));
@@ -500,6 +499,7 @@ export const events = {
       reach: (e.contact ?? e.closed ?? end) - e.opened,
       bug: bugs(tested([e])).length,
       pastBudget: e.dead - (e.budget ?? 0) - (homes.has(e.room) ? 0 : OUTPOST_LOSSES),
+      raised: e.raised ?? 0,
     }));
   },
   // Each home's safe mode, at the first sample it runs in: `killed`, our bodies killed there since

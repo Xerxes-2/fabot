@@ -504,7 +504,8 @@ with one phase machine per kind under `core/fight/kinds/`.
   Approaching → Fighting → Pursuing → Disengaging → closed`. Its loss budget
   is priced as it commits: its first answer to a raid, a newcomer group being
   a new raid. A re-price on a death or tracker event keeps it, or each death
-  would lift it past every loss. An outpost fights on past its budget by
+  would lift it past every loss; one while it forms asks no more bodies, so
+  a raid growing as it forms is fought by the set first answered. An outpost fights on past its budget by
   `OUTPOST_LOSSES` (2) bodies, then gives up: it disengages, holding no
   body (another answer drafts them, else they walk home and are recycled,
   as none would fight for it), and closes only once `sightings` clears

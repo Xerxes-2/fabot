@@ -6,6 +6,9 @@
 const namesOf = (ours) => (Array.isArray(ours) ? ours : Object.keys(ours));
 const near = (a, b, r) => a.room === b.room && Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) <= r;
 
+// `OUTPOST_LOSSES` in `core/fight/kinds/defend.rs`: an outpost's Defend loses this past its budget before it quits.
+export const OUTPOST_LOSSES = 2;
+
 // `write` takes each row; `at(rooms)` resolves to the objects of `rooms`, of every room when none is named;
 // `bodyOf(name)` is a rival body's part letters (`bodies.jsonl`).
 export function engagements(write, at, bodyOf = () => "") {
@@ -15,7 +18,7 @@ export function engagements(write, at, bodyOf = () => "") {
   // it targeted, which catch a death that closed it before it counted one.
   async function close(rec, t) {
     const graves = (await at([...rec.rooms])).filter((o) => o.type === "tombstone" && o.ours && o.ttl > 1 && rec.ours.has(o.name));
-    const { members, ours, rooms, swing, blind, asking, reached, fought, formed, empty, tombs, was, off, ...rest } = rec;
+    const { members, ours, rooms, swing, blind, asking, reached, fought, formed, empty, tombs, was, off, formedSince, formingSet, ...rest } = rec;
     const swung = Object.fromEntries(Object.entries(swing).map(([n, { ticks, swings }]) => [n, { ticks, swings }]));
     // `apart`: the ticks between the first and the last of its bodies coming within three of its raid.
     const ticks = Object.values(reached);
@@ -82,7 +85,8 @@ export function engagements(write, at, bodyOf = () => "") {
         if (theirs.length) rec.seen = t;
         // `beside`: the ticks a Defend that disengaged as its raid stepped out stood so with its raid back in its room.
         const raid = (fight.groups ?? []).find((g) => g.id === e.group);
-        if (e.phase === "disengaging" && rec.was !== "disengaging") rec.off = raid?.room !== e.room;
+        // Given up past its losses it is not one the raid's return re-answers.
+        if (e.phase === "disengaging" && rec.was !== "disengaging") rec.off = raid?.room !== e.room && e.lost <= e.budget + OUTPOST_LOSSES;
         rec.was = e.phase;
         if (rec.kind === "defend" && rec.off && e.phase === "disengaging" && raid?.room === e.room) rec.beside = (rec.beside ?? 0) + 1;
         rec.core ||= theirs.some((o) => o.type === "invaderCore");
@@ -96,6 +100,10 @@ export function engagements(write, at, bodyOf = () => "") {
         if (apart && fighting.length && e.phase === "fighting" && e.tactic.startsWith("blob")) rec.strayed = (rec.strayed ?? 0) + 1;
         if (rec.contact === null && (close || theirs.some((h) => h.hits < h.hitsMax))) rec.contact = t;
         swinging(rec, bodies, t, struck);
+        // `raised`: the re-prices a forming Defend raised its set on after the tick it began forming.
+        const set = ours.length + (fight.casts ?? []).filter((c) => c.engagement === e.id).length;
+        if (e.phase === "forming" && rec.formedSince === e.since && set > rec.formingSet) rec.raised = (rec.raised ?? 0) + 1;
+        [rec.formedSince, rec.formingSet] = [e.phase === "forming" ? e.since : null, set];
         // A sweep with all its bodies in its room: `bare`, the most ticks on end no rival creep stood there.
         if (rec.kind !== "sweep") continue;
         const held = bodies.length > 0 && bodies.every((o) => o.room === e.room);
