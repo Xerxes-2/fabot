@@ -219,6 +219,8 @@ export const measures = {
   // Signs our bodies sent (sim only), and whether `room` ends the window signed by us since the run's first
   // tick, which the first sample follows.
   signsSent: on("from to", (samples, a) => (at(samples, a.to ?? Infinity).signsSent ?? 0) - (a.from ? (at(samples, a.from).signsSent ?? 0) : 0)),
+  // Unsampled (a sim before the count) fails rather than reads as none repeated.
+  signsRepeated: on("to", (samples, a) => at(samples, a.to ?? Infinity).signsRepeated ?? Infinity),
   seenAt: on("room to", (samples, a) => (at(samples, a.to ?? Infinity).seen?.[a.room] ?? Infinity) - offsetOf(samples)),
   signedInRun: on("room to", (samples, a) => Number(at(samples, a.to ?? Infinity).rooms[a.room]?.signed >= offsetOf(samples) - 1)),
   bounced: on("from to", (samples, a) => at(samples, a.to ?? Infinity).bounced - at(samples, a.from ?? 0).bounced),

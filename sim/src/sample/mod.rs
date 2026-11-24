@@ -139,7 +139,7 @@ pub struct Sampler {
     sent_of: BTreeMap<String, BTreeMap<String, f64>>,
     sent_seq: u64,
     labs: labs::Labs,
-    signs_sent: usize,
+    signs: Vec<(String, String)>,
     pub structures_lost: u64,
     pub levels: Vec<Value>,
 }
@@ -396,10 +396,9 @@ impl Sampler {
             .flat_map(|u| &u.objects);
         let target =
             |o: &Obj, act| obj(o, Atom::intern(act)).map(|t| text(t, atom!("id")).to_string());
-        let signs = objects
-            .clone()
-            .filter_map(|(_, o)| target(o, "signController"));
-        self.signs_sent += signs.count();
+        let signs = (objects.clone()).filter_map(|(_, o)| obj(o, atom!("signController")));
+        (self.signs)
+            .extend(signs.map(|t| (text(t, atom!("id")).into(), text(t, atom!("sign")).into())));
         let acts = objects.flat_map(|(_, o)| ["pickup", "recycleCreep"].map(|act| target(o, act)));
         self.taken = acts.flatten().collect();
     }
@@ -534,7 +533,11 @@ impl Sampler {
             ("mineralHeld", json!(self.lives.mineral_held)),
             ("sent", json!(self.sent_of.get("energy"))),
             ("sentOf", json!(self.sent_of)),
-            ("signsSent", json!(self.signs_sent)),
+            ("signsSent", json!(self.signs.len())),
+            (
+                "signsRepeated",
+                json!(self.signs.len() - self.signs.iter().collect::<BTreeSet<_>>().len()),
+            ),
         ] {
             row.insert(k.into(), value);
         }

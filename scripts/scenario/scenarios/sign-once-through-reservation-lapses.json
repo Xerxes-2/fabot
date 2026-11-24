@@ -1,9 +1,10 @@
 {
-  "why": "an outpost keeps its text while its reservation lapses between reservers, so each room is signed once: picked by the reservation alone, every reserver arriving after a lapse signed it twice (21 signs by 10000 ticks)",
+  "why": "an outpost keeps its text while its reservation lapses between reservers, so no room is sent the text it already holds (`signsRepeated`): picked by the reservation alone, every reserver arriving after a lapse signed it again. How many rooms are signed follows which rooms are worked, so `signsSent` is a guardrail about 30% over the most seeds 1-5 sent, 7 x 1.3 = 9",
   "modules": ["economy"],
   "start": { "room": "W9N8", "seed": 1 },
   "ticks": 10000,
   "assert": [
-    { "measure": "signsSent", "max": 5 }
+    { "measure": "signsRepeated", "max": 0 },
+    { "measure": "signsSent", "max": 9 }
   ]
 }
