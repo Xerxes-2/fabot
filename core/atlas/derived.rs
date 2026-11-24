@@ -194,7 +194,6 @@ fn danger(world: &World, owned: &BTreeSet<RoomName>, guarded: bool) -> Vec<(Room
             .filter(|s| {
                 s.kind == StructureType::Tower
                     && s.owner.is_theirs()
-                    && !s.owner.is_ally()
                     && !fallen(&s.owner, &s.pos)
                     && s.store.amount_of(ResourceType::Energy) >= engine::TOWER_ENERGY_COST
             })

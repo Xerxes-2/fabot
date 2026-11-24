@@ -217,7 +217,7 @@ impl<'a> Scene<'a> {
         let foes: Vec<Fighter> = escort.iter().map(casting::fighter_of).collect();
         let weights = atlas.held_weights(room.name);
         let shields: BTreeSet<Tile> = (room.structures.iter())
-            .filter(|s| s.kind == StructureType::Rampart && !s.owner.is_ours())
+            .filter(|s| s.kind == StructureType::Rampart && s.owner.is_theirs())
             .map(|s| tiles::of_pos(&s.pos))
             .collect();
         let solid: BTreeSet<Tile> = (room.structures.iter())
@@ -320,7 +320,7 @@ impl<'a> Scene<'a> {
     pub(super) fn towers_in(&self, room: &'a Room<'a>) -> Vec<&'a Structure> {
         room.structures
             .iter()
-            .filter(|s| s.kind == StructureType::Tower && !s.owner.is_ours())
+            .filter(|s| s.kind == StructureType::Tower && s.owner.is_theirs())
             .collect()
     }
 

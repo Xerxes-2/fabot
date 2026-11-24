@@ -286,7 +286,7 @@ impl Owner {
     }
 
     pub fn is_theirs(&self) -> bool {
-        !self.is_ours() && *self != Owner::Nobody
+        !self.is_ours() && !self.is_ally() && *self != Owner::Nobody
     }
 
     /// The username behind the stance; none for an Invader, a keeper or an
@@ -1116,6 +1116,13 @@ mod tests {
     use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest::sample::Index;
+
+    /// An ally's structures are not theirs: no route avoids its towers and no raid razes them.
+    #[test]
+    fn an_ally_is_not_theirs() {
+        assert!(!Owner::Ally("a".to_string()).is_theirs());
+        assert!(Owner::Enemy("e".to_string()).is_theirs() && Owner::Invader.is_theirs());
+    }
 
     fn seen_in(name: RoomName, others: Vec<Creep>) -> Room<'static> {
         Room {

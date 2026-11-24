@@ -22,7 +22,7 @@ pub fn raids(e: &Engagement) -> bool {
 
 pub fn charged(room: &Room) -> Vec<Pos> {
     (room.structures.iter())
-        .filter(|s| s.kind == StructureType::Tower && !s.owner.is_ours())
+        .filter(|s| s.kind == StructureType::Tower && s.owner.is_theirs())
         .filter(|s| s.store.amount_of(ResourceType::Energy) >= engine::TOWER_ENERGY_COST)
         .map(|s| s.pos)
         .collect()

@@ -61,7 +61,7 @@ pub fn step(world: &World, intel: &mut Intel) {
                 collapses_at: world.time + s.collapse,
             }),
             towered: (room.structures.iter())
-                .any(|s| s.kind == StructureType::Tower && !s.owner.is_ours()),
+                .any(|s| s.kind == StructureType::Tower && s.owner.is_theirs()),
         };
         intel.insert(room.name, row);
     }
