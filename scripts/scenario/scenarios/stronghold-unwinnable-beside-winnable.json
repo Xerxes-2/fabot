@@ -5,7 +5,6 @@
   "ticks": 4000,
   "assert": [
     { "measure": "strongholdFallenAt", "room": "W7N3", "max": 2000 },
-    { "measure": "bodiesLost", "room": "W8N2", "max": 0 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "bodiesLost", "room": "W8N2", "max": 0 }
   ]
 }

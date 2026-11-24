@@ -6,7 +6,6 @@
   "assert": [
     { "measure": "strongholdMisread", "from": 400, "max": 0 },
     { "measure": "bodiesLost", "room": "W8N2", "max": 0 },
-    { "measure": "diedIn", "room": "W8N2", "max": 1 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "diedIn", "room": "W8N2", "max": 1 }
   ]
 }

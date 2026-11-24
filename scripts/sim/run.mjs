@@ -18,21 +18,8 @@ const PLAN = join(REPO, "target/release/plan");
 /** The template world (every room its terrain and sources, minerals, controller, keeper lairs, nobody's), checked in. */
 export const TEMPLATE = join(REPO, "scripts/scenario/worlds/template.json");
 
-// What sim stands (`world.rs`, `node.mjs`) and what `scenario.mjs` reads off what it writes
-// (`sample.rs`, `lives.rs`, `engaged.rs`: no opponent's side).
+// What sim stands (`world.rs`, `node.mjs`).
 export const SIM_START = ["gen", "room", "seed", "late", "node", "ended", "unsafe", "world", "declarations", "memory", "gcl", "stock", "level", "roadless", "follow", "opponents", "invaders", "wave", "core", "stronghold", "resetEvery", "sectors", "players"];
-export const SIM_MEASURES = new Set([
-  "metric", "spendError", "decayedAway", "roadsLost", "roadsAtEnd", "dug", "contactWait", "upgrade", "build", "linked", "builtAtEnd", "sitesAtEnd",
-  "buriedAtEnd", "unroadedAtEnd", "oldestPayingSite", "extensionsBeforeContainer", "sourceContainersAtEnd", "postedLinksAtEnd",
-  "levelsLost", "spawnsLost", "fewestCreeps", "safeModeAfterCull", "rising", "outpostDug", "outpostDecayed", "upgradeWhileQueued",
-  "upgradeStall", "leastDowngrade", "coresAtEnd", "hostilesAtEnd", "hostileTicks", "floodsMost", "atlasMissRate",
-  "threatLookupsMost", "parkedTicks", "outpostFlips", "slotIdsShared", "refusals", "faults", "heldAtEnd", "oresAtEnd", "homeLevel", "claimSafeMode", "claimLevelOf", "claimsOwned",
-  "rcl2ToTower", "claimSpawned", "claimersCast", "made", "produced", "seenAt", "extractorToOre", "boosted", "boostedWith", "bounced", "stillLoaded", "mineralAside", "mineralHeld", "carriedOut",
-  "spawnStuck", "scoutsCast", "scoutStill", "scoutTicksIn", "reserverOnPost", "castIn", "bodiesOut", "bodiesStruck", "struckOn",
-  "deathsError", "attackersAtEnd", "creepsLostBeforeSafeMode", "predictedWinsLost", "engagements", "repriced", "held", "oscillation", "bodiesLost", "waitedMost", "safeModes",
-  "closedOnCore", "strongholdMisread", "strongholdDeploying", "strongholdFallenAt", "lootTaken", "boostedShort", "diedIn", "crossed", "heldPastWave", "idleMost", "answeredMost", "sentTo", "sentBack", "draftedAfterOthers", "arrivedApart", "signsSent", "signedInRun",
-  "each", "liveEngagements", "sweptIn", "formingMost", "bareMost", "killedBeside", "drewCost", "liveAstray", "liveEnergy", "defendsOpened", "defendSpent", "rivalSpent", "answeredAfter", "recycledWounded", "culled",
-]);
 
 /** Whether a `worlds/`-shaped world holds a spawn of ours: a capture, not a map. */
 export const seatsUs = (world) => (world.rooms ?? []).some((r) => (r.objects ?? []).some((o) => o.type === "spawn" && o.user === world.userId));

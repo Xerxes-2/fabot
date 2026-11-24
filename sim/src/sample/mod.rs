@@ -444,7 +444,6 @@ impl Sampler {
             for h in self.homes.clone() {
                 let mut each = self.home(v, t, map, &h);
                 each.remove("bodies");
-                each.remove("foes");
                 homes.insert(h, Value::Object(each));
             }
             row.insert("homes".into(), Value::Object(homes));
@@ -548,7 +547,7 @@ impl Sampler {
     fn home(&mut self, v: &View, t: u64, map: &World, name: &str) -> Map<String, Value> {
         let time = v.k.time as i64;
         let home = v.room(name);
-        let (mut bodies, mut foes) = (Vec::new(), Vec::new());
+        let mut bodies = Vec::new();
         let (mut creeps, mut body_parts, mut spawns, mut hostiles) = (0, 0, 0, 0);
         let (mut sources, mut stored, mut dropped, mut cash, mut capacity) =
             (0.0, 0.0, 0.0, 0.0, 0.0);
@@ -600,16 +599,7 @@ impl Sampler {
                         if acts.is_empty() { "-" } else { &acts }
                     ));
                 }
-                "creep" => {
-                    hostiles += 1;
-                    let at = format!(
-                        "{}@{},{}",
-                        text(o, atom!("name")),
-                        num(o, atom!("x")),
-                        num(o, atom!("y"))
-                    );
-                    foes.push(format!("{at} {}", lives::letters(&parts(o))));
-                }
+                "creep" => hostiles += 1,
                 _ => {}
             }
             let structure = kind
@@ -682,7 +672,7 @@ impl Sampler {
             "parts": body_parts, "spawns": spawns, "hostiles": hostiles, "sources": sources, "energy": cash,
             "capacity": capacity, "stored": stored, "dropped": dropped, "sites": sites, "queued": queued,
             "oldestPaying": oldest, "built": built, "sourceContainers": source_containers.len(), "buried": buried,
-            "unroaded": unroaded, "postedLinks": posted, "mineralAmount": mineral, "bodies": bodies, "foes": foes });
+            "unroaded": unroaded, "postedLinks": posted, "mineralAmount": mineral, "bodies": bodies });
         match row {
             Value::Object(row) => row,
             _ => unreachable!("a json! object"),

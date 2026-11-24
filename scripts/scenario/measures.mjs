@@ -244,9 +244,8 @@ export const measures = {
   leastDowngrade: (samples, a) => at(samples, a.to ?? Infinity).rooms[a.room]?.leastDowngrade ?? -Infinity,
   // Energy our bodies carried out of a home across its border.
   carriedOut: (samples, a) => (at(samples, a.to ?? Infinity).rooms[a.room]?.carriedOut ?? 0) - (at(samples, a.from ?? 0).rooms[a.room]?.carriedOut ?? 0),
-  // Energy dug, or dropped and decayed, in every room but the colony's own.
+  // Energy dug in every room but the colony's own.
   outpostDug: outposts("dug"),
-  outpostDecayed: outposts("decayed"),
   dug: (samples, a) => (at(samples, a.to ?? Infinity).rooms[a.room]?.dug ?? 0) - (at(samples, a.from ?? 0).rooms[a.room]?.dug ?? 0),
   upgrade: (samples, a) => upgradedIn(at(samples, a.to ?? Infinity), a) - upgradedIn(at(samples, a.from ?? 0), a),
   // (none ever: Infinity)
@@ -296,9 +295,6 @@ export const measures = {
     const waits = rowsOf(dir).filter((e) => e.kind === "defend" && openedIn(a)(e)).map((e) => (e.contact ?? Infinity) - e.opened);
     return waits.length ? Math.max(...waits) : Infinity;
   },
-  // Engagements opened: an attack the bot never answered tests nothing.
-  // The priced engagements opened in `room` in [from, to): a window bounding others matches some.
-  engagements: (_, a, dir) => engagementsOf(dir).filter(openedIn(a)).length,
   // Sweeps that ever targeted `room`, wherever they opened.
   sweptIn: (_, a, dir) => rowsOf(dir).filter((e) => e.kind === "sweep" && e.rooms?.includes(a.room)).length,
   // Acts the engine refused (the soak's refusals.json) that `counted` counts.
@@ -332,9 +328,6 @@ export const measures = {
     const drawn = drawnBy(dir, a);
     return Math.min(...lives.filter((b) => b.ours && drawn.has(b.name)).flatMap(entries).filter((t) => t >= arrived)) - arrived;
   },
-  // The most ticks one engagement's bodies reached its raid apart (engaged.mjs), of those opened
-  // as `predictedWinsLost` reads: a set fed in one at a time.
-  arrivedApart: (_, a, dir) => Math.max(0, ...rowsOf(dir).filter(openedIn(a)).map((e) => e.apart ?? 0)),
   // Our bodies gone from the colony's rooms and their neighbours with life left: died, or walked
   // through a room the soak does not follow.
   bodiesOut: (_, __, dir) => {
@@ -387,11 +380,6 @@ export const measures = {
   },
   culled: (samples, a, dir) => culls(samples, a, dir).length,
   safeModes: (samples, a) => within(samples, a).filter((s, i, w) => s.safeMode && i > 0 && !w[i - 1].safeMode).length,
-  creepsLostBeforeSafeMode: (samples, a) => {
-    const seen = within(samples, a);
-    const safe = seen.findIndex((s) => s.safeMode);
-    return seen[0].creeps - Math.min(...seen.slice(0, safe < 0 ? seen.length : safe + 1).map((s) => s.creeps));
-  },
   // A core engagement that loses sight must not drop its razer's asks.
   closedOnCore: (samples, _, dir) => rowsOf(dir).filter((e) => e.core && e.closed !== null && (at(samples, e.closed).rooms[e.room]?.cores ?? 0) > 0).length,
   // A wave's engagement left open holds its bodies and asks: the most ticks
@@ -406,8 +394,6 @@ export const measures = {
   killedBeside: (_, a, dir) => rowsOf(dir).filter(kindIn(a)).reduce((n, e) => n + (e.killed ?? 0), 0),
   // The cost of the bodies of ours its engagements drew, each once.
   drewCost: (_, a, dir) => costOf(livesOf(dir).filter((b) => b.ours && new Set(rowsOf(dir).filter(kindIn(a)).flatMap((e) => e.drew)).has(b.name))),
-  // The most ticks a Defend opened in `room` in [from, to) stood answered on casts none of which stood.
-  waitedMost: (_, a, dir) => Math.max(0, ...defendsIn(dir, a).map((e) => e.waited ?? 0)),
   // Over the Defends that drafted a body in [from, to) and never stood down, the most ticks from
   // that draft to their close.
   answeredMost: (samples, a, dir) =>
@@ -438,12 +424,6 @@ export const measures = {
     within(samples, a).filter((s) => Object.values(s.strongholds ?? {}).some((h) => h.deployTime && h.intel?.[1] === h.deployTime)).length,
   // Enemies standing in our room at the window's end.
   hostilesAtEnd: (samples, a) => at(samples, a.to ?? Infinity).hostiles,
-  // `Hostiles.armed` off part letters; WORK counts anywhere, as every sample is our room.
-  attackersAtEnd: (samples, a) => {
-    const bodies = at(samples, a.to ?? Infinity).foes.map((f) => f.split(" ")[1]);
-    const strikes = (b) => /[ar]/.test(b);
-    return bodies.filter((b) => strikes(b) || b.includes("w") || (b.includes("h") && bodies.some(strikes))).length;
-  },
   // The most floods one tick ran (a miss is one flood), and the percent of
   // `fieldOn` lookups that missed: §1's "counting hits and misses".
   floodsMost: (_, a, dir) => withCounts(dir, a, (rows) => Math.max(0, ...rows.map((c) => c.atlasMisses ?? 0))),

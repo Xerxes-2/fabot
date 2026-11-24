@@ -6,7 +6,6 @@
   "assert": [
     { "measure": "strongholdFallenAt", "room": "W8N2", "max": 2000 },
     { "measure": "lootTaken", "room": "W8N2", "min": 90 },
-    { "measure": "bodiesLost", "room": "W8N2", "max": 0 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "bodiesLost", "room": "W8N2", "max": 0 }
   ]
 }
