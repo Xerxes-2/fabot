@@ -12,6 +12,7 @@ use fabot_base::world::{
     cast,
 };
 use fabot_base::{declarations, engine};
+use fabot_exchange::Outcome;
 use fabot_tactics::Tactic;
 
 /// What a `Defend` may fight as, in the order its ties fall to (§6.3).
@@ -133,6 +134,36 @@ fn passed_over(time: i32, since: i32, landing: i32, (ovens, idle): (&[&Oven], bo
 /// Its losses past the budget priced as it committed: a Defend's and a sweep's.
 pub fn beaten(e: &Engagement) -> bool {
     e.lost > e.budget
+}
+
+/// Past its first win's ticks from opening, a raid out of reach of the ramparts over our
+/// structures and struck by nothing of ours does not come to the post: re-read each re-price.
+pub(crate) fn off_post(scene: &Scene, e: &Engagement) -> bool {
+    let (Some(Outcome::Win(ticks, _)), Some(room)) = (e.predicted, scene.in_sight(e.room)) else {
+        return false;
+    };
+    let ours = |id: &Id| {
+        (scene.world.creeps.iter()).any(|c| c.id == *id)
+            || (room.structures.iter()).any(|s| s.id == *id && s.owner.is_ours())
+    };
+    let raid = |id: &Id| (scene.by_id.get(&e.group)).is_some_and(|g| g.members.contains(id));
+    let struck = (scene.world.attacks.iter()).any(|(by, at)| raid(at) && ours(by));
+    let kept = |r: &&Structure| r.kind != StructureType::Rampart && r.owner.is_ours();
+    let post: Vec<Pos> = (room.structures.iter())
+        .filter(|r| r.kind == StructureType::Rampart && r.owner.is_ours())
+        .filter(|r| room.structures.iter().filter(kept).any(|s| s.pos == r.pos))
+        .map(|r| r.pos)
+        .collect();
+    let members = (scene.by_id.get(&e.group).into_iter()).flat_map(|g| &g.members);
+    let mut at = members.filter_map(|m| scene.hostile_at.get(m));
+    let near = at.any(|h| post.iter().any(|p| p.within(engine::RANGED_RANGE, h)));
+    scene.world.time > e.opened + ticks && !near && !struck
+}
+
+/// The event: a Hold past its deadline whose raid never came to the post re-prices off it.
+pub(crate) fn unvisited(scene: &Scene, e: &Engagement) -> bool {
+    let fights = matches!(e.phase, Phase::Approaching | Phase::Fighting) && !e.unanswered;
+    e.plan.tactic == Tactic::Hold && fights && off_post(scene, e)
 }
 
 const OUTPOST_LOSSES: i32 = 2;

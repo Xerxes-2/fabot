@@ -481,7 +481,8 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
                 if left
                     || grew
                     || changed(&e, &events, &scene.by_id)
-                    || e.since == world.time && e.phase == Phase::Forming =>
+                    || e.since == world.time && e.phase == Phase::Forming
+                    || defend::unvisited(&scene, &e) =>
             {
                 decided.push(scene.priced(atlas, &mut asked, &e, &mut free, declarations));
             }

@@ -516,13 +516,17 @@ with one phase machine per kind under `core/fight/kinds/`.
   door meets it there (v1's guard). `❓` Absorbing a raid (stand down) vs
   answering it is no explicit Exchange price yet (owner). Home `Defend` never
   disengages (falls back to `unanswered` on towers/ramparts until the group
-  is gone). A raid in a home strikes as it stands, so a home's set none of
-  whose casts has begun, once its spawn has begun another body since they
-  were asked, or stands idle short of a cast's energy, and the landing their
-  price gave (their spawn ticks) has passed,
-  cannot arrive in time: that deadline sets it `unanswered` and drops its
-  asks, and a later event prices it afresh (owner; it formed on casts the
-  floor's refills never let begin).
+  is gone). Past its first win's priced ticks from opening, a raid out of
+  reach of the ramparts over our structures and struck by nothing of ours
+  (razing walls out of reach included) does not come to the post: re-read at
+  each re-price, it withholds the post, and a `Hold` re-prices off it the
+  first tick it holds. A raid in a home strikes as it stands, so a home's
+  set none of whose casts has begun, once its spawn has begun another body
+  since they were asked, or stands idle short of a cast's energy, and the
+  landing their price gave (their spawn ticks) has passed, cannot arrive in
+  time: that deadline sets it `unanswered` and drops its asks, and a later
+  event prices it afresh (owner; it formed on casts the floor's refills
+  never let begin).
 - **`Siege`, `Raid` & `Drain`** (`kinds/siege.rs`, `kinds/raid.rs`): opened on
   the table's `Siege` rows, one per `declarations.sieges` room (kept visible by
   observer/scout). Targets towers and economy structures, least struck by

@@ -107,8 +107,8 @@ pub fn closed(facts: Facts, open: &[Engagement], decided: &[Engagement]) -> Vec<
             step(facts, Some(e), &mut engagement);
             let dead = (e.ours.keys()).filter(|n| !scene.ours.contains_key(n.as_str()));
             engagement.lost += dead.count() as i32;
-            let stands = raid(raids, e)
-                .flat_map(|g| &g.members)
+            let stands = (raid(raids, e).flat_map(|g| &g.members))
+                .chain(&e.plan.order)
                 .any(|m| scene.hostile_at.contains_key(m));
             let controller = scene.in_sight(e.room).and_then(|r| r.controller.as_ref());
             let actual = &engagement.actual;

@@ -577,6 +577,17 @@ impl<'a> Scene<'a> {
         self.ask_slots(atlas, e, due, asked);
     }
 
+    pub(crate) fn in_reach(&self, e: &Engagement) -> bool {
+        let members = self
+            .by_id
+            .get(&e.group)
+            .into_iter()
+            .flat_map(|g| &g.members);
+        let raid: Vec<&Pos> = members.filter_map(|m| self.hostile_at.get(m)).collect();
+        let near = |c: &&Creep| raid.iter().any(|at| c.pos.within(engine::RANGED_RANGE, at));
+        self.members_of(e).iter().any(near)
+    }
+
     pub(super) fn facts_of(
         &self,
         e: &Engagement,
@@ -584,17 +595,6 @@ impl<'a> Scene<'a> {
         aging_out: &BTreeSet<String>,
     ) -> DefendFacts {
         let group = self.by_id.get(&e.group).cloned();
-
-        let near = |name: &str| -> bool {
-            match (self.ours.get(name), &group) {
-                (Some(creep), Some(g)) => (g.members.iter())
-                    .filter_map(|m| self.hostile_at.get(m))
-                    .any(|at| creep.pos.within(engine::RANGED_RANGE, at)),
-                _ => false,
-            }
-        };
-
-        let in_reach = e.ours.keys().any(|n| near(n));
         let on_our_ground = group
             .as_ref()
             .is_some_and(|g| self.defended.contains(&g.room()));
@@ -604,7 +604,7 @@ impl<'a> Scene<'a> {
             group,
             standing: standing.clone(),
             aging_out: aging_out.clone(),
-            in_reach,
+            in_reach: self.in_reach(e),
             home: self.home(e),
             held: self.homes.contains(&e.room),
             asked: self.spawning.iter().any(|c| c.engagement == e.id),

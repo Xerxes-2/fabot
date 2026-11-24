@@ -569,6 +569,14 @@ impl<'a> Scene<'a> {
                 .collect(),
             _ => self.remembered.get(&at).cloned().unwrap_or_default(),
         };
+        // Its kill order is the raid's owner's, a third party's bodies struck after.
+        let member = |h: &Creep| g.is_some_and(|g| g.members.contains(&h.id));
+        let kin: Vec<Creep> = (raid.iter())
+            .filter(|h| {
+                !raid.iter().any(member) || raid.iter().any(|m| member(m) && m.owner == h.owner)
+            })
+            .cloned()
+            .collect();
         let seen = g.filter(|_| room.is_some()).map(|g| g.centre);
         let Some(centre) = seen.or_else(|| self.raid_at(e, at)) else {
             return e.clone();
@@ -627,6 +635,7 @@ impl<'a> Scene<'a> {
         let terrain = casting::terrain_at(room, &centre);
 
         let posted = home
+            && !defend::off_post(self, e)
             && room.is_some_and(|r| r.name == e.room)
             && (room.iter().flat_map(|r| &r.structures))
                 .any(|s| s.kind == StructureType::Rampart && s.owner.is_ours());
@@ -749,7 +758,7 @@ impl<'a> Scene<'a> {
                 next.plan = Plan {
                     boosts,
                     tactic,
-                    order: casting::kill_order(&raid),
+                    order: casting::kill_order(&kin),
                     offers,
                 };
                 if e.unanswered || (e.phase == Phase::Forming && e.since == self.world.time) {
@@ -757,8 +766,8 @@ impl<'a> Scene<'a> {
                 }
                 next.unanswered = false;
                 next.capacity = capacity;
-                // A core alone is no fight Exchange predicts (§10.1).
-                next.predicted = if !e.unanswered {
+                // §10.1 scores the first answer's; a core alone is no fight Exchange predicts.
+                next.predicted = if e.predicted.is_some() {
                     e.predicted
                 } else if theirs.bodies.is_empty() {
                     None
