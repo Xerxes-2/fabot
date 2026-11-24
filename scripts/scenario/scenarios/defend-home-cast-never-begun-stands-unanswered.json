@@ -1,11 +1,11 @@
 {
-  "why": "a small Invader raids a home (soak:gen seed 61, E3S9 t22000) whose Defend asks one 650-energy cast; the spawn begins haulers ahead of it (t22018 on) while the raid kills three: past the landing its price gave (30 ticks of spawning) with none begun it stands unanswered, its ask dropped, rather than forming on it; a set asked again stands within its landing and a begun cast's spawning, so no stint passes 61 (257 on adb336fb; seed 80's 1,237 before)",
+  "why": "a small Invader raids a home (soak:gen seed 61, E3S9 t22000) whose Defend asks one 650-energy cast; the spawn begins haulers ahead of it (t22018 on) while the raid kills three: past the landing its price gave (30 ticks of spawning) with none begun it stands unanswered, its ask dropped, rather than forming on it; a set asked again stands within its landing and a begun cast's spawning, so no stint passes 61 (257 on adb336fb; seed 80's 1,237 before). The window opens at t20000: the raid is gen 61's third, and a faster dig brings it as early as t20300",
   "modules": ["atlas", "economy", "exchange", "fight", "layout", "mv", "observe", "strategy", "tactics"],
   "start": { "gen": 61, "seed": 1 },
   "ticks": 22400,
   "assert": [
-    { "measure": "defendsOpened", "room": "E3S9", "from": 21950, "min": 1 },
-    { "measure": "waitedMost", "room": "E3S9", "from": 21950, "max": 61 },
+    { "measure": "defendsOpened", "room": "E3S9", "from": 20000, "min": 1 },
+    { "measure": "waitedMost", "room": "E3S9", "from": 20000, "max": 61 },
     { "measure": "bodiesLost", "max": 0 }
   ]
 }
