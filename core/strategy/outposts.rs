@@ -11,6 +11,8 @@ use fabot_base::tiles;
 use fabot_base::tuning::Tuning;
 use fabot_base::vocabulary::Part;
 use fabot_base::world::{Pos, RoomName, StructureType, World};
+use fabot_economy::bodies::{self, Pattern};
+use fabot_economy::{derived, slots};
 use fabot_fight::casting;
 use fabot_fight::shape::{Engagement, Objective};
 
@@ -39,7 +41,7 @@ struct Price {
 }
 
 fn price(c: &Candidate, capacity: i32, walk: i32) -> Price {
-    use Part::{Carry, Claim, Move, Work};
+    use Part::{Carry, Claim, Move};
     let life = f64::from(engine::CREEP_LIFETIME);
     let reserver = [Claim, Move];
     let reserved = capacity >= engine::body_cost(&reserver);
@@ -49,29 +51,23 @@ fn price(c: &Candidate, capacity: i32, walk: i32) -> Price {
         engine::NEUTRAL_OUTPUT_PER_TICK
     };
     let n = c.outpost.sources.len() as f64;
-    let work = (rate + engine::HARVEST_PER_WORK - 1) / engine::HARVEST_PER_WORK;
-    let mut dig = vec![Work; work as usize];
-    dig.push(Carry);
-    dig.extend(vec![Move; ((work + 2) / 2) as usize]);
+    let dig =
+        bodies::sized(Pattern::Harvester, derived::dig_work(rate), capacity).unwrap_or_default();
     // A new remote has no road: its haulers are 1:1.
+    let pair = [Carry, Move];
     let carry = n * f64::from(rate * (2 * walk + 2)) / f64::from(engine::CARRY_PART_CAPACITY);
-    let per_body = f64::from((capacity / engine::body_cost(&[Carry, Move])).clamp(1, 25));
-    let haulers = (carry / per_body).ceil();
+    let per_body = f64::from((capacity / engine::body_cost(&pair)).clamp(1, 25));
 
-    let mut upkeep = (n * f64::from(engine::body_cost(&dig))
-        + carry * f64::from(engine::body_cost(&[Carry, Move])))
-        / life;
-    let mut parts = n * dig.len() as f64 + 2.0 * carry;
-    let mut bodies = n + haulers;
+    let mut upkeep = n * slots::upkeep(&dig) + carry * slots::upkeep(&pair);
+    let mut spawn = n * slots::spawn_ticks(&dig) + carry * slots::spawn_ticks(&pair);
+    let mut bodies = n + (carry / per_body).ceil();
     if reserved {
-        let lives = life / f64::from(engine::CLAIM_LIFETIME);
-        upkeep += f64::from(engine::body_cost(&reserver)) / f64::from(engine::CLAIM_LIFETIME);
-        parts += reserver.len() as f64 * lives;
+        upkeep += slots::upkeep(&reserver);
+        spawn += slots::spawn_ticks(&reserver);
         bodies += 1.0;
     }
     let lost = if c.contested { upkeep } else { 0.0 };
     let net = n * f64::from(rate) - upkeep - lost;
-    let spawn = parts * f64::from(engine::SPAWN_TICKS_PER_PART);
     // Its haul is priced unroaded, so a road repays itself and is no setup.
     let setup = n * f64::from(engine::CONTAINER_BUILD_COST) / life;
     let unbuilt = if c.stands { 0.0 } else { setup };
@@ -325,4 +321,39 @@ pub fn survey(
             (Some(c.home) == server || c.declared).then_some(c)
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fabot_base::declarations::Declared;
+    use fabot_base::world::Id;
+
+    /// A reserved source is dug by the harvester Economy casts, its spare WORK
+    /// counted: 6W1C3M at 800 energy, not 5W.
+    #[test]
+    fn a_reserved_dig_is_priced_at_the_harvester_economy_casts() {
+        let room: RoomName = "W1N1".parse().unwrap();
+        let at = Declared {
+            id: Id::MISREAD,
+            pos: Pos::new(room, 25, 25),
+        };
+        let c = Candidate {
+            outpost: Outpost {
+                room,
+                controller: at.clone(),
+                sources: vec![at],
+            },
+            home: room,
+            walk: 0,
+            walked: 0,
+            contested: false,
+            declared: false,
+            stands: true,
+        };
+        let haul = f64::from(engine::HELD_OUTPUT_PER_TICK * 2) / 50.0 * 100.0 / 1500.0;
+        let upkeep = 800.0 / 1500.0 + haul + 650.0 / 600.0;
+        let net = f64::from(engine::HELD_OUTPUT_PER_TICK) - upkeep;
+        assert!((price(&c, 800, 0).net - net).abs() < 1e-9);
+    }
 }

@@ -265,7 +265,7 @@ pub fn claim_parts_for(held: i32) -> i32 {
     )
 }
 
-fn upkeep(body: &[Part]) -> f64 {
+pub fn upkeep(body: &[Part]) -> f64 {
     f64::from(engine::body_cost(body)) / f64::from(engine::lifetime(body.iter().copied()))
 }
 
@@ -1115,7 +1115,7 @@ fn rank_of(job: &Job, own: bool) -> i32 {
     }
 }
 
-fn spawn_ticks(body: &[Part]) -> f64 {
+pub fn spawn_ticks(body: &[Part]) -> f64 {
     f64::from(engine::SPAWN_TICKS_PER_PART * body.len() as i32 * engine::CREEP_LIFETIME)
         / f64::from(engine::lifetime(body.iter().copied()))
 }
