@@ -9,7 +9,7 @@
   },
   "ticks": 2500,
   "assert": [
-    { "measure": "bodiesOut", "max": 0 },
+    { "measure": "diedIn", "max": 0 },
     { "measure": "hostileTicks", "room": "W6S5", "max": 500 },
     { "each": "engagement", "where": { "kind": "defend", "room": "W6S5" }, "assert": { "lasted": { "max": 400 } } },
     { "measure": "dug", "room": "W5S5", "from": 400, "min": 15000 }

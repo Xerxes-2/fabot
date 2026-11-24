@@ -8,7 +8,7 @@
   "ticks": 1500,
   "assert": [
     {
-      "measure": "bodiesOut",
+      "measure": "diedIn",
       "max": 0
     },
     {

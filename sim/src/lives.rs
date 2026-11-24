@@ -16,7 +16,6 @@ pub struct Lives {
     open: BTreeMap<String, Value>,
     keys: BTreeMap<String, String>,
     pub closed: Vec<Value>,
-    /// Bodies destroyed in any room the tick a strike landed, `by` what struck last.
     pub deaths: Vec<Value>,
     pub still_loaded: u64,
     stills: BTreeMap<String, (String, f64, u64)>,
@@ -149,6 +148,7 @@ impl Lives {
                 life["last"] = json!(time);
                 life["ttl"] = json!(num(o, atom!("ageTime")) - time as f64);
                 life["hits"] = json!(num(o, atom!("hits")));
+                life["hitsMax"] = json!(num(o, atom!("hitsMax")));
                 life["boosts"] = json!(boosts(o).into_iter().collect::<BTreeSet<_>>());
                 let ticks = &mut life["rooms"][room.name];
                 *ticks = json!(ticks.as_u64().unwrap_or(0) + 1);
@@ -214,7 +214,6 @@ impl Lives {
                 let Some(k) = self.keys.get(id) else { continue };
                 if let Some(life) = self.open.get_mut(k) {
                     life["struck"] = json!(life["struck"].as_f64().unwrap_or(0.0) + d);
-                    life["struckAt"] = json!(time);
                 }
             }
         }
@@ -229,7 +228,11 @@ impl Lives {
         carried_out
     }
 
-    /// The bodies still seen at the run's end, closed after the others.
+    pub fn mark_recycled(&mut self, id: &str) {
+        let life = self.keys.get(id).and_then(|k| self.open.get_mut(k));
+        life.into_iter().for_each(|l| l["recycled"] = json!(true));
+    }
+
     pub fn close(&mut self) -> Vec<Value> {
         let open = std::mem::take(&mut self.open);
         std::mem::take(&mut self.closed)

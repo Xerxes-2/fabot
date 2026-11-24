@@ -26,18 +26,17 @@ const costOf = (lives) => [...new Map(lives.map((b) => [b.name, b.cost])).values
 export const offsetOf = (samples) => samples[0].time - samples[0].t;
 const defendsIn = (dir, a) => rowsOf(dir).filter((e) => e.kind === "defend" && openedIn(a)(e));
 const drawnBy = (dir, a) => new Set(defendsIn(dir, a).flatMap((e) => e.drew));
+// Our bodies the engine destroyed the tick a strike landed (seat.json's `deaths`), in `room` if one is named.
+const seats = new Map();
+const seatOf = (dir) => seats.get(dir) ?? seats.set(dir, JSON.parse(readFileSync(join(dir, "seat.json"), "utf8"))).get(dir);
+const killsOf = (dir, room) => seatOf(dir).deaths.filter((d) => d.ours && (!room || d.room === room));
 // The ticks our bodies that dig or carry were killed in `room` from `from` on, soonest first.
-const culls = (samples, a, dir) => {
-  const lives = livesOf(dir);
-  const end = Math.max(...lives.map((b) => b.last));
-  const offset = offsetOf(samples);
-  return lives
-    .filter((b) => b.ours && b.at.startsWith(`${a.room} `) && b.last < end && b.ttl > AGED && b.last - b.struckAt <= STRUCK_LATELY)
+const culls = (samples, a, dir) =>
+  killsOf(dir, a.room)
     .filter((b) => /^[wcm]+$/.test(b.body) && /[wc]/.test(b.body))
-    .map((b) => b.last - offset)
+    .map((d) => d.t - offsetOf(samples))
     .filter((t) => t >= (a.from ?? 0))
     .sort((x, y) => x - y);
-};
 const scoutsOf = (dir) => livesOf(dir).filter((b) => b.ours && b.name.startsWith("scout-"));
 // Rival bodies `uid`'s seat killed: what struck them last was its.
 export const killedBy = (deaths, uid) => deaths.filter((d) => d.user !== uid && d.by?.[1] === uid);
@@ -106,11 +105,7 @@ const LEDGER_LEAST = 1000;
 const SEEN_AFTER_CAST = 2;
 // The engine's CREEP_SPAWN_TIME.
 const SPAWN_TIME_PER_PART = 3;
-// `AGED` in `core/observe/metrics.rs`: fewer ticks to live, a body died of age.
-const AGED = 5;
 const CREEP_LIFE_TIME = 1500;
-// `STRUCK_LATELY` there: struck within these ticks of its death, a body was killed.
-const STRUCK_LATELY = 5;
 // `MENDER_WORK` in `core/economy/slots.rs`.
 const MENDER_WORK = 2;
 const firstClaimed = (samples, met) => samples.find((s) => Object.keys(s.claimed ?? {}).length && Object.values(s.claimed).every(met))?.t ?? Infinity;
@@ -142,19 +137,13 @@ export const measures = {
       .map(([bot, ledger]) => Math.abs((100 * (bot - ledger)) / ledger));
     return errors.length ? Number(Math.max(...errors).toFixed(1)) : Infinity;
   }),
-  // The bot's deaths (`death.*`) against the engine's, over the bot's full
-  // windows: a body is counted dead the tick after it was last seen, and
-  // `bodies.jsonl` also closes a body that only walked out of its rooms, so
-  // one that comes back, or was never struck, did not die.
+  // The bot's deaths (`death.*`) against the engine's kills, over the bot's full windows.
   deathsError: on("from to", (_, a, dir) => {
     const full = windowsOf(dir, a).filter((w) => w.ticks === 100);
     if (!full.length) return Infinity;
     const [lo, hi] = [Math.min(...full.map((w) => w.start)), Math.max(...full.map((w) => w.start)) + 100];
     const bot = full.reduce((n, w) => n + Object.entries(w.values).reduce((m, [k, v]) => m + (k.startsWith("death.") ? v : 0), 0), 0);
-    const lives = livesOf(dir);
-    const back = (b) => lives.some((c) => c.name === b.name && c.first > b.last);
-    const died = lives.filter((b) => b.ours && b.struck && b.ttl > AGED && b.last + 1 >= lo && b.last + 1 < hi && !back(b));
-    return Math.abs(bot - died.length);
+    return Math.abs(bot - killsOf(dir).filter((d) => d.t >= lo && d.t < hi).length);
   }),
   // Roads and containers lost between samples, over every room the soak follows.
   decayedAway: on("from to", (samples, a) => {
@@ -357,35 +346,19 @@ export const measures = {
   }),
   // The ticks a fighting blob stood split, over its engagements (engaged.mjs).
   strayTicks: on("room from to", (_, a, dir) => rowsOf(dir).filter(openedIn(a)).reduce((n, e) => n + (e.strayed ?? 0), 0)),
-  // Our bodies gone from the colony's rooms and their neighbours with life left: died, or walked
-  // through a room the soak does not follow.
-  bodiesOut: (_, __, dir) => {
-    const lives = livesOf(dir);
-    const end = Math.max(...lives.map((b) => b.last));
-    return new Set(lives.filter((b) => b.ours && b.last < end && b.ttl > 1).map((b) => b.name)).size;
-  },
   // Our bodies that walked through `room` (in by one side, out by another) on a tick in [from, to).
   crossed: on("room from to", (samples, a, dir) =>
     livesOf(dir).filter((b) => b.ours && (b.entered ?? []).some(([r, t], i, e) => r === a.room && i > 0 && i + 1 < e.length && e[i - 1][0] !== e[i + 1][0] && t - offsetOf(samples) >= (a.from ?? 0) && t - offsetOf(samples) < (a.to ?? Infinity))).length),
-  // Our bodies that fell in `room` with life left.
-  diedIn: on("room", (_, a, dir) => {
-    const lives = livesOf(dir);
-    const end = Math.max(...lives.map((b) => b.last));
-    return lives.filter((b) => b.ours && b.last < end && b.ttl > 1 && b.at?.startsWith(`${a.room} `)).length;
-  }),
-  // Fight bodies that died of age standing in their seat's room: cast for a fight that never took them.
+  // Our bodies killed, in `room` if one is named.
+  diedIn: on("room", (_, a, dir) => killsOf(dir, a.room).length),
+  // Fight bodies whose life ended in their seat's room neither killed nor recycled, so of age: cast for a fight that never took them.
   agedAtHome: (_, __, dir) => {
-    const room = JSON.parse(readFileSync(join(dir, "seat.json"), "utf8")).room;
-    const last = new Map(livesOf(dir).filter((b) => b.ours && b.name.startsWith("fight-")).map((b) => [b.name, b]));
-    return [...last.values()].filter((b) => b.ttl <= AGED && b.at?.startsWith(room)).length;
+    const [room, lives] = [seatOf(dir).room, livesOf(dir)];
+    const [end, killed] = [Math.max(...lives.map((b) => b.last)), new Set(killsOf(dir).map((d) => d.name))];
+    const last = new Map(lives.filter((b) => b.ours && b.name.startsWith("fight-")).map((b) => [b.name, b]));
+    return [...last.values()].filter((b) => b.last < end && !b.recycled && !killed.has(b.name) && b.at?.startsWith(room)).length;
   },
-  // Our bodies gone below full hits, with life left and no strike lately: recycled
-  // wounded, since no other end leaves a body unstruck before its age.
-  recycledWounded: (_, __, dir) => {
-    const lives = livesOf(dir);
-    const end = Math.max(...lives.map((b) => b.last));
-    return lives.filter((b) => b.ours && b.last < end && b.ttl > AGED && b.hits < 100 * b.body.length && !(b.last - b.struckAt <= STRUCK_LATELY)).length;
-  },
+  recycledWounded: (_, __, dir) => livesOf(dir).filter((b) => b.ours && b.recycled && b.hits < b.hitsMax).length,
   bodiesStruck: (_, __, dir) => livesOf(dir).reduce((n, b) => n + (b.ours ? (b.struck ?? 0) : 0), 0),
   // The damage struck on the body called `name`.
   struckOn: on("name", (_, a, dir) => livesOf(dir).reduce((n, b) => n + (b.name === a.name ? (b.struck ?? 0) : 0), 0)),
@@ -406,8 +379,6 @@ export const measures = {
     return spawns[0] - Math.min(...spawns);
   }),
   fewestCreeps: on("from to", (samples, a) => Math.min(...within(samples, a).map((s) => s.creeps))),
-  // A death within STRUCK_LATELY ticks of a strike is a kill, as `death.*` reads one: a body
-  // struck, then recycled by its spawn, was not killed.
   safeModeAfterCull: on("room from to", (samples, a, dir) => {
     const kills = culls(samples, a, dir);
     if (kills.length < 2) return 0;
@@ -509,14 +480,14 @@ export const events = {
   // the last Defend opened there before it; `exposure` and `exposedBefore`, the room's over the
   // metric windows after it and from that Defend to it.
   safeMode: (samples, dir) => {
-    const [offset, lives, rows, windows] = [offsetOf(samples), livesOf(dir), rowsOf(dir), windowsOf(dir, {})];
+    const [offset, rows, windows] = [offsetOf(samples), rowsOf(dir), windowsOf(dir, {})];
     const of = (s, room) => s.homes?.[room] ?? s;
     return [...homesOf(samples)].flatMap((room) =>
       samples
         .filter((s, i) => i > 0 && of(s, room).safeMode && !of(samples[i - 1], room).safeMode)
         .map((s) => {
           const raided = Math.max(0, ...rows.filter((e) => e.kind === "defend" && e.room === room && e.opened <= s.t).map((e) => e.opened));
-          const killed = lives.filter((b) => b.ours && b.at?.startsWith(`${room} `) && b.ttl > AGED && b.last - b.struckAt <= STRUCK_LATELY && b.last - offset >= raided && b.last - offset <= s.t);
+          const killed = killsOf(dir, room).filter((d) => d.t - offset >= raided && d.t - offset <= s.t);
           const exposed = (w) => (w.row === room ? (w.values.exposure ?? 0) : 0);
           const exposure = windows.filter((w) => w.start >= s.t).reduce((n, w) => n + exposed(w), 0);
           const exposedBefore = windows.filter((w) => w.start < s.t && w.start + w.ticks > raided).reduce((n, w) => n + exposed(w), 0);

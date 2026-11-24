@@ -331,6 +331,9 @@ impl Sampler {
                     "tombstone" if self.graves.insert(text(o, atom!("_id")).into()) => {
                         let body = parts(o);
                         let recycled = self.taken.contains(text(o, atom!("creepId")));
+                        if recycled {
+                            self.lives.mark_recycled(text(o, atom!("creepId")));
+                        }
                         let ttl = num(o, atom!("creepTicksToLive")) / life(&body);
                         let rate = if recycled { 1.0 } else { CREEP_CORPSE_RATE } * ttl;
                         let max = f64::from(CREEP_PART_MAX_ENERGY);
@@ -566,8 +569,7 @@ impl Sampler {
         let home = v.room(name);
         let mut bodies = Vec::new();
         let (mut creeps, mut body_parts, mut spawns, mut hostiles) = (0, 0, 0, 0);
-        let (mut sources, mut stored, mut dropped, mut cash, mut capacity) =
-            (0.0, 0.0, 0.0, 0.0, 0.0);
+        let (mut sources, mut stored, mut cash, mut capacity) = (0.0, 0.0, 0.0, 0.0);
         let (mut sites, mut oldest, mut level, mut progress, mut safe) = (0, 0, 0.0, 0.0, false);
         let mut built: BTreeMap<String, i64> = BTreeMap::new();
         let mut queued: BTreeMap<String, i64> = BTreeMap::new();
@@ -596,9 +598,6 @@ impl Sampler {
                 }
                 "source" => sources += num(o, atom!("energy")),
                 "mineral" => mineral = json!(num(o, atom!("mineralAmount"))),
-                "energy" if text(o, atom!("resourceType")) == "energy" => {
-                    dropped += num(o, atom!("energy"))
-                }
                 "creep" if mine => {
                     creeps += 1;
                     body_parts += parts(o).len();
@@ -687,7 +686,7 @@ impl Sampler {
             .count();
         let row = json!({ "t": t, "time": time, "rcl": level, "safeMode": safe, "progress": progress, "creeps": creeps,
             "parts": body_parts, "spawns": spawns, "hostiles": hostiles, "sources": sources, "energy": cash,
-            "capacity": capacity, "stored": stored, "dropped": dropped, "sites": sites, "queued": queued,
+            "capacity": capacity, "stored": stored, "sites": sites, "queued": queued,
             "oldestPaying": oldest, "built": built, "sourceContainers": source_containers.len(), "buried": buried,
             "unroaded": unroaded, "postedLinks": posted, "mineralAmount": mineral, "bodies": bodies });
         match row {
