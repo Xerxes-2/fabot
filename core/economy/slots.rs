@@ -632,10 +632,10 @@ impl Plan<'_> {
             };
         // A worker draws only a full load past the reserve from one store
         // (`jobs::fuel`), a payback site's builder past none: short of it the
-        // surplus is the hand-fed upgraders'.
-        // With no reserve kept the containers and piles are a worker's too.
+        // surplus is the hand-fed upgraders'; its body refilled from the stock
+        // first, or it is cast to stand under the reserve its life.
         let load = worker.as_deref().map_or(0, |w| {
-            part_count_in(w, Part::Carry) * engine::CARRY_PART_CAPACITY
+            part_count_in(w, Part::Carry) * engine::CARRY_PART_CAPACITY + engine::body_cost(w)
         });
         let drawn = |kept: i32| {
             storage.is_none()

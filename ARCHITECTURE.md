@@ -308,9 +308,9 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   it draws stock down to the reserve and no further; **below a storage's reserve
   the surplus is the upgraders' alone** (whom carriers feed) — upgrade is the
   score, so it shrinks with the stock rather than stopping while it refills.
-  Workers draw only a full load past reserve, so none spawns short of it except
-  the downgrade-deadline upgrader and the home-road mender, both permitted to
-  draw reserve.
+  Workers draw only a full load past reserve, so none spawns short of it and
+  its body except the downgrade-deadline upgrader and the home-road mender,
+  both permitted to draw reserve.
 - **Build vs upgrade:** paying structures (spawn, extension, container, storage,
   link, tower, extractor, terminal) preempt upgrading because a structure pays
   only once complete (only RCL3's tower and RCL6's minerals are worth rushing:

@@ -1,9 +1,9 @@
 {
-  "why": "a stocked colony whose stock stands short of a worker's load past its reserve casts no worker but the deadline's and an outpost's 2-WORK mender (upkeep, not spend), since a worker never draws under the reserve while no site that pays back stands (#832): workers stood empty beside the controller while the spawn kept casting more. The line is this level's 20k reserve with no threat in the world; main at 577ffede cast 3 workers under it from t1000 (51 worker-windows)",
+  "why": "a stocked colony casts a worker only while the stock past its reserve pays the worker's body and a load, since a worker never draws under the reserve while no site that pays back stands (#832): workers stood empty beside the controller while the spawn kept casting more. The line is this level's 20k reserve with no threat in the world; main at 577ffede cast 3 workers under it from t1000, and a2c61604 on seeds 3 and 4 one at 21.4k whose 1800 body took the stock to 19k, where it stood idle its life",
   "modules": ["economy"],
   "start": { "world": "scripts/scenario/worlds/season-outpost-ring.json", "room": "E23S9", "seed": 1, "node": "N4" },
   "ticks": 4000,
   "assert": [
-    { "measure": "castsBelow", "pattern": "worker", "below": 20000, "from": 1000, "max": 0 }
+    { "each": "worker", "where": { "t": { "min": 1000, "max": 3500 } }, "assert": { "worked": { "min": 1 } } }
   ]
 }

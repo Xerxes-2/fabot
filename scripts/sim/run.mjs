@@ -27,7 +27,7 @@ export const SIM_MEASURES = new Set([
   "levelsLost", "spawnsLost", "fewestCreeps", "safeModeAfterCull", "rising", "outpostDug", "outpostDecayed", "upgradeWhileQueued",
   "upgradeStall", "leastDowngrade", "coresAtEnd", "hostilesAtEnd", "hostileTicks", "floodsMost", "atlasMissRate",
   "threatLookupsMost", "parkedTicks", "outpostFlips", "slotIdsShared", "refusals", "faults", "heldAtEnd", "oresAtEnd", "homeLevel", "claimSafeMode", "claimLevelOf", "claimsOwned",
-  "rcl2ToTower", "claimSpawned", "claimersCast", "made", "produced", "seenAt", "extractorToOre", "boosted", "boostedWith", "bounced", "stillLoaded", "mineralAside", "mineralHeld", "carriedOut", "castsBelow",
+  "rcl2ToTower", "claimSpawned", "claimersCast", "made", "produced", "seenAt", "extractorToOre", "boosted", "boostedWith", "bounced", "stillLoaded", "mineralAside", "mineralHeld", "carriedOut",
   "spawnStuck", "scoutsCast", "scoutStill", "scoutTicksIn", "reserverOnPost", "castIn", "bodiesOut", "bodiesStruck", "struckOn",
   "deathsError", "attackersAtEnd", "creepsLostBeforeSafeMode", "predictedWinsLost", "engagements", "repriced", "held", "oscillation", "bodiesLost", "waitedMost", "safeModes",
   "closedOnCore", "strongholdMisread", "strongholdDeploying", "strongholdFallenAt", "lootTaken", "boostedShort", "diedIn", "crossed", "heldPastWave", "idleMost", "answeredMost", "sentTo", "sentBack", "draftedAfterOthers", "arrivedApart", "signsSent", "signedInRun",

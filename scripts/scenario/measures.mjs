@@ -106,21 +106,6 @@ export const measures = {
     if (a.total) return values.reduce((n, v) => n + v, 0);
     return a.min !== undefined ? Math.min(...values) : Math.max(...values);
   },
-  // A body cast before the stock fell is not one cast under it, nor one cast
-  // between two samples while the stock climbed past the line. An outpost's
-  // mender is upkeep, not spend; a stocked colony casts no other 2-WORK worker.
-  castsBelow: (samples, a, dir) =>
-    new Set(
-      livesOf(dir)
-        .filter((b) => b.ours && b.name.startsWith(`${a.pattern}-`))
-        .filter((b) => b.body.split("w").length - 1 !== MENDER_WORK)
-        .filter((b) => {
-          const at = samples.findLastIndex((s) => s.time <= b.first);
-          const [before, after] = [samples[at], samples[at + 1] ?? samples[at]];
-          return before && before.t >= (a.from ?? 0) && before.stored < a.below && after.stored < a.below;
-        })
-        .map((b) => b.name),
-    ).size,
   // The most percent the bot's spend split (`spend.*`, its metrics) is off the
   // engine's ledger by category, over the rooms the ledger follows, between
   // the first and the last full window read with the ledger beside it.
@@ -521,6 +506,13 @@ export const events = {
           return { t: s.t, who: `safe mode in ${room}`, room, raided, killed: killed.length, exposure, exposedBefore };
         }),
     );
+  },
+  // Each worker of ours but an outpost's mender (upkeep, not spend): `worked`, the acts of its life.
+  worker: (samples, dir) => {
+    const offset = offsetOf(samples);
+    return livesOf(dir)
+      .filter((b) => b.ours && b.name.startsWith("worker-") && b.body.split("w").length - 1 !== MENDER_WORK)
+      .map((b) => ({ t: b.first - offset, who: b.name, worked: Object.values(b.acts).reduce((n, k) => n + k, 0) }));
   },
   // Each room dug that is no home, over the run: `decayedShare`, the percent of its dug left to decay.
   outpost: (samples) => {
