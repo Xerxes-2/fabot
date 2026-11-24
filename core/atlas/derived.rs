@@ -230,7 +230,7 @@ pub fn derive(world: &World, atlas: &mut Atlas) -> Derived {
         .filter_map(|home| {
             let room = world.room(*home)?;
             Some(Home {
-                spawn: world.spawns.iter().find(|s| s.pos.room == *home)?.pos,
+                spawn: world.working_spawns().find(|s| s.pos.room == *home)?.pos,
                 stocked: (room.structures.iter())
                     .any(|s| s.kind == StructureType::Storage && s.owner.is_ours()),
                 capacity: room.energy_capacity,
