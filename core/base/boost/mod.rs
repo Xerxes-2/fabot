@@ -236,7 +236,8 @@ pub fn labs_in<'a>(world: &'a World, room: RoomName) -> impl Iterator<Item = &'a
         .filter(|s| s.kind == world::StructureType::Lab && s.owner.is_ours())
 }
 
-fn home_holds(world: &World, room: RoomName, compound: ResourceType) -> i32 {
+/// A load between a store and a lab is still the room's.
+pub fn home_holds(world: &World, room: RoomName, compound: ResourceType) -> i32 {
     let stores = (world.rooms.iter())
         .filter(|r| r.name == room)
         .flat_map(|r| r.structures.iter())

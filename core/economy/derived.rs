@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use fabot_atlas::{self as atlas, Atlas, Tree};
 use fabot_base::HashMap;
-use fabot_base::boost::{Boosting, Load};
+use fabot_base::boost::{self, Boosting, Load};
 use fabot_base::declarations::{self, Declarations, OpKind, Outpost};
 use fabot_base::engine;
 use fabot_base::grid::Footprint;
@@ -1036,18 +1036,6 @@ fn minerals_dug_or_held(world: &World, colonies: &[Ground]) -> Vec<ResourceType>
         .collect()
 }
 
-/// A load between a store and a lab is still the room's.
-fn held_in(world: &World, g: &Ground, r: ResourceType) -> i32 {
-    (g.ores.iter().filter(|o| o.2 == r).map(|o| o.3).sum::<i32>())
-        + (g.labs.iter())
-            .filter_map(|l| l.held.filter(|h| h.0 == r).map(|h| h.1))
-            .sum::<i32>()
-        + (world.creeps.iter())
-            .filter(|c| c.owner.is_ours() && c.pos.room == g.room)
-            .map(|c| c.store.amount_of(r))
-            .sum::<i32>()
-}
-
 /// `roles` and `bench` are `None` with too few labs to react.
 struct Cluster<'g> {
     ground: &'g Ground,
@@ -1205,7 +1193,7 @@ impl<'a> Ours<'a> {
     }
 
     fn held(&self, g: &Ground, r: ResourceType) -> i32 {
-        held_in(self.world, g, r)
+        boost::home_holds(self.world, g.room, r)
     }
 
     fn empire(&self, r: ResourceType) -> i32 {
