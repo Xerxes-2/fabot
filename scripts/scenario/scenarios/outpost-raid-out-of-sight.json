@@ -1,5 +1,5 @@
 {
-  "why": "An outpost Defend whose raid went out of sight prices the raid `sightings` remembers and answers it. W2N1 is seen on the first ticks (a scout dying of age), then blind; the Defend body committed to it ages out at home on t9. main could not price blind: its Defend sat in Fighting with no body or cast until the group expired, then disengaged, and the Invader stood 1398 of 1500 ticks with W2N1 dug 0; the fix casts on t9, kills it by t91 (90 hostile ticks) and W2N1 digs 13116",
+  "why": "An outpost Defend whose raid went out of sight prices the raid `sightings` remembers and answers it. W2N1 is seen on the first ticks (a scout dying of age), then blind; the Defend body committed to it ages out at home on t9. main could not price blind: its Defend sat in Fighting with no body or cast until the group expired, then disengaged, and the Invader stood 1398 of 1500 ticks with W2N1 dug 0; the fix casts on t9, kills it by t91 (90 hostile ticks) and W2N1 digs 13116. The Invader stands at most 300 ticks and each W2N1 Defend closes within 300 of opening (42631f78, before the fix: 1,400, the whole run; main seeds 1-5: 122)",
   "modules": ["fight"],
   "start": {
     "world": "scripts/scenario/worlds/outpost-raid-out-of-sight.json",
@@ -9,6 +9,7 @@
   "ticks": 1500,
   "assert": [
     { "measure": "hostileTicks", "room": "W2N1", "max": 300 },
+    { "each": "engagement", "where": { "kind": "defend", "room": "W2N1" }, "assert": { "lasted": { "max": 300 } } },
     { "measure": "dug", "room": "W2N1", "min": 6000 },
     { "measure": "idleMost", "max": 0 }
   ]
