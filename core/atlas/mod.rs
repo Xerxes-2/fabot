@@ -533,8 +533,8 @@ impl Atlas {
         controller: Tile,
         buffer: Tile,
     ) -> Vec<Tile> {
-        tiles::within(1, buffer)
-            .into_iter()
+        std::iter::once(buffer)
+            .chain((tiles::within(1, buffer).into_iter()).filter(|t| *t != buffer))
             .filter(|t| walkable(*t) && tiles::range(*t, controller) <= engine::UPGRADE_RANGE)
             .collect()
     }
