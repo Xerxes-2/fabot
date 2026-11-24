@@ -279,16 +279,9 @@ fn guards<'w>(world: &'w World, room: RoomName) -> Vec<&'w Creep> {
 
 /// v1's guard: a body of ours striking as far as the raider, and in reach of it, holds it off the work.
 fn held(guards: &[&Creep], foe: &Creep) -> bool {
-    let range = |c: &Creep| {
-        [
-            (Part::RangedAttack, engine::RANGED_RANGE),
-            (Part::Attack, engine::MELEE_RANGE),
-        ]
-        .into_iter()
-        .find_map(|(part, range)| (c.live(part) > 0).then_some(range))
-    };
+    let range = |c: &Creep| engine::strike_reach(|p| c.live(p) > 0);
     (guards.iter()).any(|g| {
-        range(g).is_some() && range(g) >= range(foe) && g.pos.within(hostiles::reach(g), &foe.pos)
+        range(g) > 0 && range(g) >= range(foe) && g.pos.within(hostiles::reach(g), &foe.pos)
     })
 }
 

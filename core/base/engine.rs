@@ -181,11 +181,10 @@ pub fn live_parts(body: &[Part], hits: i32) -> Vec<Part> {
     body[skip..].to_vec()
 }
 
-pub fn strike_reach(body: &[Part], hits: i32) -> i32 {
-    let live = live_parts(body, hits);
-    if live.contains(&Part::RangedAttack) {
+pub fn strike_reach(live: impl Fn(Part) -> bool) -> i32 {
+    if live(Part::RangedAttack) {
         RANGED_RANGE
-    } else if live.contains(&Part::Attack) {
+    } else if live(Part::Attack) {
         MELEE_RANGE
     } else {
         0

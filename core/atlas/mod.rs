@@ -23,7 +23,6 @@ use fabot_base::grid::{
     weight_of,
 };
 use fabot_base::tiles::{self, Post, Table, Tile, TileSet};
-use fabot_base::vocabulary::Part;
 use fabot_base::world::{Built, Id, Owner, Pos, Room, RoomName, StructureType, World};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -662,7 +661,7 @@ impl Atlas {
 
     fn keeper_reach() -> i32 {
         let body = engine::keeper_body();
-        engine::strike_reach(&body, engine::PART_HITS * body.len() as i32)
+        engine::strike_reach(|p| body.contains(&p))
     }
 
     /// The tiles the keepers strike from anywhere on the walk to their posts:
@@ -674,8 +673,10 @@ impl Atlas {
             |from: Tile, reach: i32| (from, Atlas::guarded(room, from).unwrap_or(from), reach);
         let mut strikers: Vec<(Tile, Tile, i32)> = living
             .map(|c| {
-                let body: Vec<Part> = c.body.iter().map(|p| p.kind).collect();
-                striker(tiles::of_pos(&c.pos), engine::strike_reach(&body, c.hits))
+                striker(
+                    tiles::of_pos(&c.pos),
+                    engine::strike_reach(|p| c.live(p) > 0),
+                )
             })
             .collect();
         for lair in room

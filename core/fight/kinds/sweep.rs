@@ -10,7 +10,7 @@ use fabot_base::declarations::{Declarations, OpKind};
 use fabot_base::intel::Row;
 use fabot_base::tiles;
 use fabot_base::vocabulary::Part;
-use fabot_base::world::{Creep, Fallen, Owner, Pos, Room, RoomName, Source};
+use fabot_base::world::{Creep, Fallen, Owner, Pos, Room, RoomName, Source, hostiles};
 use fabot_base::{engine, grid};
 use fabot_exchange::Fighter;
 use fabot_tactics::Tactic;
@@ -33,14 +33,7 @@ pub struct Facts {
 pub fn prey<'a>(room: &'a Room) -> Vec<&'a Creep> {
     room.hostiles()
         .filter(|h| matches!(h.owner, Owner::Enemy(_)))
-        .filter(|h| {
-            h.body
-                .iter()
-                .all(|p| p.kind != Part::Attack && p.kind != Part::RangedAttack)
-                && h.body
-                    .iter()
-                    .any(|p| p.kind == Part::Work || p.kind == Part::Carry || p.kind == Part::Claim)
-        })
+        .filter(|h| !hostiles::weaponed(h) && hostiles::works(h))
         .collect()
 }
 

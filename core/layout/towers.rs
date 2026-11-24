@@ -18,13 +18,9 @@ fn heal_on(target: &Creep, hostiles: &[Creep]) -> i32 {
 }
 
 fn strikes(hostile: &Creep, struck: &[Pos]) -> bool {
-    let melee = power(hostile, Part::Attack) + power(hostile, Part::Work) > 0;
-    let ranged = power(hostile, Part::RangedAttack) > 0;
-    struck.iter().any(|p| match hostile.pos.range(p) {
-        Some(r) if r <= engine::MELEE_RANGE => melee || ranged,
-        Some(r) if r <= engine::RANGED_RANGE => ranged,
-        _ => false,
-    })
+    let wrecks = hostile.live(Part::Work) > 0;
+    let reach = engine::strike_reach(|p| hostile.live(p) > 0 || p == Part::Attack && wrecks);
+    (struck.iter()).any(|p| hostile.pos.range(p).is_some_and(|r| r <= reach))
 }
 
 fn taken(target: &Creep, damage: i32) -> i32 {

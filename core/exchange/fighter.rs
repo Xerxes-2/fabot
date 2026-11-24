@@ -46,7 +46,7 @@ pub fn of_parts(
         ranged,
         heal: power(Part::Heal),
         work: power(Part::Work),
-        reach: engine::strike_reach(body, hits),
+        reach: engine::strike_reach(|p| power(p) > 0),
         gait: FatigueFactor {
             weight: body.len() as i32
                 - part_count_in(body, Part::Move)

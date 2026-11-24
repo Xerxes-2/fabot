@@ -261,15 +261,9 @@ const REFILLING_FLOOR: i32 = 32;
 
 fn reaches(structure: bool, step: i32, raid: &[&Creep], at: &Pos) -> bool {
     raid.iter().any(|h| {
-        let range = if h.live(Part::RangedAttack) > 0 {
-            Some(engine::RANGED_RANGE)
-        } else if h.live(Part::Attack) > 0 || structure && h.live(Part::Work) > 0 {
-            Some(engine::MELEE_RANGE)
-        } else {
-            None
-        };
-
-        range.is_some_and(|range| h.pos.within(range + step, at))
+        let wrecks = structure && h.live(Part::Work) > 0;
+        let range = engine::strike_reach(|p| h.live(p) > 0 || p == Part::Attack && wrecks);
+        range > 0 && h.pos.within(range + step, at)
     })
 }
 

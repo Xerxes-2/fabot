@@ -673,13 +673,10 @@ fn steps(
 fn shots(sums: &mut Sums, world: &World, asked: &HashMap<&str, Asked>) {
     for c in &world.creeps {
         let a = asked.get(c.name.as_str()).copied().unwrap_or_default();
-        let reach = if c.live(Part::RangedAttack) > 0 {
-            engine::RANGED_RANGE
-        } else if c.live(Part::Attack) > 0 {
-            engine::MELEE_RANGE
-        } else {
+        let reach = engine::strike_reach(|p| c.live(p) > 0);
+        if reach == 0 {
             continue;
-        };
+        }
         let foe = |h: &Creep| {
             !matches!(h.owner, Owner::Stranger(_))
                 && hostiles::foe(h)
