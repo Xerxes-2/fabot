@@ -1,0 +1,7 @@
+{
+  "why": "while a home harvester or carrier waits on the bank, an open spawn ring outranks the controller container: an RCL3 home whose second source lost its harvester (800, waiting on a bank of 300 of 800) has three haulers and upgraders drinking 20 a tick from an empty container fed by one source; Hivemind's tie on the container's weight sent every load to the container (old: the bank stayed at 300 and the harvester was never cast in 1300 ticks)",
+  "modules": ["economy"],
+  "start": { "world": "scripts/scenario/worlds/feed-drained-floor-waits.json", "seed": 1 },
+  "ticks": 500,
+  "assert": [{ "measure": "castIn", "name": "harvester-", "room": "W1N1", "min": 1 }]
+}

@@ -57,6 +57,7 @@ pub struct Jobs<'a> {
     /// Per colony: a carrier stands, so a worker refills the ring and fetches
     /// its own only without one.
     carried: Vec<bool>,
+    floor_waits_on_bank: Vec<bool>,
     /// Worker id to the carrier holding a load for it.
     booked: BTreeMap<Id, Id>,
     hauls: Vec<i32>,
@@ -371,6 +372,7 @@ impl<'a> Jobs<'a> {
         derived: &'a Derived,
         (slots, owners): (&[Slot], &'a [Option<usize>]),
         held: &[(usize, &Body, Option<Task>)],
+        floor_waits_on_bank: Vec<bool>,
     ) -> Jobs<'a> {
         let mut sinks: Vec<Vec<Spot>> = (0..derived.colonies.len())
             .map(|ci| sinks_of(derived, ci))
@@ -443,6 +445,7 @@ impl<'a> Jobs<'a> {
             booked_load: HashMap::default(),
             digging,
             carried,
+            floor_waits_on_bank,
             booked,
             hauls: (0..derived.grounds.len())
                 .map(|gi| derived.haul(owners, gi))
@@ -494,7 +497,8 @@ impl<'a> Jobs<'a> {
                     return None;
                 }
                 let short = i32::from(4 * need < 3 * capacity) + i32::from(2 * need < capacity);
-                (4 - short, need)
+                let behind_ring = i32::from(ring && self.floor_waits_on_bank[ci]);
+                (4 - short.max(behind_ring), need)
             }
             Of::Hub => (5 - i32::from(range > 10), s.amount),
             Of::Worker { builds } => (

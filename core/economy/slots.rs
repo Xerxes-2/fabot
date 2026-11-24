@@ -1345,15 +1345,17 @@ pub enum Blocked {
 }
 
 type Short = Vec<(RoomName, Pattern, i32)>;
+type Blocks = Vec<(RoomName, &'static str)>;
 
 /// Every open slot whose flow stands, in order on each colony's idle spawns
 /// while the bank pays; the first it cannot pay waits for the bank. With no
 /// harvester or no carrier of its own, a colony casts one at the bank it has.
+/// Last, per colony: a home harvester or carrier waits on the bank.
 pub fn casts(
     derived: &Derived,
     slots: &[Slot],
     holders: &Holders,
-) -> (Vec<Cast>, Short, Vec<(RoomName, &'static str)>) {
+) -> (Vec<Cast>, Short, Blocks, Vec<bool>) {
     let open = |s: &Slot| {
         holders.get(s.id.as_str()).is_none_or(|h| {
             h.iter()
@@ -1372,6 +1374,7 @@ pub fn casts(
     let mut casts = Vec::new();
     let mut short: BTreeMap<(RoomName, Pattern), i32> = BTreeMap::new();
     let mut blocked = Vec::new();
+    let mut floor_waits = vec![false; derived.colonies.len()];
     for (ci, colony) in derived.colonies.iter().enumerate() {
         let mut idle: Vec<&Spawn> = colony
             .spawns
@@ -1459,6 +1462,7 @@ pub fn casts(
                 } else {
                     Blocked::Bank
                 };
+                floor_waits[ci] |= !idle.is_empty() && s.rank <= rank_of(&Job::Fill, true);
                 waiting = waiting.or(Some(why));
                 *short.entry((colony.room, s.job.pattern())).or_default() += 1;
                 continue;
@@ -1473,7 +1477,7 @@ pub fn casts(
         }
     }
     let short = short.into_iter().map(|((r, p), n)| (r, p, n)).collect();
-    (casts, short, blocked)
+    (casts, short, blocked, floor_waits)
 }
 
 #[cfg(test)]

@@ -574,7 +574,7 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
     let slots = slots::plan(context.atlas, of, &owners, &state.assignments);
     let (assigned, holders, retired) =
         slots::assign(&*context.atlas, &derived, &slots, &state.assignments);
-    let (casts, short, blocked) = slots::casts(&derived, &slots, &holders);
+    let (casts, short, blocked, waits) = slots::casts(&derived, &slots, &holders);
 
     let asks = (casts.iter())
         .map(|cast| {
@@ -624,7 +624,7 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
     let held: Vec<(usize, &Body, Option<Task>)> = (assigned.iter())
         .filter_map(|(name, si)| Some((*si, *bodies.get(name.as_str())?, kept(name))))
         .collect();
-    let mut jobs = Jobs::new(&*context.atlas, &derived, (&slots, &owners), &held);
+    let mut jobs = Jobs::new(&*context.atlas, &derived, (&slots, &owners), &held, waits);
     let mut order: Vec<&Creep> = seen;
     // The mover settles a tie by the order it is asked.
     order.sort_by_cached_key(|&c| (kept(&c.name).is_none(), c.name.as_str()));
