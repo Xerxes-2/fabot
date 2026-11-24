@@ -335,6 +335,8 @@ export const measures = {
     const drawn = drawnBy(dir, a);
     return Math.min(...lives.filter((b) => b.ours && drawn.has(b.name)).flatMap(entries).filter((t) => t >= arrived)) - arrived;
   }),
+  // The most ticks a fighting blob stood split (engaged.mjs).
+  strayedMost: on("room from to", (_, a, dir) => Math.max(0, ...rowsOf(dir).filter(openedIn(a)).map((e) => e.strayed ?? 0))),
   // Our bodies gone from the colony's rooms and their neighbours with life left: died, or walked
   // through a room the soak does not follow.
   bodiesOut: (_, __, dir) => {

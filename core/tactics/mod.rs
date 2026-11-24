@@ -427,29 +427,15 @@ pub fn engage(
     }
 }
 
-/// A blob of bodies that do not swing, bound for a swing's range, walks only those with no tile
-/// beside or under them in a swing's reach (`plan::swung`); the rest get no wish from it.
+/// `raid`: the bodies a Defend's set kites round, as Exchange prices a set that does not swing.
 pub fn blob(
     sight: &mut Sight,
-    centre: &Pos,
-    range: i32,
+    (at, range): (&Pos, i32),
     members: &[&Creep],
-    fortified: &BTreeSet<RoomName>,
+    (fortified, raid): (&BTreeSet<RoomName>, &[Creep]),
 ) -> Vec<Wish> {
-    let near = |c: &Creep| {
-        let swung = plan::swung(sight.atlas, c, hostiles_in(sight, c.pos.room));
-        let beside = tiles::within(1, tiles::of_pos(&c.pos));
-        swung.is_some_and(|d| beside.iter().any(|t| d.contains(*t)))
-    };
-    let swingers = members.iter().any(|c| c.swings());
-    let members: Vec<&Creep> = (members.iter().copied())
-        .filter(|c| swingers || range >= engine::RANGED_RANGE || !near(c))
-        .collect();
-    if members.is_empty() {
-        return Vec::new();
-    }
-    let target = target_at(sight, centre, range);
-    blob::wishes(sight.atlas, &target, WEIGHT, &members, fortified)
+    let target = target_at(sight, at, range);
+    blob::wishes(sight.atlas, (&target, WEIGHT), members, fortified, raid)
 }
 
 /// A medic's seat beside a dismantler: open ground off every tile beside the
@@ -1247,7 +1233,14 @@ mod tests {
             &[&ranger][..],
         );
         let walked = (tactic == Tactic::BlobClose)
-            .then(|| blob(&mut sight, at.0, engine::MELEE_RANGE, set, &BTreeSet::new()))
+            .then(|| {
+                blob(
+                    &mut sight,
+                    (at.0, engine::MELEE_RANGE),
+                    set,
+                    (&BTreeSet::new(), &hostiles),
+                )
+            })
             .and_then(|mut w| w.pop());
         let wish = walked.unwrap_or_else(|| engage(&mut sight, on, at, (set, set), &ranger));
         // v1's rule worked out here. The ranger leaves a tile `d` off once rested, a plain step

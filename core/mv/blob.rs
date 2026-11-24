@@ -7,7 +7,7 @@ use crate::plan;
 use fabot_atlas::{Atlas, Field, Mover, Target};
 use fabot_base::engine;
 use fabot_base::grid::{self, FatigueFactor, Footprint, factor_of, step_ticks};
-use fabot_base::tiles::{self, Tile};
+use fabot_base::tiles::{self, Tile, TileSet};
 use fabot_base::wish::Wish;
 use fabot_base::world::{Creep, RoomName};
 
@@ -45,12 +45,35 @@ fn fatigue_ticks(creep: &Creep) -> Option<i32> {
 
 pub fn wishes(
     atlas: &mut Atlas,
-    target: &Target,
-    weight: i32,
+    (target, weight): (&Target, i32),
     members: &[&Creep],
     fortified: &BTreeSet<RoomName>,
+    raid: &[Creep],
 ) -> Vec<Wish> {
     let mover = mover(members);
+    // A set that does not swing closes on whichever of the raid its lead reaches round the
+    // swings, its mark guarded or not.
+    let shot = Target {
+        tiles: raid.iter().map(|h| tiles::of_pos(&h.pos)).collect(),
+        ..target.clone()
+    };
+    let swings = members.iter().any(|c| c.swings());
+    let target = if raid.is_empty() || swings {
+        target
+    } else {
+        &shot
+    };
+    let reach: Vec<Option<TileSet>> = (members.iter())
+        .map(|c| {
+            (!c.swings() && !raid.is_empty())
+                .then(|| plan::swung(atlas, c, raid))
+                .flatten()
+        })
+        .collect();
+    let swung = |i: usize, t: Tile| reach[i].as_ref().is_some_and(|d| d.contains(t));
+    let struck: Vec<bool> = (0..members.len())
+        .map(|i| swung(i, tiles::of_pos(&members[i].pos)))
+        .collect();
 
     fn left(
         atlas: &mut Atlas,
@@ -121,23 +144,34 @@ pub fn wishes(
     ranked.sort_by_cached_key(|&i| (lags[i], members[i].name.as_str()));
     let a = ranked[(ranked.len() - 1) / 2];
     let anchor = members[a];
+    // The lead and a struck body kite round the raid's swings; the rest close on the lead, as a
+    // body kiting its own way round leaves the set.
+    let walk = |atlas: &mut Atlas, i: usize, to: &Target| {
+        let c = members[i];
+        if i == a || struck[i] {
+            plan::kited(atlas, c, (mover, to, weight), raid)
+        } else {
+            plan::toward(atlas, c, mover, to, weight)
+        }
+    };
     let r = radius(members.len());
 
-    let walks: Vec<Wish> = members
-        .iter()
-        .map(|c| plan::toward(atlas, c, mover, target, weight))
+    let anchor_wish = walk(atlas, a, target);
+    // Struck, or its step meeting a swing (it stops short): it holds no mate back.
+    let stopped: Vec<bool> = (0..members.len())
+        .map(|i| struck[i] || i != a && swung(i, walk(atlas, i, target).head))
         .collect();
-
-    let anchor_wish = walks[a].clone();
 
     // Ticks behind and out of reach of its step: one behind on terrain alone,
     // in reach, closes no faster for the anchor waiting.
-    let lagging = members.iter().zip(&lags).any(|(c, &lag)| {
-        lag != grid::UNREACHED
-            && lag - lags[a] > r + 1
-            && tiles::seam_range(&c.pos, &tiles::to_pos(anchor.pos.room, anchor_wish.head))
-                .is_none_or(|range| range > r + 1)
-    });
+    let lagging = !struck[a]
+        && (members.iter().zip(&lags).zip(&stopped)).any(|((c, &lag), &stopped)| {
+            !stopped
+                && lag != grid::UNREACHED
+                && lag - lags[a] > r + 1
+                && tiles::seam_range(&c.pos, &tiles::to_pos(anchor.pos.room, anchor_wish.head))
+                    .is_none_or(|range| range > r + 1)
+        });
 
     let head_tile = if lagging {
         anchor_wish.at
@@ -145,6 +179,21 @@ pub fn wishes(
         anchor_wish.head
     };
     let head = tiles::to_pos(anchor.pos.room, head_tile);
+
+    // Closing on the raid, one the anchor waits for walks to it, not its own way round.
+    let formed = Target {
+        room: head.room,
+        tiles: vec![head_tile],
+        range: r,
+        ..target.clone()
+    };
+    let walks: Vec<Wish> = (members.iter().enumerate())
+        .map(|(i, c)| match tiles::seam_range(&c.pos, &head) {
+            _ if i == a => anchor_wish.clone(),
+            range if !raid.is_empty() && range.is_none_or(|d| d > r + 1) => walk(atlas, i, &formed),
+            _ => walk(atlas, i, target),
+        })
+        .collect();
 
     let step_back = step_ticks(mover.factor, engine::PLAIN_WEIGHT).map_or(0, |step| 2 * step);
 
@@ -201,10 +250,15 @@ pub fn wishes(
 
     let mut out = Vec::with_capacity(members.len());
     for (i, (creep, wish)) in members.iter().zip(walks).enumerate() {
-        let waits = (i == a && lagging) || !(wish.stays() || fits(i, wish.head));
+        // One closing on the lead stops short of a swing's reach.
+        let stops = !struck[i] && swung(i, wish.head);
+        let waits =
+            (i == a && lagging) || stops || !(struck[i] || wish.stays() || fits(i, wish.head));
         if waits {
             let stay = plan::stay(atlas, creep, mover.factor, weight, None);
-            let mut holds = |tile: Tile| fits(i, tile) && keeps(atlas, step_back, creep, tile);
+            let mut holds = |tile: Tile| {
+                fits(i, tile) && !swung(i, tile) && keeps(atlas, step_back, creep, tile)
+            };
             let mut tail: Vec<Tile> = stay.tail.iter().copied().filter(|t| holds(*t)).collect();
             let regroup = stay.head != stay.at && !holds(stay.head) && !tail.is_empty();
             let head = if regroup { tail.remove(0) } else { stay.head };
@@ -214,7 +268,7 @@ pub fn wishes(
                 .tail
                 .iter()
                 .copied()
-                .filter(|tile| fits(i, *tile) && keeps(atlas, 0, creep, *tile))
+                .filter(|tile| fits(i, *tile) && !swung(i, *tile) && keeps(atlas, 0, creep, *tile))
                 .collect();
             out.push(Wish { tail, ..wish });
         }

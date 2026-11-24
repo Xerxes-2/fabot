@@ -15,7 +15,7 @@ export function engagements(write, at, bodyOf = () => "") {
   // it targeted, which catch a death that closed it before it counted one.
   async function close(rec, t) {
     const graves = (await at([...rec.rooms])).filter((o) => o.type === "tombstone" && o.ours && o.ttl > 1 && rec.ours.has(o.name));
-    const { members, ours, rooms, swing, blind, asking, reached, fought, formed, empty, tombs, was, off, ...rest } = rec;
+    const { members, ours, rooms, swing, blind, asking, reached, fought, formed, empty, tombs, stray, was, off, ...rest } = rec;
     const swung = Object.fromEntries(Object.entries(swing).map(([n, { ticks, swings }]) => [n, { ticks, swings }]));
     // `apart`: the ticks between the first and the last of its bodies coming within three of its raid.
     const ticks = Object.values(reached);
@@ -89,6 +89,12 @@ export function engagements(write, at, bodyOf = () => "") {
         const bodies = objects.filter((o) => o.type === "creep" && o.ours && ours.includes(o.name));
         for (const o of bodies) if (theirs.some((h) => near(h, o, 3))) rec.reached[o.name] ??= t;
         const close = bodies.some((o) => theirs.some((h) => near(h, o, 3)));
+        // `strayed`: the most ticks on end a body of a fighting blob stood in its raid's room out of a shot's
+        // range of it and of every mate in one, as a ranged heal reaches.
+        const fighting = bodies.filter((o) => theirs.some((h) => near(h, o, 3)));
+        const apart = bodies.some((o) => o.room === e.room && !fighting.some((m) => near(m, o, 3)));
+        rec.stray = apart && fighting.length && e.phase === "fighting" && e.tactic.startsWith("blob") ? (rec.stray ?? 0) + 1 : 0;
+        rec.strayed = Math.max(rec.strayed ?? 0, rec.stray);
         if (rec.contact === null && (close || theirs.some((h) => h.hits < h.hitsMax))) rec.contact = t;
         swinging(rec, bodies, t, struck);
         // A sweep with all its bodies in its room: `bare`, the most ticks on end no rival creep stood there.

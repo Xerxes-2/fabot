@@ -104,7 +104,7 @@ pub(super) fn act(
         let defends = e.objective == Objective::Defend;
         let walk = (e.phase, e.unanswered, defends, raid::raids(e));
         let members = scene.members_of(e);
-        let blob = formation(&mut sight, on, walk, members, || centre_of(e), &fortified);
+        let blob = formation(&mut sight, on, walk, members, centre_of(e), &fortified);
         walking.extend(blob.into_iter().map(|w| (w.creep.clone(), w)));
     }
 
@@ -184,6 +184,10 @@ pub(super) fn act(
             return (None, tactics::rampart(sight, &fighters, c));
         }
 
+        if let Some(wish) = walking.get(&c.name) {
+            return (None, wish.clone());
+        }
+
         let wish = match e.phase {
             // The towers' room is the only one a drain presses into.
             Phase::Draining => match gates.get(&e.id) {
@@ -197,10 +201,6 @@ pub(super) fn act(
             Phase::Pursuing => tactics::close(sight, order, &centre, enter, c),
             Phase::Disengaging => tactics::retreat(sight, c),
             Phase::Approaching | Phase::Fighting => {
-                if let Some(wish) = walking.get(&c.name) {
-                    return (None, wish.clone());
-                }
-
                 if raid::raids(e) {
                     return (
                         None,
@@ -325,31 +325,39 @@ pub fn fortified(world: &world::World, decided: &[Engagement]) -> BTreeSet<RoomN
         .collect()
 }
 
-/// A blob's wishes while it walks as one: a Defend's lands in reach of its mark once it fights,
-/// as its together arm was priced, else onto `centre`; none out of formation.
+/// A blob's wishes while it walks as one: a Defend's holds it while it fights in its mark's room,
+/// as its together arm was priced, into its reach (else a cripple left's), else onto `centre`.
 pub fn formation(
     sight: &mut tactics::Sight,
     (tactic, order): (Tactic, &[Id]),
     (phase, unanswered, defends, raids): (Phase, bool, bool, bool),
     members: Vec<&Creep>,
-    centre: impl FnOnce() -> (Pos, i32),
+    (centre, range): (Pos, i32),
     fortified: &BTreeSet<RoomName>,
 ) -> Vec<Wish> {
     let foes = sight.hostiles;
-    let mark = (tactic == Tactic::BlobClose && defends)
-        .then(|| (order.iter()).find_map(|id| foes.values().flatten().find(|h| h.id == *id)))
+    let marked = (order.iter()).find_map(|id| foes.values().flatten().find(|h| h.id == *id));
+    let mark = defends
+        .then(|| marked.or_else(|| foes.get(&centre.room)?.first()))
         .flatten();
     let walks = matches!(tactic, Tactic::BlobClose | Tactic::BlobKite)
         && !unanswered
-        && (phase == Phase::Approaching || mark.is_some() && phase == Phase::Fighting);
+        && (phase == Phase::Approaching || defends && phase == Phase::Fighting);
+    let reach = match tactic {
+        Tactic::BlobKite => engine::RANGED_RANGE,
+        _ => engine::MELEE_RANGE,
+    };
+    let (centre, range) = mark.map_or((centre, range), |h| (h.pos, reach));
+    // One still walking in from another room is no mate present: it closes alone.
+    let present = |c: &&Creep| phase != Phase::Fighting || c.pos.room == centre.room;
     let members: Vec<&Creep> = (members.into_iter())
-        .filter(|c| raids || mark.is_some() || !c.swings())
+        .filter(|c| (raids || defends || !c.swings()) && present(c))
         .collect();
     if !walks || members.is_empty() {
         return Vec::new();
     }
-    let (centre, range) = mark.map_or_else(centre, |h| (h.pos, engine::MELEE_RANGE));
-    tactics::blob(sight, &centre, range, &members, fortified)
+    let raid = mark.map_or(&[][..], |h| foes[&h.pos.room].as_slice());
+    tactics::blob(sight, (&centre, range), &members, (fortified, raid))
 }
 
 /// Each body's acts and the heals its swing and shot leave it, as the engine performs them.

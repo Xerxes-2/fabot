@@ -1,0 +1,10 @@
+{
+  "why": "a set priced to walk in together (BlobClose, 2R1H rangers) fights in its formation, no body out of a shot's range of the raid and of every mate in one while a mate fights: the Invader raid on an outpost, its melee guarding its healer. Main stood bodies apart 30 ticks on end (each kiting round the guard alone) and held the raid 327 ticks; in formation 9 and 235",
+  "modules": ["fight", "mv", "tactics"],
+  "start": { "room": "W8N3", "seed": 19, "node": "M7", "invaders": "W8N2:1000:2000" },
+  "ticks": 4000,
+  "assert": [
+    { "measure": "strayedMost", "max": 10 },
+    { "measure": "hostileTicks", "room": "W8N2", "max": 250 }
+  ]
+}

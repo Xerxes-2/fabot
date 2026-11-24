@@ -83,6 +83,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
 
     let mut foes: BTreeMap<RoomName, Vec<Creep>> = BTreeMap::new();
     let mut cores: BTreeSet<Id> = BTreeSet::new();
+    let mut hostiles: Vec<Creep> = Vec::new();
 
     for r in &world.rooms {
         let mut all: Vec<Creep> = r.hostiles().cloned().collect();
@@ -93,14 +94,9 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
             .filter(|s| s.kind == StructureType::InvaderCore && s.level == 0);
         all.extend(razed.map(casting::core_as_hostile));
         cores.extend(all[seen..].iter().map(|c| c.id));
+        hostiles.extend(all.iter().cloned());
         foes.insert(r.name, all);
     }
-
-    let hostiles: Vec<Creep> = world
-        .rooms
-        .iter()
-        .flat_map(|r| foes[&r.name].clone())
-        .collect();
 
     let owned = &context.derived.owned;
     let held = (state.engagements.iter()).fold(0, |most, e| most.max(e.group));

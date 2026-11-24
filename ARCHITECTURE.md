@@ -644,10 +644,15 @@ and `cheapest_win` (adds only to already-standing `ours`).
   in `together`, which pays the wait in ticks instead (a body already in the
   raid's reach is struck alone through it). `Defend` prices both arms
   (`Close`/`Kite`/`Hold` vs `Blob*`), rather than holding bodies back until
-  they gather (a hold-while, rejected). Its `BlobClose` walks the set as one
-  into melee of the kill order's first standing, through the fight; a set
-  with no body that swings walks each only until its step would enter a
-  swing's reach, then kites (§6.4). `❓` Rangers in a mixed `BlobClose`
+  they gather (a hold-while, rejected). A `Defend`'s `Blob*` set walks as
+  one while it fights too, as its price pools its heal: its bodies in the
+  raid's room into the reach its tactic names (`BlobClose` melee,
+  `BlobKite` a shot) of the kill order's first standing, or, with no body
+  that swings, of whichever of the raid its lead reaches round the swings;
+  the rest close on the lead short of a swing's reach, each kiting while a
+  swing strikes it; the lead waits for neither one struck nor one stopped
+  short; a body still walking in closes alone, and pursuit is each body's
+  (§6.4). `❓` Rangers in a mixed `BlobClose`
   still walk into melee reach; to be solved with the outpost-defence duo
   redesign.
   `❓` A `Close` set priced landing together reaches the raid apart where

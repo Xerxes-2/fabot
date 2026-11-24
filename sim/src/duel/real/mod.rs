@@ -82,7 +82,7 @@ impl Real {
             (self.tactic, &self.order[..]),
             (self.phase, false, true, false),
         );
-        let centre = || (group.centre, RANGED_RANGE);
+        let centre = (group.centre, RANGED_RANGE);
         let fortified = fortified(&world, &[]);
         let blob = formation(&mut sight, on, walk, ours.clone(), centre, &fortified);
         let mut walking: BTreeMap<String, _> =
