@@ -727,7 +727,12 @@ expansion, and operation priorities.
   the spenders its dig casts (2 parts per energy/tick) because a fixed half
   leaves spawns idle at RCL3–6 and full life past RCL6 starves hauling; a young
   home reserves half its spawns' life for workers so its pile does not decay
-  unspent. Stocked homes add one non-standing outpost at a time so spawns absorb
+  unspent. `❓` `outpost_spend_parts` stands in for a margin: a steady-state
+  charge with none lets a backlog (a full container doubling its source's
+  rate) outgrow the spawn-time cap and never drain, so deriving it needs a
+  derived margin (e.g. the backlog rate charged while a container is full) or a
+  capped backlog ask. Stocked homes add one non-standing outpost at a time so
+  spawns absorb
   one room's bodies at once; young homes open all paying ones because waiting on
   containers delays RCL3. An operation holds only the colonies it casts from
   (`outposts::busy`): a claim's sponsor until its spawn stands; a siege from its
