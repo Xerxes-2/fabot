@@ -2,6 +2,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { availableParallelism } from "node:os";
 import { createInterface } from "node:readline";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -219,3 +220,28 @@ export function runSim(bin, { world, gen, sectors, room, node, ticks, seed = 1, 
     play(["--world", map, "--room", room]);
   });
 }
+
+/** A JSON-lines file's rows, none when it is missing. */
+export const jsonLines = (path) => (existsSync(path) ? readFileSync(path, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : []);
+
+/** A seed sweep's flags (`--seeds A..B|A,B,...`, `--ticks` default 30000, `--jobs` default every allowed core); exits 2 on a bad one. */
+export function seedFlags(argv, usage) {
+  const flags = {};
+  for (let i = 0; i < argv.length; i += 2) flags[argv[i]] = argv[i + 1];
+  const whole = (v, flag) => (/^\d+$/.test(String(v)) ? Number(v) : (console.error(`${flag}: ${usage}`), process.exit(2)));
+  const span = /^(\d+)\.\.(\d+)$/.exec(flags["--seeds"] ?? "");
+  const seeds = span
+    ? Array.from({ length: Math.max(0, Number(span[2]) - Number(span[1]) + 1) }, (_, i) => Number(span[1]) + i)
+    : (flags["--seeds"] ?? "").split(",").filter(Boolean).map((s) => whole(s, "--seeds"));
+  if (!seeds.length) (console.error(usage), process.exit(2));
+  return { flags, seeds, ticks: whole(flags["--ticks"] ?? 30000, "--ticks"), jobs: whole(flags["--jobs"] ?? availableParallelism(), "--jobs") };
+}
+
+/** `run(seed)` for each of `seeds`, `jobs` at once. */
+export function pool(seeds, jobs, run) {
+  const queue = [...seeds];
+  return Promise.all(Array.from({ length: jobs }, async () => { for (let seed; (seed = queue.shift()) !== undefined; ) await run(seed); }));
+}
+
+/** A sweep's output directory for `name`, under the repo's soak-runs/. */
+export const soakDir = (name) => join(REPO, "soak-runs", name);

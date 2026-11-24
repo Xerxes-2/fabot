@@ -7,41 +7,23 @@
 //   --jobs   seeds at once (default every allowed core)
 // Prints a row per seed and, under the table, each broken seed's first broken
 // tick and the commands that replay and watch it; the exit is non-zero then.
-import { existsSync, readFileSync } from "node:fs";
-import { availableParallelism } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { counted, failures, samplesOf } from "../scenario/measures.mjs";
-import { runSim, simBinary } from "./run.mjs";
+import { jsonLines, pool, runSim, seedFlags, simBinary, soakDir } from "./run.mjs";
 
-const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const usage = "usage: npm run soak:gen -- --seeds A..B|A,B,... [--ticks N] [--jobs J]";
-const flags = {};
-for (let i = 2; i < process.argv.length; i += 2) flags[process.argv[i]] = process.argv[i + 1];
-const whole = (v, flag) => (/^\d+$/.test(String(v)) ? Number(v) : (console.error(`${flag}: ${usage}`), process.exit(2)));
-const span = /^(\d+)\.\.(\d+)$/.exec(flags["--seeds"] ?? "");
-const seeds = span
-  ? Array.from({ length: Math.max(0, Number(span[2]) - Number(span[1]) + 1) }, (_, i) => Number(span[1]) + i)
-  : (flags["--seeds"] ?? "").split(",").filter(Boolean).map((s) => whole(s, "--seeds"));
-if (!seeds.length) (console.error(usage), process.exit(2));
-const ticks = whole(flags["--ticks"] ?? 30000, "--ticks");
-const jobs = whole(flags["--jobs"] ?? availableParallelism(), "--jobs");
+const { seeds, ticks, jobs } = seedFlags(process.argv.slice(2), "usage: npm run soak:gen -- --seeds A..B|A,B,... [--ticks N] [--jobs J]");
 const bin = simBinary();
 if (!bin) process.exit(1);
 
-const dirOf = (seed) => join(REPO, "soak-runs", `gen-s${seed}`);
+const dirOf = (seed) => soakDir(`gen-s${seed}`);
 const codes = {};
-const queue = [...seeds];
-await Promise.all(
-  Array.from({ length: jobs }, async () => {
-    for (let seed; (seed = queue.shift()) !== undefined; ) {
-      codes[seed] = await runSim(bin, { gen: seed, ticks, out: dirOf(seed) });
-      console.error(`seed ${seed}: ${codes[seed] === 0 ? "done" : `failed (exit ${codes[seed]})`}`);
-    }
-  }),
-);
+await pool(seeds, jobs, async (seed) => {
+  codes[seed] = await runSim(bin, { gen: seed, ticks, out: dirOf(seed) });
+  console.error(`seed ${seed}: ${codes[seed] === 0 ? "done" : `failed (exit ${codes[seed]})`}`);
+});
 
-const lines = (dir, file) => (existsSync(join(dir, file)) ? readFileSync(join(dir, file), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : []);
+const lines = (dir, file) => jsonLines(join(dir, file));
 // The tick each broken invariant is first seen at: a fault's and a refusal's own
 // (the whole run's files, not the samples, hold them), else the first sample
 // whose prefix breaks it.
