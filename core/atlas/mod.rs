@@ -243,20 +243,18 @@ impl RoomGrid {
         self.held.as_ref().unwrap_or(&self.weights)
     }
 
-    /// The flood toward `goal`, whether it was kept, and the tiles it relaxed.
+    /// The flood toward `goal`, whether it was kept, whether live, and the tiles it relaxed.
     fn flood(
         &self,
         mover: Mover,
         goal: Goal,
         ground: Ground,
         check: bool,
-    ) -> (Rc<Table<i32>>, bool, i32) {
+    ) -> (Rc<Table<i32>>, bool, bool, i32) {
         let held = matches!(ground, Ground::Live(_)) && self.held.is_some();
         let key = FloodOf::of(mover, goal, ground.walls(), held);
-        let floods = match key.danger.is_some() || held {
-            true => &self.live,
-            false => &self.floods,
-        };
+        let live = key.danger.is_some() || held;
+        let floods = if live { &self.live } else { &self.floods };
         if let Some(k) = floods.borrow().get(&key as &dyn Keyed) {
             k.unasked.set(0);
             let fresh = |dist: &Table<i32>| *dist == self.fresh(mover, key).0;
@@ -264,7 +262,7 @@ impl RoomGrid {
                 !check || fresh(&k.value),
                 "a kept flood differs from a fresh one"
             );
-            return (k.value.clone(), true, 0);
+            return (k.value.clone(), true, live, 0);
         }
         let (dist, relaxed) = self.fresh(mover, key);
         let dist = Rc::new(dist);
@@ -274,7 +272,7 @@ impl RoomGrid {
             unasked: Cell::new(0),
         };
         floods.borrow_mut().insert(key.kept(), kept);
-        (dist, false, relaxed)
+        (dist, false, live, relaxed)
     }
 
     fn fresh(&self, mover: Mover, key: FloodOf) -> (Table<i32>, i32) {
@@ -338,6 +336,9 @@ pub struct Atlas {
     closed: Vec<Coords>,
     misses: Cell<i32>,
     hits: Cell<i32>,
+    /// Floods run round what moves (`RoomGrid::live`): never kept, so no miss.
+    live: Cell<i32>,
+    cold: bool,
     relaxed: Cell<i32>,
     trees: Carried<(RoomName, BTreeSet<RoomName>, i32), Tree>,
     walks: Carried<WalkKey, Vec<Pos>>,
@@ -763,6 +764,7 @@ impl Atlas {
         seen: impl IntoIterator<Item = (RoomName, Option<&'a [Post]>, bool)>,
         terrains: impl IntoIterator<Item = (RoomName, &'a [u8; tiles::COUNT])>,
     ) -> Atlas {
+        let cold = previous.rooms.is_empty();
         let mut rooms: HashMap<Coords, RoomGrid> = HashMap::default();
 
         for (c, room, terrain) in
@@ -903,6 +905,7 @@ impl Atlas {
             walks: Atlas::unasked(previous.walks, 1),
             towards: Atlas::unasked(previous.towards, Atlas::TRIP_TICKS),
             last_reads: previous.reads.into_inner(),
+            cold,
             check: previous.check,
             ..Atlas::default()
         }
@@ -918,6 +921,14 @@ impl Atlas {
 
     pub fn hits(&self) -> i32 {
         self.hits.get()
+    }
+
+    pub fn live(&self) -> i32 {
+        self.live.get()
+    }
+
+    pub fn cold(&self) -> bool {
+        self.cold
     }
 
     pub fn relaxed(&self) -> i32 {
@@ -1291,9 +1302,14 @@ impl Atlas {
         goal: Goal,
         ground: Ground,
     ) -> Rc<Table<i32>> {
-        let (dist, kept, relaxed) = grid.flood(mover, goal, ground, self.check);
-        let count = if kept { &self.hits } else { &self.misses };
-        count.set(count.get() + 1);
+        let (dist, kept, live, relaxed) = grid.flood(mover, goal, ground, self.check);
+        let count = match (kept, live) {
+            (true, true) => None,
+            (true, false) => Some(&self.hits),
+            (false, false) => Some(&self.misses),
+            (false, true) => Some(&self.live),
+        };
+        count.inspect(|c| c.set(c.get() + 1));
         self.relaxed.set(self.relaxed.get() + relaxed);
         dist
     }

@@ -74,7 +74,7 @@ if (flags.counts) {
     const { counts } = runTick(bot, tick);
     const w = windows.at(-1);
     w.length++;
-    w.floods += counts.atlasMisses ?? 0;
+    w.floods += (counts.atlasMisses ?? 0) + (counts.atlasLive ?? 0);
     w.hits += counts.atlasHits ?? 0;
     w.tiles += counts.flood ?? 0;
     w.carried += counts.recomputed ?? 0;

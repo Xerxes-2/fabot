@@ -135,7 +135,7 @@ where
 
     let mut counts = metrics::counts(
         &world,
-        &decided.atlas,
+        (&decided.atlas, &decided.derived),
         &decided.declarations,
         &decided.refused,
         &decided.result.telemetry.counts,

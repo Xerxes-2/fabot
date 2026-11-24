@@ -67,6 +67,10 @@ const withCounts = (dir, a, f) => {
   const rows = countsOf(dir, a);
   return rows.length ? f(rows) : Infinity;
 };
+// A cold tick (the first, or one after a reset) floods every table afresh, so
+// it is bounded per colony, apart from the warm ticks.
+const warm = (rows) => rows.filter((c) => c.cold === undefined);
+const floodsOf = (c) => (c.atlasMisses ?? 0) + (c.atlasLive ?? 0);
 const outposts = (key) => (samples, a) => {
   const [first, last] = [at(samples, a.from ?? 0), at(samples, a.to ?? Infinity)];
   return Object.keys(last.rooms).slice(1).reduce((n, r) => n + last.rooms[r][key] - (first.rooms[r]?.[key] ?? 0), 0);
@@ -435,9 +439,11 @@ export const measures = {
     within(samples, a).filter((s) => Object.values(s.strongholds ?? {}).some((h) => h.deployTime && h.intel?.[1] === h.deployTime)).length),
   // Enemies standing in our room at the window's end.
   hostilesAtEnd: on("to", (samples, a) => at(samples, a.to ?? Infinity).hostiles),
-  // The most floods one tick ran (a miss is one flood), and the percent of
-  // `fieldOn` lookups that missed: §1's "counting hits and misses".
-  floodsMost: on("from to", (_, a, dir) => withCounts(dir, a, (rows) => Math.max(0, ...rows.map((c) => c.atlasMisses ?? 0)))),
+  // The most floods one warm tick ran, and the percent of kept-flood lookups
+  // that missed: §1's "counting hits and misses".
+  floodsMost: on("from to", (_, a, dir) => withCounts(dir, a, (rows) => Math.max(0, ...warm(rows).map(floodsOf)))),
+  coldFloodsPerColony: on("from to", (_, a, dir) =>
+    withCounts(dir, a, (rows) => Math.max(0, ...rows.filter((c) => c.cold !== undefined).map((c) => Math.ceil(floodsOf(c) / Math.max(1, c.cold)))))),
   // Ticks whose outposts differ from the tick before's: each re-plans their slots.
   outpostFlips: on("from to", (_, a, dir) =>
     withCounts(dir, a, (rows) => {
@@ -449,8 +455,8 @@ export const measures = {
   threatLookupsMost: on("from to", (_, a, dir) => withCounts(dir, a, (rows) => Math.max(0, ...rows.map((c) => c.threatLookups ?? 0)))),
   atlasMissRate: on("from to", (_, a, dir) =>
     withCounts(dir, a, (rows) => {
-      const hits = rows.reduce((n, c) => n + (c.atlasHits ?? 0), 0);
-      const misses = rows.reduce((n, c) => n + (c.atlasMisses ?? 0), 0);
+      const hits = warm(rows).reduce((n, c) => n + (c.atlasHits ?? 0), 0);
+      const misses = warm(rows).reduce((n, c) => n + (c.atlasMisses ?? 0), 0);
       return Number(((100 * misses) / Math.max(1, hits + misses)).toFixed(2));
     })),
 };

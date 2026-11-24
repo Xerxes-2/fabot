@@ -591,7 +591,7 @@ proptest! {
             fatigue == 0 && legs > 0
                 || (!wish.moves
                     && (legs > 0 && fatigue <= 4 * legs
-                        || wish.stays() && atlas.misses() == 0))
+                        || wish.stays() && atlas.misses() + atlas.live() == 0))
         );
     }
 

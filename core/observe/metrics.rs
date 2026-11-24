@@ -1236,7 +1236,7 @@ fn to_text(ring: &VecDeque<Window>) -> String {
 /// The per-tick counts the observe segment reports (`ARCHITECTURE.md` §9.3).
 pub fn counts(
     world: &World,
-    atlas: &Atlas,
+    (atlas, derived): (&Atlas, &Derived),
     declarations: &Declarations,
     refused: &Refused,
     telemetry: &[(&'static str, i32)],
@@ -1244,9 +1244,13 @@ pub fn counts(
     let mut counts = vec![
         ("atlasHits".to_string(), atlas.hits()),
         ("atlasMisses".to_string(), atlas.misses()),
+        ("atlasLive".to_string(), atlas.live()),
         ("flood".to_string(), atlas.relaxed()),
         ("recomputed".to_string(), atlas.recomputed()),
     ];
+    if atlas.cold() {
+        counts.push(("cold".to_string(), derived.colonies.len() as i32));
+    }
     let abandoning =
         (declarations.colonies.iter()).filter(|p| p.stage == declarations::Stage::Abandon);
     for room in abandoning.filter_map(|p| world.room(p.room)) {
