@@ -45,6 +45,12 @@ test; `jj ship` and its gates.
 - **Dependency direction (`ARCHITECTURE.md` §3):** `Fight` and `Economy` never
   import each other; only `Strategy` imports `Season`; declarations flow down.
 - **No room name, player name, or object id in source:** they are `declarations`.
+- **One rule, one place.** An engine or game rule (strike/heal at a range,
+  body cost and spawn time, fatigue and walk time, tower falloff, ownership
+  and IFF filters, room distance) belongs once in `core/base` (`engine.rs`,
+  `world.rs`, `tiles.rs`); every caller calls it. A second copy is a bug
+  even when it agrees today.
+  `npm run ceiling` fails on combat constants outside `engine.rs`/`world.rs`.
 - **Ceilings (`scripts/ceilings.json`) never rise:** line and comment-share
   ceilings (`npm run ceiling`) and per-tick count ceilings (`npm run scenario`,
   §9.3). Pay for every addition by deleting first.
