@@ -191,20 +191,10 @@ impl Builder<'_> {
     }
 
     fn harvesters(&mut self, center: Tile) -> Option<()> {
-        let mut walk = vec![u16::MAX; tiles::COUNT];
-        walk[center.index()] = 0;
-        let mut queue = std::collections::VecDeque::from([center]);
-        while let Some(t) = queue.pop_front() {
-            for &n in tiles::around(t) {
-                if walk[n.index()] == u16::MAX && !self.m.wall(tiles::x_of(n), tiles::y_of(n)) {
-                    walk[n.index()] = walk[t.index()] + 1;
-                    queue.push_back(n);
-                }
-            }
-        }
+        let walk = tiles::reach([center], |n| !self.m.wall(tiles::x_of(n), tiles::y_of(n)));
         let sources = self.ground.sources.clone();
         for (i, s) in sources.iter().enumerate() {
-            let h = self.harvest_spot(*s, &walk)?;
+            let h = self.harvest_spot(*s, &walk[..])?;
             self.m.plan_at(h, "harvester", None);
             self.m.plan_at(h, &format!("harvester.{i}"), None);
             self.m.plan_at(h, "bay_center", None);

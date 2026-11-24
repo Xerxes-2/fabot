@@ -1,5 +1,6 @@
 //! A tile is `y * 50 + x`, the terrain raw buffer's index, so every per-room
 //! array in the Atlas reads the terrain's own order.
+use std::collections::VecDeque;
 use std::fmt;
 use std::ops::{Index, IndexMut};
 use std::sync::OnceLock;
@@ -232,6 +233,26 @@ pub fn within(radius: i32, tile: Tile) -> Vec<Tile> {
         }
     }
     tiles
+}
+
+pub const UNREACHED: u16 = u16::MAX;
+
+/// Steps from the nearest seed over the tiles `open` admits, seeds always.
+pub fn reach(seeds: impl IntoIterator<Item = Tile>, open: impl Fn(Tile) -> bool) -> Table<u16> {
+    let mut steps = table(UNREACHED);
+    let mut queue: VecDeque<Tile> = seeds.into_iter().collect();
+    for t in &queue {
+        steps[*t] = 0;
+    }
+    while let Some(t) = queue.pop_front() {
+        for &n in around(t) {
+            if steps[n] == UNREACHED && open(n) {
+                steps[n] = steps[t] + 1;
+                queue.push_back(n);
+            }
+        }
+    }
+    steps
 }
 
 const LAST: i32 = SIDE - 1;

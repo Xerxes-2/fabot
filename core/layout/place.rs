@@ -80,55 +80,17 @@ pub fn xy(t: Tile) -> (i32, i32) {
 
 /// The wall and exit distance matrices (`RoomPlanMatrixGenerator`).
 pub fn distances(terrain: &[u8]) -> (Vec<u8>, Vec<u8>) {
-    let wall = |x: i32, y: i32| terrain[index(x, y).index()] & WALL != 0;
-    let mut walls = vec![0u8; tiles::COUNT];
-    let mut exits = vec![0u8; tiles::COUNT];
-    for x in 0..50 {
-        for y in 0..50 {
-            let t = index(x, y).index();
-            if wall(x, y) {
-                walls[t] = 255;
-                exits[t] = 255;
-                continue;
-            }
-            if x == 0 || x == 49 || y == 0 || y == 49 {
-                exits[t] = 1;
-            }
-            area(x, y, 1, |ax, ay| {
-                if wall(ax, ay) {
-                    walls[t] = 1;
-                }
-                !wall(ax, ay)
-            });
-        }
-    }
-    for m in [&mut walls, &mut exits] {
-        let mut d = 1u8;
-        loop {
-            let mut changed = false;
-            for x in 0..50 {
-                for y in 0..50 {
-                    let t = index(x, y).index();
-                    if m[t] != 0 {
-                        continue;
-                    }
-                    let mut found = false;
-                    area(x, y, 1, |ax, ay| {
-                        found = m[index(ax, ay).index()] == d;
-                        !found
-                    });
-                    if found {
-                        m[t] = d + 1;
-                        changed = true;
-                    }
-                }
-            }
-            if !changed {
-                break;
-            }
-            d += 1;
-        }
-    }
+    let open = |t: Tile| terrain[t] & WALL == 0;
+    let edge = tiles::all().filter(|t| tiles::on_edge(*t) && open(*t));
+    let walls = tiles::reach(tiles::all().filter(|t| !open(*t)), open);
+    let exits = tiles::reach(edge, open);
+    let level = |t: Tile, steps: u16, from: u16| match steps {
+        _ if !open(t) => 255,
+        tiles::UNREACHED => 0,
+        s => (s + from) as u8,
+    };
+    let walls: Vec<u8> = tiles::all().map(|t| level(t, walls[t], 0)).collect();
+    let mut exits: Vec<u8> = tiles::all().map(|t| level(t, exits[t], 1)).collect();
     // Hivemind leaves a room with no exit (a crafted one) all beside an exit,
     // where it builds nothing.
     if !exits.contains(&1) {

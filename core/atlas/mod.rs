@@ -939,26 +939,17 @@ impl Atlas {
     /// The tiles a walk from the room's exits reaches without breaking a
     /// barrier.
     pub fn from_exits(&self, room: RoomName) -> TileSet {
-        let mut reached = TileSet::default();
         let Some(grid) = self.grid(room) else {
-            return reached;
+            return TileSet::default();
         };
-        let open = |t: &Tile| grid.weights[*t].is_some();
-        let mut frontier: Vec<Tile> = [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT]
+        let open = |t: Tile| grid.weights[t].is_some();
+        let exits = [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT]
             .iter()
-            .flat_map(|exit| tiles::exit_tiles(*exit).iter().copied())
-            .filter(open)
-            .collect();
-        while let Some(t) = frontier.pop() {
-            if reached.insert(t) {
-                frontier.extend(
-                    tiles::around(t)
-                        .iter()
-                        .filter(|n| open(n) && !reached.contains(**n)),
-                );
-            }
-        }
-        reached
+            .flat_map(|exit| tiles::exit_tiles(*exit).iter().copied());
+        let steps = tiles::reach(exits.filter(|t| open(*t)), open);
+        tiles::all()
+            .filter(|t| steps[*t] != tiles::UNREACHED)
+            .collect()
     }
 
     /// Terrain and road alone, as v1's arrivalGroundIn: no seat's or keeper's weight.

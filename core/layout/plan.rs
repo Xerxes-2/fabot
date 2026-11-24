@@ -341,25 +341,16 @@ fn reached<'a>(
             && (ground.minerals.iter()).any(|m| tiles::range(*m, i.tile) == 1);
         blocked[i.tile] = !i.kind.walkable() || (blocked[i.tile] && i.kind != StructureType::Road);
     }
-    let mut queue: Vec<Tile> = (tiles::all())
+    let seeds = (tiles::all())
         .filter(|t| exits && tiles::on_edge(*t) && !blocked[*t])
-        .chain([core])
-        .collect();
-    let mut seen = vec![false; tiles::COUNT];
-    for t in &queue {
-        seen[*t] = true;
-    }
-    while let Some(t) = queue.pop() {
-        for &n in tiles::around(t) {
-            if !seen[n] && !blocked[n] {
-                seen[n] = true;
-                if !post[n] {
-                    queue.push(n);
-                }
-            }
-        }
-    }
-    seen
+        .chain([core]);
+    let walked = tiles::reach(seeds, |t| !blocked[t] && !post[t]);
+    let walked = |t: Tile| walked[t] != tiles::UNREACHED;
+    (tiles::all())
+        .map(|t| {
+            walked(t) || (post[t] && !blocked[t] && tiles::around(t).iter().any(|n| walked(*n)))
+        })
+        .collect()
 }
 
 /// Hivemind's search, a few variations a tick as its planner spreads them.
@@ -669,20 +660,8 @@ mod tests {
                 && !rock(t)
                 && planned().all(|i| i.tile != t || i.kind.walkable())
         };
-        let mut seen = vec![false; tiles::COUNT];
-        let mut queue: std::collections::VecDeque<Tile> = starts.iter().copied().collect();
-        for t in starts {
-            seen[*t] = true;
-        }
-        while let Some(t) = queue.pop_front() {
-            for &n in tiles::around(t) {
-                if !seen[n] && open(n) {
-                    seen[n] = true;
-                    queue.push_back(n);
-                }
-            }
-        }
-        seen
+        let steps = tiles::reach(starts.iter().copied(), open);
+        steps.iter().map(|s| *s != tiles::UNREACHED).collect()
     }
 
     #[test]
