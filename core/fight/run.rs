@@ -466,6 +466,10 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
                     decided.push(next);
                 }
             }
+            Objective::Defend | Objective::Sweep if defend::overdue(&scene, &e) => {
+                let stands = sweep::beats(&scene, atlas, &e, (e.room, &grounds));
+                decided.extend(defend::late(&mut asked, (world.time, stands), &e))
+            }
             Objective::Sweep
                 if e.since == world.time && matches!(e.phase, Phase::Forming | Phase::Fighting)
                     || grew
@@ -479,9 +483,6 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
                         .or_else(|| scene.patrol(atlas, &e, preyed, age))
                 };
                 decided.extend(scene.swept(atlas, &mut asked, (&e, onward), (&mut free, &grounds)));
-            }
-            Objective::Defend if defend::overdue(&scene, &e) => {
-                decided.push(defend::late(&mut asked, world.time, &e))
             }
             Objective::Defend
                 if left

@@ -1,10 +1,14 @@
 /// `Sweep` (`ARCHITECTURE.md` §6.2); `step` closes it with None.
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
+use super::super::casting;
+use super::super::scene::{Hunting, Scene};
 use super::super::shape::{Engagement, Phase, enter};
+use fabot_atlas::Atlas;
 use fabot_base::engine;
 use fabot_base::vocabulary::Part;
 use fabot_base::world::{Creep, Owner, Pos, Room, RoomName, Source};
+use fabot_exchange::Fighter;
 use fabot_tactics::Tactic;
 
 pub const CANDIDATES: &[Tactic] = &[Tactic::BlobKite, Tactic::Kite];
@@ -63,6 +67,26 @@ pub fn room_worth(room: &Room, prey: &[&Creep], exposed: &[Pos], held: i32) -> i
 
 pub fn yield_of(s: &Source, held: i32) -> i32 {
     s.energy_capacity * held.max(0) / engine::SOURCE_REGEN_TIME
+}
+
+/// Whether `e`'s bodies beat `room`'s escort as they stand, casting none.
+pub(crate) fn beats(
+    scene: &Scene,
+    atlas: &Atlas,
+    e: &Engagement,
+    (room, grounds): (RoomName, &BTreeMap<RoomName, Hunting>),
+) -> bool {
+    let ours: Vec<Fighter> = (scene.members_of(e).into_iter())
+        .map(casting::fighter_of)
+        .collect();
+    let boosts = scene.boosts_for(atlas, e, &scene.boosts);
+    match (scene.in_sight(room), grounds.get(&room)) {
+        (Some(r), Some(g)) => {
+            !ours.is_empty()
+                && (scene.hunt(g, r, ours, 0, &boosts)).is_some_and(|p| p.set.is_empty())
+        }
+        _ => false,
+    }
 }
 
 /// Never home (owner).

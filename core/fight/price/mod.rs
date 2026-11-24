@@ -498,16 +498,8 @@ impl<'a> Scene<'a> {
         candidates: &[(RoomName, i32, i32, bool)],
         grounds: &BTreeMap<RoomName, Hunting>,
     ) -> Option<RoomName> {
-        let ours: Vec<Fighter> = (self.members_of(e).into_iter())
-            .map(casting::fighter_of)
-            .collect();
-        let boosts = self.boosts_for(atlas, e, &self.boosts);
-        let beats = |room: RoomName| match (self.in_sight(room), grounds.get(&room)) {
-            (Some(r), Some(g)) => {
-                (self.hunt(g, r, ours.clone(), 0, &boosts)).is_some_and(|p| p.set.is_empty())
-            }
-            _ => false,
-        };
+        let ours = self.members_of(e);
+        let beats = |room: RoomName| sweep::beats(self, atlas, e, (room, grounds));
         let won = candidates
             .iter()
             .filter(|c| c.0 != e.room && if ours.is_empty() { c.3 } else { beats(c.0) });

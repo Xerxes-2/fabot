@@ -512,7 +512,8 @@ with one phase machine per kind under `core/fight/kinds/`.
   disengages (falls back to `unanswered` on towers/ramparts until the group
   is gone). A raid in a home strikes as it stands, so a home's set none of
   whose casts has begun, once its spawn has begun another body since they
-  were asked and the landing their price gave (their spawn ticks) has passed,
+  were asked, or stands idle short of a cast's energy, and the landing their
+  price gave (their spawn ticks) has passed,
   cannot arrive in time: that deadline sets it `unanswered` and drops its
   asks, and a later event prices it afresh (owner; it formed on casts the
   floor's refills never let begin).
@@ -547,7 +548,10 @@ with one phase machine per kind under `core/fight/kinds/`.
   onward via `atlas::onward` (profitable rooms first, else stalest patrol; rooms
   with a tracker group still in `Lost` grace are not stale so a set never walks
   straight back into an escort it just left) rather than returning home; closes
-  on death, safe mode, or no remaining targets.
+  on death, safe mode, or no remaining targets. Past the deadline a home's
+  `Defend` keeps, a forming set drops its unbegun casts and goes on only if
+  its standing bodies beat its room as they stand, else closes (its bodies
+  stood at home till they aged out).
 
 - **`Stronghold`** (`kinds/stronghold.rs`, L1–L3): opened on the table's
   `Stronghold` row and priced at open off the level intel read, unseen:

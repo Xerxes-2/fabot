@@ -4,11 +4,12 @@ use std::borrow::Borrow;
 use std::collections::BTreeSet;
 
 use super::super::scene::{Asked, Scene};
-use super::super::shape::{Cast, Engagement, Group, Phase, Slot, enter};
+use super::super::shape::{Cast, Engagement, Group, Objective, Phase, Slot, enter};
 use fabot_base::tiles::{self};
 use fabot_base::vocabulary::Part;
 use fabot_base::world::{
-    Controller, Creep, Fallen, Id, Oven, Owner, Pos, RoomName, Structure, StructureType, cast,
+    Controller, Creep, Fallen, Id, Oven, Owner, Pos, RoomName, Spawn, Structure, StructureType,
+    cast,
 };
 use fabot_base::{declarations, engine};
 use fabot_tactics::Tactic;
@@ -61,9 +62,9 @@ pub fn stands_alone(time: i32, e: &Engagement) -> Engagement {
     }
 }
 
-/// A raid in a home strikes as it stands, so a home's set none of whose casts
-/// has begun is unanswered once its spawn has begun another body since they
-/// were asked and the landing their price gave has passed: a deadline (§6.2).
+/// A forming set none of whose casts has begun is past its deadline (§6.2) once
+/// their spawns began another body since the ask and the landing priced passed:
+/// a home's, as a raid there strikes as it stands, and a sweep's.
 pub(crate) fn overdue(scene: &Scene, e: &Engagement) -> bool {
     let casts: Vec<&Cast> = (scene.spawning.iter())
         .filter(|c| c.engagement == e.id)
@@ -72,24 +73,40 @@ pub(crate) fn overdue(scene: &Scene, e: &Engagement) -> bool {
         .map(|c| engine::SPAWN_TICKS_PER_PART * c.body.len() as i32)
         .sum();
     let asked = casts.iter().filter_map(|c| asked_at(&c.name)).max();
-    let ovens: Vec<&Oven> = (scene.world.spawns.iter())
-        .filter(|s| s.pos.room == e.room)
-        .filter_map(|s| s.spawning.as_ref())
+    let spawns: Vec<&Spawn> = (scene.world.spawns.iter())
+        .filter(|s| casts.iter().any(|c| c.room == s.pos.room))
         .collect();
+    let ovens: Vec<&Oven> = spawns.iter().filter_map(|s| s.spawning.as_ref()).collect();
+    let short = |s: &&&Spawn| {
+        let bank = scene
+            .world
+            .room(s.pos.room)
+            .map_or(0, |r| r.energy_available);
+        (casts.iter()).any(|c| c.room == s.pos.room && engine::body_cost(&c.body) > bank)
+    };
+    let idle = spawns.iter().any(|s| s.spawning.is_none() && short(&s));
     let begun = |c: &&Cast| ovens.iter().any(|o| o.name == c.name);
 
-    scene.homes.contains(&e.room)
+    let home = scene.homes.contains(&e.room) && !e.unanswered && e.ours.is_empty();
+
+    (home || e.objective == Objective::Sweep)
         && e.phase == Phase::Forming
-        && !e.unanswered
-        && e.ours.is_empty()
         && !casts.iter().any(begun)
-        && asked.is_some_and(|at| passed_over(scene.world.time, at, landing, &ovens))
+        && asked.is_some_and(|at| passed_over(scene.world.time, at, landing, (&ovens, idle)))
 }
 
-/// Its asks dropped, a set past its deadline holds its home's towers alone.
-pub(crate) fn late(asked: &mut Asked, time: i32, e: &Engagement) -> Engagement {
+/// Its asks dropped, a home's set past its deadline holds its towers alone; a
+/// sweep goes on only if its standing bodies beat its room as they stand.
+pub(crate) fn late(
+    asked: &mut Asked,
+    (time, stands): (i32, bool),
+    e: &Engagement,
+) -> Option<Engagement> {
     asked.casts.retain(|c| c.engagement != e.id);
-    give_up(true, time, e)
+    match e.objective {
+        Objective::Sweep => stands.then(|| stands_alone(time, e)),
+        _ => Some(give_up(true, time, e)),
+    }
 }
 
 /// A cast is named for the tick it was asked, which its deadline reads (§6.2).
@@ -105,12 +122,12 @@ pub(crate) fn asked_at(name: &str) -> Option<i32> {
         .ok()
 }
 
-/// A body its spawn began before the set was asked was in its price; one
-/// begun after took the spawn ahead of it.
-fn passed_over(time: i32, since: i32, landing: i32, ovens: &[&Oven]) -> bool {
+/// A body its spawn began before the ask was in its price; one begun after, or a
+/// spawn idle short of a cast's energy, passed the set over.
+fn passed_over(time: i32, since: i32, landing: i32, (ovens, idle): (&[&Oven], bool)) -> bool {
     let began =
         |o: &&&Oven| time - (engine::SPAWN_TICKS_PER_PART * o.body.len() as i32 - o.remaining);
-    time > since + landing && ovens.iter().any(|o| began(&o) > since)
+    time > since + landing && (idle || ovens.iter().any(|o| began(&o) > since))
 }
 
 const OUTPOST_LOSSES: i32 = 2;
@@ -546,19 +563,23 @@ mod tests {
         let since = 0;
         for time in since + 1..=since + 120 {
             let on = oven(40, 120 - time);
-            assert!(!passed_over(time, since, 108, &[&on]), "t{time}");
+            assert!(!passed_over(time, since, 108, (&[&on], false)), "t{time}");
         }
         assert!(
-            !passed_over(121, since, 108, &[]),
+            !passed_over(121, since, 108, (&[], false)),
             "a spawn come free waits on the queue"
         );
         assert!(
-            !passed_over(100, since, 108, &[&oven(10, 29)]),
+            !passed_over(100, since, 108, (&[&oven(10, 29)], false)),
             "inside the landing"
         );
         assert!(
-            passed_over(122, since, 108, &[&oven(10, 29)]),
+            passed_over(122, since, 108, (&[&oven(10, 29)], false)),
             "begun after it, past the landing"
+        );
+        assert!(
+            passed_over(121, since, 108, (&[], true)),
+            "a spawn short of the cast's energy, past the landing"
         );
     }
 
