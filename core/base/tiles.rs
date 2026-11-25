@@ -3,7 +3,6 @@
 use std::collections::VecDeque;
 use std::fmt;
 use std::ops::{Index, IndexMut};
-use std::sync::OnceLock;
 
 use crate::engine;
 use crate::world::{Pos, RoomName};
@@ -110,23 +109,23 @@ pub fn all() -> impl Iterator<Item = Tile> {
 }
 
 #[inline]
-pub fn index(x: i32, y: i32) -> Tile {
+pub const fn index(x: i32, y: i32) -> Tile {
     Tile((y * SIDE + x) as u16)
 }
 
 #[inline]
-pub fn x_of(tile: Tile) -> i32 {
-    i32::from(tile.0) % SIDE
+pub const fn x_of(tile: Tile) -> i32 {
+    tile.0 as i32 % SIDE
 }
 
 #[inline]
-pub fn y_of(tile: Tile) -> i32 {
-    i32::from(tile.0) / SIDE
+pub const fn y_of(tile: Tile) -> i32 {
+    tile.0 as i32 / SIDE
 }
 
 #[inline]
-pub fn in_room(x: i32, y: i32) -> bool {
-    (0..SIDE).contains(&x) && (0..SIDE).contains(&y)
+pub const fn in_room(x: i32, y: i32) -> bool {
+    x >= 0 && x < SIDE && y >= 0 && y < SIDE
 }
 
 #[inline]
@@ -159,7 +158,7 @@ pub const LEFT: i32 = 7;
 pub const TOP_LEFT: i32 = 8;
 
 #[inline]
-pub fn dx(direction: i32) -> i32 {
+pub const fn dx(direction: i32) -> i32 {
     match direction {
         2..=4 => 1,
         6..=8 => -1,
@@ -169,7 +168,7 @@ pub fn dx(direction: i32) -> i32 {
 
 /// Rows grow downward.
 #[inline]
-pub fn dy(direction: i32) -> i32 {
+pub const fn dy(direction: i32) -> i32 {
     match direction {
         8 | 1 | 2 => -1,
         4..=6 => 1,
@@ -178,24 +177,33 @@ pub fn dy(direction: i32) -> i32 {
 }
 
 #[inline]
-pub fn neighbour(tile: Tile, direction: i32) -> Option<Tile> {
+pub const fn neighbour(tile: Tile, direction: i32) -> Option<Tile> {
     let (x, y) = (x_of(tile) + dx(direction), y_of(tile) + dy(direction));
-    in_room(x, y).then(|| index(x, y))
+    if in_room(x, y) {
+        Some(index(x, y))
+    } else {
+        None
+    }
 }
 
-fn around_table() -> &'static Vec<Vec<Tile>> {
-    static TABLE: OnceLock<Vec<Vec<Tile>>> = OnceLock::new();
-    TABLE.get_or_init(|| {
-        all()
-            .map(|t| (1..=8).filter_map(|d| neighbour(t, d)).collect())
-            .collect()
-    })
-}
+const AROUND: &[([Tile; 8], u8); COUNT] = &{
+    let mut table = [([Tile(0); 8], 0); COUNT];
+    let mut i = 0;
+    while i < 8 * COUNT {
+        if let Some(t) = neighbour(Tile((i / 8) as u16), (i % 8) as i32 + 1) {
+            let (row, n) = &mut table[i / 8];
+            row[*n as usize] = t;
+            *n += 1;
+        }
+        i += 1;
+    }
+    table
+};
 
 /// The in-room neighbours, in direction order.
-#[inline]
 pub fn around(tile: Tile) -> &'static [Tile] {
-    &around_table()[tile]
+    let (row, n) = &AROUND[tile.index()];
+    &row[..*n as usize]
 }
 
 /// The neighbour costing least under `bound`, the first in direction order on a tie.
@@ -267,7 +275,7 @@ pub fn on_edge(tile: Tile) -> bool {
 /// The engine's FIND_EXIT_* values; a corner lies on two borders and lands
 /// nowhere.
 #[inline]
-pub fn exit_of(tile: Tile) -> i32 {
+pub const fn exit_of(tile: Tile) -> i32 {
     let (x, y) = (x_of(tile), y_of(tile));
     let on_x = x == 0 || x == LAST;
     let on_y = y == 0 || y == LAST;
@@ -284,28 +292,37 @@ pub fn exit_of(tile: Tile) -> i32 {
     }
 }
 
-fn exit_bands() -> &'static Vec<Vec<Tile>> {
-    static BANDS: OnceLock<Vec<Vec<Tile>>> = OnceLock::new();
-    BANDS.get_or_init(|| {
-        (0..9)
-            .map(|exit| match exit {
-                1 => (1..=SIDE - 2).map(|i| index(i, 0)).collect(),
-                3 => (1..=SIDE - 2).map(|i| index(LAST, i)).collect(),
-                5 => (1..=SIDE - 2).map(|i| index(i, LAST)).collect(),
-                7 => (1..=SIDE - 2).map(|i| index(0, i)).collect(),
-                _ => Vec::new(),
-            })
-            .collect()
-    })
+const BAND: usize = SIDE as usize - 2;
+
+type Band = ([Tile; BAND], [(Tile, Tile); BAND]);
+const EXITS: &[Band; 4] = &{
+    let mut sides = [([Tile(0); BAND], [(Tile(0), Tile(0)); BAND]); 4];
+    let mut i = 0;
+    while i < 4 * BAND {
+        let (side, v) = (i / BAND, (i % BAND) as i32 + 1);
+        let t = [index(v, 0), index(LAST, v), index(v, LAST), index(0, v)][side];
+        sides[side].0[i % BAND] = t;
+        sides[side].1[i % BAND] = (t, landing(t).unwrap());
+        i += 1;
+    }
+    sides
+};
+
+fn side(exit: i32) -> Option<&'static Band> {
+    matches!(exit, TOP | RIGHT | BOTTOM | LEFT).then(|| &EXITS[(exit / 2) as usize])
 }
 
-#[inline]
 pub fn exit_tiles(exit: i32) -> &'static [Tile] {
-    exit_bands().get(exit as usize).map_or(&[], Vec::as_slice)
+    side(exit).map_or(&[], |s| &s.0)
+}
+
+/// `exit_tiles(exit)` each with its `landing`, in the same order.
+pub fn exit_landings(exit: i32) -> &'static [(Tile, Tile)] {
+    side(exit).map_or(&[], |s| &s.1)
 }
 
 #[inline]
-pub fn landing(tile: Tile) -> Option<Tile> {
+pub const fn landing(tile: Tile) -> Option<Tile> {
     let (x, y) = (x_of(tile), y_of(tile));
     match exit_of(tile) {
         1 => Some(index(x, LAST)),
@@ -314,22 +331,6 @@ pub fn landing(tile: Tile) -> Option<Tile> {
         7 => Some(index(LAST, y)),
         _ => None,
     }
-}
-
-/// `exit_tiles(exit)` each with its `landing`, in the same order.
-pub fn exit_landings(exit: i32) -> &'static [(Tile, Tile)] {
-    static LANDINGS: OnceLock<Vec<Vec<(Tile, Tile)>>> = OnceLock::new();
-    let all = LANDINGS.get_or_init(|| {
-        (0..9)
-            .map(|e| {
-                exit_tiles(e)
-                    .iter()
-                    .filter_map(|&t| Some((t, landing(t)?)))
-                    .collect()
-            })
-            .collect()
-    });
-    all.get(exit as usize).map_or(&[], Vec::as_slice)
 }
 
 pub fn rooms_apart(a: RoomName, b: RoomName) -> i32 {

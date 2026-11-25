@@ -283,6 +283,14 @@ fn a_step_and_the_direction_back_to_it_agree_and_stay_within_range_one() {
 }
 
 #[test]
+fn around_lists_the_in_room_neighbours_in_direction_order() {
+    for t in tiles::all() {
+        let each: Vec<Tile> = (1..=8).filter_map(|d| tiles::neighbour(t, d)).collect();
+        assert_eq!(tiles::around(t), each);
+    }
+}
+
+#[test]
 fn an_exits_landing_is_on_the_opposite_exit_and_lands_back() {
     for exit in [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT] {
         let room = tiles::room_toward(ROOM, exit).unwrap();
@@ -291,6 +299,7 @@ fn an_exits_landing_is_on_the_opposite_exit_and_lands_back() {
             assert_eq!(tiles::exit_of(tile), exit, "on its exit");
             assert_eq!(tiles::exit_of(landing), (exit + 3) % 8 + 1, "opposite");
             assert_eq!(tiles::landing(landing), Some(tile), "and back");
+            assert!(tiles::exit_landings(exit).contains(&(tile, landing)));
             assert_eq!(
                 tiles::seam_range(&tiles::to_pos(ROOM, tile), &tiles::to_pos(room, landing)),
                 Some(0),
