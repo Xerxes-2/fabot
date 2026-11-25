@@ -27,10 +27,10 @@ const drawnBy = (dir, a) => new Set(defendsIn(dir, a).flatMap((e) => e.drew));
 const seats = new Map();
 const seatOf = (dir) => seats.get(dir) ?? seats.set(dir, JSON.parse(readFileSync(join(dir, "seat.json"), "utf8"))).get(dir);
 const killsOf = (dir, room) => seatOf(dir).deaths.filter((d) => d.ours && (!room || d.room === room));
-// The ticks our bodies that dig or carry were killed in `room` from `from` on, soonest first.
+// The ticks our bodies that dig were killed in `room` from `from` on, soonest first: Defend's cull.
 const culls = (samples, a, dir) =>
   killsOf(dir, a.room)
-    .filter((b) => /^[wcm]+$/.test(b.body) && /[wc]/.test(b.body))
+    .filter((b) => b.body.includes("w"))
     .map((d) => d.t - offsetOf(samples))
     .filter((t) => t >= (a.from ?? 0))
     .sort((x, y) => x - y);

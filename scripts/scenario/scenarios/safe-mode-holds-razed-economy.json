@@ -1,5 +1,5 @@
 {
-  "why": "a player's raid no cast answers, killing the refillers of a home with a tower, spends the safe mode within a sample (100 ticks) of its second kill of a body that digs or carries, and before the economy is razed; one whose raid kills fewer spends it at no bound. The raid lands at t300, before Layout stands any rampart of its ring: by t1500 the ring held it off our bodies and nothing was culled. N2 (RCL3) has no ring either, but its home holds only two creeps, too few to raze. culled asserts the cull happened, so the bound is never met empty",
+  "why": "a player's raid no cast answers, killing the refillers of a home with a tower, spends the safe mode within a sample (100 ticks) of its second kill of a body that digs (Defend's cull), and before the economy is razed; one whose raid kills fewer spends it at no bound. The raid lands at t300, before Layout stands any rampart of its ring: by t1500 the ring held it off our bodies and nothing was culled. N2 (RCL3) has no ring either, but its home holds only two creeps, too few to raze. culled asserts the cull happened, so the bound is never met empty",
   "modules": ["atlas", "economy", "exchange", "fight", "layout", "mv", "tactics"],
   "start": {
     "room": "W8N3",
