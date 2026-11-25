@@ -132,7 +132,8 @@ pub fn threat_radius(
     (intel, declarations): (&Intel, &Declarations),
     owned: &BTreeSet<RoomName>,
 ) -> BTreeMap<RoomName, i32> {
-    let guarded = |room: &RoomName| intel.get(room).is_some_and(|r| r.guarded(declarations));
+    let me = &world.me;
+    let guarded = |room: &RoomName| intel.get(room).is_some_and(|r| r.guarded(me, declarations));
     (owned.iter().filter_map(|r| world.room(*r)))
         .map(|room| {
             (
@@ -246,7 +247,7 @@ pub fn sight(
         .filter(|(room, _)| !intel.contains_key(*room))
         .map(|(_, hops)| *hops)
         .min();
-    let fresh = |row: &Row| row.guarded(declarations) && world.time - row.seen <= STALE;
+    let fresh = |row: &Row| row.guarded(&world.me, declarations) && world.time - row.seen <= STALE;
     let near = (radius.iter())
         .filter(|(room, hops)| intel.contains_key(*room) || Some(**hops) == ring)
         .filter(|(room, _)| !intel.get(*room).is_some_and(fresh))

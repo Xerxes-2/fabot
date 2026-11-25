@@ -10,7 +10,7 @@ use fabot_base::intel::Intel;
 use fabot_base::tiles;
 use fabot_base::tuning::Tuning;
 use fabot_base::vocabulary::{CLAIMER, Part};
-use fabot_base::world::{Pos, RoomName, StructureType, World};
+use fabot_base::world::{Owner, Pos, RoomName, StructureType, World};
 use fabot_economy::bodies;
 use fabot_economy::slots;
 use fabot_fight::casting;
@@ -297,18 +297,17 @@ pub fn survey(
                     },
                     _ if taken(&name) || !banks => continue,
                     (None, Some(row)) if row.sources.is_some() => {
-                        let theirs = |user: &String| user != &world.me;
-                        let lapsed =
-                            |(user, lapse): &(String, i32)| !theirs(user) || *lapse <= world.time;
                         let (Some(controller), Some(sources)) = (&row.controller, &row.sources)
                         else {
                             continue;
                         };
-                        let worker = row.worker.as_ref().filter(|u| theirs(u));
+                        let worker = row.worker.as_ref().filter(|u| *u != &world.me);
+                        let ally = |u: &String| {
+                            Owner::of_user(u.clone(), &world.me, declarations).is_ally()
+                        };
                         if sources.is_empty()
-                            || row.owner.is_some()
-                            || !row.reservation.as_ref().is_none_or(lapsed)
-                            || worker.is_some_and(|u| declarations.allies.contains(u))
+                            || !row.unheld(&world.me, world.time)
+                            || worker.is_some_and(ally)
                         {
                             continue;
                         }

@@ -18,7 +18,7 @@ use fabot_base::intel::{Intel, Row};
 use fabot_base::tiles;
 use fabot_base::tuning::Tuning;
 use fabot_base::vocabulary::{Part, ResourceType, multiple};
-use fabot_base::world::{Pos, RoomName, Rules, StructureType, World, sightings};
+use fabot_base::world::{Owner, Pos, RoomName, Rules, StructureType, World, sightings};
 use fabot_economy::EconomyState;
 use fabot_fight::shape::{Cast, Engagement};
 use fabot_layout::{RING_LEVEL, Standing};
@@ -158,7 +158,7 @@ pub fn reserve(rules: &Rules, t: &Tuning, level: i32, threatened: bool) -> i32 {
 }
 
 fn rival(world: &World, declarations: &Declarations, name: &str) -> bool {
-    name != world.me && !declarations.allies.contains(name)
+    Owner::of_user(name.to_string(), &world.me, declarations).is_theirs()
 }
 
 pub fn rivals(world: &World, declarations: &Declarations, intel: &Intel) -> Vec<(RoomName, i32)> {

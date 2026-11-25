@@ -94,10 +94,7 @@ pub fn mineral_worth(mineral: ResourceType, held: usize) -> f64 {
 }
 
 fn free(world: &World, row: &Row) -> bool {
-    let theirs = |user: &String| user != &world.me;
-    row.owner.is_none()
-        && (row.reservation.as_ref()).is_none_or(|(u, lapse)| !theirs(u) || *lapse <= world.time)
-        && !row.worker.as_ref().is_some_and(theirs)
+    row.unheld(&world.me, world.time) && row.worker.as_ref().is_none_or(|u| u == &world.me)
 }
 
 fn apart(owned: &BTreeSet<RoomName>, room: RoomName) -> bool {

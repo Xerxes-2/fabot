@@ -36,9 +36,16 @@ pub struct Row {
 pub type Loot = (i32, Vec<(Declared, ResourceType, i32, bool)>);
 
 impl Row {
-    /// A player's tower stood here when last seen, and the player is no ally.
-    pub fn guarded(&self, declarations: &Declarations) -> bool {
-        self.towered && (self.owner.as_ref()).is_some_and(|u| !declarations.allies.contains(u))
+    /// A tower stood here when last seen, its owner's no friend.
+    pub fn guarded(&self, me: &str, declarations: &Declarations) -> bool {
+        let theirs = |u: &String| Owner::of_user(u.clone(), me, declarations).is_theirs();
+        self.towered && self.owner.as_ref().is_some_and(theirs)
+    }
+
+    /// Nobody else holds it at `time`: no owner, and a reservation `me`'s or lapsed.
+    pub fn unheld(&self, me: &str, time: i32) -> bool {
+        let lapsed = |(u, lapse): &(String, i32)| u == me || *lapse <= time;
+        self.owner.is_none() && self.reservation.as_ref().is_none_or(lapsed)
     }
 }
 

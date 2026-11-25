@@ -333,7 +333,7 @@ pub fn decide<'t>(
             *room,
             row.lairs.as_deref(),
             row.stronghold.is_some_and(|s| s.collapses_at > world.time)
-                || row.guarded(&declarations),
+                || row.guarded(&world.me, &declarations),
         )
     });
     let mut atlas = Atlas::following(atlas, world, seen, terrains);
