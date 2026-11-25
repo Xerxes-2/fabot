@@ -13,7 +13,7 @@ use fabot_base::intents::CreepAct;
 use fabot_base::tiles::Tile;
 use fabot_base::vocabulary::Part;
 use fabot_base::wish::Wish;
-use fabot_base::world::{self, Creep, Id, Pos, RoomName, Rules, Striker};
+use fabot_base::world::{self, Creep, Id, Pos, RoomName, Rules, Striker, hostiles};
 use fabot_base::{engine, tiles};
 use fabot_mv::{blob, plan};
 
@@ -171,23 +171,17 @@ fn ranked<'a>(sight: &Sight<'a>, order: &[Id], creep: &Creep) -> Vec<&'a Creep> 
         .collect();
 
     let mut rest: Vec<&Creep> = near.filter(|h| !order.contains(&h.id)).collect();
-    rest.sort_by_key(|h| {
-        (
-            h.live(Part::Attack) + h.live(Part::RangedAttack) == 0,
-            &h.id,
-        )
-    });
+    rest.sort_by_key(|h| (!hostiles::strikes(h), &h.id));
 
     first.extend(rest);
     first
 }
 
-/// Every body that strikes, in any phase and engaged or not: a swing and a
-/// shot at the first in the kill order in reach, a volley where it lands more.
+/// Every body that strikes, in any phase and engaged or not, at the first in the kill order in reach.
 pub fn strike(sight: &Sight, order: &[Id], creep: &Creep, armed: bool) -> Vec<CreepAct> {
     let targets: Vec<&Creep> = ranked(sight, order, creep)
         .into_iter()
-        .filter(|h| !armed || h.live(Part::Attack) > 0 || h.live(Part::RangedAttack) > 0)
+        .filter(|h| !armed || hostiles::strikes(h))
         .collect();
     let within = |r: i32| targets.iter().filter(move |h| creep.pos.within(r, &h.pos));
 
