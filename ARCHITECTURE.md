@@ -513,9 +513,11 @@ with one phase machine per kind under `core/fight/kinds/`.
   merging groups merge their engagements into the older id.
 - **Starvation (`unanswered`) & safe mode:** unstaffable engagements fall back
   to `unanswered` rather than forming forever. An unanswered home `Defend`
-  activates safe mode if no tower stands, a raid reaches core structures / half
-  of spawns+extensions, a claimer reaches the controller, or player raids cut
-  haulers below refill capacity.
+  activates safe mode if no tower stands, its raid reaches a damaged keep
+  (spawn, tower, storage, terminal), or its players reach half the spawns or
+  half the extensions (two at least) no rampart covers, cut haulers below
+  refill capacity, or kill two diggers (`culled`); a claimer within reach of
+  the controller fires it, answered or not (`defend::safe_mode`).
 
 **Kinds implemented:**
 - **`Defend`** (`kinds/defend.rs`): opened on threats in or drifting toward the
