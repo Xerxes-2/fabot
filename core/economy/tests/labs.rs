@@ -196,8 +196,8 @@ impl Labs {
         Some(self.bring(i, *a)? + self.bring(i, *b)?)
     }
 
-    /// ARCHITECTURE.md's labs rank (lines 398-403), best first: running, most
-    /// outputs, reagents held, nearest, first wanted.
+    /// ARCHITECTURE.md's labs rank, best first: running, most outputs, reagents
+    /// standing there, nearest, first wanted; a slow bench only what stands there.
     fn claim(&self, i: usize, at: usize) -> Option<impl Ord> {
         let bench = self.benches[i].as_ref()?;
         let r = &self.wanted[at];
@@ -209,12 +209,13 @@ impl Labs {
             .max()
             .unwrap_or(0);
         let running = runs(bench, &self.wanted, fastest) == Some(r.0);
-        let held = holds(bench, r.1);
-        Some((
+        let held = r.1.iter().filter(|m| self.bring(i, **m) == Some(0)).count();
+        let reached = self.reached(i, r)?;
+        (2 * bench.outputs >= fastest || reached == 0).then_some((
             Reverse(running),
             Reverse(bench.outputs),
             Reverse(held),
-            self.reached(i, r)?,
+            reached,
             at,
         ))
     }
@@ -358,9 +359,9 @@ proptest! {
         for (i, r) in taken.iter().enumerate() {
             let Some(r) = r else {
                 // Idle: every reaction it reaches went elsewhere.
-                for w in &labs.wanted {
+                for (at, w) in labs.wanted.iter().enumerate() {
                     let free = taken.iter().flatten().all(|t| t.0 != w.0);
-                    prop_assert!(labs.benches[i].is_none() || labs.reached(i, w).is_none() || !free,
+                    prop_assert!(labs.claim(i, at).is_none() || !free,
                         "{i} idle beside {w:?}");
                 }
                 continue;
@@ -368,7 +369,7 @@ proptest! {
             let Some(rank) = at(r) else {
                 return Err(TestCaseError::fail(format!("{r:?} unwanted")));
             };
-            prop_assert!(labs.benches[i].is_some() && labs.reached(i, r).is_some(), "{i} {r:?}");
+            prop_assert!(labs.claim(i, rank).is_some(), "{i} {r:?}");
             prop_assert!(taken[..i].iter().flatten().all(|t| t.0 != r.0), "{r:?} twice");
             let mine = labs.claim(i, rank);
             for j in (0..taken.len()).filter(|j| *j != i) {

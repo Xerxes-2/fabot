@@ -102,27 +102,24 @@ impl Bench {
 /// Output labs set the rate: under 1/SLOW_SHARE of the fastest keeps nothing (owner: half).
 const SLOW_SHARE: usize = 2;
 
+fn keeps<'b>(benches: &[Option<&'b Bench>]) -> impl Fn(&Bench) -> bool + use<'b> {
+    let fastest = benches.iter().flatten().map(|b| b.outputs).max();
+    move |b| SLOW_SHARE * b.outputs >= fastest.unwrap_or(0)
+}
+
 /// The wanted reaction each cluster's reagent labs run and it keeps (ARCHITECTURE.md, labs).
 pub fn running<'w>(
     benches: &[Option<&Bench>],
     wanted: &'w [Reaction],
 ) -> Vec<Option<&'w Reaction>> {
-    let fastest = benches
-        .iter()
-        .flatten()
-        .map(|b| b.outputs)
-        .max()
-        .unwrap_or(0);
+    let keeps = keeps(benches);
     let runs = |b: &Bench| {
         wanted
             .iter()
             .find(|(_, reagents, _)| b.holds(reagents) == 2)
     };
     (benches.iter())
-        .map(|b| {
-            b.filter(|b| SLOW_SHARE * b.outputs >= fastest)
-                .and_then(runs)
-        })
+        .map(|b| b.filter(|b| keeps(b)).and_then(runs))
         .collect()
 }
 
@@ -134,17 +131,19 @@ pub fn assign(
     bring: Bring,
 ) -> Vec<Option<Reaction>> {
     let running = running(benches, wanted);
+    let keeps = keeps(benches);
     let mut offers = Vec::new();
     for (i, bench) in benches.iter().enumerate() {
         let Some(bench) = bench else { continue };
         for (rank, (product, reagents, _)) in wanted.iter().enumerate() {
-            let held = bench.holds(reagents);
             let runs = running[i].is_some_and(|r| r.0 == *product);
-            if let [Some(a), Some(b)] = reagents.map(|r| bring(i, r)) {
+            if let [Some(a), Some(b)] = reagents.map(|r| bring(i, r))
+                && (keeps(bench) || a + b == 0)
+            {
                 let key = (
                     Reverse(runs),
                     Reverse(bench.outputs),
-                    Reverse(held),
+                    Reverse(usize::from(a == 0) + usize::from(b == 0)),
                     a + b,
                     rank,
                 );

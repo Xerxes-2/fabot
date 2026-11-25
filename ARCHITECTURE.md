@@ -452,14 +452,14 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   reactions the stock carries through to it after the targets before it
   (`labs::makeable`), none drawing an earlier one's stock below its cap.
   `labs::assign` gives each, no two clusters the same, to a cluster its
-  reagents reach (its own, and what other colonies would
-  give through terminals with room), ranked: the reaction its reagent labs
-  already run (both reagents held), so a running reaction stays put, unless
-  it reacts under half as fast as the fastest cluster, so a slow one never
-  holds a step a fast one is free for; then most output labs; then labs
-  holding one reagent; then the nearest colony holding the reagents; then
-  the first wanted. Nothing in the rank moves as a send lands, so each tick
-  ranks afresh with no memory. A running cluster keeps its reagents and
+  reagents reach (its own, and what other colonies would give through
+  terminals with room; a cluster reacting under half as fast as the fastest
+  only its own, as it may lose the step and its reagents travel again),
+  ranked: the reaction its reagent labs already run (both reagents held),
+  so it stays put unless that slow; then most output labs; then the reagents
+  its colony holds, so a reaction goes where its stock stands; then the
+  nearest colony holding the reagents; then the first wanted. Nothing in the rank moves as a send lands, so each tick ranks
+  afresh with no memory. A running cluster keeps its reagents and
   what its product reacts with next; an idle one keeps none. Terminals
   balance reagents and boosts (§5 terminal aid), and a product another
   colony is short of leaves the labs a send at a time. Labs
