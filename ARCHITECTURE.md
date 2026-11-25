@@ -94,8 +94,11 @@ World ──▶ Derived ──▶ decisions (read Derived & Atlas, never World) 
   so a kept one equals a fresh one). Weights that only fall (a road built, a
   structure gone) repair a kept flood from the tiles that changed, never drop
   it: dropping a room's table on one road finished re-flooded up to 480 at once. A step's flood in a room with a hostile
-  on an open tile or danger walls them in a per-tick table never kept, so no
-  kept flood reads a creep or danger (`--check` re-floods each hit). Room route trees (`Derived.trees`) are
+  on an open tile or danger walls them in a table apart, keyed by the danger
+  (a carried walk's flood round its walls likewise, the walls in the key)
+  and kept on the weights with those hostiles walled while they stand still,
+  dropped the tick after going unasked, so no room's flood reads a creep
+  (`--check` re-floods each hit). Room route trees (`Derived.trees`) are
   searched once a tick per colony because Economy prices every body against
   every offer (per-query search costs thousands a tick at six colonies); trees
   and outpost road walks carry across ticks in `atlas.carried` (§4), keyed by a
@@ -139,7 +142,7 @@ segments over multiple ticks (economy first); a cold tick never spends more than
 | `Bindings` / `app` | `fabot` | Screeps JS API seam, packed `read.js`, `driver.rs`, `wire.rs` | `Game`, `RawMemory` | `Game`, `RawMemory`, segments |
 | `Engine` | `fabot-base` | Game formulas & non-global server constants (vanilla tables from `screeps-game-api`) | — | — |
 | `World` | `fabot-base` | Single-pass tick snapshot, event-log strikes/destroys, per-tick `rules` (`CONTROLLER_STRUCTURES`) | `Game` | — |
-| `Atlas` | `fabot-atlas` | Room graph (region nodes, border-stretch crossings, keeper-strike avoidance, blind keeper penalty, a room intel last saw with towers that fire on us (a live stronghold's, a non-ally player's) never crossed, only reached) and per-room tile grid (creep-free weights, reverse floods, seats, footprint queries; a hostile's tile is walled only in this tick's step floods and passability, never in a kept flood, so one moving redoes no flood, tree or walk); out-of-sight grids hold what stood when last seen (else terrain) struck where intel places the keepers (`atlas.unseen`); a walk can run on terrain alone, as it lies or paved (`bare`) | `World`, `terrain`, `intel.rooms`, `Declarations` (colony plans, for `server`) | flood table, `atlas.carried` |
+| `Atlas` | `fabot-atlas` | Room graph (region nodes, border-stretch crossings, keeper-strike avoidance, blind keeper penalty, a room intel last saw with towers that fire on us (a live stronghold's, a non-ally player's) never crossed, only reached) and per-room tile grid (creep-free weights, reverse floods, seats, footprint queries; a hostile's tile is walled only in step floods and passability, never in a room's flood, so one moving redoes no flood, tree or walk); out-of-sight grids hold what stood when last seen (else terrain) struck where intel places the keepers (`atlas.unseen`); a walk can run on terrain alone, as it lies or paved (`bare`) | `World`, `terrain`, `intel.rooms`, `Declarations` (colony plans, for `server`) | flood table, `atlas.carried` |
 | `Economy` | `fabot-economy` | Slots, casts, sticky tasks, logistics dispatcher, links, labs, terminals, abandon | `Derived`, `Atlas`, `declarations`, `EconomyState`, Strategy's `scouts` | tasks, casts, `assignments` |
 | `Layout` | `fabot-layout` | Colony placement plan (Hivemind's builder, centre first), rampart ring, construction sites, buried-road and off-plan wall destroy, tower firing | `Derived`, `Atlas`, `declarations` | sites, destroys, tower actions, `standing.layout` |
 | `Exchange` | `fabot-exchange` | Pure combat arithmetic (`outcome`, `cheapest_win`, breach planning) | fighters, terrain | — |
@@ -213,6 +216,7 @@ architecture change, not a fix.
 | `sightings` | room → armed hostile / core id → expiry tick | World | heap | vision grace for stood-down outposts |
 | `sightings.last` | per sighting (room, id): its creep's parts, boosts, hits, hits max and tile as last seen (`Glimpse`; none for a core); written on sight, cleared when that creep stands in another room, expires with its sighting; `--check`: in sight it is the creep now and every armed creep there has one, out of sight its creep stands nowhere | World | heap (a stored observation, like the sighting, not a derived memo) | a blind `Defend` prices and seeks the raid it last saw (§6.2) |
 | `atlas.floods` | per-room cached reverse floods + the weights each was flooded on | Atlas | heap | reused while room weights hold, repaired when they only fall (`--check` compares a repair with a fresh flood); dropped `FLOOD_TICKS` (300) unasked, so a room keeps the goals asked in that span, at most `MOST_FLOODS` (2000), the least lately asked dropped first |
+| `atlas.live` | per-room step floods round hostiles or danger, and carried walks' floods round their walls, + the weights (hostiles walled) each was flooded on | Atlas | heap | a hostile standing still is asked about the same flood each tick (owner, 2026-11-26), so one is reused while those weights and its danger read the same, repaired as `atlas.floods` are; dropped the tick after going unasked |
 | `atlas.unseen` | out-of-sight room grid + the keeper posts and blind flag it was struck from | Atlas | heap | keyed by those posts, not by sight alone, so intel arriving after a cold tick strikes a keeper room pre-read blind |
 | `atlas.carried` | carried room trees & outpost road walks + room-read fingerprints | Atlas | heap | a search reads no room past its hops so a carried value equals a fresh one while those read the same (saving ~1/10 of decide); drops the tick after going unasked |
 | `atlas.towards` | per target tile, room and region, on the room's weights or its terrain alone, as it lies or paved (`bare`): the walk toward it, its weights, seeds and room read | Atlas | heap | a body asks at its choice of work, so a walk is dropped only `TRIP_TICKS` unasked (at most the targets asked in that span × the rooms of their trees); recomputed when its weights or seeds change |

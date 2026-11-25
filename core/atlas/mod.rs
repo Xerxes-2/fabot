@@ -63,7 +63,7 @@ pub struct RoomGrid {
     /// yields to nothing we decide, so a step never lands on its tile.
     held: Option<Rc<Table<Weight>>>,
     floods: Floods,
-    /// Floods round `held` or danger: they read what moves, so never kept.
+    /// Floods round `held` or danger.
     live: Floods,
     /// The open tiles a keeper strikes, walled.
     pub struck: Option<Rc<TileSet>>,
@@ -773,15 +773,22 @@ impl Atlas {
         }
     }
 
-    fn reused(previous: Option<&RoomGrid>, weights: Table<Weight>) -> Rc<Table<Weight>> {
+    fn reused(previous: Option<&Rc<Table<Weight>>>, weights: Table<Weight>) -> Rc<Table<Weight>> {
         match previous {
-            Some(grid) if *grid.weights == weights => grid.weights.clone(),
+            Some(last) if **last == weights => last.clone(),
             _ => Rc::new(weights),
         }
     }
 
-    fn kept(previous: Option<RoomGrid>) -> Floods {
-        previous.map_or_else(RefCell::default, |grid| Atlas::asked_floods(grid.floods))
+    /// A flood round hostiles or danger is kept while they stand still: a tick
+    /// unasked, they have moved.
+    fn kept(previous: Option<RoomGrid>) -> (Floods, Floods) {
+        previous.map_or_else(Default::default, |grid| {
+            (
+                Atlas::asked_floods(grid.floods),
+                Atlas::unasked(grid.live, 1),
+            )
+        })
     }
 
     fn bare(last: Option<&RoomGrid>, terrain: &[u8]) -> [Rc<Table<Weight>>; 2] {
@@ -867,19 +874,20 @@ impl Atlas {
             let struck = Atlas::walled(&mut weights, Atlas::struck(room));
             let last = previous.rooms.remove(&c);
             let bare = Atlas::bare(last.as_ref(), terrain.get_bits());
-            let weights = Atlas::reused(last.as_ref(), weights);
+            let weights = Atlas::reused(last.as_ref().map(|g| &g.weights), weights);
             let hostiles = room.hostiles().map(|c| tiles::of_pos(&c.pos));
             let open: Vec<Tile> = hostiles.filter(|t| weights[*t].is_some()).collect();
             let held = (!open.is_empty()).then(|| {
                 let mut held = (*weights).clone();
                 open.into_iter().for_each(|t| held[t] = None);
-                Rc::new(held)
+                Atlas::reused(last.as_ref().and_then(|g| g.held.as_ref()), held)
             });
+            let (floods, live) = Atlas::kept(last);
             let grid = RoomGrid {
-                floods: Atlas::kept(last),
+                floods,
                 weights,
                 held,
-                live: RefCell::default(),
+                live,
                 struck,
                 standing,
                 bare,
@@ -930,7 +938,7 @@ impl Atlas {
                         assert!(fresh, "a kept unseen grid differs from a fresh one");
                     }
                     grid.floods = Atlas::asked_floods(grid.floods);
-                    grid.live.take();
+                    grid.live = Atlas::unasked(grid.live, 1);
                     grid
                 }
                 last => {
@@ -939,12 +947,13 @@ impl Atlas {
                         None => Rc::new(Atlas::ground(terrain)),
                     };
                     let (weights, struck) = unseen(&standing);
-                    let weights = Atlas::reused(last.as_ref(), weights);
+                    let weights = Atlas::reused(last.as_ref().map(|g| &g.weights), weights);
                     let bare = Atlas::bare(last.as_ref(), terrain);
+                    let (floods, live) = Atlas::kept(last);
                     RoomGrid {
-                        floods: Atlas::kept(last),
+                        floods,
                         held: None,
-                        live: RefCell::default(),
+                        live,
                         weights,
                         standing,
                         bare,
