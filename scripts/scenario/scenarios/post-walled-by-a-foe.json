@@ -1,0 +1,7 @@
+{
+  "why": "a source post walled on every side but one, an extension on another (qlxvmzwu's E9S9 9,43), and an armed foe standing on that one: no carrier keeps the pile and full container it cannot reach. Before, the home's one carrier held Pickup of the pile from t300, standing at 13,36, the ring stuck at 1049/2350 and nothing more was cast (xluyotxw: castIn 1)",
+  "modules": ["economy"],
+  "start": { "world": "scripts/scenario/worlds/post-walled-by-a-foe.json", "seed": 1 },
+  "ticks": 600,
+  "assert": [{ "measure": "castIn", "room": "W1N1", "name": "", "min": 2 }]
+}

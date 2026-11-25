@@ -289,6 +289,11 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   Hivemind reads `energyAvailable < capacity`, so a ring fully booked demotes
   no pile; the stock a pile yields to (`Ground::stock`) is storage and terminal
   less the terminal's outgoing shipment, without what transporters carry.
+  In a raided room a load is taken only where a walk round the foes reaches
+  it (from the body, or from the room's exits for a body elsewhere), where
+  Hivemind paths on terrain alone and skips loads in its danger matrix: our
+  danger leaves owned rooms out (their towers fire), and a foe parked on a
+  pocket's one way in walls a load past its reach.
   `❓` After a wipe the floors cast a harvester and worker at the bank held; a
   200-energy worker's 50 a trip can lag their own recasts, so no full cast pays.
 - **Hub pile (`ColonyPlan.pile`):** from RCL2 until storage stands, remotes

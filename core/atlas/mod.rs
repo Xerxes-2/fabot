@@ -962,9 +962,7 @@ impl Atlas {
             return TileSet::default();
         };
         let open = |t: Tile| grid.weights[t].is_some();
-        let exits = [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT]
-            .iter()
-            .flat_map(|exit| tiles::exit_tiles(*exit).iter().copied());
+        let exits = (Atlas::EXITS.iter()).flat_map(|exit| tiles::exit_tiles(*exit).iter().copied());
         let steps = tiles::reach(exits.filter(|t| open(*t)), open);
         tiles::all()
             .filter(|t| steps[*t] != tiles::UNREACHED)
@@ -1327,6 +1325,17 @@ impl Atlas {
 
     pub fn field(&self, mover: Mover, target: &Target, at: &Pos) -> Option<Field> {
         self.field_round(mover, target, at, None)
+    }
+
+    pub fn reaches_live(&self, from: &Pos, to: &Pos) -> bool {
+        let Some(field) = self.field(Atlas::PACE, &target_at(to, 1), to) else {
+            return true;
+        };
+        let walked = |t: &Tile| field.ticks(*t).is_some();
+        if from.room == to.room {
+            return walked(&tiles::of_pos(from));
+        }
+        (Atlas::EXITS.iter()).any(|e| tiles::exit_tiles(*e).iter().any(walked))
     }
 
     /// Out of another room than the target's, the flood toward the exit the

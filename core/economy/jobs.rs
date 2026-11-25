@@ -237,6 +237,13 @@ fn sinks_of(derived: &Derived, ci: usize) -> Vec<Spot> {
     out
 }
 
+/// A load in a raided room is reached only by a walk round the foes there:
+/// Hivemind's path check (`drop.ts`) is terrain alone.
+fn reached((atlas, derived): (&Atlas, &Derived), from: &Pos, to: &Pos) -> bool {
+    let raided = (derived.grounds.iter()).any(|g| g.room == to.room && g.raided);
+    !raided || atlas.reaches_live(from, to)
+}
+
 fn ores_aboard(derived: &Derived) -> Vec<ResourceType> {
     let held = derived.bodies.iter().flat_map(|b| &b.store.held);
     super::derived::once(held.map(|(r, _)| *r).filter(|r| *r != Energy))
@@ -757,11 +764,13 @@ impl<'a> Jobs<'a> {
                 // it came from.
                 let aboard = |r: ResourceType| r != Energy && body.store.amount_of(r) > 0;
                 let ore = body.store.held.iter().any(|(r, _)| aboard(*r));
+                let ground = (self.atlas, self.derived);
                 let fits = |s: &Spot| {
                     let draws = |of: &dyn Fn(ResourceType) -> bool| matches!(&s.task, Task::Withdraw(_, r) | Task::Pickup(_, r) if of(*r));
                     (far || s.pos.room == home)
                         && (room > 0 || !draws(&|r| r == Energy))
                         && (!ore || matches!(s.of, Of::Drain) && draws(&aboard))
+                        && reached(ground, &body.pos, &s.pos)
                 };
                 let mut takes = std::mem::take(&mut self.takes[ci]);
                 let used = body.store.capacity - body.free;
@@ -788,7 +797,7 @@ impl<'a> Jobs<'a> {
         kept: Option<&Task>,
     ) -> Option<Task> {
         let fetching = body.energy == 0
-            || body.free > 0 && kept.is_some_and(|t| t.is_intake() && self.can_take(slot, t));
+            || body.free > 0 && kept.is_some_and(|t| t.is_intake() && self.can_take(slot, body, t));
         if !fetching {
             return self.spend(slot, builds, body, kept);
         }
@@ -970,7 +979,11 @@ impl<'a> Jobs<'a> {
         controller.map(|c| Task::Upgrade(c.id.into()))
     }
 
-    fn can_take(&self, slot: &Slot, t: &Task) -> bool {
+    fn can_take(&self, slot: &Slot, body: &Body, t: &Task) -> bool {
+        let at = t.target().and_then(|id| self.derived.spots.get(&id));
+        if at.is_some_and(|at| !reached((self.atlas, self.derived), &body.pos, at)) {
+            return false;
+        }
         let caster = self.derived.grounds.get(slot.colony).map(|g| g.room);
         (self.derived.grounds.iter())
             .filter(|g| g.room == slot.room || Some(g.room) == caster)
@@ -989,7 +1002,7 @@ impl<'a> Jobs<'a> {
                 s.id == id && self.digging.get(&s.id).copied().unwrap_or(0) < s.seats.unwrap_or(0)
             })
         };
-        if let Some(t) = kept.filter(|t| t.is_intake() && self.can_take(slot, t))
+        if let Some(t) = kept.filter(|t| t.is_intake() && self.can_take(slot, body, t))
             && !matches!(t, Task::Harvest(id) if !id.object().is_some_and(seated))
         {
             if let Task::Harvest(id) = t
@@ -1040,9 +1053,10 @@ impl<'a> Jobs<'a> {
             let n = Some(home.spare(st, c.reserve)).filter(|n| *n >= body.free);
             loads.push((Task::Withdraw(st.id, Energy), st.pos, n.unwrap_or(0)));
         }
+        let ground = (self.atlas, self.derived);
         // Not Hivemind's rank: ranked, a worker waits idle on a drop another holds.
         let loads = (loads.iter())
-            .filter(|(_, _, n)| *n > 0 && *n >= body.free.min(100))
+            .filter(|(_, p, n)| *n > 0 && *n >= body.free.min(100) && reached(ground, &body.pos, p))
             .map(|(t, p, n)| ((p.room != g.room, *n < body.free), *p, t));
         if let Some(t) = self.nearest(&body.pos, loads) {
             Jobs::count(&mut self.booked_load, t, body.free);
