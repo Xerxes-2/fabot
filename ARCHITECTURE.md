@@ -407,9 +407,8 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   `❓` The planner ranks a tunnel at path cost (wall 30), not its upkeep
   (×150, ×750 on swamp+wall): Hivemind's matrix is kept whole, so a centre
   whose roads tunnel can win (E3S9, gen 1141).
-  `❓` The faithful port ramps a single-source room slower than the old planner
-  where its centre sits farther from the source: E23S9 soak:many −3.6% to −4.9%
-  (RCL2 t900 vs t800), owner-accepted 2026-11-26 as the port's measured cost.
+  A single-source room whose centre sits farther from its source ramps slower
+  (E23S9 −3.6% to −4.9%): the owner accepted it as the port's cost, not a bug.
   `❓` The source container's seat (`build::harvest_spot`, Hivemind's most free
   neighbours) is not checked for being the only way between two parts of the
   room; the seat a source is dug from before it (`Atlas::bare_post`) is.
@@ -538,13 +537,11 @@ with one phase machine per kind under `core/fight/kinds/`.
   bodies). Disengaged within that
   bound, it re-forms and re-prices on the budget it kept the tick its raid's
   centre steps from off our ground back onto it (the crossing is the event;
-  the centre is all a group keeps from one tick to the next). `❓` A raid
-  hovering a tile or two across the border flaps it, each re-form asking its
-  shortfall (self-play seed 7: 11 and 9 re-forms in 30k ticks, one Defend
-  re-formed, quit and re-formed within 46 ticks); stopping that needs a
-  deadline or a wider band (owner: ships as is). Blind, with no body of
-  ours standing or asked, it re-forms and re-prices the raid
-  `sightings.last` remembers after each loss or age-out while it has lost
+  the centre is all a group keeps from one tick to the next). A raid hovering
+  across the border flaps it (self-play seed 7: 11 and 9 re-forms in 30k
+  ticks); the owner ships that, as a deadline or a wider band is a latch.
+  Blind, with no body of ours standing or asked, it re-forms and re-prices
+  the raid `sightings.last` remembers after each loss or age-out while it has lost
   fewer than two, until the sighting expires, and casts and seeks it as a
   seen one; with none remembered, or a re-price casting nothing,
   it disengages and keeps its budget the same way (`❓` a raider that steps
@@ -717,9 +714,9 @@ and `cheapest_win` (adds only to already-standing `ours`).
   redesign.
   `❓` A blob's lead flips between two bodies when their lags cross near a
   raid's swings (each tick an A-B-A swap); both raid-measured fixes regressed main.
-  `❓` Defence outcomes move with any plan change that moves no rule: under a
-  reversed builder scan or heap order main loses boosted bodies, lets a raid stand
-  1580 ticks, ages bodies out at home and answers one outpost raid of two (owner waived).
+  Defence outcomes move with any plan change that moves no rule (a reversed
+  builder scan let a raid stand 1580 ticks): the owner waives such shifts, as
+  main fails the same scenarios under harmless planner changes.
   `❓` A `Close` set priced landing together reaches the raid apart where
   the raid walks onto its nearer body (a pair 1 tick apart at landing met it
   6 apart); option: price a non-together arm as if the raid closes on the
