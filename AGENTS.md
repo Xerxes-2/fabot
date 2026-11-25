@@ -19,9 +19,6 @@ below are suspended and this section wins:
   field, new/merged/deleted module, or `ARCHITECTURE.md` §4 row: decide it, do
   not stop and ask. The agent is the owner for these decisions; record each in
   `ARCHITECTURE.md` with its why in one sentence and the rest in the commit.
-- **Ceilings may be raised** (`scripts/ceilings.json`) while a rewrite is in
-  flight, in the same commit, stating the new number and when it comes back
-  down. Net lines added may be positive.
 - **The ask is the target, not the permission.** Work to the destination (the
   modules after, the structure, a measure). List options most radical first and
   take the most radical that reaches it; take the safest only when the others
@@ -31,8 +28,8 @@ below are suspended and this section wins:
   scenario when none covers the rewrite.
 
 What stays: deterministic `decide`; no names or ids in source; `Fight` and
-`Economy` do not import each other; the comment-share ceiling; the paraphrase
-test; `jj ship` and its gates.
+`Economy` do not import each other; no ceiling in `scripts/ceilings.json`
+rises; the paraphrase test; `jj ship` and its gates.
 
 ## Boundaries
 
