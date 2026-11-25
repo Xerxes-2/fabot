@@ -129,7 +129,7 @@ impl<'a> Scene<'a> {
     ) -> Option<Engagement> {
         let colony = self.colonies_of(atlas, e).iter().map(|r| r.name).min()?;
         let rules = &self.world.rules;
-        let from = (self.world.spawns.iter())
+        let from = (self.world.working_spawns())
             .find(|s| s.pos.room == colony)
             .map_or_else(|| tiles::middle(colony), |s| s.pos);
 

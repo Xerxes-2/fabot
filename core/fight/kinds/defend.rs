@@ -99,7 +99,7 @@ pub(crate) type Fights<'a> = (
 
 /// A released body walks home to a spawn and is recycled there; any other rests.
 pub(crate) fn idle(sight: &mut tactics::Sight, scene: &Scene, fights: Fights, c: &Creep) -> Wish {
-    let spawn = (scene.world.spawns.iter()).find(|s| s.pos.room == c.pos.room);
+    let spawn = (scene.world.working_spawns()).find(|s| s.pos.room == c.pos.room);
     match (released((scene, sight.atlas), fights, c), spawn) {
         (true, Some(s)) => tactics::toward(sight, c, &s.pos, engine::MELEE_RANGE),
         (true, None) => tactics::retreat(sight, c),
@@ -108,8 +108,8 @@ pub(crate) fn idle(sight: &mut tactics::Sight, scene: &Scene, fights: Fights, c:
 }
 
 pub(crate) fn recycles(scene: &Scene, atlas: &Atlas, fights: Fights) -> Vec<Action> {
-    let beside =
-        |c: &Creep| (scene.world.spawns.iter()).find(|s| s.pos.within(engine::MELEE_RANGE, &c.pos));
+    let spawns = || scene.world.working_spawns();
+    let beside = |c: &Creep| spawns().find(|s| s.pos.within(engine::MELEE_RANGE, &c.pos));
     (scene.world.creeps.iter())
         .filter(|c| released((scene, atlas), fights, c))
         .filter_map(|c| Some(Action::Spawn(beside(c)?.id, SpawnAct::RecycleCreep(c.id))))
@@ -139,7 +139,7 @@ pub(crate) fn overdue(scene: &Scene, e: &Engagement) -> bool {
         .filter_map(|c| cast_of(&c.name))
         .map(|(t, _)| t)
         .max();
-    let spawns: Vec<&Spawn> = (scene.world.spawns.iter())
+    let spawns: Vec<&Spawn> = (scene.world.working_spawns())
         .filter(|s| casts.iter().any(|c| c.room == s.pos.room))
         .collect();
     let ovens: Vec<&Oven> = spawns.iter().filter_map(|s| s.spawning.as_ref()).collect();
