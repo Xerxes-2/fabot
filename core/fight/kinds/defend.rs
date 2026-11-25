@@ -15,7 +15,7 @@ use fabot_base::world::{
     World, cast, spent,
 };
 use fabot_base::{declarations, engine};
-use fabot_exchange::Outcome;
+use fabot_exchange::{self as exchange, Outcome};
 use fabot_tactics::{self as tactics, Tactic};
 
 /// What a `Defend` may fight as, in the order its ties fall to (§6.3).
@@ -131,9 +131,6 @@ pub(crate) fn overdue(scene: &Scene, e: &Engagement) -> bool {
     let casts: Vec<&Cast> = (scene.spawning.iter())
         .filter(|c| c.engagement == e.id)
         .collect();
-    let landing: i32 = (casts.iter())
-        .map(|c| engine::SPAWN_TICKS_PER_PART * c.body.len() as i32)
-        .sum();
     let asked = casts
         .iter()
         .filter_map(|c| cast_of(&c.name))
@@ -142,6 +139,8 @@ pub(crate) fn overdue(scene: &Scene, e: &Engagement) -> bool {
     let spawns: Vec<&Spawn> = (scene.world.working_spawns())
         .filter(|s| casts.iter().any(|c| c.room == s.pos.room))
         .collect();
+    let lands = exchange::spawned(casts.iter().map(|c| c.body.len()), spawns.len() as i32);
+    let landing = lands.into_iter().max().unwrap_or(0);
     let ovens: Vec<&Oven> = spawns.iter().filter_map(|s| s.spawning.as_ref()).collect();
     let short = |s: &&&Spawn| {
         let bank = scene

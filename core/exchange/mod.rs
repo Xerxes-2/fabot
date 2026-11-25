@@ -1025,10 +1025,18 @@ fn broken_by(terrain: Terrain, horizon: i32, price: &Price, ramparts: &[(Pos, i3
         .sum()
 }
 
-/// The tick each body of `parts` parts stands spawned, in ask order, the
-/// first spawn free making the next, each of `spawns` (none read as one) in series.
 pub fn spawned(parts: impl IntoIterator<Item = usize>, spawns: i32) -> Vec<i32> {
-    let mut free = vec![0; spawns.max(1) as usize];
+    spawned_after(&vec![0; spawns.max(0) as usize], parts)
+}
+
+/// The tick each body of `parts` parts stands spawned, in ask order, the
+/// first spawn free making the next, each spawn free at its `free` (none read as one free now).
+pub fn spawned_after(free: &[i32], parts: impl IntoIterator<Item = usize>) -> Vec<i32> {
+    let mut free = if free.is_empty() {
+        vec![0]
+    } else {
+        free.to_vec()
+    };
     (parts.into_iter())
         .map(|n| {
             free.iter_mut().min().map_or(0, |next| {
@@ -1721,6 +1729,17 @@ pub fn damage_map(room: RoomName, towers: &[Pos], foes: &[Fighter]) -> Table<i32
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cast_lands_on_the_first_spawn_free() {
+        assert_eq!(spawned_after(&[0, 15], [10, 10, 10]), vec![30, 45, 60]);
+        assert_eq!(
+            spawned_after(&[], [10, 10]),
+            vec![30, 60],
+            "no spawn reads as one free"
+        );
+        assert_eq!(spawned([10, 10, 10], 3), vec![30, 30, 30]);
+    }
     use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest::sample::select;

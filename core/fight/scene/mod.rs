@@ -21,7 +21,8 @@ use fabot_tactics::{self as tactics, Tactic};
 
 #[derive(Default)]
 pub(super) struct Asked {
-    pub(super) queued: BTreeMap<RoomName, i32>,
+    /// Each room's queued bodies' part counts, in ask order.
+    pub(super) queued: BTreeMap<RoomName, Vec<usize>>,
     /// The energy each room's queued bodies will draw of its bank.
     pub(super) asked: BTreeMap<RoomName, i32>,
     pub(super) casts: Vec<Cast>,
@@ -31,8 +32,7 @@ pub(super) struct Asked {
 
 impl Asked {
     pub(super) fn queue(&mut self, room: RoomName, body: &[Part]) {
-        let ticks = engine::SPAWN_TICKS_PER_PART * body.len() as i32;
-        *self.queued.entry(room).or_insert(0) += ticks;
+        self.queued.entry(room).or_default().push(body.len());
         *self.asked.entry(room).or_insert(0) += engine::body_cost(body);
     }
 }

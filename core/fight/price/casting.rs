@@ -411,7 +411,7 @@ pub fn kill_order(hostiles: &[Creep]) -> Vec<Id> {
 pub fn colony_for(
     colonies: &[&Room],
     spawns: &[&Spawn],
-    queued: &BTreeMap<RoomName, i32>,
+    queued: &BTreeMap<RoomName, Vec<usize>>,
     asked: &BTreeMap<RoomName, i32>,
     walk: impl Fn(RoomName) -> Option<i32>,
     body: &[Part],
@@ -420,19 +420,18 @@ pub fn colony_for(
     let spawn_ticks = engine::SPAWN_TICKS_PER_PART * body.len() as i32;
 
     let wait = |room: &Room| -> i64 {
-        let of: Vec<&&Spawn> = spawns.iter().filter(|s| s.pos.room == room.name).collect();
-        let count = (of.len() as i64).max(1);
-        let busy: i64 = of
-            .iter()
-            .map(|s| i64::from(s.spawning.as_ref().map_or(0, |o| o.remaining)))
-            .sum();
+        let busy: Vec<i32> = (spawns.iter().filter(|s| s.pos.room == room.name))
+            .map(|s| s.spawning.as_ref().map_or(0, |o| o.remaining))
+            .collect();
+        let ahead = queued.get(&room.name).into_iter().flatten().copied();
+        let landed = exchange::spawned_after(&busy, ahead.chain([body.len()])).pop();
         // The economy refills a ring at the pace its spawns spend it, so a body
         // past what the bank holds waits a spawn time for each of itself the
         // refill owes.
         let spends = i64::from(asked.get(&room.name).copied().unwrap_or(0)) + i64::from(cost);
         let short = (spends - i64::from(room.energy_available)).max(0);
 
-        (busy + i64::from(queued.get(&room.name).copied().unwrap_or(0))) / count
+        i64::from(landed.unwrap_or(0) - spawn_ticks)
             + i64::from(spawn_ticks) * short / i64::from(cost)
     };
 
@@ -538,7 +537,7 @@ mod tests {
             spawns_in("W3N1".parse::<RoomName>().unwrap(), 1),
         ]
         .concat();
-        let queued = BTreeMap::from([(RoomName::W1N1, 600)]);
+        let queued = BTreeMap::from([(RoomName::W1N1, vec![50; 4])]);
         let walk = |from: RoomName| Some(if from == RoomName::W1N1 { 200 } else { 450 });
 
         assert_eq!(
