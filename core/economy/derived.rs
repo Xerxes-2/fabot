@@ -17,7 +17,7 @@ use fabot_base::world::{
     Store, Structure, StructureType, World,
 };
 
-use super::balance::{Holding, Level, Shipment, balance, takes, want};
+use super::balance::{Holding, Level, Shipment, balance, gives, sends, want};
 use super::bodies::{self, Pattern};
 use super::task::Target;
 
@@ -1114,7 +1114,7 @@ fn drain_asked(
         let Some((r, n)) = l.held else { continue };
         let asked = (holdings.iter()).any(|h| h.room != c.ground.room && h.level(r).short() > 0);
         let drained = plan.drains.iter().any(|d| d.0 == l.id);
-        if asked && n >= engine::TERMINAL_MIN_SEND && !spent.contains(&r) && !drained {
+        if asked && sends(n) && !spent.contains(&r) && !drained {
             plan.drains.push((l.id, r));
         }
     }
@@ -1276,12 +1276,12 @@ fn assign_clusters(
 ) -> Vec<Option<super::labs::Reaction>> {
     let bring = |i: usize, r: ResourceType| {
         let to = cluster[i].ground;
-        let open = (to.terminal.as_ref()).is_some_and(|t| takes(t.store.free()));
+        let open = (to.terminal.as_ref()).is_some_and(|t| sends(t.store.free()));
         (stocks.ours.iter())
             .filter(|g| open && g.room != to.room)
             .map(|g| (stocks.spare(g, r), tiles::rooms_apart(g.room, to.room)))
             .chain([(stocks.ours.held(to, r), 0)])
-            .filter(|(n, _)| *n >= engine::LAB_REACTION_AMOUNT)
+            .filter(|(n, _)| gives(*n))
             .map(|(_, apart)| apart)
             .min()
     };
@@ -1398,7 +1398,7 @@ fn give_aid(
         };
         let to = &takers[ti];
         let sent = (spare.min(to.free - MINERAL_ROOM)).min(to.short().unwrap_or(i32::MAX));
-        if sent < engine::TERMINAL_MIN_SEND {
+        if !sends(sent) {
             continue;
         }
         out.push(Shipment {

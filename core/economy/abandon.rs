@@ -6,6 +6,7 @@ use fabot_base::tiles;
 use fabot_base::vocabulary::ResourceType::{self, Energy};
 use fabot_base::world::{Creep, Room, RoomName, Structure, StructureType};
 
+use super::balance::LEAST_SEND;
 use super::derived::Ground;
 use super::task::Target;
 
@@ -101,8 +102,7 @@ pub fn evacuate(g: &mut Ground, room: &Room, creeps: &[Creep], to: Option<(RoomN
     let apart = to
         .as_ref()
         .map_or(0, |(home, _)| tiles::rooms_apart(g.room, *home));
-    let energy_kept_under =
-        engine::TERMINAL_MIN_SEND + engine::send_cost(engine::TERMINAL_MIN_SEND, apart);
+    let energy_kept_under = LEAST_SEND + engine::send_cost(LEAST_SEND, apart);
     owed.retain(|(r, n)| to.is_some() && *n > 0 && (*r != Energy || *n >= energy_kept_under));
     owed.sort_by_key(|(r, _)| *r == Energy);
     g.shipment = owed;

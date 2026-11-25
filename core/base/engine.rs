@@ -25,7 +25,6 @@ pub const CONTAINER_CAPACITY: i32 = screeps::CONTAINER_CAPACITY as i32;
 pub const STORAGE_CAPACITY: i32 = screeps::STORAGE_CAPACITY as i32;
 /// A dropped pile loses ceil(amount / this) a tick.
 pub const ENERGY_DECAY: i32 = screeps::ENERGY_DECAY as i32;
-pub const TERMINAL_MIN_SEND: i32 = screeps::TERMINAL_MIN_SEND as i32;
 
 pub fn send_cost(amount: i32, distance: i32) -> i32 {
     (f64::from(amount)

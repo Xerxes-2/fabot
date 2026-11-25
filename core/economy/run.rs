@@ -261,7 +261,7 @@ fn terminal_send(g: &Ground) -> Option<Action> {
         while amount > 0 && engine::send_cost(amount, apart) + sent * amount > pays {
             amount = amount * 9 / 10;
         }
-        (amount >= engine::TERMINAL_MIN_SEND.min(*owed)).then_some(Action::Terminal(
+        (amount >= super::balance::LEAST_SEND.min(*owed)).then_some(Action::Terminal(
             t.id,
             TerminalAct::Send {
                 resource: *ore,

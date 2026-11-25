@@ -12,8 +12,16 @@ pub const BOOST: i32 = 2_500;
 /// keeps a filled taker from giving, and the room aid leaves for a load.
 pub const BATCH: i32 = 5_000;
 
-pub fn takes(free: i32) -> bool {
-    free >= engine::TERMINAL_MIN_SEND
+/// Ours, so a send's cooldown buys a load: the engine enforces no TERMINAL_MIN_SEND.
+pub const LEAST_SEND: i32 = 100;
+
+pub fn sends(n: i32) -> bool {
+    n >= LEAST_SEND
+}
+
+/// A giver spares a reagent from a reaction's worth: `assign` counts it reaching a cluster.
+pub fn gives(spare: i32) -> bool {
+    spare >= engine::LAB_REACTION_AMOUNT
 }
 
 /// A cluster's reagents, and the target boosts while the colony fights.
@@ -104,12 +112,9 @@ pub fn balance(holdings: &mut [Holding]) -> Vec<Shipment> {
         let apart = |ti: usize| tiles::rooms_apart(giver.room, holdings[ti].room);
         // Short for its want, so a fight's boosts wait behind no reagent.
         let Some(ti) = (0..holdings.len())
-            .filter(|ti| *ti != gi && takes(holdings[*ti].free))
+            .filter(|ti| *ti != gi && sends(holdings[*ti].free))
             .flat_map(|ti| holdings[ti].levels.iter().map(move |(r, l)| (ti, *r, *l)))
-            .filter(|(_, r, l)| {
-                l.short() >= engine::TERMINAL_MIN_SEND
-                    && giver.level(*r).spare() >= engine::TERMINAL_MIN_SEND
-            })
+            .filter(|(_, r, l)| sends(l.short()) && gives(giver.level(*r).spare()))
             .min_by_key(|(ti, _, l)| (-1000 * l.short() / l.want, apart(*ti), holdings[*ti].room))
             .map(|(ti, ..)| ti)
         else {
@@ -119,9 +124,10 @@ pub fn balance(holdings: &mut [Holding]) -> Vec<Shipment> {
         let (mut load, mut fee) = (Vec::new(), 0);
         for (r, l) in holdings[ti].levels.clone() {
             let room = holdings[ti].free - load.iter().map(|(_, n)| n).sum::<i32>();
-            let n = (l.load().min(holdings[gi].level(r).spare())).min(room);
+            let spare = holdings[gi].level(r).spare();
+            let n = (l.load().min(spare)).min(room);
             let cost = engine::send_cost(n, apart);
-            if n < engine::TERMINAL_MIN_SEND || fee + cost > holdings[gi].energy {
+            if !gives(n) || n < LEAST_SEND.min(spare) || fee + cost > holdings[gi].energy {
                 continue;
             }
             fee += cost;

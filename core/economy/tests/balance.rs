@@ -1,11 +1,13 @@
 //! The owner's terminal bands, held by `balance` over generated colonies.
 use std::collections::BTreeMap;
 
-use fabot_base::engine::{self, TERMINAL_MIN_SEND};
+use fabot_base::engine::{self, LAB_REACTION_AMOUNT};
 use fabot_base::tiles;
 use fabot_base::vocabulary::ResourceType::{self, *};
 use fabot_base::world::RoomName;
-use fabot_economy::balance::{BATCH, BOOST, Holding, Level, REAGENT, Shipment, balance, want};
+use fabot_economy::balance::{
+    BATCH, BOOST, Holding, LEAST_SEND, Level, REAGENT, Shipment, balance, want,
+};
 use proptest::prelude::*;
 use proptest::sample::subsequence;
 
@@ -60,11 +62,11 @@ fn rooms(n: usize) -> impl Strategy<Value = Vec<RoomName>> {
 }
 
 fn short(l: &Level) -> bool {
-    l.want - l.held >= TERMINAL_MIN_SEND
+    l.want - l.held >= LEAST_SEND
 }
 
 fn spares(l: &Level) -> bool {
-    l.held - keep(l) >= TERMINAL_MIN_SEND && l.shippable >= TERMINAL_MIN_SEND
+    l.held - keep(l) >= LAB_REACTION_AMOUNT && l.shippable >= LAB_REACTION_AMOUNT
 }
 
 fn near(x: i32) -> impl Strategy<Value = i32> {
@@ -78,13 +80,18 @@ fn stock(want: i32) -> impl Strategy<Value = (i32, i32)> {
     let held = prop_oneof![
         0..=30_000i32,
         near(want),
-        near(want - TERMINAL_MIN_SEND),
+        near(want - LEAST_SEND),
         near(band),
-        near(band + TERMINAL_MIN_SEND),
+        near(band + LEAST_SEND),
+        near(band + LAB_REACTION_AMOUNT),
     ];
     held.prop_flat_map(|held| {
-        let least = near(TERMINAL_MIN_SEND).prop_map(move |n| n.min(held));
-        (Just(held), prop_oneof![Just(held), 0..=held, least])
+        let least = near(LEAST_SEND).prop_map(move |n| n.min(held));
+        let reaction = near(LAB_REACTION_AMOUNT).prop_map(move |n| n.min(held));
+        (
+            Just(held),
+            prop_oneof![Just(held), 0..=held, least, reaction],
+        )
     })
 }
 
@@ -107,7 +114,7 @@ fn colony(room: RoomName, boosts: Vec<ResourceType>) -> impl Strategy<Value = Co
                 Just((wants.clone(), boosted)),
                 wants.into_iter().map(stock).collect::<Vec<_>>(),
                 prop_oneof![Just(0), 0..3_000i32, 0..=100_000i32],
-                prop_oneof![Just(0), near(TERMINAL_MIN_SEND), 0..12_000i32, 0..=TERMINAL],
+                prop_oneof![Just(0), near(LEAST_SEND), 0..12_000i32, 0..=TERMINAL],
             )
         })
         .prop_map(move |((wants, boosted), stocks, energy, free)| {
@@ -183,7 +190,9 @@ fn hold_bands(colonies: &[Colony], ships: &[Shipment]) -> Result<(), TestCaseErr
         prop_assert!(fee <= giver.energy, "{s:?} costs {fee} of {}", giver.energy);
         for (r, n) in &s.load {
             let (g, t) = (giver.level(*r), taker.level(*r));
-            prop_assert!(*n >= TERMINAL_MIN_SEND, "{s:?} below the least send");
+            let spare = (g.held - keep(&g)).min(g.shippable);
+            prop_assert!(*n >= LEAST_SEND.min(spare), "{s:?} below the least send");
+            prop_assert!(*n >= LAB_REACTION_AMOUNT, "{s:?} under a reaction's worth");
             prop_assert!(*n <= g.shippable, "{s:?}: {r:?} past sendable {g:?}");
             prop_assert!(
                 g.held - n >= keep(&g),
@@ -255,7 +264,7 @@ proptest! {
         let serves = |g: &Colony| {
             (colonies.iter()).any(|t| {
                 g.room != t.room
-                    && t.free >= TERMINAL_MIN_SEND
+                    && t.free >= LEAST_SEND
                     && (t.levels.iter()).any(|(r, l)| short(l) && spares(&g.level(*r)))
             })
         };
