@@ -1,7 +1,7 @@
 use std::cmp::Reverse;
 
-use fabot_base::grid::{FatigueFactor, step_ticks};
-use fabot_base::vocabulary::{Part, ResourceType, part_count_in, takes};
+use fabot_base::grid::{self, FatigueFactor, step_ticks};
+use fabot_base::vocabulary::{Part, ResourceType, takes};
 use fabot_base::world::Pos;
 use fabot_base::{boost, engine};
 
@@ -21,6 +21,8 @@ pub struct Fighter {
     pub work: i32,
     pub reach: i32,
     pub gait: FatigueFactor,
+    /// What its CARRY holds, which weighs as the engine reads it.
+    pub load: i32,
     /// Zero on a rampart, where a swing at it lands on the rampart.
     pub strikes_back: i32,
     pub invader: bool,
@@ -33,6 +35,7 @@ pub fn of_parts(
     boosts: &[Option<ResourceType>],
     hits: i32,
     pos: Option<Pos>,
+    load: i32,
 ) -> Fighter {
     let power = engine::power_at(body, boosts, hits);
     let attack = power(Part::Attack);
@@ -47,20 +50,32 @@ pub fn of_parts(
         heal: power(Part::Heal),
         work: power(Part::Work),
         reach: engine::strike_reach(|p| power(p) > 0),
-        gait: FatigueFactor {
-            weight: body.len() as i32
-                - part_count_in(body, Part::Move)
-                - part_count_in(body, Part::Carry),
-            moves: power(Part::Move),
-        },
+        gait: gait_of(body, boosts, hits, load),
+        load,
         strikes_back: engine::strike_at(attack, 0, engine::MELEE_RANGE),
         invader: false,
         lab_wait: 0,
     }
 }
 
+pub fn gait_of(
+    body: &[Part],
+    boosts: &[Option<ResourceType>],
+    hits: i32,
+    load: i32,
+) -> FatigueFactor {
+    let dead = body.len() - engine::live_parts(body, hits).len();
+    let boost = |i: usize| boosts.get(i).copied().flatten();
+    grid::factor(
+        body.iter()
+            .enumerate()
+            .map(|(i, p)| (*p, boost(i), i >= dead)),
+        load,
+    )
+}
+
 pub fn cast(body: &[Part]) -> Fighter {
-    of_parts(body, &[], engine::PART_HITS * body.len() as i32, None)
+    of_parts(body, &[], engine::PART_HITS * body.len() as i32, None, 0)
 }
 
 /// Not-yet-cast bodies, each boosted from what the ones before it left.
@@ -82,7 +97,13 @@ pub fn cast_boosted<'a>(
                 .collect();
             Fighter {
                 lab_wait: queue.wait_with(0),
-                ..of_parts(body, &boosts, engine::PART_HITS * body.len() as i32, None)
+                ..of_parts(
+                    body,
+                    &boosts,
+                    engine::PART_HITS * body.len() as i32,
+                    None,
+                    0,
+                )
             }
         })
         .collect()

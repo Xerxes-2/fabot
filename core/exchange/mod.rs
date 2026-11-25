@@ -662,10 +662,7 @@ fn lamed_in(
         let hits = loop {
             let hits = engine::PART_HITS * live;
             let power = engine::power_at(&f.body, &f.boosts, hits);
-            let gait = FatigueFactor {
-                weight: f.gait.weight,
-                moves: power(Part::Move),
-            };
+            let gait = fighter::gait_of(&f.body, &f.boosts, hits, f.load);
 
             if live <= 0
                 || power(Part::Attack) <= 0
@@ -1295,7 +1292,9 @@ fn exchange(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> Out
     let by_live: Vec<Vec<Acts>> = (pairs.iter())
         .map(|(f, (range, heal_range))| {
             (0..=f.body.len() as i32)
-                .map(|live| fighter::of_parts(&f.body, &f.boosts, engine::PART_HITS * live, None))
+                .map(|live| {
+                    fighter::of_parts(&f.body, &f.boosts, engine::PART_HITS * live, None, f.load)
+                })
                 .map(|at| Acts {
                     deals: fighter::damage_at(&at, *range),
                     heals: fighter::heal_at(&at, *heal_range),
@@ -1738,7 +1737,7 @@ mod tests {
             let boosts: Vec<_> = (body.iter())
                 .map(|p| fabot_base::testing::boosted(*p, tier))
                 .collect();
-            fighter::of_parts(&body, &boosts, 100 * body.len() as i32, pos)
+            fighter::of_parts(&body, &boosts, 100 * body.len() as i32, pos, 0)
         })
     }
 
@@ -1827,7 +1826,7 @@ mod tests {
             let unhealed = |f: &Fighter| {
                 let body: Vec<Part> = f.body.iter().copied().filter(|p| *p != Part::Heal).collect();
                 let hits = engine::PART_HITS * body.len() as i32;
-                (!body.is_empty()).then(|| fighter::of_parts(&body, &[], hits, f.pos))
+                (!body.is_empty()).then(|| fighter::of_parts(&body, &[], hits, f.pos, f.load))
             };
             let raid: Vec<Fighter> = theirs.bodies.iter().filter_map(unhealed).collect();
             prop_assume!(!raid.is_empty());
@@ -1924,7 +1923,7 @@ mod tests {
         use Part::{Attack, Heal, Move, RangedAttack};
         let body = |parts: &[Part], x| {
             let hits = 100 * parts.len() as i32;
-            fighter::of_parts(parts, &[], hits, Some(Pos::new(ROOM, x, 25)))
+            fighter::of_parts(parts, &[], hits, Some(Pos::new(ROOM, x, 25)), 0)
         };
         let ranger = |x| body(&[RangedAttack, RangedAttack, Heal, Move, Move, Move], x);
         let medic = |x| body(&[Heal, Heal, Move, Move], x);

@@ -4,7 +4,7 @@ use std::num::NonZeroU8;
 
 use super::tiles::{self, Tile};
 use crate::engine;
-use crate::vocabulary::{Part, multiple};
+use crate::vocabulary::{Boost, Part, ResourceType, multiple};
 use crate::world::Creep;
 
 pub const UNREACHED: i32 = i32::MAX;
@@ -29,42 +29,43 @@ pub struct FatigueFactor {
 
 /// The engine's rule: a destroyed part still weighs; only a live one carries
 /// or moves.
-pub fn factor_of(creep: &Creep) -> FatigueFactor {
-    let mut weight = 0;
-    let mut carry = 0;
-    let mut moves = 0;
-    for part in &creep.body {
-        match part.kind {
-            Part::Move if part.hits > 0 => moves += multiple(Part::Move, part.boost),
-            Part::Carry if part.hits > 0 => carry += 1,
+pub fn factor(
+    parts: impl Iterator<Item = (Part, Option<ResourceType>, bool)>,
+    mut load: i32,
+) -> FatigueFactor {
+    let capacity = |boost: Option<ResourceType>| match boost.and_then(ResourceType::boost) {
+        Some(Boost::Carry(n)) => n as i32 * engine::CARRY_PART_CAPACITY,
+        _ => engine::CARRY_PART_CAPACITY,
+    };
+    let (mut weight, mut moves) = (0, 0);
+    for (kind, boost, live) in parts {
+        match kind {
+            Part::Move if live => moves += multiple(Part::Move, boost),
+            Part::Carry if live => {
+                weight += i32::from(load > 0);
+                load -= capacity(boost);
+            }
             Part::Move | Part::Carry => {}
             _ => weight += 1,
         }
     }
-    let load = creep.store.used();
-    FatigueFactor {
-        weight: weight
-            + carry.min((load + engine::CARRY_PART_CAPACITY - 1) / engine::CARRY_PART_CAPACITY),
-        moves,
-    }
+    FatigueFactor { weight, moves }
+}
+
+pub fn factor_of(creep: &Creep) -> FatigueFactor {
+    factor(
+        creep.body.iter().map(|p| (p.kind, p.boost, p.hits > 0)),
+        creep.store.used(),
+    )
 }
 
 pub fn empty_factor(body: &[Part]) -> FatigueFactor {
-    let carry = body.iter().filter(|p| **p == Part::Carry).count() as i32;
-    let loaded = loaded_factor(body);
-    FatigueFactor {
-        weight: loaded.weight - carry,
-        ..loaded
-    }
+    factor(body.iter().map(|p| (*p, None, true)), 0)
 }
 
 #[inline]
 pub fn loaded_factor(body: &[Part]) -> FatigueFactor {
-    let moves = body.iter().filter(|p| **p == Part::Move).count() as i32;
-    FatigueFactor {
-        weight: body.len() as i32 - moves,
-        moves,
-    }
+    factor(body.iter().map(|p| (*p, None, true)), i32::MAX)
 }
 
 pub fn rest(factor: FatigueFactor, fatigue: i32) -> Option<i32> {

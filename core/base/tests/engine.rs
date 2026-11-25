@@ -101,3 +101,23 @@ proptest! {
         prop_assert!(engine::damage_taken(&body, &boosts, hits, damage) >= taken - 1);
     }
 }
+
+#[test]
+fn a_loaded_carry_weighs_and_a_boosted_one_holds_its_multiple() {
+    use crate::grid::factor;
+    use ResourceType::CatalyzedKeaniumAcid as Carry;
+    let parts = |boost| [Part::Carry, Part::Carry, Part::Move].map(|p| (p, boost, true));
+    assert_eq!(factor(parts(None).into_iter(), 0).weight, 0);
+    assert_eq!(factor(parts(None).into_iter(), 51).weight, 2);
+    assert_eq!(
+        factor(parts(Some(Carry)).into_iter(), 51).weight,
+        1,
+        "a KH2O CARRY holds 200"
+    );
+    let dead = [(Part::Carry, None, false), (Part::Carry, None, true)];
+    assert_eq!(
+        factor(dead.into_iter(), 100).weight,
+        1,
+        "a destroyed CARRY carries nothing"
+    );
+}
