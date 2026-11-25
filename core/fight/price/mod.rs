@@ -643,9 +643,12 @@ impl<'a> Scene<'a> {
         // as it stands. Held, it counts a body only if it lives to the fight's
         // end, or bodies with 19-99 ticks to live price a win it reaches with one.
         let colony = self.nearest(atlas, e).map(|(walk, _)| walk);
-        let waiting = |casts: &[casting::Body]| match casts.len() {
-            0 => 0,
-            _ => engine::SPAWN_TICKS_PER_PART * casts.concat().len() as i32 + colony.unwrap_or(0),
+        let colonies = self.colonies_of(atlas, e);
+        let spawns = self.spawns_in(&colonies);
+        let waiting = |casts: &[casting::Body]| {
+            (exchange::spawned(casts.iter().map(Vec::len), spawns).into_iter())
+                .max()
+                .map_or(0, |made| made + colony.unwrap_or(0))
         };
         let wait = wait.unwrap_or_else(|| waiting(&asked_bodies));
         let outlives = |c: &Creep, wait: i32, fight: i32| {
@@ -670,7 +673,6 @@ impl<'a> Scene<'a> {
             .map(|h| h.hits)
             .sum();
 
-        let colonies = self.colonies_of(atlas, e);
         let capacity = self.capacity_of(atlas, e);
         let terrain = casting::terrain_at(room, &centre);
 
@@ -696,8 +698,6 @@ impl<'a> Scene<'a> {
                         .iter()
                         .filter(|h| !self.cores.contains(&h.id))
                         .fold(0, |most, h| most.max(h.ticks_to_live));
-
-                    let spawns = self.spawns_in(&colonies);
 
                     let razing = casting::razer(capacity, core_hits, &[]);
 
@@ -740,6 +740,7 @@ impl<'a> Scene<'a> {
                 let side = Side {
                     together,
                     cast_walk: colony,
+                    spawns,
                     ..casting::side_in(&self.world.rules, room, ours_now.clone())
                 };
                 let casting::Pricing {

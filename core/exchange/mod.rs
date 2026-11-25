@@ -30,6 +30,8 @@ pub struct Side {
     pub together: bool,
     /// Our structures a raid razes for value, and their hits.
     pub keeps: Vec<(Pos, i32)>,
+    /// The spawns its casts come off, each in series; none, one.
+    pub spawns: i32,
 }
 
 /// `weight` is the step weight of the ground fought on; `run_off` the tiles a
@@ -1019,6 +1021,46 @@ fn broken_by(terrain: Terrain, horizon: i32, price: &Price, ramparts: &[(Pos, i3
         .sum()
 }
 
+/// The tick each body of `parts` parts stands spawned, in ask order, the
+/// first spawn free making the next, each of `spawns` (none read as one) in series.
+pub fn spawned(parts: impl IntoIterator<Item = usize>, spawns: i32) -> Vec<i32> {
+    let mut free = vec![0; spawns.max(1) as usize];
+    (parts.into_iter())
+        .map(|n| {
+            free.iter_mut().min().map_or(0, |next| {
+                *next += engine::SPAWN_TICKS_PER_PART * n as i32;
+                *next
+            })
+        })
+        .collect()
+}
+
+/// A set that walks in `together` gathers first, so its casts land as one, with the last.
+fn walks_in(terrain: Terrain, side: &Side, bodies: &[Fighter], raid: &[Fighter]) -> Vec<i32> {
+    let cast = |f: &Fighter| f.pos.is_none() && side.cast_walk.is_some();
+    let casts = bodies.iter().filter(|f| cast(f));
+    let mut queued = spawned(casts.map(|f| f.body.len()), side.spawns).into_iter();
+    let walks: Vec<i32> = (bodies.iter())
+        .map(|f| {
+            let walk = walk_in(terrain, side.cast_walk, f, raid);
+            match cast(f).then(|| queued.next()).flatten() {
+                Some(made) => walk + made - engine::SPAWN_TICKS_PER_PART * f.body.len() as i32,
+                None => walk,
+            }
+        })
+        .collect();
+    let gathered = (bodies.iter().zip(&walks))
+        .filter(|(f, _)| cast(f))
+        .map(|(_, w)| *w)
+        .max();
+    (bodies.iter().zip(walks))
+        .map(|(f, w)| match gathered {
+            Some(last) if side.together && cast(f) => last,
+            _ => w,
+        })
+        .collect()
+}
+
 fn walk_in(terrain: Terrain, cast_walk: Option<i32>, f: &Fighter, raid: &[Fighter]) -> i32 {
     let step = |weight| step_ticks(f.gait, weight).unwrap_or(CAST_WALK);
     f.lab_wait
@@ -1213,9 +1255,7 @@ fn exchange(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> Out
     let towers = towers_on(&ours.towers, &|h: &Foe| strikes_from(h), &raid);
     let walking_in = towers_on(&ours.towers, &|_: &Foe| Vec::new(), &raid);
 
-    let walks: Vec<i32> = (fighters.iter())
-        .map(|f| walk_in(terrain, ours.cast_walk, f, &theirs.bodies))
-        .collect();
+    let walks = walks_in(terrain, ours, &fighters, &theirs.bodies);
     let first = walks.iter().copied().min().unwrap_or(0);
     let last = walks.iter().copied().max().unwrap_or(0);
     let struck: Vec<bool> = (fighters.iter())
@@ -1575,8 +1615,7 @@ pub fn cheapest_win(
 
         // An outcome's ticks run from the first landing; the objective is lost
         // the ticks before it too, a boosted set's lab wait among them.
-        let lands = (side.bodies.iter())
-            .map(|f| walk_in(terrain, side.cast_walk, f, &theirs.bodies))
+        let lands = (walks_in(terrain, &side, &side.bodies, &theirs.bodies).into_iter())
             .min()
             .unwrap_or(0);
         match outcome(stance, &side, theirs, terrain) {
