@@ -1455,30 +1455,33 @@ fn recipient(giver: &Taker, takers: &[Taker]) -> Option<usize> {
 /// At the rate the reserver holds, not this tick's: a body lives longer
 /// than a lapse lasts. The engine refuses a harvest on another's hold.
 fn remote_of(
-    atlas: &Atlas,
-    world: &World,
+    atlas: &mut Atlas,
+    (world, ours): (&World, &atlas::Derived),
     intel: &Intel,
     declarations: &Declarations,
-    richest: i32,
     outpost: &Outpost,
 ) -> Ground {
     let room: Cow<Room> = world.room(outpost.room).map_or_else(
         || Cow::Owned(intel::blind(outpost, intel, world, declarations)),
         Cow::Borrowed,
     );
+    let planned = |room| atlas::plan_of(declarations, &[], room);
+    let source = room.sources.first().map(|s| s.pos);
+    let server = atlas::server_of(atlas, ours, &planned, (room.controller.as_ref(), source));
+    let capacity = server.map_or(0, |s| ours.homes[s].capacity);
 
     match &room.controller {
         Some(c) if !c.owner.is_ours() && !reservable(c) => {
             let mut bare = room.clone().into_owned();
             bare.sources = Vec::new();
-            ground_of((atlas, &world.rules), richest, 0, &bare, 0)
+            ground_of((atlas, &world.rules), capacity, 0, &bare, 0)
         }
         _ if outpost.reserved
-            && richest >= engine::body_cost(bodies::block_of(Pattern::Claimer)) =>
+            && capacity >= engine::body_cost(bodies::block_of(Pattern::Claimer)) =>
         {
             ground_of(
                 (atlas, &world.rules),
-                richest,
+                capacity,
                 engine::HELD_OUTPUT_PER_TICK,
                 &room,
                 0,
@@ -1489,7 +1492,7 @@ fn remote_of(
             reservable: room.controller.as_ref().is_some_and(invader_held),
             ..ground_of(
                 (atlas, &world.rules),
-                richest,
+                capacity,
                 engine::NEUTRAL_OUTPUT_PER_TICK,
                 &room,
                 0,
@@ -1682,7 +1685,7 @@ impl Derived<'_> {
 pub fn of_world<'t>(
     homes: Homes,
     (world, creeps): (&World, &[&Creep]),
-    atlas: &Atlas,
+    atlas: &mut Atlas,
     declarations: &Declarations,
     ours: &'t atlas::Derived,
     (intel, scouts): (&Intel, &[Scout]),
@@ -1695,15 +1698,10 @@ pub fn of_world<'t>(
         c.owes = plan.is_some_and(|p| p.owes);
     }
 
-    // A declared room is dug by bodies its richest colony casts.
-    let richest = (homes.colonies.iter())
-        .map(|c| c.bank_capacity)
-        .max()
-        .unwrap_or(0);
     let from = homes.grounds.len();
     for outpost in &ours.worked {
         if !homes.colonies.iter().any(|c| c.room == outpost.room) {
-            let ground = remote_of(atlas, world, intel, declarations, richest, outpost);
+            let ground = remote_of(atlas, (world, ours), intel, declarations, outpost);
             homes.grounds.push(ground);
         }
     }
