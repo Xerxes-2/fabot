@@ -114,8 +114,7 @@ pub fn weight_of(footprint: Footprint, weights: &[Weight; tiles::COUNT], tile: T
     match footprint {
         Footprint::One => weights[tile],
         Footprint::Quad => {
-            let x = tiles::x_of(tile);
-            let y = tiles::y_of(tile);
+            let (x, y) = (tiles::x_of(tile), tiles::y_of(tile));
             if x == tiles::SIDE - 1 || y == tiles::SIDE - 1 {
                 None
             } else {
@@ -138,8 +137,7 @@ pub fn on_edge(footprint: Footprint, tile: Tile) -> bool {
     match footprint {
         Footprint::One => tiles::on_edge(tile),
         Footprint::Quad => {
-            let x = tiles::x_of(tile);
-            let y = tiles::y_of(tile);
+            let (x, y) = (tiles::x_of(tile), tiles::y_of(tile));
             x == 0 || y == 0 || x >= tiles::SIDE - 2 || y >= tiles::SIDE - 2
         }
     }
@@ -255,8 +253,7 @@ pub fn flood(
         if let Some(p) = price[tile] {
             dial.relaxed += 1;
             let candidate = d + i32::from(p);
-            let x = tiles::x_of(tile);
-            let y = tiles::y_of(tile);
+            let (x, y) = (tiles::x_of(tile), tiles::y_of(tile));
             let mut inner = [tile; 8];
             let ns: &[Tile] = if x > 0 && y > 0 && x < tiles::SIDE - 1 && y < tiles::SIDE - 1 {
                 for (n, offset) in inner.iter_mut().zip(OFFSETS) {

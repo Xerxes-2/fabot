@@ -196,10 +196,14 @@ pub fn strike(sight: &Sight, order: &[Id], creep: &Creep, armed: bool) -> Vec<Cr
         .filter(|_| creep.live(Part::Attack) > 0)
         .map(|h| CreepAct::AttackCreep(h.id));
 
-    let volley: i32 = within(engine::RANGED_RANGE)
-        .filter_map(|h| creep.pos.range(&h.pos))
-        .map(|r| engine::mass_at(1, r))
-        .sum();
+    let guns = world::power(creep, Part::RangedAttack);
+    let worth = |h: &&&Creep, hit: &dyn Fn(i32) -> i32| {
+        creep
+            .pos
+            .range(&h.pos)
+            .map_or(0, |r| i64::from(engine::landed(hit(r), h.hits, true)))
+    };
+    let pays = |head| engine::mass_pays(guns, Some(head), within(engine::RANGED_RANGE), worth);
     let spares = sight
         .spared
         .get(&creep.pos.room)
@@ -207,9 +211,7 @@ pub fn strike(sight: &Sight, order: &[Id], creep: &Creep, armed: bool) -> Vec<Cr
 
     let ranged = match within(engine::RANGED_RANGE).next() {
         _ if creep.live(Part::RangedAttack) == 0 => None,
-        Some(_) if volley > engine::strike_at(0, 1, engine::RANGED_RANGE) && !spares => {
-            Some(CreepAct::RangedMassAttack)
-        }
+        Some(h) if !spares && pays(h).is_some() => Some(CreepAct::RangedMassAttack),
         head => head.map(|h| CreepAct::RangedAttackCreep(h.id)),
     };
 
@@ -882,6 +884,7 @@ pub struct Mark {
     pub worth: i32,
     pub hits: i32,
     pub massed: bool,
+    pub creep: bool,
     pub shielded: bool,
     /// It leaves the room in a step: a strike that lands now, never a step.
     pub fleeting: bool,
@@ -906,7 +909,8 @@ pub fn hunt(
     let spared = sight.spared.get(&room).cloned().unwrap_or_default();
     let parts = world::power(c, Part::RangedAttack);
     let worth_of = |m: &Mark, damage: i32| {
-        i64::from(damage.min(m.hits)) * i64::from(m.worth) / i64::from(m.hits.max(1))
+        let landed = engine::landed(damage, m.hits, m.creep);
+        i64::from(landed) * i64::from(m.worth) / i64::from(m.hits.max(1))
     };
     // A hit's worth from `at`, now or over the tiles a mark may stand on next
     // tick: the step taken now is the next tick's reach, and a shot is
@@ -924,16 +928,15 @@ pub fn hunt(
             .map(|m| (share(m, at, next, &shot), m.id))
             .filter(|(w, _)| *w > 0)
             .max();
-        let mass: i64 = if spared.iter().any(|p| at.within(engine::RANGED_RANGE, p)) {
-            0
-        } else {
-            (marks.iter().filter(|m| m.massed))
-                .map(|m| share(m, at, next, &|r| engine::mass_at(parts, r)))
-                .sum()
-        };
-        match single {
-            Some((w, id)) if parts > 0 && w >= mass => (w, Some(CreepAct::RangedAttackCreep(id))),
-            _ if mass > 0 => (mass, Some(CreepAct::RangedMassAttack)),
+        let head = single.and_then(|(_, id)| marks.iter().find(|m| m.id == id));
+        let worth = |m: &&Mark, hit: &dyn Fn(i32) -> i32| share(m, at, next, hit);
+        let massed = marks.iter().filter(|m| m.massed);
+        let volley = (!spared.iter().any(|p| at.within(engine::RANGED_RANGE, p)))
+            .then(|| engine::mass_pays(parts, head, massed, worth))
+            .flatten();
+        match (single, volley) {
+            (_, Some(mass)) => (mass, Some(CreepAct::RangedMassAttack)),
+            (Some((w, id)), None) if parts > 0 => (w, Some(CreepAct::RangedAttackCreep(id))),
             _ => (0, None),
         }
     };

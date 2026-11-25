@@ -179,8 +179,7 @@ pub fn dy(direction: i32) -> i32 {
 
 #[inline]
 pub fn neighbour(tile: Tile, direction: i32) -> Option<Tile> {
-    let x = x_of(tile) + dx(direction);
-    let y = y_of(tile) + dy(direction);
+    let (x, y) = (x_of(tile) + dx(direction), y_of(tile) + dy(direction));
     in_room(x, y).then(|| index(x, y))
 }
 
@@ -199,8 +198,7 @@ pub fn around(tile: Tile) -> &'static [Tile] {
     &around_table()[tile]
 }
 
-/// The neighbour costing least under `bound`, the first in direction order
-/// on a tie.
+/// The neighbour costing least under `bound`, the first in direction order on a tie.
 pub fn least_around(tile: Tile, bound: i32, mut cost: impl FnMut(Tile) -> i32) -> Option<Tile> {
     (around(tile).iter())
         .map(|&n| (cost(n), n))
@@ -227,8 +225,7 @@ pub fn direction(from: Tile, onto: Tile) -> i32 {
 }
 
 pub fn within(radius: i32, tile: Tile) -> Vec<Tile> {
-    let x = x_of(tile);
-    let y = y_of(tile);
+    let (x, y) = (x_of(tile), y_of(tile));
     let side = (2 * radius + 1).clamp(0, SIDE) as usize;
     let mut tiles = Vec::with_capacity(side * side);
     for ty in (y - radius).max(0)..=(y + radius).min(SIDE - 1) {
@@ -263,8 +260,7 @@ const LAST: i32 = SIDE - 1;
 
 #[inline]
 pub fn on_edge(tile: Tile) -> bool {
-    let x = x_of(tile);
-    let y = y_of(tile);
+    let (x, y) = (x_of(tile), y_of(tile));
     x == 0 || y == 0 || x == LAST || y == LAST
 }
 
@@ -272,8 +268,7 @@ pub fn on_edge(tile: Tile) -> bool {
 /// nowhere.
 #[inline]
 pub fn exit_of(tile: Tile) -> i32 {
-    let x = x_of(tile);
-    let y = y_of(tile);
+    let (x, y) = (x_of(tile), y_of(tile));
     let on_x = x == 0 || x == LAST;
     let on_y = y == 0 || y == LAST;
     if on_x == on_y {
@@ -311,8 +306,7 @@ pub fn exit_tiles(exit: i32) -> &'static [Tile] {
 
 #[inline]
 pub fn landing(tile: Tile) -> Option<Tile> {
-    let x = x_of(tile);
-    let y = y_of(tile);
+    let (x, y) = (x_of(tile), y_of(tile));
     match exit_of(tile) {
         1 => Some(index(x, LAST)),
         3 => Some(index(0, y)),

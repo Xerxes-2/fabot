@@ -291,12 +291,12 @@ pub fn volley(sight: &Sight, room: &Room, c: &Creep) -> Option<CreepAct> {
     };
     let struck =
         (marks.iter().find(|m| m.4)).or_else(|| marks.iter().max_by(|a, b| dearest(a, b)))?;
-    let volley: i32 = (marks.iter())
-        .filter(|m| m.5)
-        .map(|m| m.2.min(engine::mass_at(guns, m.1)))
-        .sum();
+    let marked = (marks.iter()).filter(|m| m.5);
+    let worth = |m: &&(Id, i32, i32, i32, bool, bool), hit: &dyn Fn(i32) -> i32| {
+        i64::from(engine::landed(hit(m.1), m.2, false))
+    };
 
-    if !spares && volley > struck.2.min(engine::strike_at(0, guns, struck.1)) {
+    if !spares && engine::mass_pays(guns, Some(struck), marked, worth).is_some() {
         Some(CreepAct::RangedMassAttack)
     } else {
         Some(CreepAct::RangedAttackCreep(struck.0))

@@ -134,3 +134,24 @@ fn a_work_repairs_at_its_build_boost_not_its_dismantle_one() {
         "a dead WORK repairs nothing"
     );
 }
+
+#[test]
+fn a_volley_counts_a_creeps_whole_share_and_a_structures_hits_alone() {
+    let worth = |m: &(i32, i32, bool), hit: &dyn Fn(i32) -> i32| {
+        i64::from(engine::landed(hit(m.0), m.1, m.2))
+    };
+    let pays = |creep| {
+        let marks = [(3, 100, creep), (1, 2, creep), (1, 2, creep)];
+        engine::mass_pays(1, Some(marks[0]), marks.into_iter(), worth)
+    };
+    assert_eq!(
+        pays(true),
+        Some(21),
+        "a creep's heal nets at the tick's end"
+    );
+    assert_eq!(
+        pays(false),
+        None,
+        "a structure of 2 hits takes 2 of a 10 share"
+    );
+}

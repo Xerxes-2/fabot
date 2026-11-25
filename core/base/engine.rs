@@ -43,9 +43,8 @@ pub const UPGRADE_RANGE: i32 = 3;
 pub const KEEPER_GUARD_RANGE: i32 = 5;
 
 pub fn keeper_body() -> Vec<Part> {
-    let mut body = [[Part::Tough; 17].as_slice(), &[Part::Move; 13]].concat();
-    body.extend([Part::Attack, Part::RangedAttack].repeat(10));
-    body
+    let fight = [Part::Attack, Part::RangedAttack].repeat(10);
+    [&[Part::Tough; 17][..], &[Part::Move; 13], &fight].concat()
 }
 pub const ATTACK_POWER: i32 = screeps::ATTACK_POWER as i32;
 pub const RANGED_ATTACK_POWER: i32 = screeps::RANGED_ATTACK_POWER as i32;
@@ -145,6 +144,22 @@ pub fn mass_at(ranged: i32, range: i32) -> i32 {
         3 => screeps::RANGED_MASS_ATTACK_POWER_RANGE_3 as i32 * ranged,
         _ => 0,
     }
+}
+
+/// A struck structure's hits fall as the strike lands; a creep's net with its heal at the tick's end.
+pub fn landed(damage: i32, hits: i32, creep: bool) -> i32 {
+    if creep { damage } else { damage.min(hits) }
+}
+
+pub fn mass_pays<M>(
+    guns: i32,
+    head: Option<M>,
+    marks: impl Iterator<Item = M>,
+    worth: impl Fn(&M, &dyn Fn(i32) -> i32) -> i64,
+) -> Option<i64> {
+    let volley: i64 = marks.map(|m| worth(&m, &|r| mass_at(guns, r))).sum();
+    let single = head.map_or(0, |h| worth(&h, &|r| strike_at(0, guns, r)));
+    (volley > single).then_some(volley)
 }
 
 /// `power`: the heal parts' boosted count, as `world::power` gives it.
@@ -261,9 +276,6 @@ pub fn damage_taken(body: &[Part], boosts: &[Option<ResourceType>], hits: i32, d
 }
 
 pub fn tough_hits(body: &[Part], boosts: &[Option<ResourceType>], hits: i32) -> i32 {
-    if boosts.is_empty() {
-        return 0;
-    }
     let n = body.len();
     body.iter()
         .zip(boosts.iter())
