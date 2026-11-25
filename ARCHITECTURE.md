@@ -311,6 +311,8 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   only while upgraders drink more than links send, and while they do **only
   upgraders draw the controller's buffer**, or a worker's draw is carried back
   from the stock.
+  Carriers feed `jobs::upgrade_draw` (upgraders now), links are sized to `slots`'
+  `upgrade_capacity` (non-harvester WORK+CARRY bodies, ovens included): merging either way lost soak growth.
 
 ### Surplus, reserve & spending
 
@@ -337,6 +339,8 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   it with its dig (uncounted by carriers or spend until the container stands).
   Non-paying sites and repairs wait behind the controller (taking stock past
   reserve, or half income before storage).
+  `❓` Below reserve, unbuilt roads can hold all `SITES_IN_FLIGHT` for ages, so a
+  lost road gets no site (gen 258): needs a placement tick (§4) or reserve in Layout.
 - **RCL8 cap & terminal aid:** at RCL8, controllers upgrade only inside the
   downgrade deadline; surplus goes to sites, ramparts, labs, and terminal aid
   (`derived::give_aid`): stock past reserve, a 20k margin, and its sites' cost

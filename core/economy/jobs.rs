@@ -25,7 +25,7 @@ enum Of {
     Lab,
     Reagent,
     Terminal { fee: bool },
-    Feed { drink: i32, capacity: i32 },
+    Feed { draw: i32, capacity: i32 },
     Hub,
     Worker { builds: bool },
     Bank,
@@ -117,7 +117,7 @@ fn inflow(g: &Ground) -> i32 {
     }
 }
 
-fn drink(derived: &Derived, g: &Ground) -> i32 {
+fn upgrade_draw(derived: &Derived, g: &Ground) -> i32 {
     let level = g.controller.as_ref().map_or(0, |c| c.level);
     (derived.bodies.iter())
         .filter(|b| b.pos.room == g.room && b.pattern == Pattern::Upgrader)
@@ -144,7 +144,7 @@ fn hand_fed(derived: &Derived, g: &Ground) -> bool {
     }
     g.feed.as_ref().is_some_and(|f| {
         let linked = g.receiver.as_ref().is_some_and(|r| f.id == r.id.into());
-        drink(derived, g) > if linked { inflow(g) } else { 0 }
+        upgrade_draw(derived, g) > if linked { inflow(g) } else { 0 }
     })
 }
 
@@ -211,7 +211,7 @@ fn sinks_of(derived: &Derived, ci: usize) -> Vec<Spot> {
             Of::Hub
         } else {
             Of::Feed {
-                drink: drink(derived, g),
+                draw: upgrade_draw(derived, g),
                 capacity: f.energy + f.free,
             }
         };
@@ -517,8 +517,8 @@ impl<'a> Jobs<'a> {
             // A booking from afar holds the hub through the walk home; an outpost
             // load banks in the storage beside it.
             Of::Hub if s.pos.room != body.pos.room => return None,
-            Of::Feed { drink, capacity } => {
-                let need = s.amount + drink * range;
+            Of::Feed { draw, capacity } => {
+                let need = s.amount + draw * range;
                 if need <= 0 {
                     return None;
                 }

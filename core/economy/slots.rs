@@ -430,7 +430,7 @@ impl Plan<'_> {
         let mut remote: Vec<(f64, Leg)> = Vec::new();
         let mut far: Vec<String> = Vec::new();
         let fed = fed(&colony.controller);
-        let mut drink: i32 = (derived.bodies.iter().chain(derived.ovens.iter()))
+        let mut upgrade_capacity: i32 = (derived.bodies.iter().chain(derived.ovens.iter()))
             .filter(|b| b.pos.room == colony.room && b.work > 0 && b.carry > 0)
             .filter(|b| b.pattern != Pattern::Harvester)
             .map(|b| b.work * engine::UPGRADE_DRAIN_PER_WORK)
@@ -520,12 +520,12 @@ impl Plan<'_> {
                 let (linked, steady) = match (&s.link, &g.receiver) {
                     (Some(_), _) if hub => (rate, 0),
                     (Some(_), Some(_)) => (
-                        rate.min(drink),
+                        rate.min(upgrade_capacity),
                         rate * i32::from(engine::topped_out(colony.controller.level)),
                     ),
                     _ => (0, rate),
                 };
-                drink -= linked;
+                upgrade_capacity -= linked;
                 let rate = rate - linked;
                 if rate.max(steady) <= 0 {
                     continue;
