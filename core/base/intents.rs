@@ -191,6 +191,14 @@ pub struct Telemetry {
     /// Each outpost and the colony that builds there (`jobs::served`).
     pub served: Vec<(RoomName, RoomName)>,
     pub blocked: Vec<(RoomName, &'static str)>,
+    pub decisions: Vec<(&'static str, Vec<(&'static str, Datum)>)>,
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(untagged)]
+pub enum Datum {
+    Int(i64),
+    Text(String),
 }
 
 /// A module's tick: `Tick` settles the asks and wishes of every module as one.
@@ -212,15 +220,7 @@ impl ModuleOutput {
         self.telemetry.traces.extend(other.telemetry.traces);
         self.telemetry.served.extend(other.telemetry.served);
         self.telemetry.blocked.extend(other.telemetry.blocked);
-    }
-}
-
-impl From<Vec<Action>> for ModuleOutput {
-    fn from(actions: Vec<Action>) -> Self {
-        ModuleOutput {
-            actions,
-            ..ModuleOutput::default()
-        }
+        self.telemetry.decisions.extend(other.telemetry.decisions);
     }
 }
 

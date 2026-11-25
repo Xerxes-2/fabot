@@ -69,7 +69,7 @@ pub fn decide(context: &mut Context, state: &mut StrategyState) -> ModuleOutput 
         &context.derived.owned,
     );
     radius.retain(|room, _| unarmed(*room));
-    let (observed, mut scouts) = intel::sight(
+    let (actions, mut scouts) = intel::sight(
         context.world,
         context.atlas,
         context.declarations,
@@ -78,7 +78,10 @@ pub fn decide(context: &mut Context, state: &mut StrategyState) -> ModuleOutput 
     );
     scouts.retain(|s| context.declarations.sieges.contains(&s.room) || unarmed(s.room));
     state.scouts = scouts;
-    observed.into()
+    ModuleOutput {
+        actions,
+        ..ModuleOutput::default()
+    }
 }
 
 /// A rival's room this near raids within a creep life.

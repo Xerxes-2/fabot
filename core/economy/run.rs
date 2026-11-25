@@ -606,11 +606,11 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
         short: (short.into_iter())
             .map(|(room, p, n)| (room, p.into(), n))
             .collect(),
-        traces: Vec::new(),
         served: (jobs::served(&derived, &owners))
             .map(|(g, ci)| (g.room, derived.colonies[ci].room))
             .collect(),
         blocked,
+        ..Telemetry::default()
     };
 
     let scouted = scouting(&*context.atlas, &derived, &state.assignments);

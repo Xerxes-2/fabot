@@ -17,11 +17,11 @@ const NAMES: [&str; 8] = ["m0", "m1", "m2", "m3", "m4", "m5", "m6", "m7"];
 
 /// Module `I` says its name once, as creep `cI`.
 fn say<const I: usize>(_: &mut Context, _: &mut State) -> ModuleOutput {
-    vec![Action::Creep(
-        format!("c{I}"),
-        CreepAct::Say(NAMES[I].to_string()),
-    )]
-    .into()
+    let say = CreepAct::Say(NAMES[I].to_string());
+    ModuleOutput {
+        actions: vec![Action::Creep(format!("c{I}"), say)],
+        ..ModuleOutput::default()
+    }
 }
 
 const SAYS: [tick::ModuleRun; 8] = [

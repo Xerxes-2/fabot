@@ -48,8 +48,8 @@ Game ──World.ofGame──▶ World ──decide──▶ Actions ──Execu
   decisions). Any recorded `(State, World)` replays identically (§10.4). Inside
   module boundaries, code is imperative (§9.2).
 - **Central settlement:** a module returns a `ModuleOutput`: engine actions,
-  spawn asks, move wishes and telemetry (counts, short casts, traces) that
-  never reaches the game. `Tick` settles every module's asks and wishes once
+  spawn asks, move wishes and telemetry (counts, short casts, traces,
+  decisions) that never reaches the game. `Tick` settles every module's asks and wishes once
   (one spawn queue and one movement arbitration per room) into `Settled`: the
   actions, and the bodies arbitration left standing for the metrics. Split by
   type, so the executor matches only what reaches the game and `intents`
@@ -971,7 +971,10 @@ raze), offline one it outlived.
 scenario with outcome bounds (`scripts/scenario/scenarios/`). `jj ship` runs
 scenarios matching touched modules. A bound guarding a rule holds over every
 occurrence in the run (`"each"`: each engagement, safe mode, outpost), not a value
-at a tick or in a window, so a trajectory that drifts moves no bound.
+at a tick or in a window, so a trajectory that drifts moves no bound. A decision
+no outcome shows is asserted as its module reports it (`Telemetry.decisions`,
+`"each": "decision"`): tick-local, written beside the tick's counts in `cpu.jsonl`
+and dropped live, so it needs no state, Memory or segment.
 
 **Soak & reading rules (`npm run soak`, `npm run soak:many`):**
 - Judged on the 30k-tick horizon by end RCL & progress, the tick each level is

@@ -144,6 +144,7 @@ fn run_tick() {
         offers,
         traces,
         closed,
+        ..
     } = ran;
     for (creep, scored) in traces {
         let tiles: Vec<String> = scored

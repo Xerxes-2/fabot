@@ -74,9 +74,12 @@ pub fn decide(ctx: &mut Context, standing: &mut LayoutState) -> ModuleOutput {
         budget - placed,
     );
 
-    let mut intents = home;
-    intents.extend(sites);
+    let mut actions = home;
+    actions.extend(sites);
 
     *standing = kept;
-    intents.into()
+    ModuleOutput {
+        actions,
+        ..ModuleOutput::default()
+    }
 }

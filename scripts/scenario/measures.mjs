@@ -537,6 +537,11 @@ export const events = {
       .filter((b) => b.ours && b.name.startsWith("worker-") && b.body.split("w").length - 1 !== MENDER_WORK)
       .map((b) => ({ t: b.first - offset, who: b.name, worked: Object.values(b.acts).reduce((n, k) => n + k, 0) }));
   },
+  // Each decision a module reported (`Telemetry.decisions`), its fields beside `kind`.
+  decision: (_, dir) =>
+    linesOf(join(dir, "cpu.jsonl")).flatMap((r) =>
+      (r.decisions ?? []).map(([kind, fields]) => ({ ...Object.fromEntries(fields), t: r.t, who: `${kind} ${fields.map(([k, v]) => `${k}=${v}`).join(" ")}`, kind })),
+    ),
   // Each room dug that is no home, over the run: `decayedShare`, the percent of its dug left to decay.
   outpost: (samples) => {
     const homes = homesOf(samples);
