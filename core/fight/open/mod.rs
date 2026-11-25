@@ -69,7 +69,6 @@ pub fn newcomers(
 
         if let Some(id) = newcomer {
             e.group = id;
-            e.opened = time;
             e.budget = e.lost;
             e.unanswered = true;
             e.predicted = None;

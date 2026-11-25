@@ -331,7 +331,12 @@ export const measures = {
   // The most re-prices while Fighting, and the most bodies held at once, of one engagement of `kind` (none named: any) opened in [from, to).
   repriced: on("room kind from to", (_, a, dir) => Math.max(0, ...rowsOf(dir).filter((e) => (!a.kind || e.kind === a.kind) && openedIn(a)(e)).map((e) => e.repriced ?? 0))),
   held: on("room kind from to", (_, a, dir) => Math.max(0, ...rowsOf(dir).filter((e) => (!a.kind || e.kind === a.kind) && openedIn(a)(e)).map((e) => e.held ?? 0))),
-  bodiesLost: on("room kind from to", (_, a, dir) => rowsOf(dir).filter(kindIn(a)).reduce((n, e) => n + (e.dead ?? 0), 0)),
+  // Our bodies the engagements of `kind` drew at any time that the engine killed, held or no longer (one
+  // killed retreating from a given-up Defend counts).
+  bodiesLost: on("room kind from to", (_, a, dir) => {
+    const drew = new Set(rowsOf(dir).filter(kindIn(a)).flatMap((e) => e.drew));
+    return killsOf(dir).filter((d) => drew.has(d.name)).length;
+  }),
   defendsOpened: on("room from to", (_, a, dir) => defendsIn(dir, a).length),
   // The cost of the bodies of ours `room`'s Defends drew, each once.
   defendSpent: on("room from to", (_, a, dir) => costOf(livesOf(dir).filter((b) => b.ours && drawnBy(dir, a).has(b.name)))),
