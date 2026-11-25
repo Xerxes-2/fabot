@@ -302,7 +302,7 @@ impl Owner {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Store {
     pub held: Vec<(ResourceType, i32)>,
     /// Over every resource; 0 for no store.
@@ -311,10 +311,7 @@ pub struct Store {
 
 impl Store {
     pub fn empty() -> Store {
-        Store {
-            held: Vec::new(),
-            capacity: 0,
-        }
+        Store::default()
     }
 
     #[inline]
@@ -461,11 +458,7 @@ impl Controller {
     }
 
     pub fn our_safe_mode(&self) -> i32 {
-        if self.owner.is_ours() {
-            self.safe_mode
-        } else {
-            0
-        }
+        self.safe_mode * i32::from(self.owner.is_ours())
     }
 }
 

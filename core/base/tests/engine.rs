@@ -121,3 +121,16 @@ fn a_loaded_carry_weighs_and_a_boosted_one_holds_its_multiple() {
         "a destroyed CARRY carries nothing"
     );
 }
+
+#[test]
+fn a_work_repairs_at_its_build_boost_not_its_dismantle_one() {
+    use ResourceType::{CatalyzedLemergiumAcid as Repair, CatalyzedZynthiumAcid as Dismantle};
+    let body = [Part::Work; 2];
+    assert_eq!(engine::repair_at(&body, &[Some(Repair), None], 200), 300);
+    assert_eq!(engine::repair_at(&body, &[Some(Dismantle); 2], 200), 200);
+    assert_eq!(
+        engine::repair_at(&body, &[Some(Repair); 2], 100),
+        200,
+        "a dead WORK repairs nothing"
+    );
+}

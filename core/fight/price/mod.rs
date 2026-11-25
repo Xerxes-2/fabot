@@ -59,11 +59,9 @@ impl<'a> Scene<'a> {
             barriers: hits_at,
         };
 
-        let repair = engine::REPAIR_POWER
-            * self.foes[&room.name]
-                .iter()
-                .map(|h| casting::fighter_of(h).work)
-                .sum::<i32>();
+        let repair: i32 = (self.foes[&room.name].iter())
+            .map(|h| engine::repair_at(&world::body_kinds(h), &world::body_boosts(h), h.hits))
+            .sum();
 
         let rate = engine::DISMANTLE_POWER * set.iter().map(|f| f.work).sum::<i32>() - repair;
 
