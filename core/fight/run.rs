@@ -171,10 +171,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
         })
         .collect();
     let muster = |r: RoomName| declarations.colonies.iter().find(|c| c.room == r)?.muster;
-    let spawn = |r: RoomName| world.spawns.iter().find(|s| s.pos.room == r).map(|s| s.pos);
-    let musters = (homes.iter())
-        .filter_map(|r| muster(*r).or_else(|| spawn(*r)))
-        .collect();
+    let musters = homes.iter().filter_map(|r| muster(*r)).collect();
     let scene = Scene {
         world,
         sightings,

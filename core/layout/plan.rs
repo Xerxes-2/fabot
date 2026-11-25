@@ -584,23 +584,14 @@ mod tests {
     }
 
     #[test]
-    fn a_muster_holds_no_planned_road_and_no_spawns_door_within_its_reach() {
+    fn every_plan_musters_off_its_spawns_doors() {
         for colony in fx::samples(4).take(fx::MAX_TEST) {
             let Some((_, plan)) = fx::plan_of(&colony) else {
                 continue;
             };
-            let Some(muster) = plan.muster else {
-                continue;
-            };
-            let at = tiles::of_pos(&muster);
+            let at = tiles::of_pos(&plan.muster.expect("a muster"));
             for i in plan.items.iter().chain(&plan.ring) {
                 let reach = tiles::range(i.tile, at);
-                assert!(
-                    !(i.kind == StructureType::Road
-                        && reach <= fabot_base::declarations::MUSTER_RANGE),
-                    "road at {}",
-                    i.tile
-                );
                 assert!(
                     !(i.kind == StructureType::Spawn
                         && reach <= fabot_base::declarations::MUSTER_RANGE + 1),

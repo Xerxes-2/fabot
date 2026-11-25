@@ -88,8 +88,8 @@ const MUSTER_REACH: i32 = 10;
 /// A body held at the muster stays off the exit tiles, which carry it across.
 const MUSTER_EDGE: i32 = MUSTER_RANGE + 1;
 
-/// None where every tile near the anchor has a road or a spawn's door within
-/// reach: the bodies then wait by a spawn.
+/// A road in reach is ranked, not barred, so a plan dense with roads still
+/// musters; a spawn's door is barred, as a body waiting there blocks it.
 pub fn muster(
     room: RoomName,
     anchor: Tile,
@@ -97,15 +97,14 @@ pub fn muster(
     open: impl Fn(Tile) -> bool,
 ) -> Option<Pos> {
     let mut taken = [false; tiles::COUNT];
-    let mut barred = [false; tiles::COUNT];
+    let mut paved = [false; tiles::COUNT];
+    let mut doorway = [false; tiles::COUNT];
     for i in planned {
         taken[i.tile] = true;
-        if i.kind == StructureType::Road {
-            barred[i.tile] = true;
-        }
+        paved[i.tile] |= i.kind == StructureType::Road;
         if i.kind == StructureType::Spawn {
             for n in tiles::within(1, i.tile) {
-                barred[n] = true;
+                doorway[n] = true;
             }
         }
     }
@@ -116,10 +115,11 @@ pub fn muster(
     let square = |t: Tile| tiles::within(MUSTER_RANGE, t).into_iter();
     (tiles::within(MUSTER_REACH, anchor).into_iter())
         .filter(|t| inside(*t) && open(*t) && !taken[*t])
-        .filter(|t| square(*t).all(|n| !barred[n]))
+        .filter(|t| square(*t).all(|n| !doorway[n]))
         .min_by_key(|t| {
+            let roads = square(*t).filter(|n| paved[*n]).count();
             let crowd = square(*t).filter(|n| taken[*n] || !open(*n)).count();
-            (crowd, tiles::range(*t, anchor), *t)
+            (roads, crowd, tiles::range(*t, anchor), *t)
         })
         .map(|t| tiles::to_pos(room, t))
 }

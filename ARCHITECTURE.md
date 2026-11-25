@@ -736,7 +736,7 @@ and `cheapest_win` (adds only to already-standing `ours`).
 | `Close` | Close distance + glue onto moving marks; a body that does not swing closes as `Kite` walks, and on a mark that swings stops at a shot's range; a `Defend` body (`Kite` too, not the blobs) outside its centre's room enters it by any tile and ranks no mark until in. A siege's loose bodies keep its blob's line in |
 | `Hold` | Hold rampart / `Atlas` seat: one body a rampart, as Exchange's Hold stance seats them |
 | `Pursue` | Chase across room borders |
-| `Retreat` | Fall back to `ColonyPlan.muster` (off plan roads/structures) |
+| `Retreat` | Fall back to `ColonyPlan.muster` (off plan structures and spawns' doors, fewest roads in reach) |
 | `Formation` | Step 2×2 footprint as one body (with `Siege`) |
 | `Dismantle` | Dismantle target; medics seat beside the body towers struck last tick |
 | `Drain` | Bouncer/medic border-gate volley soaking |
