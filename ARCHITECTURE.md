@@ -676,6 +676,8 @@ and `cheapest_win` (adds only to already-standing `ours`).
   the raid walks onto its nearer body (a pair 1 tick apart at landing met it
   6 apart); option: price a non-together arm as if the raid closes on the
   nearest body.
+  `❓` A raid spawned beside a forming blob scatters it
+  (blob-defend-fights-within-its-heal seed 26: strayTicks 264).
 - **Focus:** the Exchange prices the kill our bodies strike: both rank the
   raid by `fighter::kill_rank`.
 - **Parts:** our bodies strike, heal and hit back only with the parts their
