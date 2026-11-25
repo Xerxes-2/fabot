@@ -380,6 +380,7 @@ pub fn step<'t>(
                 let ours = (&derived.owned, &worked as &dyn Fn(RoomName) -> bool);
                 let facts = facts(world, ours, intel, (name, row), (crossings, failed(name)));
                 let outpost = Outpost {
+                    reserved: true,
                     room: name,
                     controller: controller.clone(),
                     sources: sources.clone(),
@@ -439,6 +440,7 @@ pub fn claim(intel: &Intel, derived: &Derived, held: Option<&Expansion>) -> Opti
     let e = held.filter(|e| !derived.colonies.contains(&e.room))?;
     let row = intel.get(&e.room)?;
     Some(Outpost {
+        reserved: true,
         room: e.room,
         controller: row.controller.clone()?,
         sources: row.sources.clone()?,
@@ -531,6 +533,7 @@ mod tests {
         for room in world.rooms.iter().filter(|r| r.controller.is_some()) {
             let row = &intel[&room.name];
             let outpost = Outpost {
+                reserved: true,
                 room: room.name,
                 controller: row.controller.clone().unwrap(),
                 sources: row.sources.clone().unwrap(),

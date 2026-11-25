@@ -685,7 +685,12 @@ impl<'a> Scene<'a> {
         let (copies_of, tick_worth): (CopiesOf<'_>, i32) =
             match declarations.outposts.iter().find(|o| o.room == e.room) {
                 Some(outpost) if !self.homes.contains(&e.room) => {
-                    let tick_worth = outpost.sources.len() as i32 * engine::HELD_OUTPUT_PER_TICK;
+                    let rate = if outpost.reserved {
+                        engine::HELD_OUTPUT_PER_TICK
+                    } else {
+                        engine::NEUTRAL_OUTPUT_PER_TICK
+                    };
+                    let tick_worth = outpost.sources.len() as i32 * rate;
 
                     let ticks = raid
                         .iter()

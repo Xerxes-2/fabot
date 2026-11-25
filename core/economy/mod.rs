@@ -368,6 +368,7 @@ pub(crate) mod arb {
                 .collect();
 
             let declared = |(r, c): &(&Room, &Controller)| Outpost {
+                reserved: true,
                 room: r.name,
                 controller: Declared {
                     id: c.id,

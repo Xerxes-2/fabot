@@ -40,12 +40,32 @@ struct Price {
     spawn: f64,
     cpu: f64,
     unbuilt: f64,
+    reserved: bool,
 }
 
-fn price(c: &Candidate, capacity: i32) -> Price {
+/// Bare or reserved, whichever nets more within `left`: affording a reserver
+/// never by itself prices a kept room out. A declared row works reserved.
+fn price(c: &Candidate, capacity: i32, left: f64, spend: &dyn Fn(f64) -> f64) -> Price {
+    let affords = capacity >= engine::body_cost(&[Part::Claim, Part::Move]);
+    let bare = worked(c, capacity, false, spend);
+    match affords.then(|| worked(c, capacity, true, spend)) {
+        Some(held)
+            if c.declared || (held.spawn <= left, held.net) > (bare.spawn <= left, bare.net) =>
+        {
+            held
+        }
+        _ => bare,
+    }
+}
+
+pub fn net(world: &World, c: &Candidate) -> f64 {
+    let capacity = world.room(c.home).map_or(0, |r| r.energy_capacity);
+    price(c, capacity, f64::INFINITY, &|_| 0.0).net
+}
+
+fn worked(c: &Candidate, capacity: i32, reserved: bool, spend: &dyn Fn(f64) -> f64) -> Price {
     use Part::{Carry, Claim, Move};
     let reserver = [Claim, Move];
-    let reserved = capacity >= engine::body_cost(&reserver);
     let rate = if reserved {
         engine::HELD_OUTPUT_PER_TICK
     } else {
@@ -75,19 +95,11 @@ fn price(c: &Candidate, capacity: i32) -> Price {
     let setup = n * f64::from(engine::CONTAINER_BUILD_COST) / TENURE;
     Price {
         net,
-        spawn,
+        spawn: spawn + spend(net),
         cpu: bodies * INTENT_CPU,
         unbuilt: if c.stands { 0.0 } else { setup },
+        reserved,
     }
-}
-
-fn price_at(world: &World, c: &Candidate) -> Price {
-    price(c, world.room(c.home).map_or(0, |r| r.energy_capacity))
-}
-
-/// The energy a tick `c` nets its home, as `chosen` ranks it.
-pub fn net(world: &World, c: &Candidate) -> f64 {
-    price_at(world, c).net
 }
 
 /// An operation holds only the colonies it casts from: a claim its sponsor; a
@@ -184,11 +196,15 @@ pub fn chosen(
         spawn_left.insert(room, left);
     }
     let mut cpu_left = world.cpu_limit * tuning.outpost_cpu_share;
+    let capacity = |home: RoomName| world.room(home).map_or(0, |r| r.energy_capacity);
+    let priced_in =
+        |c: &Candidate, left: f64| price(c, capacity(c.home), left, &|net| spend(c.home, net));
     let mut priced: Vec<(Price, Candidate)> = (candidates.into_iter())
         .map(|c| {
-            let mut p = price_at(world, &c);
-            p.spawn += spend(c.home, p.net);
-            (p, c)
+            (
+                priced_in(&c, spawn_left.get(&c.home).copied().unwrap_or(0.0)),
+                c,
+            )
         })
         .collect();
     let value = |p: &Price| (p.net - p.unbuilt) / p.spawn.max(1.0);
@@ -199,8 +215,9 @@ pub fn chosen(
     });
     let mut out = Vec::new();
     let mut rising: BTreeSet<RoomName> = BTreeSet::new();
-    for (p, c) in priced {
+    for (_, mut c) in priced {
         let left = spawn_left.entry(c.home).or_default();
+        let p = priced_in(&c, *left);
         let unpaid = p.net <= 0.0 || p.spawn > *left || p.cpu > cpu_left;
         // A busy home holds back a new room, not the spawn time it ranks for;
         // a room a Defend stands in is not new, or its owed casts would drop it.
@@ -216,6 +233,7 @@ pub fn chosen(
         *left -= p.spawn;
         cpu_left -= p.cpu;
         if !c.declared && !yields {
+            c.outpost.reserved = p.reserved;
             out.push(c.outpost);
         }
     }
@@ -297,6 +315,7 @@ pub fn survey(
                             continue;
                         }
                         let outpost = Outpost {
+                            reserved: true,
                             room: name,
                             controller: controller.clone(),
                             sources: sources.clone(),
@@ -348,6 +367,7 @@ mod tests {
         };
         let c = Candidate {
             outpost: Outpost {
+                reserved: true,
                 room,
                 controller: at.clone(),
                 sources: vec![at],
@@ -362,6 +382,6 @@ mod tests {
         let haul = f64::from(engine::HELD_OUTPUT_PER_TICK * 2) / 50.0 * 100.0 / 1500.0;
         let upkeep = 800.0 / 1500.0 + haul + 650.0 / 600.0;
         let net = f64::from(engine::HELD_OUTPUT_PER_TICK) - upkeep;
-        assert!((price(&c, 800).net - net).abs() < 1e-9);
+        assert!((worked(&c, 800, true, &|_| 0.0).net - net).abs() < 1e-9);
     }
 }

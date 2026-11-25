@@ -194,14 +194,10 @@ pub fn strike_reach(live: impl Fn(Part) -> bool) -> i32 {
 /// The engine puts hits on parts from the head and only a live MOVE moves:
 /// one MOVE last walks while any part lives.
 pub fn with_move_last(mut body: Vec<Part>) -> Vec<Part> {
-    match body.iter().rposition(|p| *p == Part::Move) {
-        Some(at) if at < body.len() - 1 => {
-            let part = body.remove(at);
-            body.push(part);
-            body
-        }
-        _ => body,
+    if let Some(at) = body.iter().rposition(|p| *p == Part::Move) {
+        body[at..].rotate_left(1);
     }
+    body
 }
 
 pub fn part_hits_at(n: usize, hits: i32, i: usize) -> i32 {

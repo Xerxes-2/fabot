@@ -14,6 +14,7 @@ pub struct Outpost {
     pub room: RoomName,
     pub controller: Declared,
     pub sources: Vec<Declared>,
+    pub reserved: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]

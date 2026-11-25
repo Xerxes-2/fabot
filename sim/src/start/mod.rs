@@ -96,6 +96,7 @@ fn rank(map: &Map, maps: &Maps, room: &str) -> Option<(f64, Vec<String>)> {
     let rivals = fabot_strategy::rivals(&world, &declarations, &intel);
     let facts = expand::facts(&world, (&none, &|_| false), &intel, (name, &row), (0, 0.0));
     let outpost = Outpost {
+        reserved: true,
         room: name,
         controller: row.controller.clone()?,
         sources: row.sources.clone()?,

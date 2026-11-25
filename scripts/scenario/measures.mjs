@@ -74,7 +74,7 @@ const warm = (rows) => rows.filter((c) => c.cold === undefined);
 const floodsOf = (c) => (c.atlasMisses ?? 0) + (c.atlasLive ?? 0);
 const outposts = (key) => (samples, a) => {
   const [first, last] = [at(samples, a.from ?? 0), at(samples, a.to ?? Infinity)];
-  return Object.keys(last.rooms).slice(1).reduce((n, r) => n + last.rooms[r][key] - (first.rooms[r]?.[key] ?? 0), 0);
+  return Object.keys(last.rooms).slice(1).filter((r) => !a.room || r === a.room).reduce((n, r) => n + last.rooms[r][key] - (first.rooms[r]?.[key] ?? 0), 0);
 };
 const at = (samples, t) => samples.find((s) => s.t >= t) ?? samples.at(-1);
 const PART = { t: "tough", a: "attack", r: "ranged_attack", h: "heal", m: "move" };
@@ -268,7 +268,7 @@ export const measures = {
   // Energy our bodies carried out of a home across its border.
   carriedOut: on("room from to", (samples, a) => (at(samples, a.to ?? Infinity).rooms[a.room]?.carriedOut ?? 0) - (at(samples, a.from ?? 0).rooms[a.room]?.carriedOut ?? 0)),
   // Energy dug in every room but the colony's own.
-  outpostDug: on("from to", outposts("dug")),
+  outpostDug: on("from to room", outposts("dug")),
   dug: on("room from to", (samples, a) => (at(samples, a.to ?? Infinity).rooms[a.room]?.dug ?? 0) - (at(samples, a.from ?? 0).rooms[a.room]?.dug ?? 0)),
   upgrade: on("room from to", (samples, a) => upgradedIn(at(samples, a.to ?? Infinity), a) - upgradedIn(at(samples, a.from ?? 0), a)),
   // (none ever: Infinity)

@@ -1470,20 +1470,28 @@ fn remote_of(
             bare.sources = Vec::new();
             ground_of((atlas, &world.rules), richest, 0, &bare, 0)
         }
-        _ if richest >= engine::body_cost(bodies::block_of(Pattern::Claimer)) => ground_of(
-            (atlas, &world.rules),
-            richest,
-            engine::HELD_OUTPUT_PER_TICK,
-            &room,
-            0,
-        ),
-        _ => ground_of(
-            (atlas, &world.rules),
-            richest,
-            engine::NEUTRAL_OUTPUT_PER_TICK,
-            &room,
-            0,
-        ),
+        _ if outpost.reserved
+            && richest >= engine::body_cost(bodies::block_of(Pattern::Claimer)) =>
+        {
+            ground_of(
+                (atlas, &world.rules),
+                richest,
+                engine::HELD_OUTPUT_PER_TICK,
+                &room,
+                0,
+            )
+        }
+        // Worked bare, a claimer still strikes an Invader's hold off.
+        _ => Ground {
+            reservable: room.controller.as_ref().is_some_and(invader_held),
+            ..ground_of(
+                (atlas, &world.rules),
+                richest,
+                engine::NEUTRAL_OUTPUT_PER_TICK,
+                &room,
+                0,
+            )
+        },
     }
 }
 

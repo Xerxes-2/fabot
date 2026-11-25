@@ -196,6 +196,7 @@ fn outposts(declared: &Value, key: &str) -> Vec<Outpost> {
     };
     (sites.into_iter())
         .map(|site| Outpost {
+            reserved: true,
             room: site.room,
             controller: at(site.room, site.controller),
             sources: (site.sources.into_iter())
