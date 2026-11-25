@@ -14,7 +14,7 @@ use fabot_base::vocabulary::ResourceType::{self, Energy};
 use fabot_base::vocabulary::{Part, part_count_in};
 use fabot_base::world::{
     self, BodyPart, Built, Controller, Creep, Id, Owner, Pos, Room, RoomName, Rules, Source, Spawn,
-    Store, Structure, StructureType, World, terrain,
+    Store, Structure, StructureType, World,
 };
 
 use super::balance::{Holding, Level, Shipment, balance, takes, want};
@@ -568,11 +568,10 @@ fn repair_of(room: &Room, wall: i32, owned_room: bool, s: &Structure) -> Option<
             (wall.min(s.hits_max), chunk, decay, 0.0, 0)
         }
         StructureType::Road => {
-            let ratio = if terrain::is_swamp(room.terrain, s.pos.x, s.pos.y) {
-                engine::ROAD_SWAMP_RATIO
-            } else {
-                1
-            };
+            let bits = room
+                .terrain
+                .map_or(0, |t| t.get_bits()[tiles::of_pos(&s.pos).index()]);
+            let ratio = engine::road_ratio(bits);
             let chunk = engine::ROAD_DECAY_AMOUNT * ratio;
             let block = bodies::block_of(Pattern::Hauler);
             let load = part_count_in(block, Part::Carry) * engine::CARRY_PART_CAPACITY;

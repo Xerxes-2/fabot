@@ -1,5 +1,5 @@
 use super::vocabulary::{Part, ResourceType, damage_ratio, multiple, part_count_in};
-use screeps::StructureType;
+use screeps::{StructureType, Terrain};
 
 pub const MAX_BODY_PARTS: usize = screeps::MAX_CREEP_SIZE as usize;
 pub const HARVEST_PER_WORK: i32 = screeps::HARVEST_POWER as i32;
@@ -80,8 +80,12 @@ pub const ROAD_WEIGHT: i32 = screeps::MOVE_COST_ROAD as i32;
 pub const PLAIN_WEIGHT: i32 = screeps::MOVE_COST_PLAIN as i32;
 pub const SWAMP_WEIGHT: i32 = screeps::MOVE_COST_SWAMP as i32;
 pub const ROAD_BUILD_COST: i32 = StructureType::Road.construction_cost().unwrap() as i32;
-/// A swamp road's build, hits and decay.
-pub const ROAD_SWAMP_RATIO: i32 = screeps::CONSTRUCTION_COST_ROAD_SWAMP_RATIO as i32;
+/// A road's build, hits and decay multiplier; swamp and wall bits each apply, as in the engine.
+pub fn road_ratio(terrain: u8) -> i32 {
+    let times = |bit: Terrain, r: u32| r.pow(u32::from(terrain & bit as u8 != 0)) as i32;
+    let swamp = times(Terrain::Swamp, screeps::CONSTRUCTION_COST_ROAD_SWAMP_RATIO);
+    swamp * times(Terrain::Wall, screeps::CONSTRUCTION_COST_ROAD_WALL_RATIO)
+}
 /// Every ROAD_DECAY_TIME, on plain.
 pub const ROAD_DECAY_AMOUNT: i32 = screeps::ROAD_DECAY_AMOUNT as i32;
 pub const ROAD_DECAY_TIME: i32 = screeps::ROAD_DECAY_TIME as i32;

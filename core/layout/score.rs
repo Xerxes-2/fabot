@@ -1,12 +1,13 @@
 //! Hivemind's variation generator and plan scorer (MIT, © David Franke): the
 //! room centres and harvest-bay spawns it tries, and how it picks one.
+use fabot_base::engine;
 use fabot_base::tiles::{self, Tile, index};
 use fabot_base::world::Rules;
 
 use super::build::{self, Built, Variation};
 use super::ground::Ground;
 use super::path::{Goal, Search};
-use super::place::{BLOCKED, Labels, ROAD, SWAMP, WALL, xy};
+use super::place::{BLOCKED, Labels, ROAD, WALL, xy};
 
 /// `varyRoomCenter` then `varySourceSpawns`, in Hivemind's key order.
 pub fn variations(ground: &Ground, walls: &[u8], exits: &[u8]) -> Vec<Variation> {
@@ -157,13 +158,7 @@ pub fn score(rules: &Rules, built: &Built, terrain: &[u8], exits: &[u8], ground:
     maintenance -= 0.001 * a("rampart") * 300.0 / 100.0;
     maintenance -= 0.001 * a("container") * 5000.0 / 500.0;
     for t in plan.of("road") {
-        let mut factor = 0.002;
-        if terrain[t.index()] == SWAMP {
-            factor *= 5.0;
-        }
-        if terrain[t.index()] & WALL != 0 {
-            factor *= 150.0;
-        }
+        let factor = 0.002 * f64::from(engine::road_ratio(terrain[t.index()]));
         maintenance -= factor * 100.0 / 1000.0;
     }
 

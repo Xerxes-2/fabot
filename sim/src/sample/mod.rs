@@ -4,14 +4,14 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod labs;
 
+use fabot_base::engine::road_ratio;
 use krebs::atom;
 use krebs::constants::{CREEP_CORPSE_RATE, CREEP_PART_MAX_ENERGY};
 use krebs::doc::{Atom, Obj, Val};
 use krebs::intents::RoomIntents;
 use screeps::{
-    CONSTRUCTION_COST_ROAD_SWAMP_RATIO, CONSTRUCTION_COST_ROAD_WALL_RATIO, CREEP_LIFE_TIME,
-    ENERGY_DECAY, LINK_LOSS_RATIO, Part, REPAIR_COST, SPAWN_ENERGY_CAPACITY, StructureType,
-    TOWER_ENERGY_COST, controller_levels,
+    CREEP_LIFE_TIME, ENERGY_DECAY, LINK_LOSS_RATIO, Part, REPAIR_COST, SPAWN_ENERGY_CAPACITY,
+    StructureType, TOWER_ENERGY_COST, controller_levels,
 };
 use serde_json::{Map, Value, json};
 
@@ -724,12 +724,11 @@ impl Sampler {
                             && k.construction_cost().is_some() =>
                     {
                         let at = (num(o, atom!("y")) * 50.0 + num(o, atom!("x"))) as usize;
-                        let ratio = match (k, map.terrain(name)[at]) {
-                            (StructureType::Road, b'1' | b'3') => CONSTRUCTION_COST_ROAD_WALL_RATIO,
-                            (StructureType::Road, b'2') => CONSTRUCTION_COST_ROAD_SWAMP_RATIO,
+                        let ratio = match k {
+                            StructureType::Road => road_ratio(map.terrain(name)[at] - b'0'),
                             _ => 1,
                         };
-                        let cost = f64::from(build_cost(kind)) * f64::from(ratio);
+                        let cost = f64::from(build_cost(kind) * ratio);
                         structures += cost;
                         scored += cost * (1.0 + unlock(k).ln());
                     }
