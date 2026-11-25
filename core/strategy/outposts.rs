@@ -9,7 +9,7 @@ use fabot_base::engine;
 use fabot_base::intel::Intel;
 use fabot_base::tiles;
 use fabot_base::tuning::Tuning;
-use fabot_base::vocabulary::Part;
+use fabot_base::vocabulary::{CLAIMER, Part};
 use fabot_base::world::{Pos, RoomName, StructureType, World};
 use fabot_economy::bodies::{self, Pattern};
 use fabot_economy::{derived, slots};
@@ -46,7 +46,7 @@ struct Price {
 /// Bare or reserved, whichever nets more within `left`: affording a reserver
 /// never by itself prices a kept room out. A declared row works reserved.
 fn price(c: &Candidate, capacity: i32, left: f64, spend: &dyn Fn(f64) -> f64) -> Price {
-    let affords = capacity >= engine::body_cost(&[Part::Claim, Part::Move]);
+    let affords = capacity >= engine::body_cost(&CLAIMER);
     let bare = worked(c, capacity, false, spend);
     match affords.then(|| worked(c, capacity, true, spend)) {
         Some(held)
@@ -64,8 +64,7 @@ pub fn net(world: &World, c: &Candidate) -> f64 {
 }
 
 fn worked(c: &Candidate, capacity: i32, reserved: bool, spend: &dyn Fn(f64) -> f64) -> Price {
-    use Part::{Carry, Claim, Move};
-    let reserver = [Claim, Move];
+    use Part::{Carry, Move};
     let rate = if reserved {
         engine::HELD_OUTPUT_PER_TICK
     } else {
@@ -85,8 +84,8 @@ fn worked(c: &Candidate, capacity: i32, reserved: bool, spend: &dyn Fn(f64) -> f
     let mut spawn = n * slots::spawn_ticks(&dig) + walked * slots::spawn_ticks(&pair);
     let mut bodies = n + (carry / per_body).ceil();
     if reserved {
-        upkeep += slots::upkeep(&reserver);
-        spawn += slots::spawn_ticks(&reserver);
+        upkeep += slots::upkeep(&CLAIMER);
+        spawn += slots::spawn_ticks(&CLAIMER);
         bodies += 1.0;
     }
     let lost = if c.contested { upkeep } else { 0.0 };

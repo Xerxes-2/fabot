@@ -227,6 +227,7 @@ dependencies = [
  "fabot-tactics",
  "proptest",
  "serde",
+ "strum",
 ]
 
 [[package]]

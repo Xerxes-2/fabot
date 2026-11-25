@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
+use strum::IntoStaticStr;
 
 use fabot_base::vocabulary::Part;
 use fabot_base::world::{Id, Pos, RoomName};
@@ -67,8 +68,9 @@ pub struct Boosted {
     pub colony: RoomName,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, IntoStaticStr)]
 #[serde(from = "Kind", into = "Kind")]
+#[strum(serialize_all = "lowercase")]
 pub enum Objective {
     Defend,
     /// Into its room to the rival structure `target`; the plan's order is the
@@ -100,16 +102,12 @@ impl From<Kind> for Objective {
 
 impl From<Objective> for Kind {
     fn from(o: Objective) -> Kind {
-        let (kind, target) = match o {
-            Objective::Defend => (None, None),
-            Objective::Siege(target) => (Some("siege"), Some(target)),
-            Objective::Sweep => (Some("sweep"), None),
-            Objective::Stronghold => (Some("stronghold"), None),
+        let kind = (o != Objective::Defend).then(|| <&str>::from(&o).to_string());
+        let target = match o {
+            Objective::Siege(target) => Some(target),
+            _ => None,
         };
-        Kind {
-            kind: kind.map(str::to_string),
-            target,
-        }
+        Kind { kind, target }
     }
 }
 

@@ -35,6 +35,7 @@ pub const LAB_MINERAL_CAPACITY: i32 = screeps::LAB_MINERAL_CAPACITY as i32;
 pub const LAB_REACTION_AMOUNT: i32 = screeps::LAB_REACTION_AMOUNT as i32;
 /// Chebyshev over the room grid; the observed room is visible the next tick alone.
 pub const OBSERVER_RANGE: i32 = screeps::OBSERVER_RANGE as i32;
+pub const SEGMENT_BYTES: usize = screeps::MEMORY_SEGMENT_SIZE_LIMIT as usize;
 pub const MELEE_RANGE: i32 = 1;
 pub const RANGED_RANGE: i32 = screeps::CREEP_RANGED_ACTION_RANGE as i32;
 /// The reach of upgradeController, build and repair.

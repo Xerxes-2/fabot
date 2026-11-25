@@ -24,8 +24,7 @@ use fabot_fight::shape::{Cast, Engagement, Phase};
 
 pub const WINDOW: i32 = 100;
 const RING: usize = 150;
-/// The engine's limit on one segment, less a margin.
-const BYTES: usize = 99 * 1024;
+const BYTES: usize = engine::SEGMENT_BYTES - 1024;
 
 const STOCK: &str = "stock";
 const FLOOR: &str = "floor";

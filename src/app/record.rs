@@ -10,7 +10,7 @@ use fabot_base::world::push_int;
 
 const RING: usize = 5;
 const FIRST: usize = 10;
-const LIMIT: usize = 100 * 1024;
+const LIMIT: usize = fabot_base::engine::SEGMENT_BYTES;
 /// A part's head, `tick part parts `, is shorter than this.
 const HEAD: usize = 32;
 const LEVEL: u8 = 1;

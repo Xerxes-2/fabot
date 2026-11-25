@@ -8,11 +8,11 @@ use super::super::shape::{Cast, Engagement, Group, Objective, Phase, Slot, enter
 use fabot_atlas::Atlas;
 use fabot_base::intents::{Action, SpawnAct};
 use fabot_base::tiles::{self};
-use fabot_base::vocabulary::Part;
+use fabot_base::vocabulary::{Part, part_count_in};
 use fabot_base::wish::Wish;
 use fabot_base::world::{
     Controller, Creep, Fallen, Id, Oven, Owner, Pos, RoomName, Spawn, Structure, StructureType,
-    World, cast, spent,
+    World, spent,
 };
 use fabot_base::{declarations, engine};
 use fabot_exchange::{self as exchange, Outcome};
@@ -348,8 +348,8 @@ fn half(lost: i32, whole: i32) -> bool {
 
 /// v1's refiller held a Refill, which is Economy's to know; a hauler's body stands in.
 fn hand(body: &[impl Borrow<Part>], pos: &Pos) -> bool {
-    cast(body, Part::Carry) > 0
-        && cast(body, Part::Work) == 0
+    part_count_in(body, Part::Carry) > 0
+        && part_count_in(body, Part::Work) == 0
         && !tiles::on_edge(tiles::of_pos(pos))
 }
 
@@ -395,22 +395,22 @@ fn razed(home: &Home) -> bool {
     // Two of the dig fallen within a tombstone's life: a raid camping a
     // source kills faster than the spawn regrows, and no hand ever falls.
     let culled = (home.fallen.iter().filter(fell))
-        .filter(|(_, f)| cast(&f.body, Part::Work) > 0)
+        .filter(|(_, f)| part_count_in(&f.body, Part::Work) > 0)
         .count()
         >= 2;
     let killed: i32 = (home.fallen.iter().filter(fell))
         .filter(|(pos, f)| hand(&f.body, pos))
-        .map(|(_, f)| cast(&f.body, Part::Carry))
+        .map(|(_, f)| part_count_in(&f.body, Part::Carry))
         .sum();
 
     let left: i32 = hands
         .iter()
         .filter(|c| !struck(c))
-        .map(|c| cast(&c.body, Part::Carry))
+        .map(|c| part_count_in(&c.body, Part::Carry))
         .sum();
     let whole: i32 = hands
         .iter()
-        .map(|c| cast(&c.body, Part::Carry))
+        .map(|c| part_count_in(&c.body, Part::Carry))
         .sum::<i32>()
         + killed;
     let (spawn_lost, spawn_all) = share(StructureType::Spawn);

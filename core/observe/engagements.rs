@@ -4,14 +4,14 @@ use std::collections::{BTreeSet, VecDeque};
 
 use serde::Serialize;
 
+use fabot_base::engine;
 use fabot_base::world::RoomName;
 use fabot_exchange::Outcome;
-use fabot_fight::shape::{Closed, Objective, Phase};
+use fabot_fight::shape::{Closed, Phase};
 use fabot_tactics::Tactic;
 
 const ROWS: usize = 200;
-/// A segment holds 100 KB.
-const BYTES: usize = 100 * 1000;
+const BYTES: usize = engine::SEGMENT_BYTES;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,12 +46,7 @@ pub fn rows(closed: &[Closed], time: i32) -> Vec<String> {
             let e = &c.engagement;
             let row = Row {
                 id: e.id,
-                kind: match e.objective {
-                    Objective::Defend => "defend",
-                    Objective::Siege(_) => "siege",
-                    Objective::Sweep => "sweep",
-                    Objective::Stronghold => "stronghold",
-                },
+                kind: (&e.objective).into(),
                 room: e.room,
                 tactic: e.plan.tactic,
                 rivals: &e.actual.rivals,

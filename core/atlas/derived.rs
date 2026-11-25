@@ -6,7 +6,7 @@ use fabot_base::declarations::{ColonyPlan, Declarations, Outpost, REACH_HOPS, St
 use fabot_base::grid::{self, Footprint};
 use fabot_base::intel::Intel;
 use fabot_base::tiles::{self, TileSet};
-use fabot_base::vocabulary::Part;
+use fabot_base::vocabulary::{CLAIMER, Part};
 use fabot_base::world::{
     Creep, Owner, Pos, Room, RoomName, Sightings, StructureType, World, hostiles,
 };
@@ -88,7 +88,7 @@ pub fn sponsor(
     at: &Pos,
 ) -> Option<usize> {
     let spawns: Vec<Pos> = derived.homes.iter().map(|h| h.spawn).collect();
-    let claimer = engine::body_cost(&[Part::Claim, Part::Move]);
+    let claimer = engine::body_cost(&CLAIMER);
     let pays = |i: usize| {
         let room = derived.colonies[i];
         room != at.room && !given_up(room) && derived.homes[i].capacity >= claimer

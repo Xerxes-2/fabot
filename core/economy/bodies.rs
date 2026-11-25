@@ -2,7 +2,7 @@ use strum::{EnumString, IntoStaticStr};
 
 use fabot_base::engine;
 use fabot_base::grid::{self, FatigueFactor};
-use fabot_base::vocabulary::{Part, part_count_in};
+use fabot_base::vocabulary::{CLAIMER, Part, part_count_in};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString, IntoStaticStr)]
 #[cfg_attr(test, derive(strum::EnumIter))]
@@ -22,7 +22,6 @@ pub fn block_of(pattern: Pattern) -> &'static [Part] {
     const HARVESTER: [Part; 4] = [Part::Work, Part::Work, Part::Carry, Part::Move];
     const HAULER: [Part; 3] = [Part::Carry, Part::Carry, Part::Move];
     const UPGRADER: [Part; 3] = [Part::Work, Part::Carry, Part::Move];
-    const CLAIMER: [Part; 2] = [Part::Claim, Part::Move];
     match pattern {
         Pattern::Worker => &WORKER,
         Pattern::Harvester => &HARVESTER,

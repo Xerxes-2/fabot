@@ -15,6 +15,7 @@ fabot-exchange.workspace = true
 fabot-mv.workspace = true
 fabot-tactics.workspace = true
 serde.workspace = true
+strum.workspace = true
 
 [dev-dependencies]
 fabot-base = { workspace = true, features = ["test-support"] }

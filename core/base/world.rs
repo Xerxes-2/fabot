@@ -753,12 +753,8 @@ pub mod hostiles {
     /// The tiles a body can strike before our next decision: its longest
     /// weapon's range plus the two ticks v1's `ReachHorizon` let it close in.
     pub fn reach(creep: &Creep) -> i32 {
-        let ranged = creep.body.iter().any(|p| p.kind == Part::RangedAttack);
-        2 + if ranged {
-            engine::RANGED_RANGE
-        } else {
-            engine::MELEE_RANGE
-        }
+        2 + engine::strike_reach(|p| creep.body.iter().any(|b| b.kind == p))
+            .max(engine::MELEE_RANGE)
     }
 
     pub fn owned(rooms: &[Room]) -> BTreeSet<RoomName> {
@@ -988,11 +984,6 @@ pub fn live(body: &[BodyPart], kind: Part) -> i32 {
     (body.iter())
         .filter(|p| p.hits > 0 && p.kind == kind)
         .count() as i32
-}
-
-#[inline]
-pub fn cast(body: &[impl Borrow<Part>], kind: Part) -> i32 {
-    (body.iter()).filter(|p| *(*p).borrow() == kind).count() as i32
 }
 
 impl World<'_> {
