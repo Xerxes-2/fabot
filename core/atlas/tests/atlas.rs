@@ -29,7 +29,7 @@ fn structure(kind: StructureType, walkable: bool, x: i32, y: i32) -> Structure {
         owner: Owner::Nobody,
         hits: 1,
         hits_max: 1,
-        store: Store::empty(),
+        store: Store::default(),
         cooldown: 0,
         collapse: 0,
         deploy: 0,
@@ -166,7 +166,7 @@ fn creep(owner: Owner, pos: Pos) -> Creep {
         hits_max: 1,
         ticks_to_live: 1,
         fatigue: 0,
-        store: Store::empty(),
+        store: Store::default(),
     }
 }
 
@@ -441,7 +441,7 @@ proptest! {
         prop_assert!(loaded.weight >= empty.weight, "{:?}", kinds);
         prop_assert_eq!(loaded.moves, empty.moves, "{:?}", kinds);
         let unloaded = Creep {
-            store: Store::empty(),
+            store: Store::default(),
             ..creep.clone()
         };
         prop_assert_eq!(factor_of(&unloaded), empty, "{:?}", kinds);

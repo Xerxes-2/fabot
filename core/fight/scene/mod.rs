@@ -825,7 +825,7 @@ mod tests {
             hits_max: 200,
             ticks_to_live: 1000,
             fatigue: 0,
-            store: Store::empty(),
+            store: Store::default(),
         }
     }
 

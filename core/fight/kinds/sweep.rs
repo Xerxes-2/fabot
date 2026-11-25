@@ -264,7 +264,7 @@ mod tests {
         room.remains.push(Remains {
             id: Id::from("t1"),
             pos: Pos::new(RoomName::W1N1, 25, 25),
-            store: Store::empty(),
+            store: Store::default(),
             fallen: Some(Fallen {
                 body,
                 ticks_to_live,

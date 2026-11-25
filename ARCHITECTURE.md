@@ -1122,7 +1122,7 @@ Never write unit tests pinning a specific creep's action in one scenario.
 `core/observe/metrics.rs` aggregates pure 100-tick windows (persisted to segment
 3, never read by `decide`) across three plan axes: **output** (controller
 progress), **exposure** (ticks a raid could cost a colony a level — a foe
-outliving the colony's running safe mode, in it or its nearest outposts, while
+outliving the colony's running safe mode, in it or an outpost it serves, while
 below RCL3, lacking a stocked tower, or unable to fire safe mode), and
 **losses** (energy). Tracks idle share, churn, returned loads, spend split
 (within 2% of engine ledger), spawn use, ticks a colony left a slot uncast

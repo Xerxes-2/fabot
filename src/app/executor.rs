@@ -9,6 +9,7 @@ use fabot_base::intents::{
     TowerAct,
 };
 use fabot_base::world::Id;
+use fabot_observe::metrics;
 
 #[wasm_bindgen]
 extern "C" {
@@ -105,29 +106,7 @@ impl Pack {
     fn pack(&mut self, intent: &Action) {
         match intent {
             Action::Creep(name, act) => {
-                let method = match act {
-                    CreepAct::Move(_) => "move",
-                    CreepAct::Say(_) => "say",
-                    CreepAct::Harvest(_) => "harvest",
-                    CreepAct::Transfer(..) => "transfer",
-                    CreepAct::Withdraw(..) => "withdraw",
-                    CreepAct::Pickup(_) => "pickup",
-                    CreepAct::Drop(_) => "drop",
-                    CreepAct::Build(_) => "build",
-                    CreepAct::Repair(_) => "repair",
-                    CreepAct::Upgrade(_) => "upgradeController",
-                    CreepAct::Reserve(_) => "reserveController",
-                    CreepAct::Unreserve(_) => "attackController",
-                    CreepAct::ClaimController(_) => "claimController",
-                    CreepAct::AttackCreep(_) => "attack",
-                    CreepAct::RangedAttackCreep(_) => "rangedAttack",
-                    CreepAct::RangedMassAttack => "rangedMassAttack",
-                    CreepAct::HealCreep(_) => "heal",
-                    CreepAct::RangedHealCreep(_) => "rangedHeal",
-                    CreepAct::Dismantle(_) => "dismantle",
-                    CreepAct::Sign(..) => "signController",
-                };
-                let call = self.call(CREEP, name, method);
+                let call = self.call(CREEP, name, act.method());
                 match act {
                     CreepAct::Move(direction) => call.int(*direction),
                     CreepAct::Say(message) => call.text(message),
@@ -198,33 +177,6 @@ impl Pack {
     }
 }
 
-/// The refusal's act: the verb, or the actor's kind where a creep or tower is gone.
-fn act(intent: &Action, tag: i32) -> String {
-    let verb = match intent {
-        _ if tag == THREW => "threw",
-        Action::Creep(..) if tag == GONE => "creep",
-        Action::Tower(..) if tag == GONE => "tower",
-        Action::Creep(_, act) => act.into(),
-        Action::Room(_, RoomAct::CreateSite(_, _, kind)) => {
-            return format!("site:{kind}");
-        }
-        Action::Room(_, RoomAct::Destroy(_)) => "destroy",
-        Action::Tower(_, TowerAct::Attack(_)) => "attack",
-        Action::Tower(_, TowerAct::Heal(_)) => "heal",
-        Action::Tower(_, TowerAct::Repair(_)) => "repair",
-        Action::Controller(_, ControllerAct::ActivateSafeMode) => "safeMode",
-        Action::Controller(_, ControllerAct::Unclaim) => "unclaim",
-        Action::Link(..) => "link",
-        Action::Lab(_, LabAct::RunReaction(..)) => "runReaction",
-        Action::Lab(_, LabAct::BoostCreep(_)) => "boostCreep",
-        Action::Terminal(..) => "send",
-        Action::Observe(..) => "observeRoom",
-        Action::Spawn(_, SpawnAct::RecycleCreep(_)) => "recycle",
-        Action::Spawn(_, SpawnAct::SpawnCreep(..)) => "spawn",
-    };
-    verb.to_string()
-}
-
 /// One bad intent costs itself, never the rest of the tick's.
 pub fn run(intents: &[Action]) -> Vec<Refusal> {
     let mut pack = Pack::default();
@@ -240,7 +192,10 @@ pub fn run(intents: &[Action]) -> Vec<Refusal> {
             };
             Refusal {
                 actor: intent.actor(),
-                act: act(intent, tag),
+                act: match tag {
+                    THREW => "threw".to_string(),
+                    _ => metrics::verb(intent, tag == GONE).into_owned(),
+                },
                 code,
             }
         })

@@ -4,7 +4,7 @@ use super::vocabulary::{Part, ResourceType};
 use super::wish::Wish;
 use super::world::{Id, RoomName, StructureType};
 
-/// Into `src/app/executor.rs`'s verb, which a refusal is counted under.
+/// Into the verb a refusal is counted under (`observe::metrics::verb`).
 #[derive(Clone, Debug, PartialEq, Eq, IntoStaticStr)]
 #[strum(serialize_all = "camelCase")]
 pub enum CreepAct {
@@ -59,6 +59,16 @@ impl CreepAct {
 
     pub fn slots(&self) -> u8 {
         self.pipeline().0
+    }
+
+    pub fn method(&self) -> &'static str {
+        match self {
+            CreepAct::Upgrade(_) => "upgradeController",
+            CreepAct::Reserve(_) => "reserveController",
+            CreepAct::Unreserve(_) => "attackController",
+            CreepAct::ClaimController(_) => "claimController",
+            act => act.into(),
+        }
     }
 }
 
@@ -165,12 +175,10 @@ impl Action {
     pub fn actor(&self) -> String {
         match self {
             Action::Creep(name, _) => name.clone(),
-            Action::Spawn(id, _) | Action::Tower(id, _) | Action::Controller(id, _) => {
-                id.to_string()
-            }
-            Action::Link(id, _) | Action::Lab(id, _) | Action::Terminal(id, _) => id.to_string(),
-            Action::Observe(id, _) => id.to_string(),
             Action::Room(room, _) => room.to_string(),
+            Action::Spawn(id, _) | Action::Tower(id, _) | Action::Link(id, _) => id.to_string(),
+            Action::Controller(id, _) | Action::Observe(id, _) => id.to_string(),
+            Action::Lab(id, _) | Action::Terminal(id, _) => id.to_string(),
         }
     }
 }
@@ -187,6 +195,7 @@ pub struct Telemetry {
     pub served: Vec<(RoomName, RoomName)>,
     pub blocked: Vec<(RoomName, &'static str)>,
     pub decisions: Vec<(&'static str, Vec<(&'static str, Datum)>)>,
+    pub struck: std::collections::BTreeSet<Id>,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -216,6 +225,7 @@ impl ModuleOutput {
         self.telemetry.served.extend(other.telemetry.served);
         self.telemetry.blocked.extend(other.telemetry.blocked);
         self.telemetry.decisions.extend(other.telemetry.decisions);
+        self.telemetry.struck.extend(other.telemetry.struck);
     }
 }
 

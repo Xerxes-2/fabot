@@ -65,7 +65,7 @@ fn predict(sample: &Value) -> Value {
                     hits_max: engine::PART_HITS * parts.len() as i32,
                     ticks_to_live: 1500,
                     fatigue: 0,
-                    store: Store::empty(),
+                    store: Store::default(),
                 };
                 fabot_fight::casting::fighter_of(&creep)
             })

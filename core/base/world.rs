@@ -310,10 +310,6 @@ pub struct Store {
 }
 
 impl Store {
-    pub fn empty() -> Store {
-        Store::default()
-    }
-
     #[inline]
     pub fn amount_of(&self, resource: ResourceType) -> i32 {
         (self.held.iter())
@@ -911,7 +907,7 @@ pub mod sightings {
                     hits_max: g.hits_max,
                     ticks_to_live: s.gone - time,
                     fatigue: 0,
-                    store: Store::empty(),
+                    store: Store::default(),
                 })
             })
             .collect()
@@ -1126,7 +1122,7 @@ mod tests {
             hits_max: 100,
             ticks_to_live: 300,
             fatigue: 0,
-            store: Store::empty(),
+            store: Store::default(),
         };
         let keeper = creep("k", Owner::Keeper, crate::engine::keeper_body());
         let healer = creep(
@@ -1181,7 +1177,7 @@ mod tests {
                     hits_max: 200,
                     ticks_to_live: 1500 - time,
                     fatigue: 0,
-                    store: Store::empty(),
+                    store: Store::default(),
                 };
                 let rooms = (names.iter().zip(seen).filter(|(_, seen)| *seen))
                     .map(|(&r, _)| {
@@ -1227,7 +1223,7 @@ mod tests {
             owner,
             hits: 1,
             hits_max: 1,
-            store: Store::empty(),
+            store: Store::default(),
             cooldown: 0,
             collapse: 0,
             deploy: 0,

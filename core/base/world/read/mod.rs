@@ -173,7 +173,7 @@ impl<'a> Reader<'a> {
         let hits = self.n();
         let hits_max = self.n();
         let store = if kind.as_ref().is_ok_and(|k| !k.has_store()) {
-            Store::empty()
+            Store::default()
         } else {
             self.store()
         };

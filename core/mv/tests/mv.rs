@@ -181,7 +181,7 @@ fn errand() -> impl Strategy<Value = Errand> {
                     hits_max: 100,
                     ticks_to_live: 1000,
                     fatigue,
-                    store: Store::empty(),
+                    store: Store::default(),
                 },
                 target: Target {
                     room: if away {

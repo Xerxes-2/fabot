@@ -117,7 +117,7 @@ pub fn core_as_hostile(core: &Structure) -> Creep {
         hits_max: core.hits_max,
         ticks_to_live: core.collapse,
         fatigue: 0,
-        store: Store::empty(),
+        store: Store::default(),
     }
 }
 

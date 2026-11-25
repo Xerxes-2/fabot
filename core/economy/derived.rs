@@ -1522,7 +1522,7 @@ fn ovens_of(world: &World) -> Vec<Body> {
                         (None, &oven.name),
                         &s.pos,
                         &oven.body,
-                        &Store::empty(),
+                        &Store::default(),
                         engine::lifetime(oven.body.iter().map(|p| p.kind)),
                     )
                 })

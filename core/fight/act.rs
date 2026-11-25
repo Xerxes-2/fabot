@@ -312,6 +312,7 @@ pub(super) fn act(
     }
 
     out.telemetry.traces = traced;
+    out.telemetry.struck = sight.struck.clone();
     out.telemetry.counts.push(("threatLookups", lookups));
     let patients = (&fighters[..], &world.creeps[..]);
     out.actions.extend(reflexes(chosen, patients, &incoming));

@@ -1138,7 +1138,7 @@ mod tests {
             hits_max: 100 * parts.len() as i32,
             ticks_to_live: 1000,
             fatigue: 0,
-            store: fabot_base::world::Store::empty(),
+            store: fabot_base::world::Store::default(),
         }
     }
 

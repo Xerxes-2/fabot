@@ -58,7 +58,7 @@ fn main() {
             owner: Owner::Ours,
             hits: 1,
             hits_max: 1,
-            store: Store::empty(),
+            store: Store::default(),
             cooldown: 0,
             collapse: 0,
             deploy: 0,

@@ -69,7 +69,7 @@ pub fn structure(id: &str, kind: StructureType, owner: Owner, tile: Tile) -> Str
         owner,
         hits: 1,
         hits_max: 1,
-        store: Store::empty(),
+        store: Store::default(),
         cooldown: 0,
         collapse: 0,
         deploy: 0,
@@ -430,7 +430,7 @@ pub fn creep(id: &str, owner: Owner, hits: i32, tile: Tile) -> Creep {
         hits_max: 100,
         ticks_to_live: 1000,
         fatigue: 0,
-        store: Store::empty(),
+        store: Store::default(),
     }
 }
 

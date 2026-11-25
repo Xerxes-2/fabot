@@ -168,7 +168,7 @@ impl Reader<'_> {
             store: if kind.has_store() {
                 Reader::store(o)
             } else {
-                Store::empty()
+                Store::default()
             },
             cooldown: if kind.has_cooldown() { cooldown } else { 0 },
             collapse: if core { collapse } else { 0 },

@@ -10,8 +10,9 @@ use fabot_atlas::{Atlas, Derived};
 use fabot_base::HashMap;
 use fabot_base::declarations::{self, Declarations, Refused};
 use fabot_base::engine;
-use fabot_base::intents::{Action, CreepAct, Refusal, SpawnAct, TowerAct};
-use fabot_base::tiles;
+use fabot_base::intents::{
+    Action, ControllerAct, CreepAct, LabAct, Refusal, RoomAct, SpawnAct, Telemetry, TowerAct,
+};
 use fabot_base::vocabulary::{Part, ResourceType::Energy};
 use fabot_base::world::{
     Controller, Creep, Id, Owner, Pos, Room, RoomName, Rules, StructureType, World, hostiles,
@@ -392,9 +393,7 @@ pub struct Seen<'a> {
     pub casts: &'a [Cast],
     pub intents: &'a [Action],
     pub held: &'a [String],
-    pub short: &'a [(RoomName, &'static str, i32)],
-    pub served: &'a [(RoomName, RoomName)],
-    pub blocked: &'a [(RoomName, &'static str)],
+    pub telemetry: &'a Telemetry,
     pub refusals: &'a [Refusal],
     pub phases: &'a [(String, f64)],
     pub walked: &'a [(String, i32)],
@@ -508,18 +507,27 @@ fn spent(
     }
 }
 
-/// The actor and the executor's verb for an act that spends, as a refusal names them.
-fn verb(intent: &Action) -> Option<(Cow<'_, str>, &'static str)> {
-    Some(match intent {
-        Action::Creep(
-            name,
-            act @ (CreepAct::Build(_) | CreepAct::Repair(_) | CreepAct::Upgrade(_)),
-        ) => (name.into(), act.into()),
-        Action::Spawn(id, SpawnAct::SpawnCreep(..)) => (id.to_string().into(), "spawn"),
-        Action::Tower(id, TowerAct::Attack(_)) => (id.to_string().into(), "attack"),
-        Action::Tower(id, TowerAct::Heal(_)) => (id.to_string().into(), "heal"),
-        Action::Tower(id, TowerAct::Repair(_)) => (id.to_string().into(), "repair"),
-        _ => return None,
+/// A refusal's act, live and in the sim alike: the verb, or the actor's kind
+/// where a creep or tower is `gone`.
+pub fn verb(intent: &Action, gone: bool) -> Cow<'static, str> {
+    Cow::Borrowed(match intent {
+        Action::Creep(..) if gone => "creep",
+        Action::Tower(..) if gone => "tower",
+        Action::Creep(_, act) => act.into(),
+        Action::Room(_, RoomAct::CreateSite(_, _, kind)) => return format!("site:{kind}").into(),
+        Action::Room(_, RoomAct::Destroy(_)) => "destroy",
+        Action::Tower(_, TowerAct::Attack(_)) => "attack",
+        Action::Tower(_, TowerAct::Heal(_)) => "heal",
+        Action::Tower(_, TowerAct::Repair(_)) => "repair",
+        Action::Controller(_, ControllerAct::ActivateSafeMode) => "safeMode",
+        Action::Controller(_, ControllerAct::Unclaim) => "unclaim",
+        Action::Link(..) => "link",
+        Action::Lab(_, LabAct::RunReaction(..)) => "runReaction",
+        Action::Lab(_, LabAct::BoostCreep(_)) => "boostCreep",
+        Action::Terminal(..) => "send",
+        Action::Observe(..) => "observeRoom",
+        Action::Spawn(_, SpawnAct::RecycleCreep(_)) => "recycle",
+        Action::Spawn(_, SpawnAct::SpawnCreep(..)) => "spawn",
     })
 }
 
@@ -683,18 +691,14 @@ fn steps(
     }
 }
 
-fn shots(sums: &mut Sums, world: &World, asked: &HashMap<&str, Asked>) {
+fn shots(sums: &mut Sums, world: &World, asked: &HashMap<&str, Asked>, struck: &BTreeSet<Id>) {
     for c in &world.creeps {
         let a = asked.get(c.name.as_str()).copied().unwrap_or_default();
         let reach = engine::strike_reach(|p| c.live(p) > 0);
         if reach == 0 {
             continue;
         }
-        let foe = |h: &Creep| {
-            !matches!(h.owner, Owner::Stranger(_))
-                && hostiles::foe(h)
-                && c.pos.within(reach, &h.pos)
-        };
+        let foe = |h: &Creep| struck.contains(&h.id) && c.pos.within(reach, &h.pos);
         if !a.heal
             && world
                 .room(c.pos.room)
@@ -806,17 +810,8 @@ fn dwell(sums: &mut Sums, seen: &Seen) {
     }
 }
 
-/// No colony owns an outpost, so exposure counts one against the nearest;
-/// by room distance, as metrics has no Atlas to walk.
 fn exposure(sums: &mut Sums, seen: &Seen) {
-    let colonies = &seen.derived.colonies;
-    let nearest = |room: RoomName| {
-        colonies
-            .iter()
-            .copied()
-            .min_by_key(|c| tiles::rooms_apart(*c, room))
-    };
-    for colony in colonies {
+    for colony in &seen.derived.colonies {
         let Some(r) = seen.world.room(*colony) else {
             continue;
         };
@@ -828,9 +823,9 @@ fn exposure(sums: &mut Sums, seen: &Seen) {
         if c.level >= 3 && towers(&seen.world.rules, r) && safe {
             continue;
         }
-        let mut outposts = (seen.declarations.outposts.iter())
-            .filter(|o| nearest(o.room) == Some(*colony))
-            .filter_map(|o| seen.world.room(o.room));
+        let mut outposts = (seen.telemetry.served.iter())
+            .filter(|(_, c)| c == colony)
+            .filter_map(|(o, _)| seen.world.room(*o));
         if armed(seen, r, safe_left) || outposts.any(|o| armed(seen, o, safe_left)) {
             add(sums, Some(*colony), EXPOSURE, 1.0);
         }
@@ -849,7 +844,7 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
     let world = seen.world;
     let start = world.time - world.time.rem_euclid(WINDOW);
     if m.ticks > 0 && start != m.start {
-        m.close(world, seen.served);
+        m.close(world, &seen.telemetry.served);
     }
     if m.ticks == 0 {
         m.start = start;
@@ -896,8 +891,7 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
             }
             _ => (),
         }
-        if let Some((actor, act)) = verb(intent)
-            && !refused.contains(&(&*actor, act))
+        if (refused.is_empty() || !refused.contains(&(&*intent.actor(), &*verb(intent, false))))
             && let Some((room, what, n)) = spent(world, &creeps, &fed, &mut undone, intent)
         {
             add(sums, Some(room), what, f64::from(n));
@@ -907,7 +901,7 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
     for name in seen.held {
         asked.entry(name.as_str()).or_default().held = true;
     }
-    for (room, pattern, n) in seen.short {
+    for (room, pattern, n) in &seen.telemetry.short {
         add(
             sums,
             Some(*room),
@@ -916,7 +910,7 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
         );
         owed.insert(*room);
     }
-    for (room, why) in seen.blocked {
+    for (room, why) in &seen.telemetry.blocked {
         add(sums, Some(*room), &format!("{BLOCKED}{why}"), 1.0);
         if *why == "bank" && world.room(*room).is_some_and(ring_starved) {
             add(sums, Some(*room), &format!("{STALL}ring"), 1.0);
@@ -1001,7 +995,7 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
     m.closed.retain(|_, t| world.time - *t < WINDOW);
 
     steps(sums, &mut m.tracks, world, &asked);
-    shots(sums, world, &asked);
+    shots(sums, world, &asked, &seen.telemetry.struck);
     deaths(sums, &mut m.tracks, world);
     lost(sums, world);
     dwell(sums, seen);
