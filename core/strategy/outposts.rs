@@ -156,7 +156,7 @@ pub fn chosen(
     world: &World,
     candidates: Vec<Candidate>,
     (busy, spare): (&BTreeSet<RoomName>, &BTreeMap<RoomName, f64>),
-    tuning: &Tuning,
+    (tuning, engagements): (&Tuning, &[Engagement]),
 ) -> Vec<Outpost> {
     // A young home opens every room that pays at once, as The International does.
     let stocked = |home: RoomName| stocked(world, home);
@@ -202,8 +202,11 @@ pub fn chosen(
     for (p, c) in priced {
         let left = spawn_left.entry(c.home).or_default();
         let unpaid = p.net <= 0.0 || p.spawn > *left || p.cpu > cpu_left;
-        // A busy home holds back a new room, not the spawn time it ranks for.
-        let yields = busy.contains(&c.home) && !c.stands;
+        // A busy home holds back a new room, not the spawn time it ranks for;
+        // a room a Defend stands in is not new, or its owed casts would drop it.
+        let defended = (engagements.iter())
+            .any(|e| e.room == c.outpost.room && e.objective == Objective::Defend);
+        let yields = busy.contains(&c.home) && !c.stands && !defended;
         if !c.declared && (unpaid || rising.contains(&c.home)) {
             continue;
         }

@@ -124,7 +124,7 @@ fn rank(map: &Map, maps: &Maps, room: &str) -> Option<(f64, Vec<String>)> {
         .map(|c| (c.outpost.room, outposts::net(&world, c)))
         .collect();
     let spare = (&none, &BTreeMap::new());
-    let chosen = outposts::chosen(&world, candidates, spare, &declarations.tuning);
+    let chosen = outposts::chosen(&world, candidates, spare, (&declarations.tuning, &[]));
     let net: f64 = chosen.iter().map(|o| nets[&o.room]).sum();
     // The claim rule's own price of a home source.
     let home = f64::from(engine::HELD_OUTPUT_PER_TICK) * facts.sources as f64;
