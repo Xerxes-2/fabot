@@ -41,6 +41,12 @@ pub struct Target {
     pub max_hops: i32,
 }
 
+pub fn middle_in(reached: &TileSet, room: RoomName) -> Pos {
+    (tiles::all().filter(|t| reached.contains(*t)))
+        .min_by_key(|t| (tiles::range(tiles::of_pos(&tiles::middle(room)), *t), *t))
+        .map_or_else(|| tiles::middle(room), |t| tiles::to_pos(room, t))
+}
+
 /// A room out of sight is what stood there when last seen, else its
 /// terrain, and the strikes intel places.
 #[derive(Clone, Debug)]
@@ -950,9 +956,9 @@ impl Atlas {
     }
 
     /// The tiles a walk from the room's exits reaches without breaking a
-    /// barrier.
+    /// barrier, out of sight by what last stood there.
     pub fn from_exits(&self, room: RoomName) -> TileSet {
-        let Some(grid) = self.grid(room) else {
+        let Some(grid) = self.rooms.get(&room.coords()) else {
             return TileSet::default();
         };
         let open = |t: Tile| grid.weights[t].is_some();
@@ -963,6 +969,11 @@ impl Atlas {
         tiles::all()
             .filter(|t| steps[*t] != tiles::UNREACHED)
             .collect()
+    }
+
+    /// With no tile reached (no terrain, or a sealed room), the geometric middle, which may be wall.
+    pub fn reached_middle(&self, room: RoomName) -> Pos {
+        middle_in(&self.from_exits(room), room)
     }
 
     /// Terrain and road alone, as v1's arrivalGroundIn: no seat's or keeper's weight.

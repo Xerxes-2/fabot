@@ -251,7 +251,7 @@ pub fn hold(sight: &Sight, creep: &Creep) -> Wish {
 fn aim(sight: &mut Sight, order: &[Id], centre: &Pos, enter: bool, c: &Creep, range: i32) -> Wish {
     let half = engine::ROOM_SIDE / 2;
     let (at, range) = match ranked(sight, order, c).first() {
-        _ if enter && c.pos.room != centre.room => (Pos::new(centre.room, half, half), half),
+        _ if enter && c.pos.room != centre.room => (tiles::middle(centre.room), half),
         Some(h) if !c.swings() && h.live(Part::Attack) > 0 => (h.pos, engine::RANGED_RANGE),
         first => (first.map_or(*centre, |h| h.pos), range),
     };
@@ -538,7 +538,7 @@ pub fn drain(sight: &mut Sight, gate: &Gate, creep: &Creep) -> Wish {
 
     // The set waits beside his room, off the pair's tiles: the entry is the plan's.
     if strikes || creep.live(Part::Work) > 0 {
-        let wait = there(tiles::index(engine::ROOM_SIDE / 2, engine::ROOM_SIDE / 2));
+        let wait = tiles::middle(gate.from);
         return toward(sight, creep, &wait, engine::ROOM_SIDE / 2);
     }
 

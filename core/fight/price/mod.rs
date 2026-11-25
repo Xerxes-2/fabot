@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 mod account;
 pub mod casting;
 use crate::kinds::{defend, raid, siege, sweep};
-use crate::scene::{Asked, Hunting, Scene, fresh, middle, picket};
+use crate::scene::{Asked, Hunting, Scene, fresh, picket};
 use crate::shape::{Cast, Engagement, Group, Objective, Phase, Plan};
 pub use account::{Actual, Closed, account, closed};
 use fabot_atlas::{self as atlas, Atlas, Mover, Target};
@@ -130,7 +130,7 @@ impl<'a> Scene<'a> {
         let colony = self.colonies_of(atlas, e).iter().map(|r| r.name).min()?;
         let from = (self.world.spawns.iter())
             .find(|s| s.pos.room == colony)
-            .map_or_else(|| middle(colony), |s| s.pos);
+            .map_or_else(|| tiles::middle(colony), |s| s.pos);
 
         let room = self.in_sight(e.room);
         if let Some(c) = room.and_then(|r| siege::tapped(r, target)) {

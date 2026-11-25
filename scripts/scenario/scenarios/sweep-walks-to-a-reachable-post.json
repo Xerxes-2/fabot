@@ -1,0 +1,10 @@
+{
+  "why": "a sweep walks to the tile nearest its room's middle that a walk in from the exits reaches: his outpost W7N2 (enemy-towered-home, its middle 7x7 laid over as wall) is swept and its digger killed. On main the set walked for the walled middle, never reached a tile within range of it and killed nothing",
+  "modules": ["fight"],
+  "start": { "world": "scripts/scenario/worlds/enemy-towered-home.json", "overlay": "scripts/scenario/worlds/sweep-walled-middle.json", "seed": 1 },
+  "ticks": 3000,
+  "assert": [
+    { "measure": "killedBeside", "kind": "sweep", "min": 1 },
+    { "measure": "bodiesLost", "max": 0 }
+  ]
+}

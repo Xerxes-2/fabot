@@ -46,6 +46,7 @@ pub(super) struct Hunting {
     pub(super) marks: Vec<tactics::Mark>,
     pub(super) worth: i32,
     pub(super) at: Pos,
+    pub(super) middle: Pos,
     pub(super) walk: Option<i32>,
 }
 
@@ -193,6 +194,7 @@ impl<'a> Scene<'a> {
     /// `was`: last tick's groups (§6.1), the only record of where a body stood.
     pub(super) fn ground(&self, atlas: &Atlas, room: &Room, was: &[Group]) -> Hunting {
         let reached = atlas.from_exits(room.name);
+        let middle = fabot_atlas::middle_in(&reached, room.name);
         // Denied only once a body stands there: its life less the most a
         // harasser spawns in and its walk.
         let e = fresh(0, Objective::Sweep, room.name, 0, Tactic::Kite);
@@ -310,7 +312,8 @@ impl<'a> Scene<'a> {
                 .first()
                 .or(prey.first().map(|c| &c.pos))
                 .copied()
-                .unwrap_or_else(|| middle(room.name)),
+                .unwrap_or(middle),
+            middle,
             escort,
             marks,
             walk,
@@ -387,7 +390,9 @@ impl<'a> Scene<'a> {
 
     pub(super) fn raid_at(&self, e: &Engagement, room: RoomName) -> Option<Pos> {
         let ours = self.members_of(e).into_iter().map(|c| c.pos);
-        let from: Vec<Pos> = ours.chain(self.homes.iter().map(|&r| middle(r))).collect();
+        let from: Vec<Pos> = ours
+            .chain(self.homes.iter().map(|&r| tiles::middle(r)))
+            .collect();
         sightings::raid_at(self.remembered.get(&room)?, &from)
     }
 
@@ -768,10 +773,6 @@ pub(super) fn picket(e: &Engagement, c: &Creep) -> bool {
     !raid::raids(e) && tactics::picket_of(c)
 }
 
-pub(super) fn middle(room: RoomName) -> Pos {
-    Pos::new(room, engine::ROOM_SIDE / 2, engine::ROOM_SIDE / 2)
-}
-
 pub(super) fn fresh(
     id: i32,
     objective: Objective,
@@ -820,7 +821,7 @@ mod tests {
             id: name.into(),
             name: name.to_owned(),
             owner: Owner::Ours,
-            pos: middle(RoomName::W1N1),
+            pos: tiles::middle(RoomName::W1N1),
             body: vec![part(Part::Attack), part(Part::Move)],
             hits: 200,
             hits_max: 200,

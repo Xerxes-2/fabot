@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::casting;
 use super::kinds::defend::{self, Home};
 use super::kinds::{raid, siege, stronghold};
-use super::scene::{Hunting, Scene, middle, picket};
+use super::scene::{Hunting, Scene, picket};
 use super::shape::{Engagement, Objective, Phase};
 use fabot_atlas::Atlas;
 use fabot_base::declarations;
@@ -25,6 +25,14 @@ pub(super) fn act(
     given_up: &BTreeSet<i32>,
 ) -> ModuleOutput {
     let (world, (decided, _, grounds)) = (scene.world, fights);
+    let walked = (decided.iter()).filter(|e| !matches!(e.objective, Objective::Siege(_)));
+    let rooms: BTreeSet<RoomName> = walked.map(|e| e.room).collect();
+    let middle = |r: RoomName| {
+        grounds
+            .get(&r)
+            .map_or_else(|| atlas.reached_middle(r), |g| g.middle)
+    };
+    let middles: BTreeMap<RoomName, Pos> = rooms.into_iter().map(|r| (r, middle(r))).collect();
     let mut sight = tactics::Sight {
         atlas,
         hostiles: &scene.foes,
@@ -83,16 +91,16 @@ pub(super) fn act(
             // His towers are spent at the edge before the set breaches: it
             // waits in the room beside his, off the tiles a pair works.
             (Objective::Siege(_), _, _) if gates.contains_key(&e.id) => {
-                (middle(gates[&e.id].from), engine::ROOM_SIDE / 2)
+                (tiles::middle(gates[&e.id].from), engine::ROOM_SIDE / 2)
             }
             (Objective::Siege(_), _, Some(b)) => (b.pos, engine::RANGED_RANGE),
             (Objective::Defend, Some(g), _) => (g.centre, engine::RANGED_RANGE),
             (Objective::Defend, None, _) => (
-                scene.raid_at(e, e.room).unwrap_or_else(|| middle(e.room)),
+                scene.raid_at(e, e.room).unwrap_or(middles[&e.room]),
                 engine::RANGED_RANGE,
             ),
-            (Objective::Siege(_), _, None) => (middle(e.room), engine::ROOM_SIDE / 2),
-            _ => (middle(e.room), engine::RANGED_RANGE),
+            (Objective::Siege(_), _, None) => (tiles::middle(e.room), engine::ROOM_SIDE / 2),
+            _ => (middles[&e.room], engine::RANGED_RANGE),
         }
     };
 
@@ -143,7 +151,7 @@ pub(super) fn act(
             return (None, defend::idle(sight, scene, fights, c));
         };
 
-        if let Some(acted) = stronghold::act(sight, scene, e, c) {
+        if let Some(acted) = stronghold::act(sight, scene, (e, &middles), c) {
             return acted;
         }
 
@@ -191,7 +199,7 @@ pub(super) fn act(
             // The towers' room is the only one a drain presses into.
             Phase::Draining => match gates.get(&e.id) {
                 Some(gate) if given_up.contains(&e.id) => {
-                    tactics::toward(sight, c, &middle(gate.from), engine::ROOM_SIDE / 2)
+                    tactics::toward(sight, c, &tiles::middle(gate.from), engine::ROOM_SIDE / 2)
                 }
                 Some(gate) => tactics::drain(sight, gate, c),
                 None => tactics::hold(sight, c),

@@ -130,7 +130,7 @@ pub fn closed(facts: Facts, open: &[Engagement], decided: &[Engagement]) -> Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scene::{fresh, middle};
+    use crate::scene::fresh;
     use fabot_base::world::{Pos, RoomName, Rules, Sightings, World};
     use fabot_exchange::Outcome;
     use fabot_tactics::Tactic;
@@ -188,7 +188,10 @@ mod tests {
     /// A Defend on one raid body over (time, in sight, its death seen) ticks,
     /// and whether it would close left on the last.
     fn play(ticks: &[(i32, bool, bool)]) -> (Engagement, bool) {
-        let (x, at) = (Id::parse("a1").unwrap(), middle(RoomName::W1N1));
+        let (x, at) = (
+            Id::parse("a1").unwrap(),
+            fabot_base::tiles::middle(RoomName::W1N1),
+        );
         let (mut e, mut left, mut was_in_sight) = (defend(Some(Outcome::Lose)), true, false);
         for &(time, in_sight, fell) in ticks {
             let hostile_at = in_sight.then_some((x, at)).into_iter().collect();

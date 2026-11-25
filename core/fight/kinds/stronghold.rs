@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::super::casting;
 use super::super::price;
-use super::super::scene::{Asked, Scene, fresh, middle};
+use super::super::scene::{Asked, Scene, fresh};
 use super::super::shape::{Engagement, Objective, Phase, Plan, enter};
 use fabot_atlas::Atlas;
 use fabot_base::boost::Stock;
@@ -311,7 +311,7 @@ pub(crate) fn incoming<'a>(
 pub(crate) fn act(
     sight: &mut Sight,
     scene: &Scene,
-    e: &Engagement,
+    (e, middles): (&Engagement, &BTreeMap<RoomName, Pos>),
     c: &Creep,
 ) -> Option<(Option<CreepAct>, Wish)> {
     let working = matches!(e.phase, Phase::Approaching | Phase::Fighting);
@@ -322,19 +322,24 @@ pub(crate) fn act(
         .filter(|m| m.name != c.name)
         .map(|m| m.pos)
         .collect();
-    Some(walked(sight, scene.in_sight(e.room), e, (c, &mates)))
+    Some(walked(
+        sight,
+        scene.in_sight(e.room),
+        &middles[&e.room],
+        (c, &mates),
+    ))
 }
 
 fn walked(
     sight: &mut Sight,
     room: Option<&Room>,
-    e: &Engagement,
+    middle: &Pos,
     (c, mates): (&Creep, &[Pos]),
 ) -> (Option<CreepAct>, Wish) {
     let Some(room) = room else {
         return (
             None,
-            tactics::toward(sight, c, &middle(e.room), engine::ROOM_SIDE / 2 - 2),
+            tactics::toward(sight, c, middle, engine::ROOM_SIDE / 2 - 2),
         );
     };
     let Some((mark, at)) = mark(room, sight.atlas) else {

@@ -139,6 +139,10 @@ pub fn to_pos(room: RoomName, tile: Tile) -> Pos {
     Pos::new(room, x_of(tile), y_of(tile))
 }
 
+pub fn middle(room: RoomName) -> Pos {
+    Pos::new(room, SIDE / 2, SIDE / 2)
+}
+
 /// The engine's `getRangeTo`.
 #[inline]
 pub fn range(a: Tile, b: Tile) -> i32 {
