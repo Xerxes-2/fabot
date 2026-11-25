@@ -397,6 +397,9 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   bays, ramparts, towers), and the best variations score close together. So a
   planner change re-baselines with a broad soak. The open fixes are choosing
   the anchor first, canonical roads, or scoring only what a road tie cannot move.
+  `❓` The source container's seat (`build::harvest_spot`, Hivemind's most free
+  neighbours) is not checked for being the only way between two parts of the
+  room; the seat a source is dug from before it (`Atlas::bare_post`) is.
 - **Ramparts (`strategy::wall`, `ColonyPlan.rampart_hits`):** kept at `ticks
   held × dismantler damage/tick`, where dismantler damage is the largest rival
   dismantler up to our RCL (capped at our level because a taller wall outbids

@@ -217,29 +217,9 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
 }
 
 /// Whether a structure on `t` parts the tiles beside it but across `post`,
-/// where a miner works and steps aside for no walker. Beside, not the whole
-/// room: a walk round the room prices dearer than a step through the miner.
+/// where a miner works and steps aside for no walker.
 fn closes(census: &Census, post: Tile, t: Tile) -> bool {
-    let beside: Vec<Tile> = tiles::around(t)
-        .iter()
-        .copied()
-        .filter(|n| *n != post && census.walkable[*n] > 0)
-        .collect();
-
-    let mut reached: Vec<Tile> = beside.iter().take(1).copied().collect();
-    let mut i = 0;
-
-    while i < reached.len() {
-        for n in &beside {
-            if tiles::range(*n, reached[i]) == 1 && !reached.contains(n) {
-                reached.push(*n);
-            }
-        }
-
-        i += 1;
-    }
-
-    reached.len() < beside.len()
+    fabot_atlas::parts(t, |n| n != post && census.walkable[n] > 0)
 }
 
 fn held_of(census: &Census, kind: StructureType) -> i32 {

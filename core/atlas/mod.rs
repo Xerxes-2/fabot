@@ -578,8 +578,15 @@ impl Atlas {
             .min_by_key(|(p, built)| (shared(p), -from_controller(p), built.is_none(), p.y, p.x))
     }
 
-    pub fn bare_post(room: &Room, seats: Vec<Pos>) -> Option<Pos> {
-        (seats.into_iter()).min_by_key(|p| (-Atlas::from_controller(room, p), tiles::of_pos(p)))
+    /// A seat that parts its neighbours ranks last: a harvester there holds the room.
+    pub fn bare_post(&self, room: &Room, seats: Vec<Pos>) -> Option<Pos> {
+        let weights = self.grid(room.name).map(|g| &g.weights);
+        let open = |t: Tile| weights.is_some_and(|w| w[t].is_some());
+        let key = |p: &Pos| {
+            let at = tiles::of_pos(p);
+            (parts(at, open), -Atlas::from_controller(room, p), at)
+        };
+        seats.into_iter().min_by_key(key)
     }
 
     fn from_controller(room: &Room, p: &Pos) -> i32 {
@@ -1632,6 +1639,23 @@ pub fn onward(candidates: impl Iterator<Item = (RoomName, i32, i32)>) -> Option<
 /// What `onward` ranks by: worth a tick of the walk, a room's crossing counted.
 pub fn rate(worth: i32, walk: i32) -> i64 {
     i64::from(worth) * 1000 / i64::from(walk + engine::ROOM_SIDE)
+}
+
+/// Beside, not the whole room: a walk round it prices dearer than a step through a seated body.
+pub fn parts(at: Tile, open: impl Fn(Tile) -> bool) -> bool {
+    let beside: Vec<Tile> = (tiles::around(at).iter().copied())
+        .filter(|n| open(*n))
+        .collect();
+    let mut reached: Vec<Tile> = beside.iter().take(1).copied().collect();
+    let mut i = 0;
+    while let Some(&t) = reached.get(i) {
+        let next: Vec<Tile> = (beside.iter().copied())
+            .filter(|n| !reached.contains(n) && tiles::range(*n, t) == 1)
+            .collect();
+        reached.extend(next);
+        i += 1;
+    }
+    reached.len() < beside.len()
 }
 
 #[cfg(test)]
