@@ -4,6 +4,8 @@
 //! energy its repairer cost.
 use std::cell::Cell;
 
+use fabot_base::engine;
+use fabot_base::tiles;
 use krebs::atom;
 use krebs::constants::OBSTACLE_OBJECT_TYPES;
 use krebs::doc::{Id, Obj, Val};
@@ -472,19 +474,19 @@ impl Rivals {
             let (r, theirs) = (at(raid.room.as_deref().unwrap_or(home)), at(&p.room));
             let (a, b) = (k.meta.rooms[r].xy, k.meta.rooms[theirs].xy);
             let open = |(x, y): (i32, i32)| k.terrain.raw(r as u32)[(y * 50 + x) as usize] & 1 == 0;
-            let exits = |side: &&(i32, i32)| (0..50).map(|i| edge(**side, i)).any(open);
-            let led: Vec<_> = (SIDES.iter().filter(exits))
-                .filter(|(dx, dy)| (a.x + dx, a.y + dy) == (b.x, b.y))
-                .collect();
-            let sides = if led.is_empty() {
-                SIDES.iter().collect()
-            } else {
-                led
+            let edge = |exit: i32| {
+                (tiles::exit_tiles(exit).iter()).map(|t| (tiles::x_of(*t), tiles::y_of(*t)))
             };
-            let tiles = sides
-                .iter()
-                .flat_map(|&&side| (0..50).map(move |i| edge(side, i)));
-            let mut tiles: Vec<(i32, i32)> = tiles.filter(|&p| open(p)).collect();
+            let led: Vec<i32> = (EXITS.into_iter())
+                .filter(|e| edge(*e).any(open))
+                .filter(|e| (a.x + tiles::dx(*e), a.y + tiles::dy(*e)) == (b.x, b.y))
+                .collect();
+            let sides = if led.is_empty() { EXITS.to_vec() } else { led };
+            let mut tiles: Vec<(i32, i32)> = sides
+                .into_iter()
+                .flat_map(edge)
+                .filter(|&p| open(p))
+                .collect();
             let Some(&(ox, oy)) = tiles.get((random() * tiles.len() as f64) as usize) else {
                 continue;
             };
@@ -493,9 +495,9 @@ impl Rivals {
             let docs = (raid.bodies.iter().zip(tiles).enumerate()).map(|(i, (parts, (x, y)))| {
                 let inner = (x.clamp(1, 48), y.clamp(1, 48));
                 let (x, y) = if raid.inside && open(inner) { inner } else { (x, y) };
-                let hits = parts.len() * 100;
+                let hits = parts.len() as i32 * engine::PART_HITS;
                 json!({ "type": "creep", "user": p.id, "body": parts, "name": format!("raid-{}-{i}", k.time),
-                    "hits": hits, "hitsMax": hits, "ageTime": k.time + 1500, "x": x, "y": y, "room": room,
+                    "hits": hits, "hitsMax": hits, "ageTime": k.time + engine::CREEP_LIFETIME as u64, "x": x, "y": y, "room": room,
                     "fatigue": 0, "store": {}, "storeCapacity": 0, "notifyWhenAttacked": true })
             });
             let docs: Vec<Value> = docs.collect();
@@ -504,14 +506,5 @@ impl Rivals {
     }
 }
 
-/// Each exit side by the step to the room beyond it, as FIND_EXIT lists them.
-const SIDES: [(i32, i32); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
-
-fn edge(side: (i32, i32), i: i32) -> (i32, i32) {
-    match side {
-        (0, -1) => (i, 0),
-        (1, 0) => (49, i),
-        (0, 1) => (i, 49),
-        _ => (0, i),
-    }
-}
+/// As FIND_EXIT lists them.
+const EXITS: [i32; 4] = [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT];

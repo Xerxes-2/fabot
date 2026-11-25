@@ -1,7 +1,9 @@
 //! A scenario's Invaders, level-0 cores and strongholds as the official engine stands them; krebs plays them.
 use std::sync::Arc;
 
+use fabot_base::engine;
 use fabot_base::intel::Intel;
+use fabot_base::tiles::{self, Tile};
 use krebs::atom;
 use krebs::constants::{INVADER_CORE_HITS, OBSTACLE_OBJECT_TYPES};
 use krebs::cron::CronCtx;
@@ -55,9 +57,10 @@ fn wall(k: &World, r: usize, (x, y): (i64, i64)) -> bool {
 /// that a wave lands.
 pub fn wave(k: &mut World, room: &str, bodies: &[Vec<String>], mut random: impl FnMut() -> f64) {
     let r = index(k, room);
-    let sides: [fn(i64) -> (i64, i64); 4] = [|i| (i, 0), |i| (i, 49), |i| (0, i), |i| (49, i)];
+    let at = |t: &Tile| (i64::from(tiles::x_of(*t)), i64::from(tiles::y_of(*t)));
+    let sides = [tiles::TOP, tiles::BOTTOM, tiles::LEFT, tiles::RIGHT].map(tiles::exit_tiles);
     let open: Vec<Vec<(i64, i64)>> = (sides.iter())
-        .map(|at| (0..49).map(at).filter(|&p| !wall(k, r, p)).collect())
+        .map(|side| side.iter().map(at).filter(|&p| !wall(k, r, p)).collect())
         .filter(|tiles: &Vec<_>| !tiles.is_empty())
         .collect();
     let mut exits = open[(random() * open.len() as f64) as usize].clone();
@@ -75,12 +78,13 @@ pub fn wave(k: &mut World, room: &str, bodies: &[Vec<String>], mut random: impl 
         last = square;
         let parts: Vec<Value> = body
             .iter()
-            .map(|p| json!({ "type": p, "hits": 100 }))
+            .map(|p| json!({ "type": p, "hits": engine::PART_HITS }))
             .collect();
         let name = format!("invader_{room}_{}", (random() * 1000.0) as u32);
+        let hits = body.len() as i32 * engine::PART_HITS;
         docs.push(
-            json!({ "type": "creep", "user": INVADER, "body": parts, "hits": body.len() * 100,
-            "hitsMax": body.len() * 100, "ticksToLive": 1500, "x": x, "y": y, "room": room,
+            json!({ "type": "creep", "user": INVADER, "body": parts, "hits": hits,
+            "hitsMax": hits, "ticksToLive": engine::CREEP_LIFETIME, "x": x, "y": y, "room": room,
             "fatigue": 0, "store": {}, "storeCapacity": 0, "name": name }),
         );
     }

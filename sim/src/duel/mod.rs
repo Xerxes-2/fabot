@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 use std::io::Read;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use fabot_base::engine;
 use fabot_tactics::Tactic;
 use krebs::atom;
 use krebs::cron::JOBS;
@@ -321,7 +322,7 @@ fn stand(s: &Sample, seed: u64) -> World {
                 .collect();
             let user = if b.invader { INVADER } else { user };
             objects.push(json!({ "type": "creep", "room": room, "x": b.x, "y": b.y, "user": user, "body": body,
-                "name": format!("{}-{side}-{i}", s.id), "hits": b.hits, "hitsMax": 100 * b.parts.len(),
+                "name": format!("{}-{side}-{i}", s.id), "hits": b.hits, "hitsMax": engine::PART_HITS * b.parts.len() as i32,
                 "fatigue": 0, "store": {}, "storeCapacity": 0, "notifyWhenAttacked": true }));
         }
     }
