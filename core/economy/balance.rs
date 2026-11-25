@@ -73,6 +73,7 @@ impl Level {
     }
 }
 
+#[derive(Clone)]
 pub struct Holding {
     pub room: RoomName,
     pub levels: Vec<(ResourceType, Level)>,
@@ -101,6 +102,30 @@ pub struct Shipment {
     pub to: RoomName,
     pub taker_free: i32,
     pub load: Vec<(ResourceType, i32)>,
+}
+
+/// What sending `loads` over `apart` rooms costs, a hundred over as the fee
+/// rounds up per send; none for no load.
+pub fn send_fee(loads: impl Iterator<Item = i32>, apart: i32) -> i32 {
+    let fee: i32 = loads.map(|n| engine::send_cost(n, apart)).sum();
+    if fee > 0 { fee + 100 } else { 0 }
+}
+
+/// v1's `oreShipFee`: each giver's sends' fee were its terminal's energy no bound.
+pub fn fees(holdings: &[Holding]) -> Vec<(RoomName, i32)> {
+    let mut unbound = holdings.to_vec();
+    unbound.iter_mut().for_each(|h| h.energy = i32::MAX);
+    (balance(&mut unbound).iter())
+        .map(|s| {
+            (
+                s.from,
+                send_fee(
+                    s.load.iter().map(|(_, n)| *n),
+                    tiles::rooms_apart(s.from, s.to),
+                ),
+            )
+        })
+        .collect()
 }
 
 /// A terminal sends to one colony a tick. Each batch is booked on both, so

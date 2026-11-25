@@ -262,6 +262,8 @@ pub struct Ground {
     pub terminal: Option<TerminalFact>,
     /// What this colony sends, and the colony and its terminal's free room.
     pub shipment: Vec<(ResourceType, i32)>,
+    /// What its terminal keeps for the fees of the sends it would make.
+    pub fees: i32,
     pub ship_to: Option<(RoomName, i32)>,
     pub abandoned: bool,
 }
@@ -287,6 +289,16 @@ impl Ground {
         self.stores.iter().find(|s| s.owned || s.kind.is_pile())
     }
 
+    /// Hivemind's `getBestStorageSource`: the bank, or a terminal fuller of energy for its size.
+    pub fn source(&self) -> Option<&StoreFact> {
+        let fill = |s: &StoreFact| f64::from(self.own(s)) / f64::from((s.energy + s.free).max(1));
+        let terminal = self.stores.iter().find(|s| self.is_terminal(s) && !s.owned);
+        match (self.bank(), terminal) {
+            (Some(b), Some(t)) if fill(t) > fill(b) => Some(t),
+            (bank, terminal) => bank.or(terminal),
+        }
+    }
+
     /// Both full, the storage with no room: no carrier is sent to either.
     pub fn deposit(&self) -> Option<&StoreFact> {
         let bank = self.bank()?;
@@ -301,16 +313,17 @@ impl Ground {
             return 0;
         };
         let apart = tiles::rooms_apart(self.room, *home);
-        let fee: i32 = (self.shipment.iter())
-            .map(|(r, n)| engine::send_cost(*n, apart) + if *r == Energy { *n } else { 0 })
+        let sent: i32 = (self.shipment.iter())
+            .filter(|(r, _)| *r == Energy)
+            .map(|(_, n)| n)
             .sum();
-        if fee > 0 { fee + 100 } else { 0 }
+        sent + super::balance::send_fee(self.shipment.iter().map(|(_, n)| *n), apart)
     }
 
-    /// What of `s` is the stock: a terminal's past what its shipment takes.
+    /// What of `s` is the stock: a terminal's past what its sends take.
     fn own(&self, s: &StoreFact) -> i32 {
         if self.is_terminal(s) {
-            0.max(s.energy - self.shipped())
+            0.max(s.energy - self.shipped().max(self.fees))
         } else {
             s.energy
         }
@@ -329,18 +342,19 @@ impl Ground {
         self.has_storage().then(|| held.sum())
     }
 
-    /// What a worker may draw from `s`: the stock past the reserve, the
-    /// storage's first and the terminal's after, so the two never give it twice.
+    /// What a body may draw from `s`: the stock past the reserve, `source`'s
+    /// first and the other bank's after, so the two never give it twice.
     pub fn spare(&self, s: &StoreFact, reserve: i32) -> i32 {
         if !self.banks(s) {
             return s.energy;
         }
         let past = self.stock().unwrap_or(0) - reserve;
-        let from_storage = self.held(|s| s.owned, |s| s.energy).unwrap_or(0).min(past);
-        if s.owned {
-            from_storage
+        let first = self.source().filter(|f| self.banks(f));
+        let from_first = first.map_or(0, |f| self.own(f).min(past));
+        if first.is_some_and(|f| f.id == s.id) {
+            from_first
         } else {
-            self.own(s).min(past - from_storage.max(0))
+            self.own(s).min(past - from_first.max(0))
         }
     }
 
@@ -1006,6 +1020,7 @@ fn ground_of(
             }),
         shipment: Vec::new(),
         ship_to: None,
+        fees: 0,
         abandoned: false,
         buffer_seats: buffer_seats_of(atlas, room, buffer.as_ref()),
         buffer,
@@ -1352,6 +1367,12 @@ fn stock_labs(
             g.lab_plan = Some(plan);
             g.boost_lab = boost_lab;
         }
+    }
+    for (room, fee) in super::balance::fees(&holdings) {
+        grounds
+            .iter_mut()
+            .filter(|g| g.room == room)
+            .for_each(|g| g.fees += fee);
     }
     balance(&mut holdings)
 }

@@ -1,0 +1,36 @@
+{
+  "why": "a ring short while the room's stock covers it is filled: W7S5 (RCL6, one spawn) on young-among-colonies' reagents start banks its stock in its terminal (287,325 energy at t4000, none in its storage), and its home carrier hauler-1280934-Spawn11 stood empty beside the storage 1,514 ticks while the ring held 328-879 of 2300 and the spawn waited on the bank: the ring drew only on the storage, the terminal only while a shipment to it was in flight. Hivemind's getBestStorageSource draws the storage or the terminal, whichever is fuller of energy for its size, the terminal past the fees of the sends balance would plan (v1's oreShipFee). Over seeds 1-3, stall.ring window-ticks from t3000 and the outposts' worst decayed share: main 8c29b43d 4151/3882/3779 and 300/282/471, with it 1445/1496/893 and 103/122/90; bounds about twice that",
+  "modules": [
+    "economy"
+  ],
+  "start": {
+    "world": "scripts/scenario/worlds/young-among-colonies.json",
+    "seed": 1,
+    "stock": {
+      "W2S8": {
+        "X": 6000
+      },
+      "W3S8": {
+        "KO": 3000
+      },
+      "W7S9": {
+        "OH": 3000,
+        "UH": 1000
+      }
+    }
+  },
+  "ticks": 8000,
+  "assert": [
+    {
+      "metric": "stall.ring",
+      "room": "W7S5",
+      "from": 3000,
+      "total": true,
+      "max": 2500
+    },
+    {
+      "measure": "decayedShareMost",
+      "max": 200
+    }
+  ]
+}

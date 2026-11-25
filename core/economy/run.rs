@@ -245,13 +245,12 @@ fn terminal_send(g: &Ground) -> Option<Action> {
     }
     let apart = tiles::rooms_apart(g.room, *home);
     let energy = t.store.amount_of(Energy);
-    let fees: i32 = g
+    let ores = g
         .shipment
         .iter()
         .filter(|(r, _)| *r != Energy)
-        .map(|(_, n)| engine::send_cost(*n, apart))
-        .sum();
-    let kept = if fees > 0 { fees + 100 } else { 0 };
+        .map(|(_, n)| *n);
+    let kept = super::balance::send_fee(ores, apart);
     g.shipment.iter().find_map(|(ore, owed)| {
         let (pays, sent) = if *ore == Energy {
             (energy - kept, 1)

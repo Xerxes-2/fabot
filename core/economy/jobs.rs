@@ -10,7 +10,7 @@ use fabot_base::vocabulary::ResourceType::{self, Energy};
 use fabot_base::world::{Built, Id, Pos, StructureType};
 
 use super::bodies::Pattern;
-use super::derived::{Body, Derived, Ground, StoreKind, TerminalFact};
+use super::derived::{Body, Derived, Ground, StoreKind};
 use super::slots::{self, Job, Slot};
 use super::task::{Target, Task};
 
@@ -33,12 +33,11 @@ enum Of {
     Drop,
     Loot,
     Pickup,
-    Stock { pile: bool },
+    Stock { pile: bool, chosen: bool },
     Ore,
     Link,
     Mineral,
     Drain,
-    Received,
 }
 
 impl Of {
@@ -301,23 +300,14 @@ fn takes_of(derived: &Derived, ci: usize, outposts: &[&Ground], short: i32) -> V
             Of::Container,
         );
     }
-    if let Some(s) = g.bank() {
+    let best = g.source();
+    for s in (g.stores.iter()).filter(|s| g.banks(s) || best.is_some_and(|b| b.id == s.id)) {
+        let chosen = best.is_some_and(|b| b.id == s.id);
         let of = Of::Stock {
             pile: s.kind.is_pile(),
+            chosen,
         };
-        add(energy(s.id), s.pos, s.energy.min(short), of);
-    }
-    // Sent energy is banked where the stock is drawn, out of the minerals' room.
-    let sent = |o: &Ground| {
-        o.ship_to.is_some_and(|(to, _)| to == g.room)
-            && o.shipment.iter().any(|(r, _)| *r == Energy)
-    };
-    let banks_here = |t: &&TerminalFact| g.deposit().is_some_and(|d| d.id == t.id.into());
-    if let Some(t) = (g.terminal.as_ref())
-        .filter(|t| g.ship_to.is_none() && derived.grounds.iter().any(sent) && !banks_here(t))
-    {
-        let n = t.store.amount_of(Energy);
-        add(energy(t.id.into()), t.pos, n, Of::Received);
+        add(energy(s.id), s.pos, g.spare(s, 0).min(short), of);
     }
     let net = g.link_net();
     for l in g
@@ -419,9 +409,10 @@ impl<'a> Jobs<'a> {
             .collect();
         for (si, body, task) in held {
             let (s, home) = (&slots[*si], derived.colonies[slots[*si].colony].room);
-            let bank = derived.grounds[s.colony].bank().map(|b| b.id);
+            let g = &derived.grounds[s.colony];
+            let bank = |id: &Target| g.stores.iter().any(|b| g.banks(b) && b.id == *id);
             let bound = task.as_ref().is_some_and(|t| match t {
-                Task::Withdraw(id, r) => *r == Energy && Some(*id) == bank,
+                Task::Withdraw(id, r) => *r == Energy && bank(id),
                 t => sinks[s.colony].iter().any(|x| &x.task == t && wants(x)),
             });
             if s.job == Job::Fill && body.pos.room == home && bound {
@@ -558,15 +549,15 @@ impl<'a> Jobs<'a> {
             // keep the spawn waiting; Hivemind's priority else, its weight by 30.
             Of::Loot => (4 - 2 * i32::from(ring), 10 * s.amount / 3),
             Of::Pickup => (5 - 2 * i32::from(ring), s.amount),
-            Of::Stock { pile: false } => (2, s.amount),
-            Of::Stock { pile: true } if carrier && ring => (5, 0),
-            Of::Stock { pile: true } => (if carrier { 0 } else { 4 }, 0),
+            Of::Stock { chosen: false, .. } => (-1, 0),
+            Of::Stock { pile: false, .. } => (2, s.amount),
+            Of::Stock { pile: true, .. } if carrier && ring => (5, 0),
+            Of::Stock { pile: true, .. } => (if carrier { 0 } else { 4 }, 0),
             Of::Ore => (0, 0),
             Of::Link => (5 - i32::from(range > 10), s.amount),
             Of::Mineral if 2 * s.amount < engine::CONTAINER_CAPACITY => (-1, 0),
             Of::Mineral => (3, 5 * s.amount),
             Of::Drain => (3, 0),
-            Of::Received => (1, 0),
         })
     }
 
@@ -677,7 +668,7 @@ impl<'a> Jobs<'a> {
                 .or_else(|| colony.spawns.first().map(|s| s.pos));
             let ring = self.ring_open(ci);
             let on_demand = |s: &Spot| match s.of {
-                Of::Stock { pile } => !(pile && ring),
+                Of::Stock { pile, .. } => !(pile && ring),
                 Of::Ore => true,
                 _ => false,
             };
@@ -1055,7 +1046,7 @@ impl<'a> Jobs<'a> {
         // it raises has none at hand.
         if let (Some(home), Some(c)) = (self.derived.grounds.get(ci), self.derived.colonies.get(ci))
             && home.room != g.room
-            && let Some(st) = home.stores.iter().find(|s| s.owned)
+            && let Some(st) = home.source().filter(|s| home.banks(s))
         {
             let n = Some(home.spare(st, c.reserve)).filter(|n| *n >= body.free);
             loads.push((Task::Withdraw(st.id, Energy), st.pos, n.unwrap_or(0)));
