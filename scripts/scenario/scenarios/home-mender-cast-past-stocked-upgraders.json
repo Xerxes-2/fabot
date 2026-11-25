@@ -1,0 +1,9 @@
+{
+  "why": "a home road at risk casts its mender ahead of the stocked upgraders: soak:gen seed 272 (E4S2, RCL4, one spawn always busy), the first worker ranked STOCKED tied with the upgraders cast before it; no worker stood t25865..28965 and the road beside the spawn at 36,31 wore out at t28182 (roadsLost 1)",
+  "modules": ["economy"],
+  "start": { "gen": 272, "seed": 1 },
+  "ticks": 30000,
+  "assert": [
+    { "measure": "roadsLost", "room": "E4S2", "from": 25000, "to": 30000, "max": 0 }
+  ]
+}

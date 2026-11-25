@@ -809,7 +809,7 @@ impl Plan<'_> {
             let rank = match k {
                 0 if inside_deadline(&colony.controller) => DEADLINE,
                 0 if mends && !draws => MEND,
-                0 if mends => STOCKED,
+                0 if mends => AT_RISK,
                 0 if floor > 0 => STOCKED,
                 k if k < floor => FLOOR,
                 k if k < floor + crews => CREW,
@@ -1112,6 +1112,8 @@ fn mines(ground: &Ground, m: &MineralFact) -> bool {
 const DEADLINE: i32 = -1;
 /// Below the reserve a lost road costs more than the energy that mends it.
 const MEND: i32 = 3;
+/// Above the reserve, ahead of the stocked upgraders: their recasts held a busy spawn past a road's last repair.
+const AT_RISK: i32 = 2;
 /// The ore is RCL6's payoff: the outposts take what spawn time it leaves.
 const MINE: i32 = 3;
 /// Past it the ore only fills the storage: `balance` sends a short colony from stock.

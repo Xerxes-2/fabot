@@ -250,7 +250,8 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   since they refill the bank it waits on); mineral miner queues before outposts;
   while stock is past reserve (or a pile's draw beats decay), upgraders and
   pre-storage workers queue before outpost haul (the haul only adds to the stock
-  they draw down); the outposts' carriers take the spawn time the colony's other
+  they draw down), and a home's at-risk mender before both, its reservers and
+  claims too (their recasts held a busy spawn past a road's last repair); the outposts' carriers take the spawn time the colony's other
   bodies leave over a life, so a far ring of outposts never casts nothing but
   haulers. While `ColonyPlan.owes` is true (a fight cast owed or imminent siege
   successor), no surplus-spending body is spawned so spawns stay free.
