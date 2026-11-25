@@ -69,6 +69,12 @@ const withCounts = (dir, a, f) => {
   const rows = countsOf(dir, a);
   return rows.length ? f(rows) : Infinity;
 };
+export const outpostsIn = (counts) => Object.keys(counts).filter((k) => k.startsWith("outpost:")).map((k) => k.slice(8));
+const outpostsAt = (dir, ts) => new Map(linesOf(join(dir, "cpu.jsonl")).filter((r) => r.counts && ts.has(r.t)).map((r) => [r.t, outpostsIn(Object.fromEntries(r.counts))]));
+// A stall is read over this many ticks, so a long run's good stretches do not dilute it.
+const DECAY_WINDOW = 1000;
+// A window an outpost dug less than this in reads no share: on a few hundred dug any pile is a large one.
+const DUG_LEAST = 2000;
 // A cold tick (the first, or one after a reset) floods every table afresh, so
 // it is bounded per colony, apart from the warm ticks.
 const warm = (rows) => rows.filter((c) => c.cold === undefined);
@@ -404,6 +410,30 @@ export const measures = {
   // that draft to their close.
   answeredMost: on("from to", (samples, a, dir) =>
     Math.max(0, ...rowsOf(dir).filter((e) => e.kind === "defend" && !e.disengaged && e.drafted != null && e.drafted >= (a.from ?? 0) && e.drafted < (a.to ?? Infinity)).map((e) => (e.closed ?? samples.at(-1).t) - e.drafted))),
+  // The most energy that decayed in an outpost per energy it dug there over a full DECAY_WINDOW, in
+  // percent, on the samples the bot held it with a container standing in it: before one, a dig's piles
+  // decay while its haul is not yet cast. Over 100 when piles dug before the window decay in it.
+  decayedShareMost: on("from to", (samples, a, dir) => {
+    const seen = within(samples, a);
+    const held = outpostsAt(dir, new Set(seen.map((s) => s.t)));
+    if (!held.size) return Infinity;
+    const steps = seen.slice(1).flatMap((s, i) =>
+      (held.get(s.t) ?? [])
+        .filter((room) => {
+          if (s.rooms[room] && s.rooms[room].containers === undefined) throw new Error(`samples carry no \`containers\` for ${room}: a sim from before it`);
+          return s.rooms[room]?.containers > 0;
+        })
+        .map((room) => ({ t: s.t, room, dug: s.rooms[room].dug - (seen[i].rooms[room]?.dug ?? 0), decayed: s.rooms[room].decayed - (seen[i].rooms[room]?.decayed ?? 0) })),
+    );
+    const shares = steps.filter(({ t }) => t + DECAY_WINDOW <= seen.at(-1).t).map(({ t, room }) => {
+      const span = steps.filter((x) => x.room === room && x.t >= t && x.t < t + DECAY_WINDOW);
+      const dug = span.reduce((n, x) => n + x.dug, 0);
+      return dug >= DUG_LEAST ? Math.round((100 * span.reduce((n, x) => n + x.decayed, 0)) / dug) : undefined;
+    });
+    // No window read (no outpost held, or none dug enough) is no evidence: it fails rather than passes.
+    const read = shares.filter((v) => v !== undefined);
+    return read.length ? Math.max(...read) : Infinity;
+  }),
   // Invader cores standing in the declared outposts at the window's end.
   coresAtEnd: on("to", (samples, a) => Object.values(at(samples, a.to ?? Infinity).rooms).reduce((n, r) => n + (r.cores ?? 0), 0)),
   // Samples in the window where intel keeps a standing stronghold's level, deploy or collapse
@@ -438,7 +468,7 @@ export const measures = {
   // Ticks whose outposts differ from the tick before's: each re-plans their slots.
   outpostFlips: on("from to", (_, a, dir) =>
     withCounts(dir, a, (rows) => {
-      const set = (c) => Object.keys(c).filter((k) => k.startsWith("outpost:")).sort().join();
+      const set = (c) => outpostsIn(c).sort().join();
       return rows.filter((c, i) => i > 0 && set(c) !== set(rows[i - 1])).length;
     })),
   parkedTicks: on("from to", (_, a, dir) => withCounts(dir, a, (rows) => rows.filter((c) => (c.parkedCarriers ?? 0) > 0).length)),

@@ -1,10 +1,11 @@
 {
-  "why": "a stocked home budgets its outposts' haul on the path its carriers walk, not the straight line: on gen 5 E9S9 took E9S8 at a straight 58 ticks whose haul walks ~120 out its north gap, so Economy cast half the far carriers it needed and the outposts' dig decayed while upgraders drew the stock: before the haul fix (c45a8705) E9S8 let 16% of its dig decay over the run (31k from t18000 to t24000); after it every outpost lets at most 7% (seeds 1-5). An outpost is read once it has dug 10k, past its first container",
+  "why": "a stocked home budgets its outposts' haul on the path its carriers walk, not the straight line: on gen 5 E9S9 took E9S8 at a straight 58 ticks whose haul walks ~120 out its north gap, so Economy cast half the far carriers it needed and the outposts' dig decayed while upgraders drew the stock: before the haul fix (c45a8705) E9S8 let 16% of its dig decay over the run (31k from t18000 to t24000); after it every outpost lets at most 7% (seeds 1-5). An outpost is read once it has dug 10k, past its first container. A stall shows in a 1,000-tick window (`decayedShareMost`): on 3f0a7cd5 an invader on E9S9's pocket t8000-9200 held its carriers on loads they could not reach while E7S9 dug on, 134% of a window's dig decayed (22% over the run); main reads 21/26/16/5/21 on seeds 1-5, bound about 1.3x that, 34",
   "modules": ["strategy", "atlas", "economy"],
   "start": { "gen": 5, "seed": 1 },
   "ticks": 24000,
   "assert": [
     { "each": "outpost", "where": { "dug": { "min": 10000 } }, "assert": { "decayedShare": { "max": 11 } } },
-    { "measure": "outpostDug", "from": 18000, "to": 24000, "min": 120000 }
+    { "measure": "outpostDug", "from": 18000, "to": 24000, "min": 120000 },
+    { "measure": "decayedShareMost", "max": 34 }
   ]
 }

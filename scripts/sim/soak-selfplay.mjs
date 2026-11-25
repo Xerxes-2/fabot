@@ -11,7 +11,7 @@
 import { createReadStream, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { join, resolve } from "node:path";
-import { samplesOf } from "../scenario/measures.mjs";
+import { outpostsIn, samplesOf } from "../scenario/measures.mjs";
 import { jsonLines, pool, runSim, seedFlags, simBinary, soakDir } from "./run.mjs";
 
 const PLAYERS = JSON.stringify([
@@ -164,7 +164,7 @@ async function smellsOf(dir) {
   const held = new Set();
   const drops = new Map();
   for await (const { t, counts } of stream(join(dir, "cpu.jsonl"))) {
-    const now = new Set(counts.filter(([k]) => k.startsWith("outpost:")).map(([k]) => k.slice(8)));
+    const now = new Set(outpostsIn(Object.fromEntries(counts)));
     for (const r of held) if (!now.has(r)) drops.set(r, [...(drops.get(r) ?? []), t]);
     held.clear();
     for (const r of now) held.add(r);
