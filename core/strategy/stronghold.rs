@@ -30,9 +30,18 @@ pub fn rows(
         .filter(|e| e.objective == Objective::Stronghold && !e.unanswered)
         .map(|e| e.room)
         .collect();
+    // Out of sight, the loot as last seen: a body there sees it taken.
+    let unseen = (intel.iter()).filter(|(room, row)| {
+        world.room(**room).is_none()
+            && row
+                .loot
+                .as_ref()
+                .is_some_and(|(c, l)| *c > world.time && !l.is_empty())
+    });
     let fallen: Vec<RoomName> = (world.rooms.iter())
         .filter(|r| stronghold::fallen_with_loot(r))
         .map(|r| r.name)
+        .chain(unseen.map(|(room, _)| *room))
         .collect();
     let standing =
         |(room, row): (&RoomName, &fabot_base::intel::Row)| Some((*room, row.stronghold?));

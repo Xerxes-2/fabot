@@ -528,7 +528,7 @@ mod tests {
             world.rooms.push(room);
         }
         let mut intel = Intel::default();
-        crate::intel::step(&world, &mut intel);
+        crate::intel::step(&world, &fabot_atlas::Atlas::default(), &mut intel);
         let mut checked = 0;
         for room in world.rooms.iter().filter(|r| r.controller.is_some()) {
             let row = &intel[&room.name];

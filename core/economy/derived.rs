@@ -398,15 +398,8 @@ pub struct Pickup {
     pub loot: Vec<(Id, Pos, ResourceType, i32)>,
 }
 
-fn reached(atlas: &Atlas, at: &Pos) -> bool {
-    let here = tiles::of_pos(at);
-    std::iter::once(&here)
-        .chain(tiles::around(here))
-        .any(|t| atlas.passable(at.room, *t))
-}
-
 fn pickups_of(
-    (world, atlas): (&World, &Atlas),
+    (world, atlas, intel): (&World, &Atlas, &Intel),
     declarations: &Declarations,
     ours: &atlas::Derived,
     (colonies, grounds): (&[Colony], &[Ground]),
@@ -415,35 +408,29 @@ fn pickups_of(
         let home = colonies[ci].room;
         ours.tree(home)?.crossings(home, room)
     };
-    (declarations
-        .rooms(OpKind::Pickup)
-        .filter_map(|r| world.room(r)))
-    .filter_map(|room| {
-        let walled = |at: &Pos| {
-            (room.structures.iter())
-                .any(|s| s.kind == StructureType::Rampart && s.pos == *at && !s.owner.is_ours())
-        };
-        let containers = (room.structures.iter())
-            .filter(|s| s.kind == StructureType::Container && !s.owner.is_ours())
-            .map(|s| (s.id, s.pos, &s.store));
-        let held = (room.remains.iter().map(|r| (r.id, r.pos, &r.store)))
-            .chain(containers)
-            .filter(|(_, at, _)| !walled(at) && reached(atlas, at));
-        let loot: Vec<(Id, Pos, ResourceType, i32)> = held
-            .flat_map(|(id, pos, store)| store.held.iter().map(move |(x, n)| (id, pos, *x, *n)))
-            .filter(|(_, _, x, n)| *x != Energy && *n > 0)
-            .collect();
-        // `jobs` fetches only for a bank with room for the load: one with none idles a carrier.
-        let least = loot.iter().map(|l| l.3).min()?;
-        let takes = |ci: usize| (grounds[ci].bank()).is_some_and(|b| b.owned && b.free >= least);
-        let colony = (0..colonies.len())
-            .filter(|ci| takes(*ci))
-            .filter_map(|ci| Some((crossed(ci, room.name)?, ci)))
-            .min()?
-            .1;
-        Some(Pickup { colony, loot })
-    })
-    .collect()
+    let seen = |room: RoomName| match world.room(room) {
+        Some(r) => Some(fabot_atlas::loot_in(r, atlas)),
+        None => (intel.get(&room)?.loot.clone())
+            .filter(|(c, _)| *c > world.time)
+            .map(|l| l.1),
+    };
+    (declarations.rooms(OpKind::Pickup))
+        .filter_map(|room| {
+            let loot: Vec<(Id, Pos, ResourceType, i32)> = (seen(room)?.into_iter())
+                .map(|(at, r, n)| (at.id, at.pos, r, n))
+                .collect();
+            // `jobs` fetches only for a bank with room for the load: one with none idles a carrier.
+            let least = loot.iter().map(|l| l.3).min()?;
+            let takes =
+                |ci: usize| (grounds[ci].bank()).is_some_and(|b| b.owned && b.free >= least);
+            let colony = (0..colonies.len())
+                .filter(|ci| takes(*ci))
+                .filter_map(|ci| Some((crossed(ci, room)?, ci)))
+                .min()?
+                .1;
+            Some(Pickup { colony, loot })
+        })
+        .collect()
 }
 
 /// A resource, not a decider (`ARCHITECTURE.md` §2).
@@ -1748,7 +1735,12 @@ pub fn of_world<'t>(
         })
         .filter(reservable)
         .collect();
-    let pickups = pickups_of((world, atlas), declarations, ours, (&colonies, &grounds));
+    let pickups = pickups_of(
+        (world, atlas, intel),
+        declarations,
+        ours,
+        (&colonies, &grounds),
+    );
     let mut spots = spots_of(&grounds, &claims, &bodies);
     for (id, pos, _, _) in pickups.iter().flat_map(|p| &p.loot) {
         spots.entry(Target::Object(*id)).or_insert(*pos);

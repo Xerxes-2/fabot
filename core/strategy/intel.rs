@@ -20,7 +20,7 @@ fn user(me: &str, owner: &Owner) -> Option<String> {
     }
 }
 
-pub fn step(world: &World, intel: &mut Intel) {
+pub fn step(world: &World, atlas: &Atlas, intel: &mut Intel) {
     for room in &world.rooms {
         let c = room.controller.as_ref();
         let row = Row {
@@ -62,6 +62,14 @@ pub fn step(world: &World, intel: &mut Intel) {
             }),
             towered: (room.structures.iter())
                 .any(|s| s.kind == StructureType::Tower && s.owner.is_theirs()),
+            // The core's collapse, read while it stood, ends its loot unseen.
+            loot: fabot_fight::kinds::stronghold::fallen_with_loot(room).then(|| {
+                let last = intel.get(&room.name);
+                let collapse = (last.and_then(|r| r.stronghold.map(|s| s.collapses_at)))
+                    .or(last.and_then(|r| Some(r.loot.as_ref()?.0)))
+                    .unwrap_or(world.time);
+                (collapse, fabot_atlas::loot_in(room, atlas))
+            }),
         };
         intel.insert(room.name, row);
     }

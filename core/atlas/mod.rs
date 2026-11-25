@@ -9,6 +9,7 @@ use std::rc::Rc;
 
 mod derived;
 mod graph;
+mod loot;
 
 pub use self::derived::{
     BANK_LEVEL, Context, Derived, Home, derive, nearest, plan_of, server, sponsor, target_at,
@@ -16,6 +17,7 @@ pub use self::derived::{
 };
 pub use self::graph::Tree;
 use self::graph::Way;
+pub use self::loot::loot_in;
 
 use fabot_base::engine;
 use fabot_base::grid::{

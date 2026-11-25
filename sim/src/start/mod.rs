@@ -81,7 +81,7 @@ fn rank(map: &Map, maps: &Maps, room: &str) -> Option<(f64, Vec<String>)> {
     world.closed = maps.1.clone();
     (world.rooms.iter_mut()).for_each(|r| r.terrain = maps.terrain(r.name));
     let mut intel = Intel::default();
-    intel::step(&world, &mut intel);
+    intel::step(&world, &Atlas::default(), &mut intel);
     let seen = (intel.iter()).map(|(r, row)| (*r, row.lairs.as_deref(), false));
     let mut atlas = Atlas::following(Atlas::default(), &world, seen, maps.terrains());
     let derived = atlas::derive(&world, &mut atlas);

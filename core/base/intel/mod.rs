@@ -30,7 +30,10 @@ pub struct Row {
     pub mineral: Option<(ResourceType, Option<Tile>)>,
     pub stronghold: Option<Stronghold>,
     pub towered: bool,
+    pub loot: Option<Loot>,
 }
+
+pub type Loot = (i32, Vec<(Declared, ResourceType, i32)>);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Stronghold {
@@ -109,10 +112,10 @@ pub struct Scout {
 
 const NONE: &str = "-";
 
-/// One line a room, `room seen owner level reserver lapse worker lairs
-/// controller sources contained mineral stronghold towered`, `-` for none, `lairs` each lair's tile and its
-/// resource's as `lair.resource,…`, `sources` each as `id@tile,…` (`.`
-/// alone for none), `stronghold` as `level.deploys_at.collapses_at`; a segment holds thousands.
+/// One line a room, `room seen owner level reserver lapse worker lairs controller sources
+/// contained mineral stronghold towered loot`, `-` for none (`loot` left off); `lairs` as
+/// `lair.resource,…`, `sources` `id@tile,…` (`.` for none), `stronghold` `level.deploys.collapses`,
+/// `loot` `collapse;id@tile:resource:amount,…` (a fallen stronghold's); a segment holds thousands.
 pub fn to_text(intel: &Intel) -> String {
     use std::fmt::Write;
     fn name(user: &Option<String>) -> &str {
@@ -179,6 +182,13 @@ pub fn to_text(intel: &Intel) -> String {
             None => out.extend([" ", NONE]),
         }
         out.push_str(if r.towered { " 1" } else { " 0" });
+        if let Some((collapse, loot)) = &r.loot {
+            let _ = write!(out, " {collapse};");
+            for (i, (at, resource, n)) in loot.iter().enumerate() {
+                id_at(&mut out, if i == 0 { "" } else { "," }, at.id, &at.pos);
+                let _ = write!(out, ":{resource}:{n}");
+            }
+        }
         out.push('\n');
     }
     out
@@ -186,17 +196,10 @@ pub fn to_text(intel: &Intel) -> String {
 
 /// A count, written before posts were, is none only at zero.
 fn posts_of(text: &str) -> Option<Vec<Post>> {
-    let tile = |t: &str| {
-        t.parse::<u16>()
-            .ok()
-            .filter(|i| usize::from(*i) < tiles::COUNT)
-    };
+    let tile = |t: &str| t.parse::<usize>().ok().filter(|i| *i < tiles::COUNT);
     let post = |p: &str| {
         let (lair, resource) = p.split_once('.')?;
-        Some((
-            Tile::of_index(tile(lair)?.into()),
-            Tile::of_index(tile(resource)?.into()),
-        ))
+        Some((Tile::of_index(tile(lair)?), Tile::of_index(tile(resource)?)))
     };
     match text {
         "." | "0" => Some(Vec::new()),
@@ -207,10 +210,7 @@ fn posts_of(text: &str) -> Option<Vec<Post>> {
 
 fn site_of(room: RoomName, text: &str) -> Option<Declared> {
     let (id, at) = text.split_once('@')?;
-    let at: i32 = at
-        .parse()
-        .ok()
-        .filter(|i| (0..tiles::COUNT as i32).contains(i))?;
+    let at = at.parse::<usize>().ok().filter(|i| *i < tiles::COUNT)? as i32;
     Some(Declared {
         id: Id::parse(id)?,
         pos: Pos::new(room, at % 50, at / 50),
@@ -223,6 +223,17 @@ fn mineral_of(text: &str) -> Option<(ResourceType, Option<Tile>)> {
         .map_or((text, None), |(m, at)| (m, Some(at)));
     let tile = |at: &str| at.parse().ok().filter(|i| *i < tiles::COUNT);
     Some((m.parse().ok()?, at.and_then(tile).map(Tile::of_index)))
+}
+
+fn loot_of(room: RoomName, text: &str) -> Option<Loot> {
+    let (collapse, list) = text.split_once(';')?;
+    let item = |l: &str| {
+        let mut f = l.split(':');
+        let at = site_of(room, f.next()?)?;
+        Some((at, f.next()?.parse().ok()?, f.next()?.parse().ok()?))
+    };
+    let items = list.split(',').filter_map(item).collect();
+    Some((collapse.parse().ok()?, items))
 }
 
 fn stronghold_of(text: &str) -> Option<Stronghold> {
@@ -239,7 +250,7 @@ pub fn of_text(text: &str) -> Intel {
     text.lines()
         .filter_map(|line| {
             let f: Vec<&str> = line.split(' ').collect();
-            if !(7..=14).contains(&f.len()) {
+            if !(7..=15).contains(&f.len()) {
                 return None;
             }
             let room = f[0].parse().ok()?;
@@ -265,6 +276,7 @@ pub fn of_text(text: &str) -> Intel {
                 mineral: f.get(11).and_then(|m| mineral_of(m)),
                 stronghold: f.get(12).and_then(|s| stronghold_of(s)),
                 towered: f.get(13) == Some(&"1"),
+                loot: f.get(14).and_then(|l| loot_of(room, l)),
             };
             Some((room, row))
         })
@@ -312,7 +324,18 @@ mod tests {
             option::of((1..=5, 0..=9_999_999, 0..=9_999_999)),
             any::<bool>(),
         );
-        draws.prop_map(|draws| {
+        let loot = vec(
+            (
+                0..=9_999_999,
+                0..=49,
+                0..=49,
+                select(crate::vocabulary::ORES.to_vec()),
+                1..=9_999,
+            ),
+            0..3,
+        );
+        let loot = option::of((0..=9_999_999, loot));
+        (draws, loot).prop_map(|(draws, loot)| {
             let (
                 seen,
                 owner,
@@ -344,6 +367,20 @@ mod tests {
                     collapses_at,
                 }),
                 towered,
+                loot: loot.map(|(collapse, loot)| {
+                    let loot = (loot.into_iter()).map(|(id, x, y, resource, amount)| {
+                        let id = format!("{id:x}").as_str().into();
+                        (
+                            Declared {
+                                id,
+                                pos: Pos::new(RoomName::W1N1, x, y),
+                            },
+                            resource,
+                            amount,
+                        )
+                    });
+                    (collapse, loot.collect())
+                }),
             }
         })
     }

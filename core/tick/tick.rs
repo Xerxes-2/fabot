@@ -324,7 +324,7 @@ pub fn decide<'t>(
     let sightings = fabot_base::world::sightings::step(world, sightings);
     let kept = !atlas.check || fabot_base::world::sightings::kept(world, &sightings);
     assert!(kept, "a sighting differs from what stands now");
-    intel::step(world, intel);
+    intel::step(world, &atlas, intel);
     phases.push(("world".to_string(), clock() - began));
 
     let start = clock();
