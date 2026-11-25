@@ -619,6 +619,11 @@ with one phase machine per kind under `core/fight/kinds/`.
   deadline a home's `Defend` keeps, a forming set drops its unbegun casts and
   goes on only if its standing bodies hold its room, else closes (its bodies
   stood at home till they aged out).
+  `❓` A sweep's candidates need stirred prey (a group newly seen there),
+  which needs live vision: once the sweeps stop, nothing is stirred and none
+  reopens, so a dry spell of thousands of ticks follows (sweep-hunts seed 1
+  on the centre-first planner: no prey seen t20000-24000 while beta works the
+  same rooms). Patrol preyed rooms to keep vision?
 
 - **`Stronghold`** (`kinds/stronghold.rs`, L1–L3): opened on the table's
   `Stronghold` row and priced at open off the level intel read, unseen:
