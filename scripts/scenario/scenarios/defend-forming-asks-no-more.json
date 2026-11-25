@@ -1,11 +1,11 @@
 {
-  "why": "a Defend's re-price while it forms asks no more bodies than its answer did, so a raid that grows while the set forms is fought by the set first answered: three Invader waves (a ranged and a melee each) land in W8N3 E1's outpost W7N3 40 ticks apart and merge into one raid. On the release change its Defend raised its set twice as the waves merged and the raid stood 433 ticks; now it raises none and the raid stands 236 (bodies lost 0 -> 3)",
+  "why": "a Defend's re-price while it forms asks no more bodies than its answer did, so a raid that grows while the set forms is fought by the set first answered: three Invader waves (a ranged and a melee each) land in W8N3 E1's outpost W7N3 40 ticks apart and merge into one raid. On the release change its Defend raised its set twice as the waves merged and the raid stood 433 ticks; now it raises none and the raid stands 236 (bodies lost 0 -> 3). A set priced walking in together gathers out of reach until its casts land, and one in contact withdraws to gather (owner, 2026-11-25), so seed 2 here: on 9fe19968 its Defend fought with the bodies it had, gave up past its budget and the raid stood 1580 ticks. Seeds 1-8, bodies lost / hostile ticks, main vs gathered: 2/243 vs 3/363, 4/1580 vs 2/366, 4/1580 vs 2/357, 2/236 vs 1/360, 4/1580 vs 3/368, 4/1580 vs 1/362, 3/244 vs 1/365, 1/226 vs 2/421: no raid stands, at up to ~200 more ticks than an unbroken fight, so 430. A newcomer re-committing the Defend is a new answer with a new budget (§6.2, (c)): `raised` and the budget read from it (seed 1: forming since t1152, a newcomer re-commits it at t1281, budget 1 -> 2, priced afresh; Fighting at t1328 on budget 5, it loses 5)",
   "modules": ["fight"],
-  "start": { "room": "W8N3", "seed": 1, "node": "E1", "invaders": "W7N3:100000:1000,W7N3:100000:1040,W7N3:100000:1080", "wave": "ranged,melee" },
+  "start": { "room": "W8N3", "seed": 2, "node": "E1", "invaders": "W7N3:100000:1000,W7N3:100000:1040,W7N3:100000:1080", "wave": "ranged,melee" },
   "ticks": 4000,
   "assert": [
     { "measure": "bodiesLost", "max": 4 },
-    { "measure": "hostileTicks", "room": "W7N3", "max": 300 },
-    { "each": "engagement", "where": { "kind": "defend" }, "assert": { "raised": { "max": 0 } } }
+    { "measure": "hostileTicks", "room": "W7N3", "max": 430 },
+    { "each": "engagement", "where": { "kind": "defend" }, "assert": { "raised": { "max": 0 }, "pastBudget": { "max": 0 } } }
   ]
 }

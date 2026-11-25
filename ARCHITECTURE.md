@@ -666,8 +666,12 @@ and `cheapest_win` (adds only to already-standing `ours`).
   walk included), so a set fed in one at a time prices worse than one walked
   in `together`, which pays the wait in ticks instead (a body already in the
   raid's reach is struck alone through it). `Defend` prices both arms
-  (`Close`/`Kite`/`Hold` vs `Blob*`), rather than holding bodies back until
-  they gather (a hold-while, rejected). A `Defend`'s `Blob*` set walks as
+  (`Close`/`Kite`/`Hold` vs `Blob*`); where only the gathered set wins (its
+  bodies standing do not, and every arm walks in together), its casts still
+  to land, it forms again and gathers out of its raid's reach until they
+  land, then goes in as one (owner, 2026-11-25: a set fed in one at a time
+  loses what the gathered set wins). `❓` A raid that grows
+  after contact cannot be gathered against. A `Defend`'s `Blob*` set walks as
   one while it fights too, as its price pools its heal: its bodies in the
   raid's room into the reach its tactic names (`BlobClose` melee,
   `BlobKite` a shot) of the kill order's first standing, or, with no body

@@ -23,7 +23,7 @@ export function engagements(write, bodyOf, offset, closes, killedAt) {
     if (t !== null && !row && merged) return;
     if (t !== null && !row) throw new Error(`engagement ${rec.id} closed at t${t} with no engagements.log row`);
     if (row) Object.assign(rec, { contact: run(row.contact), seen: run(row.seen), gaveUp: Boolean(row.gaveUp), dead: row.dead, left: Boolean(row.left) });
-    const { members, ours, standing, raid, rooms, swing, blind, asking, fought, formed, empty, kills, was, off, formedSince, formingSet, ...rest } = rec;
+    const { members, ours, standing, raid, rooms, swing, blind, asking, fought, formed, empty, kills, was, off, formedSince, formingSet, committed, ...rest } = rec;
     const swung = Object.fromEntries(Object.entries(swing).map(([n, { ticks, swings }]) => [n, { ticks, swings }]));
     write({ ...rest, swung, closed: t, drew: [...ours], rooms: [...rooms] });
   }
@@ -79,8 +79,9 @@ export function engagements(write, bodyOf, offset, closes, killedAt) {
         // `waited`: the most ticks on end a Defend stood answered on casts asked, none of its bodies standing.
         rec.asking = rec.kind === "defend" && !e.unanswered && !ours.length && asked.has(e.id) ? rec.asking + 1 : 0;
         rec.waited = Math.max(rec.waited, rec.asking);
-        // `budget`: the bodies its price let it lose when it last Formed, where it commits; one moved later is no commitment.
-        if (e.phase === "forming") rec.budget = e.budget ?? 0;
+        // `budget`: the bodies its price let it lose when it last committed: Formed, or re-committed by a newcomer (§6.2).
+        const recommitted = rec.committed !== undefined && e.budget !== rec.committed;
+        if (e.phase === "forming" || recommitted) rec.budget = e.budget ?? 0;
         // `forming`: the most ticks on end it formed answered.
         rec.formed = e.phase === "forming" && !e.unanswered ? rec.formed + 1 : 0;
         rec.forming = Math.max(rec.forming, rec.formed);
@@ -101,7 +102,8 @@ export function engagements(write, bodyOf, offset, closes, killedAt) {
         swinging(rec, bodies, t, struck);
         // `raised`: the re-prices a forming Defend raised its set on after the tick it began forming.
         const set = ours.length + (fight.casts ?? []).filter((c) => c.engagement === e.id).length;
-        if (e.phase === "forming" && rec.formedSince === e.since && set > rec.formingSet) rec.raised = (rec.raised ?? 0) + 1;
+        if (e.phase === "forming" && rec.formedSince === e.since && !recommitted && set > rec.formingSet) rec.raised = (rec.raised ?? 0) + 1;
+        rec.committed = e.budget;
         [rec.formedSince, rec.formingSet] = [e.phase === "forming" ? e.since : null, set];
         // A sweep with all its bodies in its room: `bare`, the most ticks on end no rival creep stood there.
         if (rec.kind !== "sweep") continue;

@@ -5,7 +5,7 @@ mod account;
 pub mod casting;
 use crate::kinds::{defend, raid, siege, sweep};
 use crate::scene::{Asked, Hunting, Scene, fresh, picket};
-use crate::shape::{Cast, Engagement, Group, Objective, Phase, Plan};
+use crate::shape::{Cast, Engagement, Group, Objective, Phase, Plan, enter};
 pub use account::{Actual, Closed, account, closed};
 use fabot_atlas::{self as atlas, Atlas, Mover, Target};
 use fabot_base::declarations::{self, Declarations};
@@ -837,6 +837,10 @@ impl<'a> Scene<'a> {
                     .map(|c| casting::fighter_of(c))
                     .collect();
 
+                let gathers = price.together
+                    && (price.cast > 0 || !asked_bodies.is_empty())
+                    && !self.in_reach(e)
+                    && arms.iter().all(|a| a.together);
                 if casting::wins(
                     price.stance,
                     &casting::side_in(&self.world.rules, room, standing),
@@ -844,6 +848,9 @@ impl<'a> Scene<'a> {
                     terrain,
                 ) {
                     defend::stands_alone(self.world.time, &next)
+                } else if gathers && matches!(next.phase, Phase::Approaching | Phase::Fighting) {
+                    // Owner (2026-11-25): where only the gathered set wins, it gathers before it goes in.
+                    enter(Phase::Forming, self.world.time, &next)
                 } else {
                     next
                 }

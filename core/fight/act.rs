@@ -185,6 +185,7 @@ pub(super) fn act(
         let (centre, _) = centre_of(e);
         let order = &e.plan.order;
         let enter = e.objective == Objective::Defend;
+        let gathers = enter && matches!(e.plan.tactic, Tactic::BlobClose | Tactic::BlobKite);
 
         if e.unanswered {
             return (None, tactics::rampart(sight, &fighters, c));
@@ -203,9 +204,9 @@ pub(super) fn act(
                 Some(gate) => tactics::drain(sight, gate, c),
                 None => tactics::hold(sight, c),
             },
-            Phase::Forming => tactics::hold(sight, c),
+            Phase::Forming if !gathers || !scene.in_reach(e) => tactics::hold(sight, c),
+            Phase::Forming | Phase::Disengaging => tactics::retreat(sight, c),
             Phase::Pursuing => tactics::close(sight, order, &centre, enter, c),
-            Phase::Disengaging => tactics::retreat(sight, c),
             Phase::Approaching | Phase::Fighting => {
                 if raid::raids(e) {
                     return (
