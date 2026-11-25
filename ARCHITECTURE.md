@@ -996,7 +996,8 @@ Pure at module boundaries, systems Rust inside (measurements override defaults):
 ### 9.3 Counts are a gate
 
 Deterministic per-tick counts (floods on a warm tick and per colony on a cold
-one, Atlas miss rate, Hunt threat lookups) are
+one and the three after it, whose plans move the weights it flooded on, Atlas
+miss rate, Hunt threat lookups) are
 reported to segment 1 and enforced against ceilings in `scripts/ceilings.json`
 on every `npm run scenario` run.
 

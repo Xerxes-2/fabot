@@ -56,7 +56,7 @@ export const exposureOf = (dir, last) => {
 const countsOf = (dir, a) =>
   linesOf(join(dir, "cpu.jsonl"))
     .filter((r) => r.counts && r.t >= (a.from ?? 0) && r.t < (a.to ?? Infinity))
-    .map((r) => Object.fromEntries(r.counts));
+    .map((r) => ({ ...Object.fromEntries(r.counts), t: r.t }));
 // A run that reported no counts fails its ceiling: Infinity is over any max.
 const withCounts = (dir, a, f) => {
   const rows = countsOf(dir, a);
@@ -68,9 +68,21 @@ const outpostsAt = (dir, ts) => new Map(linesOf(join(dir, "cpu.jsonl")).filter((
 const DECAY_WINDOW = 1000;
 // A window an outpost dug less than this in reads no share: on a few hundred dug any pile is a large one.
 const DUG_LEAST = 2000;
-// A cold tick (the first, or one after a reset) floods every table afresh, so
-// it is bounded per colony, apart from the warm ticks.
-const warm = (rows) => rows.filter((c) => c.cold === undefined);
+// A cold tick (the first, or one after a reset) floods every table afresh, and
+// the ticks just after it again where its plans moved the weights, so these
+// are bounded per colony, apart from the warm ticks: each row's colonies, else undefined.
+const COLD_TAIL = 3;
+const coldOf = (rows) => {
+  let last;
+  return rows.map((c) => {
+    if (c.cold !== undefined) last = c;
+    return last && c.t - last.t <= COLD_TAIL ? last.cold : undefined;
+  });
+};
+const warm = (rows) => {
+  const cold = coldOf(rows);
+  return rows.filter((_, i) => cold[i] === undefined);
+};
 const floodsOf = (c) => (c.atlasMisses ?? 0) + (c.atlasLive ?? 0);
 const outposts = (key) => (samples, a) => {
   const [first, last] = [at(samples, a.from ?? 0), at(samples, a.to ?? Infinity)];
@@ -457,7 +469,10 @@ export const measures = {
   // that missed: §1's "counting hits and misses".
   floodsMost: on("from to", (_, a, dir) => withCounts(dir, a, (rows) => Math.max(0, ...warm(rows).map(floodsOf)))),
   coldFloodsPerColony: on("from to", (_, a, dir) =>
-    withCounts(dir, a, (rows) => Math.max(0, ...rows.filter((c) => c.cold !== undefined).map((c) => Math.ceil(floodsOf(c) / Math.max(1, c.cold)))))),
+    withCounts(dir, a, (rows) => {
+      const cold = coldOf(rows);
+      return Math.max(0, ...rows.flatMap((c, i) => (cold[i] === undefined ? [] : [Math.ceil(floodsOf(c) / Math.max(1, cold[i]))])));
+    })),
   // Ticks whose outposts differ from the tick before's: each re-plans their slots.
   outpostFlips: on("from to", (_, a, dir) =>
     withCounts(dir, a, (rows) => {
