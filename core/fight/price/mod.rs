@@ -840,6 +840,7 @@ impl<'a> Scene<'a> {
 
                 let gathers = price.together
                     && (price.cast > 0 || !asked_bodies.is_empty())
+                    && (!self.in_reach(e) || kin.iter().any(|h| !e.plan.order.contains(&h.id)))
                     && arms.iter().all(|a| a.together);
                 if casting::wins(
                     price.stance,
@@ -849,7 +850,7 @@ impl<'a> Scene<'a> {
                 ) {
                     defend::stands_alone(self.world.time, &next)
                 } else if gathers && matches!(next.phase, Phase::Approaching | Phase::Fighting) {
-                    // Owner (2026-11-25): where only the gathered set wins, it gathers first, withdrawing from contact.
+                    // Owner 2026-11-25: a grown raid, not our losses, pulls a set in contact back.
                     enter(Phase::Forming, self.world.time, &next)
                 } else {
                     next
