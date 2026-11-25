@@ -1,0 +1,11 @@
+{
+  "why": "Whether a raider swings into our ATTACK's strike-back is its pick, so a Defend is priced both ways and takes the worse: an Invader with WORK dismantles in place of its swing. soak:gen seed 227 (E4S7, t10120): a small melee dismantling the road under our body and a small healer (60 heal) were priced a 9-tick win for one 3-ATTACK body by crediting 90/tick struck back that never landed; it lost its ATTACK, three later casts died, and the raid held the outpost 1500 ticks. Priced both ways, two such bodies land together and win with none lost (hostileTicks 122; seeds 1-5 pass)",
+  "modules": ["fight", "exchange"],
+  "start": { "gen": 227, "seed": 1 },
+  "ticks": 11700,
+  "assert": [
+    { "measure": "hostileTicks", "room": "E4S7", "from": 10100, "to": 11700, "max": 400 },
+    { "measure": "bodiesLost", "kind": "defend", "from": 10100, "to": 11700, "max": 0 },
+    { "measure": "predictedWinsLost", "room": "E4S7", "from": 10100, "to": 11700, "max": 0 }
+  ]
+}

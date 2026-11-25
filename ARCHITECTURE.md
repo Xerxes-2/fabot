@@ -625,6 +625,8 @@ with one phase machine per kind under `core/fight/kinds/`.
   reopens, so a dry spell of thousands of ticks follows
   (sweep-hunts-creeps-before-containers seed 1 on the centre-first planner: no
   prey seen t20000-24000 while beta works the same rooms). Patrol preyed rooms to keep vision?
+  `❓` A sweep's hunter still plinks a structure on some self-play seeds
+  (sweep-hunts-creeps-before-containers: main seed 6, sweep 4 E9S8 t10712).
 
 - **`Stronghold`** (`kinds/stronghold.rs`, L1–L3): not priced by
   `Exchange` (owner): a level's towers, ramparts, hits and garrison are the
@@ -738,7 +740,9 @@ and `cheapest_win` (adds only to already-standing `ours`).
 - **Towers alone:** with no body of ours fielded, towers that out-damage the
   raid's heal win, within the energy each holds, and if the raid razes no
   keep first.
-- `❓` Exchange counts a swinger's strike-back whether or not the raid swings.
+- **Swing pick:** whether a raider swings into our strike-back is its pick
+  (a dismantle drops the swing), so the Exchange prices it both ways and the
+  worse decides.
 - **Consequence pricing:** every threat, structure, and seat is valued in
   **energy/tick** (razed, killed, healed, or denied) — never by body parts or
   creep kind. Feature-keyed rules leave exploitable gaps; wrong choices are

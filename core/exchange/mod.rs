@@ -247,16 +247,19 @@ struct Price {
     dismantlers: Vec<(Fighter, i32)>,
     /// Its dismantlers' hits that strike nothing: the kill where no striker stands.
     razing: i32,
+    /// Its swings land, struck back by ours; else it holds them (a dismantle drops a swing).
+    swings: bool,
 }
 
 /// Its healers heal the body they heal most. Where `heals`, a healer that
-/// fights heals wherever its heal reaches and drops the weapon it heals over.
+/// fights heals wherever its heal reaches and drops the weapon it heals over;
+/// where `swings`, its swings land and are struck back, else it holds them.
 fn price_as(
     terrain: Terrain,
     theirs: &Side,
     raid: &[Foe],
     horizon: i32,
-    heals: bool,
+    (heals, swings): (bool, bool),
     range_of: &dyn Fn(&Foe) -> i32,
 ) -> Price {
     let striking: Vec<Foe> = raid
@@ -269,7 +272,7 @@ fn price_as(
         let range = range_of(h);
 
         (
-            engine::strike_at(h.f.attack, 0, range),
+            engine::strike_at(h.f.attack, 0, range) * i32::from(swings),
             engine::strike_at(0, h.f.ranged, range),
         )
     };
@@ -369,6 +372,7 @@ fn price_as(
             .filter(|h| !fighter::strikes(&h.f))
             .map(|h| fighter::effective_hits(&h.f))
             .sum(),
+        swings,
     }
 }
 
@@ -379,16 +383,17 @@ fn prices(
     horizon: i32,
     range_of: &dyn Fn(&Foe) -> i32,
 ) -> Vec<Price> {
-    let weapons = price_as(terrain, theirs, raid, horizon, false, range_of);
+    let price = |picks| price_as(terrain, theirs, raid, horizon, picks, range_of);
+    let fighting_healer = raid.iter().any(|h| h.f.heal > 0 && fighter::strikes(&h.f));
+    let swinger = raid.iter().any(|h| h.f.attack > 0);
 
-    if raid.iter().any(|h| h.f.heal > 0 && fighter::strikes(&h.f)) {
-        vec![
-            weapons,
-            price_as(terrain, theirs, raid, horizon, true, range_of),
-        ]
-    } else {
-        vec![weapons]
-    }
+    // Whether to swing into our strike-back is the raid's pick: priced both ways.
+    [true, false]
+        .into_iter()
+        .flat_map(|swings| [(false, swings), (true, swings)])
+        .filter(|&(heals, swings)| (!heals || fighting_healer) && (swings || swinger))
+        .map(price)
+        .collect()
 }
 
 fn out_heals(price: &Price, our_damage: i32) -> bool {
@@ -1328,7 +1333,11 @@ fn exchange(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> Out
     let approach = approach_of(terrain, stance, &fighters, &theirs.bodies);
 
     let settle = |horizon: i32, price: &Price| -> (Outcome, i32) {
-        let struck = struck_back(price, dealt, back.struck, back.swingers);
+        let struck = if price.swings {
+            struck_back(price, dealt, back.struck, back.swingers)
+        } else {
+            0
+        };
         let damage = dealt + struck;
 
         let bodies: Vec<Focused> = bodies
@@ -1797,6 +1806,7 @@ mod tests {
             breaches: false,
             dismantlers: Vec::new(),
             razing: 0,
+            swings: true,
         }
     }
 
