@@ -799,7 +799,8 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
     actions.extend(pickups(&derived, &taken));
     actions.extend(sends(&derived));
     let given_up = (context.world.rooms.iter()).filter(|r| context.declarations.abandoning(r.name));
-    actions.extend(given_up.flat_map(super::abandon::raze));
+    let ground = |room| derived.grounds.iter().find(|g| g.room == room);
+    actions.extend(given_up.flat_map(|r| super::abandon::raze(r, ground(r.name))));
 
     state.assignments = next;
     ModuleOutput {

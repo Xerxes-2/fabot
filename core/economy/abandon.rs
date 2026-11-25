@@ -6,7 +6,7 @@ use fabot_base::tiles;
 use fabot_base::vocabulary::ResourceType::{self, Energy};
 use fabot_base::world::{Creep, Room, RoomName, Structure, StructureType};
 
-use super::balance::LEAST_SEND;
+use super::balance::{LEAST_SEND, send_fee};
 use super::derived::Ground;
 use super::task::Target;
 
@@ -31,15 +31,13 @@ pub fn left(room: &Room) -> i32 {
         .sum()
 }
 
-/// What stays once shipped: energy under the least send and its fee.
-const LEFT: i32 = 200;
-
 /// `destroy()` needs our controller: the unclaim waits for the last structure.
-pub fn raze(room: &Room) -> Vec<Action> {
+/// Nothing is razed while `g`'s shipment is owed, or its terminal goes first.
+pub fn raze(room: &Room, g: Option<&Ground>) -> Vec<Action> {
     let Some(c) = room.controller.as_ref().filter(|c| c.owner.is_ours()) else {
         return Vec::new();
     };
-    if left(room) > LEFT {
+    if g.is_some_and(|g| !g.shipment.is_empty()) {
         return Vec::new();
     }
     let ours: Vec<Action> = (room.structures.iter())
@@ -103,7 +101,11 @@ pub fn evacuate(g: &mut Ground, room: &Room, creeps: &[Creep], to: Option<(RoomN
         .as_ref()
         .map_or(0, |(home, _)| tiles::rooms_apart(g.room, *home));
     let energy_kept_under = LEAST_SEND + engine::send_cost(LEAST_SEND, apart);
-    owed.retain(|(r, n)| to.is_some() && *n > 0 && (*r != Energy || *n >= energy_kept_under));
+    let held = |ore: bool| (owed.iter()).filter(move |(r, _)| (*r != Energy) == ore);
+    // What the room's energy cannot send is no shipment: the raze waits on none.
+    let paid = held(false).map(|o| o.1).sum::<i32>() >= send_fee(held(true).map(|o| o.1), apart);
+    let kept = |r, n| (r == Energy && n >= energy_kept_under) || (r != Energy && paid);
+    owed.retain(|(r, n)| to.is_some() && *n > 0 && kept(*r, *n));
     owed.sort_by_key(|(r, _)| *r == Energy);
     g.shipment = owed;
     g.ship_to = to.filter(|_| !g.shipment.is_empty());
