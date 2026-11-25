@@ -112,8 +112,6 @@ const SEEN_AFTER_CAST = 2;
 // The engine's CREEP_SPAWN_TIME.
 const SPAWN_TIME_PER_PART = 3;
 const CREEP_LIFE_TIME = 1500;
-// `MENDER_WORK` in `core/economy/slots.rs`.
-const MENDER_WORK = 2;
 const firstClaimed = (samples, met) => samples.find((s) => Object.keys(s.claimed ?? {}).length && Object.values(s.claimed).every(met))?.t ?? Infinity;
 // A refused "act code" that counts: not an observer's look past a cut world's
 // edge (-10), a room the live map always holds.
@@ -530,11 +528,13 @@ export const events = {
         }),
     );
   },
-  // Each worker of ours but an outpost's mender (upkeep, not spend): `worked`, the acts of its life.
+  // Each worker of ours but one cast for another room than its colony (an outpost's mender, a
+  // claim's pioneer: upkeep, not spend): `worked`, the acts of its life.
   worker: (samples, dir) => {
     const offset = offsetOf(samples);
+    const away = new Set(events.decision(samples, dir).filter((d) => d.kind === "cast" && d.room !== d.colony).map((d) => d.name));
     return livesOf(dir)
-      .filter((b) => b.ours && b.name.startsWith("worker-") && b.body.split("w").length - 1 !== MENDER_WORK)
+      .filter((b) => b.ours && b.name.startsWith("worker-") && !away.has(b.name))
       .map((b) => ({ t: b.first - offset, who: b.name, worked: Object.values(b.acts).reduce((n, k) => n + k, 0) }));
   },
   // Each decision a module reported (`Telemetry.decisions`), its fields beside `kind`.

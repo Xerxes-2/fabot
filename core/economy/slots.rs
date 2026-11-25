@@ -1322,6 +1322,7 @@ pub struct Cast {
     pub name: String,
     pub floor: bool,
     pub slot: String,
+    pub room: RoomName,
 }
 
 /// Why a colony left an open slot uncast this tick.
@@ -1381,6 +1382,7 @@ pub fn casts(
                     body,
                     floor,
                     slot: slot.id.clone(),
+                    room: slot.room,
                 }
             };
         let mut mine: Vec<&Slot> = slots.iter().filter(|s| s.colony == ci).collect();

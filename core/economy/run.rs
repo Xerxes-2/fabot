@@ -7,7 +7,8 @@ use fabot_base::grid::{self, Footprint};
 use fabot_base::intel::Intel;
 use fabot_base::intel::Scout;
 use fabot_base::intents::{
-    Action, Ask, CreepAct, LabAct, LinkAct, ModuleOutput, Rank, SpawnAct, Telemetry, TerminalAct,
+    Action, Ask, CreepAct, Datum::Text, LabAct, LinkAct, ModuleOutput, Rank, SpawnAct, Telemetry,
+    TerminalAct,
 };
 use fabot_base::tiles::{self, TileSet};
 use fabot_base::vocabulary::Part;
@@ -610,6 +611,16 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
             .map(|(g, ci)| (g.room, derived.colonies[ci].room))
             .collect(),
         blocked,
+        decisions: (casts.iter())
+            .map(|c| {
+                let room = |r: RoomName| Text(r.to_string());
+                let name = ("name", Text(c.name.clone()));
+                (
+                    "cast",
+                    vec![name, ("room", room(c.room)), ("colony", room(c.colony))],
+                )
+            })
+            .collect(),
         ..Telemetry::default()
     };
 
