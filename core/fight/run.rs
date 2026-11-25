@@ -10,7 +10,7 @@ use fabot_atlas::{Atlas, Context};
 use fabot_base::declarations::OpKind;
 use fabot_base::engine;
 use fabot_base::intents::{Ask, ModuleOutput, Rank};
-use fabot_base::world::{Creep, Id, Pos, RoomName, StructureType, sightings};
+use fabot_base::world::{self, Creep, Id, Pos, RoomName, StructureType, sightings};
 use fabot_tactics::{self as tactics, Tactic};
 
 /// A merge keeps the older group's id; two engagements on one group are one,
@@ -121,7 +121,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
     let ours: BTreeMap<&str, &Creep> = world.creeps.iter().map(|c| (c.name.as_str(), c)).collect();
     let standing: BTreeSet<String> = world.creeps.iter().map(|c| c.name.clone()).collect();
     let able: BTreeSet<String> = (world.creeps.iter())
-        .filter(|c| !c.spent())
+        .filter(|c| !world::spent(&c.body))
         .map(|c| c.name.clone())
         .collect();
     let aging_out: BTreeSet<String> = world
@@ -314,7 +314,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
                     let next = sweep::step(
                         &sweep::Facts {
                             time: world.time,
-                            standing: standing.clone(),
+                            standing: able.clone(),
                             aging_out: aging_out.clone(),
                             asked: scene.spawning.iter().any(|c| c.engagement == e.id),
                             arrived: members.iter().all(|c| c.pos.room == e.room),

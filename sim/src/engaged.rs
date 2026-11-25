@@ -26,7 +26,7 @@ pub fn row(v: &View, memory: &str, t: u64, open: &mut bool) -> Option<Value> {
             json!({ "id": text(o, atom!("_id")), "name": name.and_then(|n| n.as_str()), "room": room,
                 "x": num(o, atom!("x")), "y": num(o, atom!("y")), "hits": num(o, atom!("hits")),
                 "hitsMax": num(o, atom!("hitsMax")), "type": kind, "ours": v.ours(o),
-                "ttl": num(o, atom!("creepTicksToLive")) })
+                "ttl": num(o, atom!("creepTicksToLive")), "spent": crate::read::spent(o) })
         })
         .collect();
     let struck: Vec<Value> = (v.rooms.iter().flat_map(Room::events))

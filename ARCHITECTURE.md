@@ -593,7 +593,8 @@ with one phase machine per kind under `core/fight/kinds/`.
   enemy holds or reached only past a rival's towers; rooms
   with a tracker group still in `Lost` grace are not stale so a set never walks
   straight back into an escort it just left) rather than returning home; closes
-  unanswered, on its first loss in a room or with nowhere to go
+  unanswered, on its first loss in a room (a body disarmed is one, as
+  to an outpost Defend, and walks home to be recycled) or with nowhere to go
   (losses start afresh on each room; the log keeps their total). Past the
   deadline a home's `Defend` keeps, a forming set drops its unbegun casts and
   goes on only if its standing bodies hold its room, else closes (its bodies

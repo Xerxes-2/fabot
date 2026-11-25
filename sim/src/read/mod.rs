@@ -44,6 +44,10 @@ pub fn build_cost(kind: &str) -> i32 {
     kind.and_then(StructureType::construction_cost).unwrap_or(0) as i32
 }
 
+pub fn spent(o: &Obj) -> bool {
+    fabot_base::world::spent(&Reader::body(o))
+}
+
 struct Reader<'a> {
     time: i32,
     declarations: &'a Declarations,

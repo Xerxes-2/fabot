@@ -12,7 +12,7 @@ use fabot_base::vocabulary::Part;
 use fabot_base::wish::Wish;
 use fabot_base::world::{
     Controller, Creep, Fallen, Id, Oven, Owner, Pos, RoomName, Spawn, Structure, StructureType,
-    World, cast,
+    World, cast, spent,
 };
 use fabot_base::{declarations, engine};
 use fabot_exchange::Outcome;
@@ -63,10 +63,12 @@ pub fn give_up(held: bool, time: i32, e: &Engagement) -> Engagement {
 }
 
 pub(crate) fn free(c: &Creep) -> bool {
-    declarations::fights(&c.name) && !c.spent() && c.ticks_to_live > engine::AGED_OUT_TICKS_TO_LIVE
+    declarations::fights(&c.name)
+        && !spent(&c.body)
+        && c.ticks_to_live > engine::AGED_OUT_TICKS_TO_LIVE
 }
 
-/// Cast by a Defend standing given up, drafted by no answer since and no open sweep's to take.
+/// Held by no answer: disarmed, or cast by a Defend standing given up and no open sweep's to take.
 fn released((scene, atlas): (&Scene, &Atlas), fights: Fights, c: &Creep) -> bool {
     let (decided, casts, grounds) = fights;
     // An id is reused once closed: a body asked before this Defend opened is not its.
@@ -84,7 +86,8 @@ fn released((scene, atlas): (&Scene, &Atlas), fights: Fights, c: &Creep) -> bool
         e.objective == Objective::Sweep
             && ground.is_some_and(|(r, g)| scene.takes_in(atlas, (e, casts), c, (g, r)))
     };
-    !drafted && cast_of(&c.name).is_some_and(gave_up) && !(free(c) && decided.iter().any(taken))
+    let given_up = cast_of(&c.name).is_some_and(gave_up) && !(free(c) && decided.iter().any(taken));
+    !drafted && declarations::fights(&c.name) && (spent(&c.body) || given_up)
 }
 
 /// The engagements decided, their casts and the sweeps' grounds.

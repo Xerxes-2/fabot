@@ -500,6 +500,7 @@ export const events = {
       bug: bugs(tested([e])).length,
       pastBudget: e.dead - (e.budget ?? 0) - (homes.has(e.room) ? 0 : OUTPOST_LOSSES),
       raised: e.raised ?? 0,
+      disarmed: e.disarmed ?? 0,
     }));
   },
   // Each home's safe mode, at the first sample it runs in: `killed`, our bodies killed there since

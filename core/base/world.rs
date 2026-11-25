@@ -985,12 +985,11 @@ impl Creep {
     pub fn swings(&self) -> bool {
         self.body.iter().any(|p| p.kind == Part::Attack)
     }
+}
 
-    /// Legs and a hold alone fight for nothing; only a home's towers heal them back.
-    pub fn spent(&self) -> bool {
-        !(self.body.iter())
-            .any(|p| p.hits > 0 && !matches!(p.kind, Part::Move | Part::Tough | Part::Carry))
-    }
+/// Legs and a hold alone fight for nothing; only a home's towers heal them back.
+pub fn spent(body: &[BodyPart]) -> bool {
+    !(body.iter()).any(|p| p.hits > 0 && !matches!(p.kind, Part::Move | Part::Tough | Part::Carry))
 }
 
 #[inline]

@@ -1,0 +1,19 @@
+{
+  "why": "a sweep body the bot reads spent (`Creep::spent`: nothing but MOVE, TOUGH and CARRY lives) leaves the sweep, counted lost as to an outpost Defend, and walks home to be recycled (sweep-casts-what-its-spawns-land's self-play start; engagement field `disarmed`, the member-ticks a sweep held a spent body, read off sim's `spent` per body). On its parent 61 of alpha's 129 sweeps and 28 of beta's 50 held one more than a tick (alpha's sweep 2 for 704 ticks, beta's sweep 3 for 868); now none, one tick at most, the tick it is seen. Bodies lost 54/19 -> 13/5",
+  "modules": ["fight"],
+  "start": {
+    "gen": 7,
+    "seed": 1,
+    "players": [
+      { "name": "alpha", "declarations": { "enemies": ["beta"] } },
+      { "name": "beta", "declarations": { "enemies": ["alpha"] } }
+    ]
+  },
+  "ticks": 30000,
+  "assert": [
+    { "measure": "bodiesLost", "max": 78 },
+    { "measure": "bodiesLost", "seat": "beta", "max": 92 },
+    { "each": "engagement", "where": { "kind": "sweep" }, "assert": { "disarmed": { "max": 1 } } },
+    { "each": "engagement", "seat": "beta", "where": { "kind": "sweep" }, "assert": { "disarmed": { "max": 1 } } }
+  ]
+}

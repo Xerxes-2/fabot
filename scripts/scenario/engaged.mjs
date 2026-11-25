@@ -106,6 +106,9 @@ export function engagements(write, at, bodyOf = () => "") {
         [rec.formedSince, rec.formingSet] = [e.phase === "forming" ? e.since : null, set];
         // A sweep with all its bodies in its room: `bare`, the most ticks on end no rival creep stood there.
         if (rec.kind !== "sweep") continue;
+        // `disarmed`: the member-ticks it held a body the bot reads spent (`Creep::spent`, sim's engaged.rs).
+        if (bodies.some((o) => o.spent === undefined)) throw new Error("fight.jsonl carries no `spent`: a sim from before it");
+        rec.disarmed = (rec.disarmed ?? 0) + bodies.filter((o) => o.spent).length;
         const held = bodies.length > 0 && bodies.every((o) => o.room === e.room);
         const rivals = held ? objects.filter((o) => o.type === "creep" && !o.ours && o.room === e.room) : [];
         rec.empty = held && !rivals.length ? rec.empty + 1 : 0;
