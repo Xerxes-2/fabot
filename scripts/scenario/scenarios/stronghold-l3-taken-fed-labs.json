@@ -25,6 +25,11 @@
       "min": 30
     },
     {
+      "measure": "ruinLootLeft",
+      "room": "W8N2",
+      "max": 0
+    },
+    {
       "measure": "castIn",
       "room": "W8N3",
       "name": "fight-",

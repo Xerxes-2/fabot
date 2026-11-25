@@ -760,8 +760,7 @@ impl<'a> Jobs<'a> {
                 // them, so the ring never waits on a body gone to an outpost.
                 let home = self.derived.colonies[ci].room;
                 let far = slots::far(slot);
-                // Topped up from a store, a mineral would go back to the store
-                // it came from.
+                // A mineral topped up from a store goes back to it; loot is from none of ours.
                 let aboard = |r: ResourceType| r != Energy && body.store.amount_of(r) > 0;
                 let ore = body.store.held.iter().any(|(r, _)| aboard(*r));
                 let ground = (self.atlas, self.derived);
@@ -769,7 +768,9 @@ impl<'a> Jobs<'a> {
                     let draws = |of: &dyn Fn(ResourceType) -> bool| matches!(&s.task, Task::Withdraw(_, r) | Task::Pickup(_, r) if of(*r));
                     (far || s.pos.room == home)
                         && (room > 0 || !draws(&|r| r == Energy))
-                        && (!ore || matches!(s.of, Of::Drain) && draws(&aboard))
+                        && (!ore
+                            || matches!(s.of, Of::Drain) && draws(&aboard)
+                            || matches!(s.of, Of::Pickup | Of::Loot) && !draws(&|r| r == Energy))
                         && reached(ground, &body.pos, &s.pos)
                 };
                 let mut takes = std::mem::take(&mut self.takes[ci]);

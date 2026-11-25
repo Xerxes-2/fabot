@@ -131,10 +131,13 @@ pub fn stronghold(k: &mut World, room: &str, level: u32, deploy: u32) {
 pub fn strongholds(v: &View, intel: &Intel) -> Value {
     let rooms = v.rooms.iter().filter_map(|room| {
         let Some(core) = (room.of("invaderCore")).find(|o| num(o, atom!("level")) > 0.0) else {
-            let held = ["ruin", "container", "tombstone"].into_iter().flat_map(|k| room.of(k));
-            let loot: f64 = held.map(|o| used(o) - store(o, atom!("energy"))).sum();
+            let loot_of = |kinds: &[&str]| -> f64 {
+                let held = kinds.iter().flat_map(|k| room.of(k));
+                held.map(|o| used(o) - store(o, atom!("energy"))).sum()
+            };
+            let (loot, ruin) = (loot_of(&["ruin", "container", "tombstone"]), loot_of(&["ruin"]));
             let fallen = room.of("rampart").any(|o| text(o, atom!("user")) == INVADER);
-            return fallen.then(|| (room.name.to_string(), json!({ "level": 0, "loot": loot })));
+            return fallen.then(|| (room.name.to_string(), json!({ "level": 0, "loot": loot, "ruin": ruin })));
         };
         let row = room.name.parse().ok().and_then(|r| intel.get(&r));
         let read = row.and_then(|r| r.stronghold.map(|s| json!([s.level, s.deploys_at, s.collapses_at, r.seen])));

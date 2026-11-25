@@ -458,6 +458,8 @@ export const measures = {
     const most = Math.max(0, ...fallen.map((h) => h.loot));
     return most > 0 ? Math.round((100 * (most - fallen.at(-1).loot)) / most) : 0;
   }),
+  // The loot `room`'s ruins still held (energy aside) at the window's last fallen sample.
+  ruinLootLeft: on("room from to", (samples, a) => within(samples, a).map((s) => s.strongholds?.[a.room]).filter((h) => h?.level === 0).at(-1)?.ruin ?? Infinity),
   // Samples in the window where intel read a still-deploying stronghold's deploy tick.
   strongholdDeploying: on("from to", (samples, a) =>
     within(samples, a).filter((s) => Object.values(s.strongholds ?? {}).some((h) => h.deployTime && h.intel?.[1] === h.deployTime)).length),
