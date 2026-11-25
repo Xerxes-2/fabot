@@ -231,8 +231,7 @@ pub fn derive(world: &World, atlas: &mut Atlas) -> Derived {
         .filter_map(|home| {
             let room = world.room(*home)?;
             let level = room.controller.as_ref().map_or(0, |c| c.level);
-            let stocked = (room.structures.iter())
-                .any(|s| s.kind == StructureType::Storage && s.owner.is_ours());
+            let stocked = room.storage().is_some();
             Some(Home {
                 spawn: world.working_spawns().find(|s| s.pos.room == *home)?.pos,
                 stocked,

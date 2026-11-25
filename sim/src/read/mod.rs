@@ -151,15 +151,9 @@ impl Reader<'_> {
         };
         let public = matches!(o.get(atom!("isPublic")), Some(Val::Bool(true)));
         let core = kind == StructureType::InvaderCore;
-        // As `read.js`: a core not yet collapsing collapses at the latest after its deploy.
         let deploy = (num(o, atom!("deployTime")) as i32 - self.time).max(0);
-        let (collapse, deploy) = match crate::npc::collapse(o) {
-            Some(end) => (end as i32 - self.time, 0),
-            None => (
-                deploy + fabot_base::engine::STRONGHOLD_LONGEST_COLLAPSE,
-                deploy,
-            ),
-        };
+        let collapse = crate::npc::collapse(o).map(|end| end as i32 - self.time);
+        let (collapse, deploy) = fabot_base::engine::core_clock(collapse, deploy);
         Structure {
             id: Id::of_engine(text(o, atom!("_id"))),
             pos: self.pos(room, o),
@@ -181,11 +175,7 @@ impl Reader<'_> {
             spawn: (kind == StructureType::KeeperLair)
                 .then(|| num(o, atom!("nextSpawnTime")) as i32 - self.time)
                 .filter(|t| *t >= 0),
-            walkable: if kind == StructureType::Rampart {
-                owner.is_ours() || public
-            } else {
-                kind.walkable()
-            },
+            walkable: fabot_base::world::walkable(kind, &owner, public),
             owner,
             kind,
         }

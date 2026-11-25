@@ -194,15 +194,8 @@ pub struct Telemetry {
     /// Each outpost and the colony that builds there (`jobs::served`).
     pub served: Vec<(RoomName, RoomName)>,
     pub blocked: Vec<(RoomName, &'static str)>,
-    pub decisions: Vec<(&'static str, Vec<(&'static str, Datum)>)>,
+    pub decisions: Vec<(&'static str, Vec<(&'static str, String)>)>,
     pub struck: std::collections::BTreeSet<Id>,
-}
-
-#[derive(Clone, serde::Serialize)]
-#[serde(untagged)]
-pub enum Datum {
-    Int(i64),
-    Text(String),
 }
 
 /// A module's tick: `Tick` settles the asks and wishes of every module as one.

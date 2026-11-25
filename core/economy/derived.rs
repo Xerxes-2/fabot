@@ -541,17 +541,13 @@ fn body_of(
     }
 }
 
-fn reservable(c: &Controller) -> bool {
-    c.owner == Owner::Nobody && c.reservation.as_ref().is_none_or(|(by, _)| by.is_ours())
-}
-
 pub fn invader_held(c: &Controller) -> bool {
     matches!(c.reservation, Some((Owner::Invader, _)))
 }
 
 /// v1's: a claimer attacks the Invader's hold off before it reserves.
 fn takeable(c: &Controller) -> bool {
-    reservable(c) || invader_held(c)
+    c.reservable() || invader_held(c)
 }
 
 /// `None` where the Atlas counts none: unknown, not zero.
@@ -840,10 +836,7 @@ fn ground_of(
     let owned_room = room.controller.as_ref().is_some_and(|c| c.owner.is_ours());
     let built = Atlas::buffer(room);
     let is_buffer = |id: Id| built.is_some_and(|b| b.id == id);
-    let storage = room
-        .structures
-        .iter()
-        .find(|s| s.kind == StructureType::Storage && s.owner.is_ours());
+    let storage = room.storage();
 
     let links = links_of(room, &working, &is_buffer, storage);
 
@@ -1472,7 +1465,7 @@ fn remote_of(
     let capacity = server.map_or(0, |s| ours.homes[s].capacity);
 
     match &room.controller {
-        Some(c) if !c.owner.is_ours() && !reservable(c) => {
+        Some(c) if !c.open_to_us() => {
             let mut bare = room.clone().into_owned();
             bare.sources = Vec::new();
             ground_of((atlas, &world.rules), capacity, 0, &bare, 0)
@@ -1748,7 +1741,7 @@ pub fn of_world<'t>(
             Some(room) => room.controller.clone(),
             None => intel::blind(claim, intel, world, declarations).controller,
         })
-        .filter(reservable)
+        .filter(Controller::reservable)
         .collect();
     let pickups = pickups_of(
         (world, atlas, intel),

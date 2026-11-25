@@ -10,33 +10,22 @@ use fabot_base::tiles;
 use fabot_base::vocabulary::Part;
 use fabot_base::world::{Owner, Room, RoomName, Rules, Structure, StructureType, World};
 
-/// `Owner::of_user`'s inverse: a row outlives the stance it was seen under.
-fn user(me: &str, owner: &Owner) -> Option<String> {
-    match owner {
-        Owner::Ours => Some(me.to_string()),
-        Owner::Ally(user) | Owner::Enemy(user) | Owner::Stranger(user) => Some(user.clone()),
-        Owner::Invader => Some(screeps::INVADER_USERNAME.to_string()),
-        Owner::Keeper => Some(screeps::SOURCE_KEEPER_USERNAME.to_string()),
-        Owner::Nobody => None,
-    }
-}
-
 pub fn step(world: &World, atlas: &Atlas, intel: &mut Intel) {
     for room in &world.rooms {
         let c = room.controller.as_ref();
         let row = Row {
             seen: world.time,
-            owner: c.and_then(|c| user(&world.me, &c.owner)),
+            owner: c.and_then(|c| c.owner.username(&world.me)),
             level: c.map_or(0, |c| c.level),
             reservation: c
                 .and_then(|c| c.reservation.as_ref())
-                .and_then(|(owner, left)| Some((user(&world.me, owner)?, world.time + left))),
+                .and_then(|(owner, left)| Some((owner.username(&world.me)?, world.time + left))),
             // An ally's body is never hunted, so it never hides an enemy's.
             worker: room
                 .hostiles()
                 .filter(|h| h.owner != Owner::Invader)
                 .find(|h| h.body.iter().any(|p| p.kind == Part::Work))
-                .and_then(|h| user(&world.me, &h.owner)),
+                .and_then(|h| h.owner.username(&world.me)),
             lairs: Some(Atlas::posts(room)),
             controller: c.map(|c| Declared {
                 id: c.id,

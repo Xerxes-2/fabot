@@ -7,7 +7,7 @@ use fabot_base::declarations::{self, ColonyPlan};
 use fabot_base::grid::Footprint;
 use fabot_base::intents::{Action, RoomAct};
 use fabot_base::tiles::{self, Tile, TileSet};
-use fabot_base::world::{Owner, Pos, Room, RoomName, StructureType, World, terrain};
+use fabot_base::world::{Controller, Pos, Room, RoomName, StructureType, World, terrain};
 
 use super::shape::Plan;
 use super::sites::SITES_IN_FLIGHT;
@@ -22,15 +22,6 @@ const HAULER: Mover = Mover {
 
 /// Bounds a walk that never arrives.
 const LONGEST: usize = ((declarations::REACH_HOPS + 1) * 2 * tiles::SIDE) as usize;
-
-/// The engine refuses a site under anyone else's hold.
-fn ours(room: &Room) -> bool {
-    room.controller.as_ref().is_none_or(|c| match &c.owner {
-        Owner::Ours => true,
-        Owner::Nobody => c.reservation.as_ref().is_none_or(|(by, _)| by.is_ours()),
-        _ => false,
-    })
-}
 
 fn opened(
     taken: &mut BTreeMap<RoomName, TileSet>,
@@ -111,8 +102,7 @@ fn sink_for<'p>(
     );
     let home = derived.colonies[atlas::server_of(atlas, derived, planned, anchors)?];
 
-    (world.room(home)?.structures.iter())
-        .find(|s| s.kind == StructureType::Storage && s.owner.is_ours())
+    (world.room(home)?.storage())
         .map(|s| s.pos)
         .or_else(|| planned(home)?.pile)
 }
@@ -135,7 +125,8 @@ pub fn sites<'p>(
 
     for room in &world.rooms {
         if colonies.contains(&room.name)
-            || (outposts.iter().any(|o| o.room == room.name) && ours(room))
+            || (outposts.iter().any(|o| o.room == room.name)
+                && room.controller.as_ref().is_none_or(Controller::open_to_us))
         {
             rooms.insert(room.name, room);
         }

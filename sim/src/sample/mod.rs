@@ -4,14 +4,14 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod labs;
 
-use fabot_base::engine::road_ratio;
+use fabot_base::engine::{self, road_ratio};
 use krebs::atom;
 use krebs::constants::{CREEP_CORPSE_RATE, CREEP_PART_MAX_ENERGY};
 use krebs::doc::{Atom, Obj, Val};
 use krebs::intents::RoomIntents;
 use screeps::{
-    CREEP_LIFE_TIME, ENERGY_DECAY, LINK_LOSS_RATIO, Part, REPAIR_COST, SPAWN_ENERGY_CAPACITY,
-    StructureType, TOWER_ENERGY_COST, controller_levels,
+    ENERGY_DECAY, LINK_LOSS_RATIO, Part, REPAIR_COST, SPAWN_ENERGY_CAPACITY, StructureType,
+    controller_levels,
 };
 use serde_json::{Map, Value, json};
 
@@ -51,7 +51,7 @@ fn reserve(level: u32) -> f64 {
         return 0.0;
     }
     let towers = f64::from(StructureType::Tower.controller_structures(level));
-    towers * f64::from(TOWER_ENERGY_COST) * f64::from(CREEP_LIFE_TIME) * 2.0
+    towers * f64::from(engine::tower_spend(engine::CREEP_LIFETIME)) * 2.0
 }
 
 /// A creep's body, or a tombstone's.
@@ -283,7 +283,7 @@ impl Sampler {
                         line.upgrade += spent.unwrap_or(0.0);
                     }
                     EVENT_REPAIR if by_tower => {
-                        ledger.tower += spent.unwrap_or(f64::from(TOWER_ENERGY_COST))
+                        ledger.tower += spent.unwrap_or(f64::from(engine::tower_spend(1)))
                     }
                     EVENT_REPAIR => {
                         ledger.repair += spent.unwrap_or(0.0);
@@ -294,7 +294,7 @@ impl Sampler {
                         ledger.linked += amount - kept;
                     }
                     EVENT_ATTACK | EVENT_HEAL if by_tower => {
-                        ledger.tower += f64::from(TOWER_ENERGY_COST)
+                        ledger.tower += f64::from(engine::tower_spend(1))
                     }
                     EVENT_OBJECT_DESTROYED if lost(&e.data["type"]) => self.structures_lost += 1,
                     _ => {}

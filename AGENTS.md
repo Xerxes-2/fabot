@@ -21,10 +21,11 @@ one place for a fact to two, and short reports to long ones.
 - **No room name, player name, or object id in source:** they are `declarations`.
 - **One rule, one place.** An engine or game rule (strike/heal at a range,
   body cost and spawn time, fatigue and walk time, tower falloff, ownership
-  and IFF filters, room distance) belongs once in `core/base` (`engine.rs`,
+  and IFF filters, room distance) belongs once in `core/base` (`engine/`,
   `world.rs`, `tiles.rs`); every caller calls it. A second copy is a bug
   even when it agrees today.
-  `npm run ceiling` fails on combat constants outside `engine.rs`/`world.rs`.
+  `npm run ceiling` fails on combat constants outside `engine/`/`world.rs`,
+  and on other engine constants outside `core/base`.
 - **Ceilings (`scripts/ceilings.json`) never rise:** line and comment-share
   ceilings (`npm run ceiling`) and per-tick count ceilings (`npm run scenario`,
   §9.3). Pay for every addition by deleting first.

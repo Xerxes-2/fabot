@@ -143,9 +143,8 @@ pub fn wall(
 
 /// The threat in, a reserve out, as a priced choice would be (§5).
 pub fn reserve(rules: &Rules, t: &Tuning, level: i32, threatened: bool) -> i32 {
-    let fire = rules.allowed(StructureType::Tower, level)
-        * engine::TOWER_ENERGY_COST
-        * engine::CREEP_LIFETIME;
+    let fire =
+        rules.allowed(StructureType::Tower, level) * engine::tower_spend(engine::CREEP_LIFETIME);
     let full = (f64::from(fire) * t.reserve_lifetimes) as i32;
     if threatened {
         full
@@ -217,8 +216,7 @@ pub fn plan<'t>(
             let kept = reserve(&world.rules, tuning, level, threatened);
             let rival = threat.unwrap_or(level);
             let (rampart_hits, outheals) = wall(&world.rules, tuning, (rival, level), threatened);
-            let stored = (room.structures.iter())
-                .any(|s| s.kind == StructureType::Storage && s.owner.is_ours());
+            let stored = room.storage().is_some();
             let standing = layout.get(&room.name);
             let plan = standing.and_then(|s| s.plan.as_ref());
             let hub = match (plan, standing) {

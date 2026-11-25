@@ -1,6 +1,7 @@
 // The line and comment-share ceilings in scripts/ceilings.json, checked, and
 // no issue or ADR citation in code, nor a combat rule constant outside
-// core/base/engine and core/base/world.rs. A directory's line count is every line of every .rs beneath it,
+// core/base/engine and core/base/world.rs, nor another engine rule constant
+// outside core/base. A directory's line count is every line of every .rs beneath it,
 // minus the files of any row beneath it: a `<dir>/*` row holds each of its
 // files to its own ceiling, a `<dir>` row its whole tree. A comment share is
 // per directory of the bot's source (`src`, `core`, `sim`), over its own .rs
@@ -97,34 +98,36 @@ if (cited.length > 0) {
   process.exit(1);
 }
 
-// Combat rules live in engine and world alone; others call their functions.
-const RULE_HOMES = ["core/base/engine/mod.rs", "core/base/world.rs"];
-const RULE =
-  /\b(?:RANGED_)?(?:ATTACK|HEAL)_POWER\b|\bRANGED_MASS_ATTACK_POWER\w*|\bTOWER_(?:POWER_\w+|FALLOFF\w*|OPTIMAL_RANGE)\b/g;
-const RULE_ALLOWED = {
-  // The tower's reach, not its falloff damage.
-  "core/atlas/derived.rs": ["TOWER_FALLOFF_RANGE"],
-  "core/fight/kinds/siege.rs": ["TOWER_FALLOFF_RANGE"],
-};
-const ruled = ROOTS.flatMap(rsFiles)
-  .filter((file) => !RULE_HOMES.includes(file))
-  .flatMap((file) =>
-    readFileSync(file, "utf8")
-      .split("\n")
-      .map((line, i) => [file, i + 1, line])
-      .filter(([, , line]) =>
-        (line.match(RULE) ?? []).some(
-          (name) => !RULE_ALLOWED[file]?.includes(name),
-        ),
-      ),
-  );
-for (const [file, n, line] of ruled)
-  console.error(`RULE ${file}:${n}: ${line.trim()}`);
-if (ruled.length > 0) {
-  console.error(
-    `ceiling: ${ruled.length} combat rule constant(s) outside engine/world; call engine::strike_at / heal_at / mass_at / tower_attack_at`,
-  );
-  process.exit(1);
+// Engine rules live in core/base alone; others call its functions.
+const RULES = [
+  {
+    homes: ["core/base/engine/mod.rs", "core/base/world.rs"],
+    names: /\b(?:RANGED_)?(?:ATTACK|HEAL)_POWER\b|\bRANGED_MASS_ATTACK_POWER\w*|\bTOWER_(?:POWER_\w+|FALLOFF\w*|OPTIMAL_RANGE)\b/g,
+    // The tower's reach, not its falloff damage.
+    allowed: { "core/atlas/derived.rs": ["TOWER_FALLOFF_RANGE"], "core/fight/kinds/siege.rs": ["TOWER_FALLOFF_RANGE"] },
+    calls: "engine::strike_at / heal_at / mass_at / tower_attack_at",
+  },
+  {
+    homes: ["core/base/"],
+    names: /\b(?:SPAWN_TICKS_PER_PART|CARRY_PART_CAPACITY|TOWER_ENERGY_COST|HARVEST_PER_WORK)\b/g,
+    allowed: {},
+    calls: "engine::spawn_ticks / carry_capacity / carry_parts / dig_rate / dug / work_to_dig / tower_shots / tower_spend",
+  },
+];
+for (const { homes, names, allowed, calls } of RULES) {
+  const ruled = ROOTS.flatMap(rsFiles)
+    .filter((file) => !homes.some((home) => file.startsWith(home)))
+    .flatMap((file) =>
+      readFileSync(file, "utf8")
+        .split("\n")
+        .map((line, i) => [file, i + 1, line])
+        .filter(([, , line]) => (line.match(names) ?? []).some((name) => !allowed[file]?.includes(name))),
+    );
+  for (const [file, n, line] of ruled) console.error(`RULE ${file}:${n}: ${line.trim()}`);
+  if (ruled.length > 0) {
+    console.error(`ceiling: ${ruled.length} engine rule constant(s) outside ${homes.join(", ")}; call ${calls}`);
+    process.exit(1);
+  }
 }
 
 const dirs = [

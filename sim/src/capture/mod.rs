@@ -127,22 +127,12 @@ fn pos(p: Pos) -> Value {
 }
 
 impl Game<'_> {
-    fn username(&self, owner: &Owner) -> Option<String> {
-        match owner {
-            Owner::Ours => Some(self.me.to_string()),
-            Owner::Ally(n) | Owner::Enemy(n) | Owner::Stranger(n) => Some(n.clone()),
-            Owner::Invader => Some(screeps::INVADER_USERNAME.to_string()),
-            Owner::Keeper => Some(screeps::SOURCE_KEEPER_USERNAME.to_string()),
-            Owner::Nobody => None,
-        }
-    }
-
     /// An object by its id, `fields` beside its position and owner; the key back.
     fn put(&mut self, id: Id, at: Pos, owner: Option<&Owner>, mut fields: Value) -> String {
         fields["pos"] = pos(at);
         if let Some(owner) = owner {
             fields["my"] = json!(owner.is_ours());
-            if let Some(name) = self.username(owner) {
+            if let Some(name) = owner.username(self.me) {
                 fields["owner"] = json!({ "username": name });
             }
         }
@@ -197,10 +187,10 @@ impl Game<'_> {
                     "upgradeBlocked": c.upgrade_blocked });
                 if let Some((owner, left)) = &c.reservation {
                     fields["reservation"] =
-                        json!({ "username": self.username(owner), "ticksToEnd": left });
+                        json!({ "username": owner.username(self.me), "ticksToEnd": left });
                 }
                 if let Some((owner, text)) = &c.sign {
-                    fields["sign"] = json!({ "username": self.username(owner), "text": text });
+                    fields["sign"] = json!({ "username": owner.username(self.me), "text": text });
                 }
             }
             Kind::KeeperLair => fields["ticksToSpawn"] = json!(s.spawn),

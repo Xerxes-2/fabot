@@ -1140,7 +1140,7 @@ fn towers_on(
 ) -> i32 {
     let loaded: Vec<&Tower> = towers
         .iter()
-        .filter(|t| t.energy >= engine::TOWER_ENERGY_COST)
+        .filter(|t| engine::tower_shots(t.energy) > 0)
         .collect();
 
     let on = |h: &Foe| -> i32 {
@@ -1197,10 +1197,9 @@ fn razes(ours: &Side, theirs: &Side, terrain: Terrain, price: &Price, ticks: i32
 
 /// Each loaded tower spends its energy a shot a tick; no hauler refill is counted.
 fn towers_last(towers: &[Tower], ticks: i32) -> bool {
-    let shots = i64::from(ticks) * i64::from(engine::TOWER_ENERGY_COST);
     (towers.iter())
-        .filter(|t| t.energy >= engine::TOWER_ENERGY_COST)
-        .all(|t| shots <= i64::from(t.energy))
+        .map(|t| engine::tower_shots(t.energy))
+        .all(|shots| shots == 0 || ticks <= shots)
 }
 
 fn exchange(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> Outcome {
@@ -1871,9 +1870,8 @@ mod tests {
 
             match outcome(stance, &towers, &raid, ground) {
                 Outcome::Win(ticks, _) => {
-                    let loaded = energy.iter().filter(|e| **e >= engine::TOWER_ENERGY_COST);
-                    for e in loaded {
-                        prop_assert!(ticks * engine::TOWER_ENERGY_COST <= *e, "dry by t{ticks}");
+                    for shots in energy.iter().map(|e| engine::tower_shots(*e)) {
+                        prop_assert!(shots == 0 || ticks <= shots, "dry by t{ticks}");
                     }
                 }
                 _ => prop_assert!(energy != [1000, 1000], "full towers outlast every raid drawn"),

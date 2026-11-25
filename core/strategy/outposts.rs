@@ -10,7 +10,7 @@ use fabot_base::intel::Intel;
 use fabot_base::tiles;
 use fabot_base::tuning::Tuning;
 use fabot_base::vocabulary::{CLAIMER, Part};
-use fabot_base::world::{Owner, Pos, RoomName, StructureType, World};
+use fabot_base::world::{Owner, Pos, RoomName, World};
 use fabot_economy::bodies;
 use fabot_economy::slots;
 use fabot_fight::casting;
@@ -156,9 +156,7 @@ pub fn casters(
 }
 
 fn stocked(world: &World, home: RoomName) -> bool {
-    world.room(home).is_some_and(|r| {
-        (r.structures.iter()).any(|s| s.kind == StructureType::Storage && s.owner.is_ours())
-    })
+    world.room(home).is_some_and(|r| r.storage().is_some())
 }
 
 pub fn chosen(

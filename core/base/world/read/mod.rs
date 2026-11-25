@@ -188,21 +188,13 @@ impl<'a> Reader<'a> {
         let (collapse, deploy, level) = if kind == StructureType::InvaderCore {
             let running = self.flag();
             let ticks = self.n();
-            let (collapse, deploy) = if running {
-                (ticks, 0)
-            } else {
-                (ticks + engine::STRONGHOLD_LONGEST_COLLAPSE, ticks)
-            };
+            let (collapse, deploy) = engine::core_clock(running.then_some(ticks), ticks);
             (collapse, deploy, self.n())
         } else {
             (0, 0, 0)
         };
-        let walkable = if kind == StructureType::Rampart {
-            let public = self.flag();
-            owner.is_ours() || public
-        } else {
-            kind.walkable()
-        };
+        let public = kind == StructureType::Rampart && self.flag();
+        let walkable = super::walkable(kind, &owner, public);
         Some(Structure {
             id,
             kind,

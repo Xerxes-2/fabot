@@ -10,7 +10,7 @@ use crate::tick;
 use fabot_atlas::Atlas;
 use fabot_base::declarations::Declarations;
 use fabot_base::intel::Intel;
-use fabot_base::intents::{Action, Datum, Refusal};
+use fabot_base::intents::{Action, Refusal};
 use fabot_base::tiles;
 use fabot_base::world::Pos;
 use fabot_base::world::{RoomName, Sightings, World};
@@ -39,7 +39,7 @@ pub struct Ran<'t> {
     pub traces: Vec<(String, Vec<(Pos, i64)>)>,
     /// `engagements.log`'s rows of the engagements closed this tick.
     pub closed: Vec<String>,
-    pub decisions: Vec<(&'static str, Vec<(&'static str, Datum)>)>,
+    pub decisions: Vec<(&'static str, Vec<(&'static str, String)>)>,
 }
 
 /// The terrain a driver has read: a room's, and every room's for the Atlas.

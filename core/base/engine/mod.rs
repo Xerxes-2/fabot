@@ -11,6 +11,11 @@ pub const CREEP_LIFETIME: i32 = screeps::CREEP_LIFE_TIME as i32;
 pub const CLAIM_LIFETIME: i32 = screeps::CREEP_CLAIM_LIFE_TIME as i32;
 /// ×1.1: the longest a deployed core stands.
 pub const STRONGHOLD_LONGEST_COLLAPSE: i32 = screeps::STRONGHOLD_DECAY_TICKS as i32 * 11 / 10;
+
+/// A core's `(collapse, deploy)`: one not yet collapsing collapses at the latest after its deploy.
+pub fn core_clock(collapse: Option<i32>, deploy: i32) -> (i32, i32) {
+    collapse.map_or((deploy + STRONGHOLD_LONGEST_COLLAPSE, deploy), |c| (c, 0))
+}
 pub const SPAWN_TICKS_PER_PART: i32 = screeps::CREEP_SPAWN_TIME as i32;
 
 pub const fn spawn_ticks(parts: usize) -> i32 {
@@ -80,6 +85,14 @@ pub const TOWER_POWER_ATTACK: i32 = screeps::TOWER_POWER_ATTACK as i32;
 pub const TOWER_CAPACITY: i32 = screeps::TOWER_CAPACITY as i32;
 /// A tower holding less does nothing.
 pub const TOWER_ENERGY_COST: i32 = screeps::TOWER_ENERGY_COST as i32;
+
+pub fn tower_shots(energy: i32) -> i32 {
+    energy / TOWER_ENERGY_COST
+}
+
+pub fn tower_spend(shots: i32) -> i32 {
+    shots * TOWER_ENERGY_COST
+}
 pub const TOWER_FALLOFF_RANGE: i32 = screeps::TOWER_FALLOFF_RANGE as i32;
 pub const PART_HITS: i32 = screeps::CREEP_HITS_PER_PART as i32;
 pub const HELD_OUTPUT_PER_TICK: i32 =

@@ -299,6 +299,16 @@ impl Owner {
         !self.is_friend() && *self != Owner::Nobody
     }
 
+    /// `of_user`'s inverse: an intel row outlives the stance it was seen under.
+    pub fn username(&self, me: &str) -> Option<String> {
+        match self {
+            Owner::Ours => Some(me.to_string()),
+            Owner::Invader => Some(screeps::INVADER_USERNAME.to_string()),
+            Owner::Keeper => Some(screeps::SOURCE_KEEPER_USERNAME.to_string()),
+            _ => self.user().map(str::to_string),
+        }
+    }
+
     /// The username behind the stance; none for an Invader, keeper or empty seat.
     pub fn user(&self) -> Option<&str> {
         match self {
@@ -371,6 +381,11 @@ impl Built for StructureType {
         use StructureType::*;
         matches!(self, Road | Container | Rampart | Portal)
     }
+}
+
+/// A rampart is walked by its owner alone, or by anyone while public.
+pub fn walkable(kind: StructureType, owner: &Owner, public: bool) -> bool {
+    kind.walkable() && (kind != StructureType::Rampart || owner.is_ours() || public)
 }
 
 pub const KIND_COUNT: usize = <StructureType as enum_iterator::Sequence>::CARDINALITY;
@@ -464,6 +479,15 @@ impl Controller {
 
     pub fn safe(&self) -> bool {
         self.our_safe_mode() > 0 || self.safe_mode_fireable()
+    }
+
+    pub fn reservable(&self) -> bool {
+        self.owner == Owner::Nobody && self.reservation.as_ref().is_none_or(|(by, _)| by.is_ours())
+    }
+
+    /// The engine refuses a site under anyone else's hold.
+    pub fn open_to_us(&self) -> bool {
+        self.owner.is_ours() || self.reservable()
     }
 }
 
@@ -564,6 +588,10 @@ impl Room<'_> {
 
     pub fn hostiles(&self) -> impl Iterator<Item = &Creep> {
         self.others.iter().filter(|c| !c.owner.is_ally())
+    }
+
+    pub fn storage(&self) -> Option<&Structure> {
+        (self.structures.iter()).find(|s| s.kind == StructureType::Storage && s.owner.is_ours())
     }
 
     pub fn invader_core(&self) -> Option<&Structure> {
@@ -733,7 +761,7 @@ pub mod terrain {
 }
 
 pub fn charged(tower: &Structure) -> bool {
-    tower.store.amount_of(ResourceType::Energy) >= engine::TOWER_ENERGY_COST
+    engine::tower_shots(tower.store.amount_of(ResourceType::Energy)) > 0
 }
 
 pub mod hostiles {

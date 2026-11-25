@@ -504,7 +504,7 @@ fn spent(
         }
         Action::Tower(id, TowerAct::Attack(_) | TowerAct::Heal(_) | TowerAct::Repair(_)) => {
             let r = (world.rooms.iter()).find(|r| r.structures.iter().any(|s| s.id == *id))?;
-            Some((r.name, TOWER, engine::TOWER_ENERGY_COST))
+            Some((r.name, TOWER, engine::tower_spend(1)))
         }
         _ => None,
     }
