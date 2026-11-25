@@ -1,6 +1,6 @@
 // The line and comment-share ceilings in scripts/ceilings.json, checked, and
-// no issue or ADR citation in code, nor a combat rule constant outside engine
-// and world. A directory's line count is every line of every .rs beneath it,
+// no issue or ADR citation in code, nor a combat rule constant outside
+// core/base/engine and core/base/world.rs. A directory's line count is every line of every .rs beneath it,
 // minus the files of any row beneath it: a `<dir>/*` row holds each of its
 // files to its own ceiling, a `<dir>` row its whole tree. A comment share is
 // per directory of the bot's source (`src`, `core`, `sim`), over its own .rs
@@ -98,7 +98,7 @@ if (cited.length > 0) {
 }
 
 // Combat rules live in engine and world alone; others call their functions.
-const RULE_HOMES = ["core/base/engine.rs", "core/base/world.rs"];
+const RULE_HOMES = ["core/base/engine/mod.rs", "core/base/world.rs"];
 const RULE =
   /\b(?:RANGED_)?(?:ATTACK|HEAL)_POWER\b|\bRANGED_MASS_ATTACK_POWER\w*|\bTOWER_(?:POWER_\w+|FALLOFF\w*|OPTIMAL_RANGE)\b/g;
 const RULE_ALLOWED = {

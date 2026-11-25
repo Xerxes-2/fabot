@@ -172,6 +172,8 @@ by `npm run ceiling` and `npm run scenario`). `core/fight/price` (offers, set
 shapes, casting), `core/fight/scene` (the per-tick read), `core/fight/open`
 (what opens a Defend), `core/fight/tracker` (§6.1) and each `kinds/*` file hold
 ceilings apart from the rest of `core/fight`, as each changes on its own (owner).
+`core/base/engine` (the engine's constants and formulas) holds its own, so
+moving a rule copy into it never weighs on the rest of `core/base` (owner, 2026-11-27).
 
 ## 4. State
 
