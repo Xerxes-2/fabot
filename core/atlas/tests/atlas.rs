@@ -554,6 +554,29 @@ proptest! {
     }
 
     #[test]
+    fn a_flood_repaired_onto_roads_built_and_walls_razed_is_a_fresh_one(walk in walk(), built in coords(), razed in vec(any::<Index>(), 0..10)) {
+        let mut after = walk.ground.clone();
+        after.roads.extend(built);
+        for i in razed {
+            if !after.walls.is_empty() {
+                after.walls.swap_remove(i.index(after.walls.len()));
+            }
+        }
+        let target = target_of(ROOM, &walk);
+        let start = tiles::to_pos(ROOM, walk.start);
+        let mut stale = Atlas::of_world(&world_of(&walk.ground));
+        stale.check = true;
+        stale.travel_ticks(walk.mover, &target, &start);
+        let warm = Atlas::following(stale, &world_of(&after), [], []);
+        let fresh = Atlas::of_world(&world_of(&after));
+        prop_assert_eq!(
+            warm.travel_ticks(walk.mover, &target, &start),
+            fresh.travel_ticks(walk.mover, &target, &start)
+        );
+        prop_assert_eq!(warm.misses(), 0);
+    }
+
+    #[test]
     fn toward_another_room_the_walk_ends_on_an_exit(walk in walk(), toward in exit()) {
         let onto = tiles::room_toward(ROOM, toward).unwrap();
         let atlas = Atlas::of_world(&world_of(&walk.ground));

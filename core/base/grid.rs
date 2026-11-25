@@ -181,13 +181,12 @@ impl Dial {
     }
 
     fn unlink(&mut self, tile: Tile, dist: &[i32]) {
-        let p = self.prev[tile];
-        let n = self.next[tile];
-        if let Some(p) = p {
-            self.next[p] = n
-        } else {
-            let b = (dist[tile] % self.ring as i32) as usize;
-            self.head[b] = n;
+        let (p, n) = (self.prev[tile].take(), self.next[tile].take());
+        let b = (dist[tile] % self.ring as i32) as usize;
+        match p {
+            Some(p) => self.next[p] = n,
+            None if self.head[b] == Some(tile) => self.head[b] = n,
+            None => return,
         }
         if let Some(n) = n {
             self.prev[n] = p;
@@ -196,14 +195,14 @@ impl Dial {
     }
 }
 
-/// From each seed at its own distance; `seeds` rise.
+/// From each seed at its own distance over `dist`: unreached, or flooded on weights none cheaper than these; `seeds` rise.
 pub fn flood(
     footprint: Footprint,
     weights: &[Weight; tiles::COUNT],
     steps: &[Option<u16>],
+    mut dist: tiles::Table<i32>,
     seeds: impl Iterator<Item = (Tile, i32)>,
 ) -> (tiles::Table<i32>, i32) {
-    let mut dist = tiles::table(UNREACHED);
     // The step off a tile; None where no walk leaves it.
     let mut price: [Option<u16>; tiles::COUNT] = [None; tiles::COUNT];
     let dearest = steps.iter().flatten().max().copied().unwrap_or(0);
@@ -227,7 +226,7 @@ pub fn flood(
         while let Some((seed, at)) = seeds.next_if(|(_, at)| *at <= d) {
             let old = dist[seed];
             if let Some(w) = weight_of(footprint, weights, seed)
-                && at < old
+                && at <= old
             {
                 if old != UNREACHED {
                     dial.unlink(seed, &*dist);

@@ -91,7 +91,9 @@ World ──▶ Derived ──▶ decisions (read Derived & Atlas, never World) 
   keyed by `(footprint, pace class, goal, danger)`, counting hits and misses.
   Floods outlive the tick while the room's creep-free weights hold (within a tick half
   repeat and across ticks nearly all, and a flood is a pure function of weights
-  so a kept one equals a fresh one). A step's flood in a room with a hostile
+  so a kept one equals a fresh one). Weights that only fall (a road built, a
+  structure gone) repair a kept flood from the tiles that changed, never drop
+  it: dropping a room's table on one road finished re-flooded up to 480 at once. A step's flood in a room with a hostile
   on an open tile or danger walls them in a per-tick table never kept, so no
   kept flood reads a creep or danger (`--check` re-floods each hit). Room route trees (`Derived.trees`) are
   searched once a tick per colony because Economy prices every body against
@@ -210,7 +212,7 @@ architecture change, not a fix.
 | `homes` | the colonies' own economy facts (`derived::Homes`) | Economy | heap (this tick) | read once by `economy::spare` before outposts are picked, finished by Economy's `of_world` |
 | `sightings` | room → armed hostile / core id → expiry tick | World | heap | vision grace for stood-down outposts |
 | `sightings.last` | per sighting (room, id): its creep's parts, boosts, hits, hits max and tile as last seen (`Glimpse`; none for a core); written on sight, cleared when that creep stands in another room, expires with its sighting; `--check`: in sight it is the creep now and every armed creep there has one, out of sight its creep stands nowhere | World | heap (a stored observation, like the sighting, not a derived memo) | a blind `Defend` prices and seeks the raid it last saw (§6.2) |
-| `atlas.floods` | per-room cached reverse floods | Atlas | heap | reused while room weights hold; dropped `FLOOD_TICKS` (300) unasked, so a room keeps the goals asked in that span, at most `MOST_FLOODS` (2000), the least lately asked dropped first |
+| `atlas.floods` | per-room cached reverse floods + the weights each was flooded on | Atlas | heap | reused while room weights hold, repaired when they only fall (`--check` compares a repair with a fresh flood); dropped `FLOOD_TICKS` (300) unasked, so a room keeps the goals asked in that span, at most `MOST_FLOODS` (2000), the least lately asked dropped first |
 | `atlas.unseen` | out-of-sight room grid + the keeper posts and blind flag it was struck from | Atlas | heap | keyed by those posts, not by sight alone, so intel arriving after a cold tick strikes a keeper room pre-read blind |
 | `atlas.carried` | carried room trees & outpost road walks + room-read fingerprints | Atlas | heap | a search reads no room past its hops so a carried value equals a fresh one while those read the same (saving ~1/10 of decide); drops the tick after going unasked |
 | `atlas.towards` | per target tile, room and region, on the room's weights or its terrain alone, as it lies or paved (`bare`): the walk toward it, its weights, seeds and room read | Atlas | heap | a body asks at its choice of work, so a walk is dropped only `TRIP_TICKS` unasked (at most the targets asked in that span × the rooms of their trees); recomputed when its weights or seeds change |

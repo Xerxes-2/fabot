@@ -254,6 +254,10 @@ impl RoomGrid {
         self.held.as_ref().unwrap_or(&self.weights)
     }
 
+    fn ground(&self, key: FloodOf) -> &Rc<Table<Weight>> {
+        if key.held { self.held() } else { &self.weights }
+    }
+
     /// The flood toward `goal`, whether it was kept, whether live, and the tiles it relaxed.
     fn flood(
         &self,
@@ -266,38 +270,87 @@ impl RoomGrid {
         let key = FloodOf::of(mover, goal, ground.walls(), held);
         let live = key.danger.is_some() || held;
         let floods = if live { &self.live } else { &self.floods };
-        if let Some(k) = floods.borrow().get(&key as &dyn Keyed) {
+        let now = self.ground(key);
+        let kept = (floods.borrow().get(&key as &dyn Keyed)).map(|k| {
             k.unasked.set(0);
-            let fresh = |dist: &Table<i32>| *dist == self.fresh(mover, key).0;
-            assert!(
-                !check || fresh(&k.value),
-                "a kept flood differs from a fresh one"
-            );
-            return (k.value.clone(), true, live, 0);
+            (k.read.clone(), k.value.clone())
+        });
+        let fresh = |dist: &Table<i32>| !check || *dist == self.fresh(mover, key).0;
+        if let Some((_, dist)) = kept.as_ref().filter(|(read, _)| Rc::ptr_eq(read, now)) {
+            assert!(fresh(dist), "a kept flood differs from a fresh one");
+            return (dist.clone(), true, live, 0);
         }
-        let (dist, relaxed) = self.fresh(mover, key);
+        let kept = kept.as_ref().map(|(read, dist)| (&**read, &**dist));
+        let (dist, relaxed, carried) = self.flooded(mover, key, kept);
+        assert!(
+            !carried || fresh(&dist),
+            "a repaired flood differs from a fresh one"
+        );
         let dist = Rc::new(dist);
         let kept = Kept {
-            read: (),
+            read: now.clone(),
             value: dist.clone(),
             unasked: Cell::new(0),
         };
         floods.borrow_mut().insert(key.kept(), kept);
-        (dist, false, live, relaxed)
+        (dist, carried, live, relaxed)
     }
 
     fn fresh(&self, mover: Mover, key: FloodOf) -> (Table<i32>, i32) {
-        let (footprint, goal, danger) = (mover.footprint, key.goal, key.danger);
-        let ground = if key.held { self.held() } else { &self.weights };
-        let walled = danger.filter(|_| goal != Goal::Clear).map(|danger| {
-            let mut weights = (**ground).clone();
-            for t in tiles::all().filter(|t| danger.contains(*t)) {
-                weights[t] = None;
+        let (dist, relaxed, _) = self.flooded(mover, key, None);
+        (dist, relaxed)
+    }
+
+    /// Fresh, or `kept` (a flood and the weights it read) carried onto the
+    /// weights now while no tile rose or closed: a road built or a structure
+    /// gone only lowers them, so only the tiles that changed relax again.
+    fn flooded(
+        &self,
+        mover: Mover,
+        key: FloodOf,
+        kept: Option<(&Table<Weight>, &Table<i32>)>,
+    ) -> (Table<i32>, i32, bool) {
+        let footprint = mover.footprint;
+        let now = RoomGrid::walled(key, self.ground(key));
+        let carried = kept.and_then(|(read, kept)| {
+            let was = RoomGrid::walled(key, read);
+            let mut seeds = Vec::new();
+            for t in tiles::all() {
+                match (weight_of(footprint, &was, t), weight_of(footprint, &now, t)) {
+                    (a, b) if a == b => {}
+                    (Some(a), Some(b)) if b < a => seeds.push((t, kept[t])),
+                    (None, Some(_)) => seeds.extend(tiles::around(t).iter().map(|&n| (n, kept[n]))),
+                    _ => return None,
+                }
             }
-            weights
+            seeds.retain(|&(t, d)| d != UNREACHED && !on_edge(footprint, t));
+            Some((seeds, kept.clone()))
         });
-        let weights = walled.as_ref().unwrap_or(ground);
-        let goals = match key.goal {
+        let repaired = carried.is_some();
+        let (mut seeds, dist) = carried.unwrap_or_else(|| (Vec::new(), tiles::table(UNREACHED)));
+        let goals = RoomGrid::goals(footprint, key, &now).into_iter();
+        seeds.extend(goals.map(|g| (g, 0)));
+        seeds.sort_by_key(|&(_, d)| d);
+        let steps = step_table(mover.factor);
+        let (dist, relaxed) = flood(footprint, &now, &steps, dist, seeds.into_iter());
+        (dist, relaxed, repaired)
+    }
+
+    fn walled<'w>(key: FloodOf, ground: &'w Table<Weight>) -> std::borrow::Cow<'w, Table<Weight>> {
+        match key.danger.filter(|_| key.goal != Goal::Clear) {
+            Some(danger) => {
+                let mut weights = ground.clone();
+                for t in tiles::all().filter(|t| danger.contains(*t)) {
+                    weights[t] = None;
+                }
+                std::borrow::Cow::Owned(weights)
+            }
+            None => std::borrow::Cow::Borrowed(ground),
+        }
+    }
+
+    fn goals(footprint: Footprint, key: FloodOf, weights: &Table<Weight>) -> Vec<Tile> {
+        match key.goal {
             Goal::Seats {
                 range,
                 tiles: targets,
@@ -317,12 +370,10 @@ impl RoomGrid {
                 .filter(|t| {
                     weight_of(footprint, weights, *t).is_some()
                         && !on_edge(footprint, *t)
-                        && !danger.is_some_and(|d| d.contains(*t))
+                        && !key.danger.is_some_and(|d| d.contains(*t))
                 })
                 .collect(),
-        };
-        let goals = goals.into_iter().map(|g| (g, 0));
-        flood(footprint, weights, &step_table(mover.factor), goals)
+        }
     }
 }
 
@@ -363,7 +414,7 @@ pub struct Atlas {
 
 type Carried<K, T, R = Reads> = RefCell<HashMap<K, Kept<T, R>>>;
 /// A room's floods read its weights alone, which the room's grid keys.
-type Floods = Carried<FloodKey, Rc<Table<i32>>, ()>;
+type Floods = Carried<FloodKey, Rc<Table<i32>>, Rc<Table<Weight>>>;
 
 /// A walk toward `to` from `room`, by its region `way`'s way on, else by any.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -395,8 +446,9 @@ impl Walked {
         let weights = self.weights.as_deref().map_or_else(plain, Clone::clone);
         let steps = step_table(Atlas::PACE.factor);
         let seeds = self.seeds.iter().copied();
+        let unreached = tiles::table(UNREACHED);
         let dist = (!self.seeds.is_empty())
-            .then(|| Rc::new(flood(Footprint::One, &weights, &steps, seeds).0));
+            .then(|| Rc::new(flood(Footprint::One, &weights, &steps, unreached, seeds).0));
         Walked { dist, ..self }
     }
 }
@@ -728,12 +780,8 @@ impl Atlas {
         }
     }
 
-    /// The floods `previous` kept, while its weights hold.
-    fn kept(previous: Option<RoomGrid>, weights: &Rc<Table<Weight>>) -> Floods {
-        match previous {
-            Some(grid) if Rc::ptr_eq(&grid.weights, weights) => Atlas::asked_floods(grid.floods),
-            _ => RefCell::default(),
-        }
+    fn kept(previous: Option<RoomGrid>) -> Floods {
+        previous.map_or_else(RefCell::default, |grid| Atlas::asked_floods(grid.floods))
     }
 
     fn bare(last: Option<&RoomGrid>, terrain: &[u8]) -> [Rc<Table<Weight>>; 2] {
@@ -828,7 +876,7 @@ impl Atlas {
                 Rc::new(held)
             });
             let grid = RoomGrid {
-                floods: Atlas::kept(last, &weights),
+                floods: Atlas::kept(last),
                 weights,
                 held,
                 live: RefCell::default(),
@@ -894,7 +942,7 @@ impl Atlas {
                     let weights = Atlas::reused(last.as_ref(), weights);
                     let bare = Atlas::bare(last.as_ref(), terrain);
                     RoomGrid {
-                        floods: Atlas::kept(last, &weights),
+                        floods: Atlas::kept(last),
                         held: None,
                         live: RefCell::default(),
                         weights,
