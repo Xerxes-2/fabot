@@ -1,0 +1,10 @@
+{
+  "why": "a free body a sweep takes in stands for the harasser it would cast only where the hunt holds the room with it: our free 1A1M does not out-reach his 1A1M guard at the outpost W7N2 (enemy-towered-home with the guard and our body laid over it; his guard and worker are scripted to stand, so this tests the pricing, not a chase), so the sweep casts its harasser and leaves the 1A1M free. On main it took the 1A1M in on its cost alone, cast nothing and closed 47 ticks later having killed nothing; now its harasser kills 1",
+  "modules": ["fight"],
+  "start": { "world": "scripts/scenario/worlds/enemy-towered-home.json", "overlay": "scripts/scenario/worlds/sweep-guarded-outpost.json", "seed": 1 },
+  "ticks": 2000,
+  "assert": [
+    { "measure": "killedBeside", "kind": "sweep", "min": 1 },
+    { "measure": "bodiesLost", "max": 0 }
+  ]
+}

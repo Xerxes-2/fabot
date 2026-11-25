@@ -7,7 +7,7 @@ use super::scene::{Hunting, Scene, fresh};
 use super::shape::{Cast, Engagement, FightState, Group, Objective, Phase};
 use super::{casting, open, tracker};
 use fabot_atlas::{Atlas, Context};
-use fabot_base::declarations::{self, OpKind};
+use fabot_base::declarations::OpKind;
 use fabot_base::engine;
 use fabot_base::intents::{Ask, ModuleOutput, Rank};
 use fabot_base::world::{Creep, Id, Pos, RoomName, StructureType, sightings};
@@ -420,11 +420,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
     let mut free: Vec<String> = world
         .creeps
         .iter()
-        .filter(|c| {
-            declarations::fights(&c.name)
-                && able.contains(&c.name)
-                && !(committed.contains(&c.name) || aging_out.contains(&c.name))
-        })
+        .filter(|c| defend::free(c) && !committed.contains(&c.name))
         .map(|c| c.name.clone())
         .collect();
 
@@ -529,10 +525,9 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
         &scene,
         atlas,
         context.trace,
-        &decided,
+        (&decided, &casts, &grounds),
         &gates,
         &given_up,
-        &grounds,
     );
     out.asks = asks;
 

@@ -5,7 +5,7 @@ mod account;
 pub mod casting;
 use crate::kinds::{defend, raid, siege, sweep};
 use crate::scene::{Asked, Hunting, Scene, fresh, middle, picket};
-use crate::shape::{Engagement, Group, Objective, Phase, Plan};
+use crate::shape::{Cast, Engagement, Group, Objective, Phase, Plan};
 pub use account::{Actual, Closed, account, closed};
 use fabot_atlas::{self as atlas, Atlas, Mover, Target};
 use fabot_base::declarations::{self, Declarations};
@@ -474,6 +474,39 @@ impl<'a> Scene<'a> {
         atlas::onward(held)
     }
 
+    fn fielding(&self, e: &Engagement, casts: &[Cast]) -> Vec<Fighter> {
+        let members = (e.ours.keys()).filter_map(|n| self.ours.get(n.as_str()));
+        let cast = (casts.iter()).filter(|c| c.engagement == e.id);
+        (members.map(|c| self.fighter(c)))
+            .chain(cast.map(|c| fighter::cast(&c.body)))
+            .collect()
+    }
+
+    /// A free body a sweep takes in stands for the harasser it would cast, never beside one:
+    /// no dearer, one it walks in and its hunt holds `room` with.
+    pub(crate) fn takes_in(
+        &self,
+        atlas: &Atlas,
+        (e, casts): (&Engagement, &[Cast]),
+        c: &Creep,
+        (ground, room): (&Hunting, &Room),
+    ) -> bool {
+        let cost = engine::body_cost(&world::body_kinds(c));
+        let casts_one = || {
+            let fielding = self.fielding(e, casts);
+            let set = self.hunt(ground, room, &fielding, self.capacity_of(atlas, e));
+            set.is_some_and(|set| !set.is_empty())
+        };
+        sweep::HARASSERS
+            .iter()
+            .any(|h| cost <= engine::body_cost(h))
+            && self.hunt(ground, room, &[self.fighter(c)], 0).is_some()
+            && casts_one()
+            && !self
+                .joining(atlas, e, std::slice::from_ref(&c.name))
+                .is_empty()
+    }
+
     /// Priced at open, on arrival and on an event in its room, and again as
     /// the bank grows while it holds nothing.
     pub(super) fn swept(
@@ -487,13 +520,7 @@ impl<'a> Scene<'a> {
             return Some(e.clone());
         };
 
-        let mut fielding: Vec<Fighter> = (e.ours.keys())
-            .filter_map(|n| self.ours.get(n.as_str()))
-            .map(|c| self.fighter(c))
-            .collect();
-        let casts = (asked.casts.iter()).filter(|c| c.engagement == e.id);
-        fielding.extend(casts.map(|c| fighter::cast(&c.body)));
-
+        let fielding = self.fielding(e, &asked.casts);
         let capacity = self.capacity_of(atlas, e);
         let Some(mut set) = self.hunt(ground, room, &fielding, capacity) else {
             if fielding.is_empty() {
@@ -507,21 +534,16 @@ impl<'a> Scene<'a> {
             return onward.map(|r| sweep::onto(r, self.world.time, e));
         };
 
-        // A body it takes in stands for a harasser it would cast, never beside one.
-        let shaped = |n: &String| {
-            self.ours
-                .get(n.as_str())
-                .is_some_and(|c| sweep::harasser(c))
-        };
-        let joining: Vec<String> = (self.joining(atlas, e, free).into_iter())
-            .filter(shaped)
-            .take(usize::from(!set.is_empty()))
+        let joining: Vec<String> = (free.iter())
+            .filter(|n| {
+                let c = self.ours.get(n.as_str());
+                c.is_some_and(|c| self.takes_in(atlas, (e, &asked.casts), c, (ground, room)))
+            })
+            .take(1)
+            .cloned()
             .collect();
-        if let Some(c) = joining.first().and_then(|n| self.ours.get(n.as_str())) {
-            fielding.push(self.fighter(c));
-            set = self
-                .hunt(ground, room, &fielding, capacity)
-                .unwrap_or_default();
+        if !joining.is_empty() {
+            set.clear();
         }
 
         // A set walks in as one; in its room each body's step is its own.

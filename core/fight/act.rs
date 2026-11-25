@@ -20,12 +20,11 @@ pub(super) fn act(
     scene: &Scene,
     atlas: &mut Atlas,
     trace: bool,
-    decided: &[Engagement],
+    fights: defend::Fights,
     gates: &BTreeMap<i32, tactics::Gate>,
     given_up: &BTreeSet<i32>,
-    grounds: &BTreeMap<RoomName, Hunting>,
 ) -> ModuleOutput {
-    let world = scene.world;
+    let (world, (decided, _, grounds)) = (scene.world, fights);
     let mut sight = tactics::Sight {
         atlas,
         hostiles: &scene.foes,
@@ -141,7 +140,7 @@ pub(super) fn act(
     let mut lookups = 0;
     let mut step = |sight: &mut tactics::Sight, c: &Creep| -> (Option<CreepAct>, Wish) {
         let Some(&e) = engaged_in.get(c.name.as_str()) else {
-            return (None, defend::idle(sight, scene, decided, c));
+            return (None, defend::idle(sight, scene, fights, c));
         };
 
         if let Some(acted) = stronghold::act(sight, scene, e, c) {
@@ -305,7 +304,8 @@ pub(super) fn act(
     out.telemetry.counts.push(("threatLookups", lookups));
     let patients = (&fighters[..], &world.creeps[..]);
     out.actions.extend(reflexes(chosen, patients, &incoming));
-    out.actions.extend(defend::recycles(scene, decided));
+    out.actions
+        .extend(defend::recycles(scene, sight.atlas, fights));
     out
 }
 

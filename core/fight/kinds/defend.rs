@@ -3,9 +3,9 @@
 use std::borrow::Borrow;
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::super::scene::{Asked, Scene};
+use super::super::scene::{Asked, Hunting, Scene};
 use super::super::shape::{Cast, Engagement, Group, Objective, Phase, Slot, enter};
-use super::sweep;
+use fabot_atlas::Atlas;
 use fabot_base::intents::{Action, SpawnAct};
 use fabot_base::tiles::{self};
 use fabot_base::vocabulary::Part;
@@ -62,8 +62,13 @@ pub fn give_up(held: bool, time: i32, e: &Engagement) -> Engagement {
     next
 }
 
-/// Cast by a Defend standing given up, drafted by no answer since and no sweep's to take.
-fn released(decided: &[Engagement], c: &Creep) -> bool {
+pub(crate) fn free(c: &Creep) -> bool {
+    declarations::fights(&c.name) && !c.spent() && c.ticks_to_live > engine::AGED_OUT_TICKS_TO_LIVE
+}
+
+/// Cast by a Defend standing given up, drafted by no answer since and no open sweep's to take.
+fn released((scene, atlas): (&Scene, &Atlas), fights: Fights, c: &Creep) -> bool {
+    let (decided, casts, grounds) = fights;
     // An id is reused once closed: a body asked before this Defend opened is not its.
     let gave_up = |(asked, id): (i32, i32)| {
         (decided.iter()).any(|e| {
@@ -74,29 +79,36 @@ fn released(decided: &[Engagement], c: &Creep) -> bool {
         })
     };
     let drafted = (decided.iter()).any(|e| e.ours.contains_key(&c.name));
-    !drafted && !sweep::harasser(c) && cast_of(&c.name).is_some_and(gave_up)
+    let taken = |e: &Engagement| {
+        let ground = (scene.in_sight(e.room)).zip(grounds.get(&e.room));
+        e.objective == Objective::Sweep
+            && ground.is_some_and(|(r, g)| scene.takes_in(atlas, (e, casts), c, (g, r)))
+    };
+    !drafted && cast_of(&c.name).is_some_and(gave_up) && !(free(c) && decided.iter().any(taken))
 }
 
+/// The engagements decided, their casts and the sweeps' grounds.
+pub(crate) type Fights<'a> = (
+    &'a [Engagement],
+    &'a [Cast],
+    &'a BTreeMap<RoomName, Hunting>,
+);
+
 /// A released body walks home to a spawn and is recycled there; any other rests.
-pub(crate) fn idle(
-    sight: &mut tactics::Sight,
-    scene: &Scene,
-    decided: &[Engagement],
-    c: &Creep,
-) -> Wish {
+pub(crate) fn idle(sight: &mut tactics::Sight, scene: &Scene, fights: Fights, c: &Creep) -> Wish {
     let spawn = (scene.world.spawns.iter()).find(|s| s.pos.room == c.pos.room);
-    match (released(decided, c), spawn) {
+    match (released((scene, sight.atlas), fights, c), spawn) {
         (true, Some(s)) => tactics::toward(sight, c, &s.pos, engine::MELEE_RANGE),
         (true, None) => tactics::retreat(sight, c),
         (false, _) => tactics::rest(sight, c, &scene.worked),
     }
 }
 
-pub(crate) fn recycles(scene: &Scene, decided: &[Engagement]) -> Vec<Action> {
+pub(crate) fn recycles(scene: &Scene, atlas: &Atlas, fights: Fights) -> Vec<Action> {
     let beside =
         |c: &Creep| (scene.world.spawns.iter()).find(|s| s.pos.within(engine::MELEE_RANGE, &c.pos));
     (scene.world.creeps.iter())
-        .filter(|c| released(decided, c))
+        .filter(|c| released((scene, atlas), fights, c))
         .filter_map(|c| Some(Action::Spawn(beside(c)?.id, SpawnAct::RecycleCreep(c.id))))
         .collect()
 }

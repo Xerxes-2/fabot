@@ -507,8 +507,9 @@ with one phase machine per kind under `core/fight/kinds/`.
   would lift it past every loss; one while it forms asks no more bodies, so
   a raid growing as it forms is fought by the set first answered. An outpost fights on past its budget by
   `OUTPOST_LOSSES` (2) bodies, then gives up: it disengages, holding no
-  body (another answer drafts them, else they walk home and are recycled,
-  as none would fight for it), and closes only once `sightings` clears
+  body (another answer drafts them; one an open sweep would take in rests
+  for it; else they walk home and are recycled, as none would fight for
+  it), and closes only once `sightings` clears
   (closing sooner reopens on the same raid with a fresh budget and feeds it
   bodies). Disengaged within that
   bound, it re-forms and re-prices on the budget it kept the tick its raid's
