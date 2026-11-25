@@ -577,7 +577,7 @@ export const check = (samples, a, dir, max = a.max ?? Infinity) => {
   return { value, ok: value <= max && value >= (a.min ?? -Infinity), bound };
 };
 
-// main's longest wait from RCL4 to its third rampart over soak:many's starts:
+// main's longest wait from its ring (RCL4 there) to its third rampart over soak:many's starts:
 // 5,900 ticks, on E1's node, which starts past RCL4 with no ring.
 const RING_OWED_AFTER = 6000;
 /** Each invariant `samples` (default the run's) break: where, the assert, its check, and a line saying so. */
@@ -585,14 +585,15 @@ export const failures = (dir, samples = samplesOf(dir)) => {
   const last = samples.at(-1);
   const rooms = Object.keys(last.rooms);
   const homes = Object.keys(last.homes ?? { [rooms[0]]: last });
+  const cpu = linesOf(join(dir, "cpu.jsonl"));
   return [
     ...rooms.map((room) => [room, samples, { measure: "roadsLost", room, max: 0 }]),
     ...homes.flatMap((home) => {
       const of = samples.map((s) => s.homes?.[home] ?? s);
-      const rcl4 = of.find((s) => s.rcl >= 4)?.t ?? Infinity;
+      const ringed = cpu.find((r) => r.counts?.some(([k]) => k === `ring:${home}`))?.t ?? Infinity;
       return [
         { measure: "levelsLost", max: 0 },
-        ...(last.t - rcl4 >= RING_OWED_AFTER ? [{ measure: "builtAtEnd", kind: "rampart", min: 3 }] : []),
+        ...(last.t - ringed >= RING_OWED_AFTER ? [{ measure: "builtAtEnd", kind: "rampart", min: 3 }] : []),
         { measure: "oldestPayingSite", max: 10000 },
       ].map((a) => [home, of, a]);
     }),

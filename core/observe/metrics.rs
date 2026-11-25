@@ -1294,6 +1294,8 @@ pub fn counts(
         counts.push((format!("abandon:{}", room.name), abandon::left(room)));
     }
     counts.extend((declarations.outposts.iter()).map(|o| (format!("outpost:{}", o.room), 1)));
+    let ringed = declarations.colonies.iter().filter(|p| p.ring);
+    counts.extend(ringed.map(|p| (format!("ring:{}", p.room), 1)));
     counts.extend((refused.rooms.iter()).map(|room| (format!("closed:{room}"), 1)));
     counts.extend((refused.rules.iter()).map(|rule| (format!("refused:{rule}"), 1)));
     counts.extend(telemetry.iter().map(|(name, n)| (name.to_string(), *n)));
