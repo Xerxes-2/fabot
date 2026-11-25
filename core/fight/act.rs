@@ -66,6 +66,7 @@ pub(super) fn act(
             .collect(),
         musters: scene.musters.clone(),
         avoid: scene.avoid,
+        rules: &world.rules,
     };
 
     let engaged_in: BTreeMap<&str, &Engagement> = decided
@@ -320,7 +321,7 @@ pub(super) fn act(
 
 /// The rooms a blob walks into under towers: a siege's is priced so while out of sight.
 pub fn fortified(world: &world::World, decided: &[Engagement]) -> BTreeSet<RoomName> {
-    let charged = world.rooms.iter().filter(|r| !raid::charged(r).is_empty());
+    let charged = (world.rooms.iter()).filter(|r| !raid::charged(&world.rules, r).is_empty());
     let sieges = decided
         .iter()
         .filter(|e| matches!(e.objective, Objective::Siege(_)));
@@ -395,7 +396,7 @@ fn front_of(scene: &Scene, atlas: &Atlas, e: &Engagement) -> Option<tactics::Fro
     else {
         return None;
     };
-    let towers = raid::charged(room);
+    let towers = raid::charged(&scene.world.rules, room);
     let fired: BTreeSet<&Id> = scene.towers_in(room).iter().map(|t| &t.id).collect();
     let struck = (scene.world.attacks.iter())
         .find(|(by, _)| fired.contains(by))
@@ -470,8 +471,7 @@ fn homes_of(scene: &Scene, decided: &[Engagement]) -> Vec<Home> {
 
             homes_lost.push(Home {
                 controller: controller.clone(),
-                towered: (scene.world.rules.working(room))
-                    .any(|s| s.kind == StructureType::Tower && s.owner.is_ours()),
+                towered: (scene.world.rules.towers(room)).any(|s| s.owner.is_ours()),
                 raid: room
                     .hostiles()
                     .filter(|h| raid.contains(&h.id))

@@ -300,7 +300,7 @@ impl<'a> Scene<'a> {
                 }),
         );
         Hunting {
-            threat: exchange::damage_map(room.name, &raid::charged(room), &foes),
+            threat: exchange::damage_map(room.name, &raid::charged(&self.world.rules, room), &foes),
             worth: sweep::room_worth(room, &prey, &exposed, held)
                 * sweep::kept(room, held, walk.unwrap_or(0))
                 / held.max(1),
@@ -317,9 +317,8 @@ impl<'a> Scene<'a> {
     }
 
     pub(super) fn towers_in(&self, room: &'a Room<'a>) -> Vec<&'a Structure> {
-        room.structures
-            .iter()
-            .filter(|s| s.kind == StructureType::Tower && s.owner.is_theirs())
+        (self.world.rules.towers(room))
+            .filter(|s| s.owner.is_theirs())
             .collect()
     }
 
@@ -636,7 +635,7 @@ impl<'a> Scene<'a> {
         gate: Option<&tactics::Gate>,
     ) -> SiegeFacts {
         let room = self.in_sight(e.room);
-        let towers = room.map_or_else(Vec::new, |r| raid::charged(r));
+        let towers = room.map_or_else(Vec::new, |r| raid::charged(&self.world.rules, r));
 
         SiegeFacts {
             time: self.world.time,
@@ -661,7 +660,8 @@ impl<'a> Scene<'a> {
             razed: room.is_some_and(|room| match &e.objective {
                 Objective::Siege(target) => {
                     !siege::stands(room, *target)
-                        && (!raid::raids(e) || raid::mark(room, &self.members_of(e)).is_none())
+                        && (!raid::raids(e)
+                            || raid::mark(&self.world.rules, room, &self.members_of(e)).is_none())
                 }
                 _ => false,
             }),

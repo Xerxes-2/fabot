@@ -7,8 +7,9 @@ use super::sweep;
 use fabot_atlas::Atlas;
 use fabot_base::engine;
 use fabot_base::tiles::{self, Tile, TileSet};
-use fabot_base::vocabulary::ResourceType;
-use fabot_base::world::{Controller, Id, Owner, Pos, Room, RoomName, Structure, StructureType};
+use fabot_base::world::{
+    Controller, Id, Owner, Pos, Room, RoomName, Rules, Structure, StructureType,
+};
 use fabot_exchange::{self as exchange, Outcome};
 use fabot_tactics::{self as tactics, Offer, Tactic};
 
@@ -86,17 +87,14 @@ pub fn taken(s: &Structure, sources: &[Pos]) -> i32 {
 /// The rival's structure razed next: the one its charged towers strike
 /// least, so the set the bank buys is the cheapest (owner: a tower is razed
 /// whenever that is cheap); then the dearest to him, then the nearest `walk`.
-pub fn next_razed<'a>(room: &'a Room, walk: impl Fn(&Structure) -> i32) -> Option<&'a Structure> {
-    let structures = &room.structures;
+pub fn next_razed<'a>(
+    rules: &Rules,
+    room: &'a Room,
+    walk: impl Fn(&Structure) -> i32,
+) -> Option<&'a Structure> {
     let sources: Vec<Pos> = room.sources.iter().map(|s| s.pos).collect();
-    let theirs = || structures.iter().filter(|s| s.owner.is_theirs());
-    let charged: Vec<&Pos> = theirs()
-        .filter(|t| {
-            t.kind == StructureType::Tower
-                && t.store.amount_of(ResourceType::Energy) >= engine::TOWER_ENERGY_COST
-        })
-        .map(|t| &t.pos)
-        .collect();
+    let theirs = || room.structures.iter().filter(|s| s.owner.is_theirs());
+    let charged = super::raid::charged(rules, room);
     let struck = |at: &Pos| -> i32 {
         (charged.iter().filter_map(|t| t.range(at)))
             .map(engine::tower_attack_at)
@@ -117,8 +115,11 @@ fn declaimed<'a>(room: &'a Room) -> Option<&'a Controller> {
     (room.controller.as_ref()).filter(|c| matches!(c.owner, Owner::Enemy(_)))
 }
 
-pub fn next_target(room: &Room, near: Option<&Pos>) -> Option<Id> {
-    let razed = next_razed(room, |s| near.and_then(|p| p.range(&s.pos)).unwrap_or(0)).map(|s| s.id);
+pub fn next_target(rules: &Rules, room: &Room, near: Option<&Pos>) -> Option<Id> {
+    let razed = next_razed(rules, room, |s| {
+        near.and_then(|p| p.range(&s.pos)).unwrap_or(0)
+    })
+    .map(|s| s.id);
     razed.or(declaimed(room).map(|c| c.id))
 }
 

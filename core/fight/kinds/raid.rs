@@ -9,9 +9,9 @@ use fabot_atlas::Atlas;
 use fabot_base::engine;
 use fabot_base::intents::CreepAct;
 use fabot_base::tiles::{self, Tile};
-use fabot_base::vocabulary::{Part, ResourceType};
+use fabot_base::vocabulary::Part;
 use fabot_base::wish::Wish;
-use fabot_base::world::{self, Creep, Id, Pos, Room, Striker, Structure, StructureType};
+use fabot_base::world::{self, Creep, Id, Pos, Room, Rules, Striker, Structure, StructureType};
 use fabot_exchange::{self as exchange, Fighter, Ground, Losses, Outcome};
 use fabot_tactics::{self as tactics, Sight, Tactic};
 
@@ -20,10 +20,9 @@ pub fn raids(e: &Engagement) -> bool {
     matches!(e.objective, Objective::Siege(_)) && e.plan.tactic == Tactic::BlobKite
 }
 
-pub fn charged(room: &Room) -> Vec<Pos> {
-    (room.structures.iter())
-        .filter(|s| s.kind == StructureType::Tower && s.owner.is_theirs())
-        .filter(|s| s.store.amount_of(ResourceType::Energy) >= engine::TOWER_ENERGY_COST)
+pub fn charged(rules: &Rules, room: &Room) -> Vec<Pos> {
+    (rules.towers(room))
+        .filter(|s| s.owner.is_theirs() && world::charged(s))
         .map(|s| s.pos)
         .collect()
 }
@@ -50,8 +49,8 @@ pub fn unwalled(room: &Room, passable: impl Fn(Tile) -> bool) -> tiles::Table<u1
 }
 
 /// His charged tower first: it takes the most strike off the set per hit spent.
-fn next<'a>(room: &'a Room, members: &[&Creep]) -> Option<&'a Structure> {
-    let towers = charged(room);
+fn next<'a>(rules: &Rules, room: &'a Room, members: &[&Creep]) -> Option<&'a Structure> {
+    let towers = charged(rules, room);
 
     (room.structures.iter())
         .filter(|s| siege::razed(s.kind) && s.owner.is_theirs())
@@ -70,8 +69,8 @@ fn next<'a>(room: &'a Room, members: &[&Creep]) -> Option<&'a Structure> {
         })
 }
 
-pub fn target(room: &Room, members: &[&Creep]) -> Option<Id> {
-    next(room, members).map(|s| s.id).or_else(|| {
+pub fn target(rules: &Rules, room: &Room, members: &[&Creep]) -> Option<Id> {
+    next(rules, room, members).map(|s| s.id).or_else(|| {
         room.controller
             .as_ref()
             .filter(|c| c.owner.is_theirs())
@@ -80,8 +79,8 @@ pub fn target(room: &Room, members: &[&Creep]) -> Option<Id> {
 }
 
 /// Where the blob goes and how near: a shot off his structure, onto his site to stomp it.
-pub fn mark(room: &Room, members: &[&Creep]) -> Option<(Pos, i32)> {
-    if let Some(s) = next(room, members) {
+pub fn mark(rules: &Rules, room: &Room, members: &[&Creep]) -> Option<(Pos, i32)> {
+    if let Some(s) = next(rules, room, members) {
         return Some((s.pos, engine::RANGED_RANGE));
     }
     let site = (room.sites.iter())
@@ -106,8 +105,8 @@ fn near(members: &[&Creep], at: &Pos) -> i32 {
 /// The structure the set is priced on: the one his towers and armed bodies
 /// strike hardest a body beside it, since they strike the same set whether it
 /// razes that one first or last.
-pub fn hardest<'a>(room: &'a Room) -> Option<&'a Structure> {
-    let towers = charged(room);
+pub fn hardest<'a>(rules: &Rules, room: &'a Room) -> Option<&'a Structure> {
+    let towers = charged(rules, room);
     let guards = guards(room);
 
     (room.structures.iter())
@@ -123,7 +122,7 @@ pub fn hardest<'a>(room: &'a Room) -> Option<&'a Structure> {
 /// The set's price: a way to within a shot of `goal` no step of which his
 /// towers and armed bodies out-strike the heal the set pools there.
 pub fn plan(
-    atlas: &Atlas,
+    (atlas, rules): (&Atlas, &Rules),
     room: &Room,
     goal: &Pos,
     from: &Pos,
@@ -143,7 +142,7 @@ pub fn plan(
     let plan = exchange::breach_plan(
         &ground,
         gait,
-        &charged(room),
+        &charged(rules, room),
         &guards(room),
         set,
         ring(tiles::of_pos(goal)),
@@ -184,8 +183,8 @@ pub fn reinforce<T>(
 /// not out-strike the heal the set lands on a body there; a wounded body steps
 /// to where they net it least.
 pub fn dance(sight: &mut Sight, room: &Room, members: &[&Creep], c: &Creep) -> Wish {
-    let target = mark(room, members);
-    let towers = charged(room);
+    let target = mark(sight.rules, room, members);
+    let towers = charged(sight.rules, room);
     let guards = guards(room);
     let healers: Vec<(&Creep, i32)> = (members.iter())
         .filter(|m| m.name != c.name)
@@ -266,14 +265,14 @@ pub fn volley(sight: &Sight, room: &Room, c: &Creep) -> Option<CreepAct> {
         |s: &Structure| theirs().find(|r| r.kind == StructureType::Rampart && r.pos == s.pos);
     let reach = |at: &Pos| c.pos.range(at).filter(|r| *r <= engine::RANGED_RANGE);
 
+    let firing = charged(sight.rules, room);
     // A mark: id, range, hits it takes, what its loss costs, charged, bare.
     let mut marks: Vec<(Id, i32, i32, i32, bool, bool)> = Vec::new();
 
     for s in theirs().filter(|s| siege::razed(s.kind)) {
         let Some(r) = reach(&s.pos) else { continue };
         let struck = cover(s).unwrap_or(s);
-        let charged = s.kind == StructureType::Tower
-            && s.store.amount_of(ResourceType::Energy) >= engine::TOWER_ENERGY_COST;
+        let charged = firing.contains(&s.pos);
 
         marks.push((
             struck.id,

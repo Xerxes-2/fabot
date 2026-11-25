@@ -787,11 +787,7 @@ fn armed(seen: &Seen, r: &Room, safe_left: i32) -> bool {
 }
 
 fn towers(rules: &Rules, r: &Room) -> bool {
-    rules.working(r).any(|s| {
-        s.kind == StructureType::Tower
-            && s.owner.is_ours()
-            && s.store.amount_of(Energy) >= engine::TOWER_ENERGY_COST
-    })
+    (rules.towers(r)).any(|s| s.owner.is_ours() && fabot_base::world::charged(s))
 }
 
 fn dwell(sums: &mut Sums, seen: &Seen) {

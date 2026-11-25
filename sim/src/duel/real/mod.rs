@@ -76,6 +76,7 @@ impl Real {
             ramparts: BTreeMap::from([(room, ramparts.map(|s| s.pos).collect())]),
             musters: Vec::new(),
             avoid: &avoid,
+            rules: &world.rules,
         };
 
         let (on, walk) = (

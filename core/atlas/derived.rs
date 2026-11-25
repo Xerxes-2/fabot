@@ -1,12 +1,12 @@
 use std::collections::BTreeSet;
 
-use super::loot::{fallen, garrison};
+use super::loot::garrison;
 use super::{Atlas, Mover, Target, Tree};
 use fabot_base::declarations::{ColonyPlan, Declarations, Outpost, REACH_HOPS, Stage};
 use fabot_base::grid::{self, Footprint};
 use fabot_base::intel::Intel;
 use fabot_base::tiles::{self, TileSet};
-use fabot_base::vocabulary::{Part, ResourceType};
+use fabot_base::vocabulary::Part;
 use fabot_base::world::{
     Creep, Owner, Pos, Room, RoomName, Sightings, StructureType, World, hostiles,
 };
@@ -135,8 +135,7 @@ pub struct Derived {
     pub capped: bool,
     /// The owned rooms a spawn stands in, in `World.rooms`' order.
     pub colonies: Vec<RoomName>,
-    /// The declared outposts and raised claims a colony reaches, whose work
-    /// no foe stands down (`ARCHITECTURE.md` §13, M1b).
+    /// The declared outposts and raised claims a colony reaches, not `raided`.
     pub worked: Vec<Outpost>,
     pub raided: BTreeSet<RoomName>,
     /// What a body outside a fight walks round, per room with any.
@@ -186,13 +185,8 @@ fn danger(world: &World, owned: &BTreeSet<RoomName>, guarded: bool) -> Vec<(Room
             .filter(|c| hostiles::foe(c) && hostiles::strikes(c) && !garrison(r, c))
             .filter(|c| !(guarded && held(&guards, c)))
             .map(|c| (tiles::of_pos(&c.pos), hostiles::reach(c)));
-        let towers = (r.structures.iter())
-            .filter(|s| {
-                s.kind == StructureType::Tower
-                    && s.owner.is_theirs()
-                    && !(s.owner == Owner::Invader && fallen(r))
-                    && s.store.amount_of(ResourceType::Energy) >= engine::TOWER_ENERGY_COST
-            })
+        let towers = (world.rules.towers(r))
+            .filter(|s| s.owner.is_theirs() && fabot_base::world::charged(s))
             .map(|s| (tiles::of_pos(&s.pos), engine::TOWER_FALLOFF_RANGE));
         creeps.chain(towers).collect::<Vec<_>>()
     };

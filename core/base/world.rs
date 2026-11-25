@@ -445,7 +445,6 @@ pub struct Controller {
     pub ticks_to_downgrade: i32,
     /// Who holds it and the ticks left.
     pub reservation: Option<(Owner, i32)>,
-    /// Who signed it and the text.
     pub sign: Option<(Owner, String)>,
     pub safe_mode: i32,
     pub safe_mode_available: i32,
@@ -678,6 +677,15 @@ impl Rules {
         })
     }
 
+    /// `room`'s towers that fire once loaded: an Invader's only while its core stands.
+    pub fn towers<'r>(&self, room: &'r Room) -> impl Iterator<Item = &'r Structure> + use<'r> {
+        let core = room.invader_core().is_some();
+        let fires = move |s: &&Structure| core || s.owner != Owner::Invader;
+        (self.working(room))
+            .filter(|s| s.kind == StructureType::Tower)
+            .filter(fires)
+    }
+
     #[cfg(any(test, feature = "test-support", feature = "tools"))]
     pub fn vanilla() -> Rules {
         let row = |kind: StructureType| (0..=8).map(move |l| kind.controller_structures(l) as i32);
@@ -711,6 +719,10 @@ pub mod terrain {
     pub fn is_swamp(terrain: Option<&LocalRoomTerrain>, x: i32, y: i32) -> bool {
         terrain.is_some_and(|t| t.get_bits()[(y * 50 + x) as usize] & (WALL | SWAMP) == SWAMP)
     }
+}
+
+pub fn charged(tower: &Structure) -> bool {
+    tower.store.amount_of(ResourceType::Energy) >= engine::TOWER_ENERGY_COST
 }
 
 pub mod hostiles {
@@ -835,30 +847,16 @@ pub mod sightings {
         // A room in sight holds what stands there now: a wave killed reopens it.
         for room in &world.rooms {
             let mut seen: BTreeMap<Id, Seen> = BTreeMap::new();
-
+            let mut put = |id, gone, armed, last| seen.insert(id, Seen { gone, armed, last });
             for creep in room.hostiles() {
                 if hostiles::armed(&owned, room.hostiles(), creep) {
-                    seen.insert(
-                        creep.id,
-                        Seen {
-                            gone: world.time + creep.ticks_to_live,
-                            armed: true,
-                            last: Some(Glimpse::of(creep)),
-                        },
-                    );
+                    let last = Some(Glimpse::of(creep));
+                    put(creep.id, world.time + creep.ticks_to_live, true, last);
                 }
             }
-
             for s in &room.structures {
                 if s.kind == StructureType::InvaderCore {
-                    seen.insert(
-                        s.id,
-                        Seen {
-                            gone: world.time + s.collapse,
-                            armed: s.level > 0,
-                            last: None,
-                        },
-                    );
+                    put(s.id, world.time + s.collapse, s.level > 0, None);
                 }
             }
 

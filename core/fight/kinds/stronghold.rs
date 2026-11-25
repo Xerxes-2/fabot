@@ -19,7 +19,7 @@ use fabot_base::stronghold::{self as bunker, Stronghold, raw};
 use fabot_base::tiles::{self, TileSet};
 use fabot_base::vocabulary::{Part, ResourceType, multiple, part_count_in, takes};
 use fabot_base::wish::Wish;
-use fabot_base::world::{Creep, Id, Pos, Room, RoomName, Structure, StructureType};
+use fabot_base::world::{Creep, Id, Pos, Room, RoomName, Rules, Structure};
 use fabot_tactics::{self as tactics, Sight, Tactic};
 
 /// Each body's copies and its parts, `HEAD` order: the struck body loses
@@ -354,15 +354,12 @@ struct Ground {
     block: [Pos; BLOCK],
 }
 
-fn ground(room: &Room, atlas: &Atlas, reach: i32, set: &[&Creep]) -> Option<Ground> {
+fn ground(rules: &Rules, room: &Room, atlas: &Atlas, reach: i32, set: &[&Creep]) -> Option<Ground> {
     let (id, at) = mark(room)?;
     let closed = square::closed(room);
     let walls = square::walls(room, atlas, &closed);
     let entered = square::from_border(atlas, &walls, room.name)?;
-    let towers: Vec<Pos> = (room.structures.iter())
-        .filter(|s| s.kind == StructureType::Tower && s.owner.is_theirs())
-        .map(|s| s.pos)
-        .collect();
+    let towers = super::raid::charged(rules, room);
     let corners = (-reach - 1..=reach).flat_map(|dx| (-reach - 1..=reach).map(move |dy| (dx, dy)));
     let block = corners
         .filter_map(|(dx, dy)| square::at(room, atlas, &closed, (at.x + dx, at.y + dy)))
@@ -390,7 +387,7 @@ fn ground(room: &Room, atlas: &Atlas, reach: i32, set: &[&Creep]) -> Option<Grou
 }
 
 /// Whether `level`'s first recipe has a block its square walks to.
-pub fn reached(room: &Room, atlas: &Atlas, level: i32) -> bool {
+pub fn reached(rules: &Rules, room: &Room, atlas: &Atlas, level: i32) -> bool {
     let recipe = usize::try_from(level)
         .ok()
         .and_then(|l| RECIPES.get(l)?.first());
@@ -400,7 +397,7 @@ pub fn reached(room: &Room, atlas: &Atlas, level: i32) -> bool {
             .map(|b| part_count_in(b, Attack) > 0)
             .collect::<Vec<_>>()
     });
-    swings.is_some_and(|s| ground(room, atlas, reach(s.into_iter()), &[]).is_some())
+    swings.is_some_and(|s| ground(rules, room, atlas, reach(s.into_iter()), &[]).is_some())
 }
 
 /// Healed before it lands, on the body nearest the core the towers strike, the
@@ -447,7 +444,7 @@ pub(crate) fn walks(sight: &mut Sight, scene: &Scene, e: &Engagement) -> Vec<Wis
         return Vec::new();
     };
     let reach = reach(set.iter().map(|c| c.live(Attack) > 0));
-    let Some(g) = ground(room, sight.atlas, reach, &set) else {
+    let Some(g) = ground(sight.rules, room, sight.atlas, reach, &set) else {
         return Vec::new();
     };
     let at = g.mark.1;

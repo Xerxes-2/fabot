@@ -13,7 +13,7 @@ use fabot_base::intents::CreepAct;
 use fabot_base::tiles::Tile;
 use fabot_base::vocabulary::Part;
 use fabot_base::wish::Wish;
-use fabot_base::world::{self, Creep, Id, Pos, RoomName, Striker};
+use fabot_base::world::{self, Creep, Id, Pos, RoomName, Rules, Striker};
 use fabot_base::{engine, tiles};
 use fabot_mv::{blob, plan};
 
@@ -149,6 +149,7 @@ pub struct Sight<'a> {
     pub ramparts: BTreeMap<RoomName, Vec<Pos>>,
     pub musters: Vec<Pos>,
     pub avoid: &'a BTreeSet<RoomName>,
+    pub rules: &'a Rules,
 }
 
 /// Above every economy wish in the room's one arbitration: a fight step is
@@ -1225,6 +1226,7 @@ mod tests {
             ramparts: BTreeMap::new(),
             musters: Vec::new(),
             avoid: &BTreeSet::new(),
+            rules: &world.rules,
         };
         let order: Vec<Id> = hostiles.iter().map(|h| h.id).collect();
         let (on, at, set) = (

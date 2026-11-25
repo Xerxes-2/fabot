@@ -128,6 +128,7 @@ impl<'a> Scene<'a> {
         grew: bool,
     ) -> Option<Engagement> {
         let colony = self.colonies_of(atlas, e).iter().map(|r| r.name).min()?;
+        let rules = &self.world.rules;
         let from = (self.world.spawns.iter())
             .find(|s| s.pos.room == colony)
             .map_or_else(|| tiles::middle(colony), |s| s.pos);
@@ -168,16 +169,16 @@ impl<'a> Scene<'a> {
             // as nothing a set shoots at there can fall (§6.2).
             let raid = (open && breached && !Scene::safe(room))
                 .then(|| {
-                    let hard = raid::hardest(room).map_or_else(|| goal.pos, |s| s.pos);
+                    let hard = raid::hardest(rules, room).map_or_else(|| goal.pos, |s| s.pos);
                     let priced = |set: &[casting::Body]| {
-                        raid::plan(atlas, room, &hard, &from, &cast_all(set), &[])
+                        raid::plan((atlas, rules), room, &hard, &from, &cast_all(set), &[])
                     };
 
                     raid::reinforce(capacity, &[], priced)
                 })
                 .flatten();
             let planned = raid.clone().or(siege).and_then(|(set, (order, outcome))| {
-                let charged = raid::charged(room);
+                let charged = raid::charged(rules, room);
                 let mut set = set;
 
                 if raid.is_none() {
@@ -275,7 +276,8 @@ impl<'a> Scene<'a> {
                 || self.landed.iter().any(|c| c.engagement == e.id)
                 || late
                 || self.next_struck(e).is_some_and(|b| {
-                    let priced = raid::hardest(room).filter(|_| reach == engine::RANGED_RANGE);
+                    let priced =
+                        raid::hardest(rules, room).filter(|_| reach == engine::RANGED_RANGE);
                     struck(priced.unwrap_or(b)) > exchange::pooled_heal(set.len() as i32, &set)
                         || self.unreached(atlas, room, b, &in_room)
                 });
@@ -294,9 +296,10 @@ impl<'a> Scene<'a> {
                     // topped up to the set its price buys, or it does not enter
                     // (owner, 2026-10-21).
                     if raid::raids(e) {
-                        let hard = raid::hardest(room).map_or_else(|| goal.pos, |s| s.pos);
+                        let hard = raid::hardest(rules, room).map_or_else(|| goal.pos, |s| s.pos);
                         let priced = |set: &[casting::Body]| {
-                            raid::plan(atlas, room, &hard, &from, &cast_all(set), &breaking)
+                            let set = cast_all(set);
+                            raid::plan((atlas, rules), room, &hard, &from, &set, &breaking)
                         };
 
                         return raid::reinforce(e.capacity, &fielded, priced);
@@ -397,7 +400,7 @@ impl<'a> Scene<'a> {
     ) -> Option<Vec<casting::Body>> {
         let escort: Vec<Fighter> = ground.escort.iter().map(casting::fighter_of).collect();
         // His safe mode covers this room alone, never his others.
-        let barred = !raid::charged(room).is_empty() || Scene::safe(room);
+        let barred = !raid::charged(&self.world.rules, room).is_empty() || Scene::safe(room);
         let holds = |f: &Fighter| !barred && escort.iter().all(|g| sweep::outreaches(f, g));
         if !ours.is_empty() {
             return ours.iter().all(holds).then(Vec::new);

@@ -1,9 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use fabot_base::declarations::{ColonyPlan, Stage};
-use fabot_base::engine;
 use fabot_base::tiles::{self, Tile, TileSet};
-use fabot_base::vocabulary::ResourceType;
 use fabot_base::world::{Creep, Id, Pos, RoomName, Structure, StructureType, World};
 
 use super::ground;
@@ -86,12 +84,8 @@ pub fn colonies(
             .cloned()
             .collect();
 
-        let mut towers: Vec<Structure> = (world.rules.working(room))
-            .filter(|s| {
-                s.kind == StructureType::Tower
-                    && s.owner.is_ours()
-                    && s.store.amount_of(ResourceType::Energy) >= engine::TOWER_ENERGY_COST
-            })
+        let mut towers: Vec<Structure> = (world.rules.towers(room))
+            .filter(|s| s.owner.is_ours() && fabot_base::world::charged(s))
             .cloned()
             .collect();
 

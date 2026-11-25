@@ -170,8 +170,8 @@ pub fn side_in(rules: &Rules, room: Option<&Room>, bodies: Vec<Fighter>) -> exch
             .filter(ours(StructureType::Rampart))
             .map(|s| (s.pos, s.hits))
             .collect::<BTreeMap<_, _>>(),
-        towers: (room.iter().flat_map(|r| rules.working(r)))
-            .filter(ours(StructureType::Tower))
+        towers: (room.iter().flat_map(|r| rules.towers(r)))
+            .filter(|s| s.owner.is_ours())
             .map(|s| exchange::Tower {
                 pos: s.pos,
                 energy: s.store.amount_of(ResourceType::Energy),
