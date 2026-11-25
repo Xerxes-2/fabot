@@ -34,6 +34,8 @@ pub struct Census {
     pub site: [u8; tiles::COUNT],
     pub occupied: [u8; tiles::COUNT],
     pub walkable: [u8; tiles::COUNT],
+    /// Natural wall: a road there is a tunnel.
+    pub wall: [u8; tiles::COUNT],
     /// Tiles whose container's rock, else controller, has one already: one
     /// standing off the plan's tile is kept, never doubled.
     pub served: [u8; tiles::COUNT],
@@ -66,6 +68,8 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
             *w = 1;
         }
     }
+
+    let wall = walkable.map(|w| 1 - w);
 
     for c in ours.iter().chain(room.hostiles()) {
         occupied[tiles::of_pos(&c.pos)] = 1;
@@ -203,6 +207,7 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
         site,
         occupied,
         walkable,
+        wall,
         served,
         rocked,
         posts,
@@ -364,7 +369,14 @@ pub fn place(
                 .all(|rc| astray.contains(rc))
     };
 
-    for item in plan.items.iter().filter(|i| placeable(i, level)) {
+    // A tunnel takes only the slots nothing else wants: its site would hold
+    // one for thousands of ticks ahead of the ring.
+    let tunnel = |i: &&Item| i.kind == StructureType::Road && census.wall[i.tile] > 0;
+    let rest = plan.items.iter().filter(|i| !tunnel(i));
+    for item in rest
+        .chain(plan.items.iter().filter(tunnel))
+        .filter(|i| placeable(i, level))
+    {
         match tile_of(item) {
             Some(t)
                 if (placed.len() as i32) < budget

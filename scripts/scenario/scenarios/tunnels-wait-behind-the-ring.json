@@ -1,0 +1,7 @@
+{
+  "why": "a tunnel road's site (45,000 energy on a wall) holds one of the room's five site slots for thousands of ticks: on soak:gen seed 173 (E8S3) two tunnels at 35,12 and 35,13 and three slow roads kept the RCL4 ring from ever being placed, main at bab1ccc3 ending with 2 ramparts; tunnels now take only slots nothing else wants, and the ring stands by t28400 (33 ramparts)",
+  "modules": ["layout"],
+  "start": { "gen": 173, "seed": 1 },
+  "ticks": 30000,
+  "assert": [{ "measure": "builtAtEnd", "kind": "rampart", "min": 3 }]
+}
