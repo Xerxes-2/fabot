@@ -8,9 +8,9 @@ Items marked `❓` are open owner decisions.
 
 ## 0. What v2 is
 
-A Screeps seasonal-server bot in Rust, compiled to WASM and bundled into one JS
-file. `v1` lives on the `v1` bookmark `9677b5e8` for reference and rollback
-only.
+A Screeps seasonal-server bot in Rust, compiled to WASM and uploaded as two
+modules (`dist/main.js`, `dist/main.wasm`). `v1` lives on the `v1` bookmark
+`9677b5e8` for reference and rollback only.
 
 Four principles shape v2:
 
@@ -72,11 +72,8 @@ arrives:
 | `Layout` | colony plan | ground: terrain, rocks, non-own obstacles |
 | `Economy` | slots | none — slots re-derive each tick; bodies keep sticky slot + task |
 | `Fight` | engagement plan | engagement event (§6.2) |
-| `Strategy` | operations, declarations | intel changed, engagement closed, due tick |
+| `Strategy` | operations, declarations | none — re-derived each tick (expansion: §7.2) |
 | `Move` | step / arbitration | re-derived per tick from `Atlas` floods |
-
-CPU pressure has one knob: a low bucket stretches due intervals. Nothing else
-degrades.
 
 **Within the tick, derive once:**
 
@@ -144,7 +141,7 @@ segments over multiple ticks (economy first); a cold tick never spends more than
 | `Economy` | `fabot-economy` | Slots, casts, sticky tasks, logistics dispatcher, links, labs, terminals, abandon | `Derived`, `Atlas`, `declarations`, `EconomyState`, Strategy's `scouts` | tasks, casts, `assignments` |
 | `Layout` | `fabot-layout` | Colony placement plan (Hivemind's builder, centre first), rampart ring, construction sites, buried-road and off-plan wall destroy, tower firing | `Derived`, `Atlas`, `declarations` | sites, destroys, tower actions, `standing.layout` |
 | `Exchange` | `fabot-exchange` | Pure combat arithmetic (`outcome`, `cheapest_win`, breach planning) | fighters, terrain | — |
-| `Fight` | `fabot-fight` | Hostile `Tracker`, engagements (`kinds/`: defend, siege, sweep, raid, stronghold), casting | `Derived`, `Atlas`, `Exchange`, `declarations` (its operations table), `intel`, `FightState` | fight actions, asks, wishes, casts, `FightState` |
+| `Fight` | `fabot-fight` | Hostile `Tracker`, engagements (`kinds/`: defend, siege, sweep, raid, stronghold, square), casting | `Derived`, `Atlas`, `Exchange`, `declarations` (its operations table), `intel`, `FightState` | fight actions, asks, wishes, casts, `FightState` |
 | `Tactics` | `fabot-tactics` | Per-creep combat actions, stepping, and the operator's tactic rules (`ruling`, `checked`) (no `Fight` import) | `Atlas`, `Move`, `Sight` + plan | creep actions, wishes |
 | `Strategy` | `fabot-strategy` | Intel, observers/scouts, `ColonyPlan` & outpost selection, expansion/abandon, operation opening & global force priority | `World`, `Derived`, `intel`, `Season`, `standing.layout`, `economy::spare` over `EconomyState.assignments` (its colonies' own bodies, priced this tick), fight state | `declarations` (`ColonyPlan`, outposts, claims, operations), `intel`, `expansion`, `piles` |
 | `Season` | `fabot-strategy` (private `season`) | Disposable seasonal rules (`worth`, `spent`, season structures/scoring) | `World` | declarations to `Strategy`, season actions |
@@ -156,7 +153,7 @@ segments over multiple ticks (economy first); a cold tick never spends more than
 `wish`, `intents`, `declarations`, intel rows, boost queries, `HashMap`) and
 imports no module above it: a crate, so the compiler holds that floor.
 `fabot-core` (`core/tick`) keeps only the tick (`state`, `memory`, `tick`,
-`drive`) over the module crates.
+`drive`, `sign`) over the module crates.
 
 **Dependency direction:** top to bottom, enforced at compile time by the Cargo
 workspace: each crate depends only on crates earlier in this chain (`‖` joins
@@ -168,7 +165,7 @@ private module of `fabot-strategy`. Declarations flow down only.
 **Line, comment, and count ceilings** live in `scripts/ceilings.json` (checked
 by `npm run ceiling` and `npm run scenario`). `core/fight/price` (offers, set
 shapes, casting), `core/fight/scene` (the per-tick read), `core/fight/open`
-(what opens a Defend) and `core/fight/tracker` (who is out there, §6.1) hold
+(what opens a Defend), `core/fight/tracker` (§6.1) and each `kinds/*` file hold
 ceilings apart from the rest of `core/fight`, as each changes on its own (owner).
 
 ## 4. State
@@ -176,7 +173,9 @@ ceilings apart from the rest of `core/fight`, as each changes on its own (owner)
 Every cross-tick value lives in this table with one owner. `State` composes
 one slice per owner (`EconomyState`, `LayoutState`, `FightState`,
 `StrategyState`) and each module's `decide` takes `&mut` only to its own, so
-the compiler holds ownership. Adding a row is an architecture change, not a fix.
+the compiler holds ownership; the one exception, `strategy::plan`, takes
+`&mut EconomyState` so `economy::spare` fills `homes`. Adding a row is an
+architecture change, not a fix.
 
 **Storage tiers:**
 - **Memory (`RawMemory`):** parsed once per tick in `core/tick/memory.rs` under
@@ -199,14 +198,14 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
 | `tuning` | `Tuning` (`core/base/tuning/mod.rs`): judgment constants of economy, expansion and defence economics (never Fight's), a key left out its default, an unknown or out-of-range one (each key's range beside its default) a fault and every default; carried on `Declarations` | Operator writes; Strategy and Economy read | Memory (`observe tuning`, soak's `--tuning` and a seat's `tuning`) | runtime A/B of judgment constants in self-play and soak without a rebuild |
 | `expansion` | in-flight claim, failed rooms (100k fade), abandoned colonies | Strategy | Memory | outlives travel, stock dips, and raze ticks |
 | `piles` | colony → its hub: pile tile, or built over (`Plan::pile`) | Strategy | Memory | written from the plan whenever one stands, read only while none does (a reset redraws it over ticks), so a colony banks and picks outposts on the cold tick as warm; no `--check`: a heap's first plan apart from the hub kept before it is a live fault, a warm replan updates it; dropped with its colony |
-| `switches` | module name → bool (`false` disables; `recorder: true` opts in) | Main | Memory | live kill switches |
+| `switches` | module name → bool (`false` disables; `recorder: true` opts in) | `app` | Memory | live kill switches |
 | `observe.*` | health, faults, per-module CPU, counts, tactic offers, alerts | Observe | segment 1 | operator telemetry & benchmark calibration |
 | `intel.rooms` | per-room snapshot (seen tick, owner/level, reservation, worker (another player's WORK body, never an Invader), keeper posts, controller/sources/containers, mineral, stronghold (core level, deploy and collapse ticks, the loot a set reaches that its room showed), a tower standing, a fallen stronghold's loot no rampart covers; by username, never stance) | Strategy | heap + segment 2 (every 100 ticks) | serve out-of-sight rooms; price outposts & expansion |
 | `metrics.windows` | 100-tick aligned windows (per-room + world, up to 150 windows) | Observe | segment 3 | `observe metrics` & soak `metrics.jsonl` (§10.5) |
-| `recorder` | deflated `read.js` pass + Memory + intel ring | Main | segments 10–14 | live capture for benchmark & replay (§9.1) |
+| `recorder` | deflated `read.js` pass + Memory + intel ring | `app` | segments 10–14 | live capture for benchmark & replay (§9.1) |
 | `engagements.log` | the last 200 engagements closed (an unpriced row evicted before any priced one, owner), a JSON row a line: id, kind, room, rivals, tactic, opened, contact, seen, closed, `predicted` (priced only), our dead, energy cast, and how it ended (`disengaged`, `gaveUp`, `left`, `safe`; none: its rival's death seen) | Observe (rows Fight's closes) | segment 4, written on a close (rows closed before a reset's first read wait in heap) | live `Exchange` error tracking (§10.1): an engagement's prediction goes with it, and 200 rows (~230 B each) fit one segment |
 | `metrics` | open window sums & per-creep/site/room deltas (a creep's task, load and tile, and the ticks they held) | Observe | heap | incremental tick deltas; a body stuck on its task is read across ticks |
-| `standing.layout` | per-room layout plan & incremental drawing state + ground key + `cold` (drawn with no standing held: a reset or a new colony) | Layout | heap | rebuilds at 4 centres/tick after reset; `cold` marks the first plan `piles` is checked against |
+| `standing.layout` | per-room layout plan & incremental drawing state + ground key + `cold` (drawn with no standing held: a reset or a new colony) | Layout | heap | rebuilds over ticks after reset (§5); `cold` marks the first plan `piles` is checked against |
 | `scouts` | scout targets | Strategy | heap (this tick) | derived from intel for Economy |
 | `homes` | the colonies' own economy facts (`derived::Homes`) | Economy | heap (this tick) | read once by `economy::spare` before outposts are picked, finished by Economy's `of_world` |
 | `sightings` | room → armed hostile / core id → expiry tick | World | heap | vision grace for stood-down outposts |
@@ -220,9 +219,8 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
 | `buffers` | emptied `World` lists from last tick | World | heap | capacity reuse without allocation (§9.2) |
 | `fixed` | structure id → immutable type/tile/owner/hitsMax | World (`read.js`) | JS heap | avoids repeated getter cost (~1/5 of `read.structures`); checked by `replay --check` |
 
-**Rules:** Memory and segments are written once per tick by `Main` from `State'`;
-no `thread_local!`/`static` outside `app/driver.rs` and the heap rows above; no
-room/player names or object ids in source.
+**Rules:** Memory and segments are written once per tick by `app` from `State'`;
+no `thread_local!`/`static` outside `app/driver.rs` and the heap rows above.
 
 **Not state:** multi-part danger tables, stand-down latches, raid
 episodes, exit watches/holds, head latches, recall flags, quarries, economy
@@ -248,10 +246,8 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   1:1 `CARRY:MOVE`, whichever delivers more energy/life per energy cost on the
   route (`bodies::carry_per_move`). Small emergency haulers (< half target
   shape) hold their own slot while CARRY is short.
-- **Cast priority:** a room's queue runs floors (home dig and carriers),
-  Defends, other fights, the economy (owner); only a Defend waits on the bank,
-  holding what ranks behind it, and floors rank ahead of it since they refill
-  the bank it waits on; mineral miner queues before outposts;
+- **Cast priority:** a room's queue is §6.5's (floors rank ahead of a Defend
+  since they refill the bank it waits on); mineral miner queues before outposts;
   while stock is past reserve (or a pile's draw beats decay), upgraders and
   pre-storage workers queue before outpost haul (the haul only adds to the stock
   they draw down); the outposts' carriers take the spawn time the colony's other
@@ -360,6 +356,15 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   road is at risk or its walk lacks one (Hivemind's mine builder counts a
   missing road as work, first paving or lost alike), cast ahead of the far haul
   as Hivemind's is, since the haul's recasts otherwise hold every spawn.
+- **Outpost stand-down:** a player's armed hostile stands down an outpost
+  while it reaches its sources/containers and no armed body of ours holds it
+  (strikes as far and stands within its own reach of it: v1's guard), an armed
+  Invader on sight (its only aim is that work; one shot down to no weapon holds
+  nothing, as Defend leaves it; bodies withdraw while Defend answers, the
+  outpost stays chosen), a stronghold core outright, and a blind room's
+  last-seen hostile for its life (`sightings`); a harvester (at its seat or
+  walking to it) walks round only the strikes no guard holds, every other body
+  round all.
 - **Reserve (`strategy::reserve`):** threatened colonies (rival within 3 rooms,
   home fight open, or fight cast owed) keep `towers × TOWER_ENERGY_COST ×
   CREEP_LIFETIME × n` (`n` the `reserveLifetimes` tuning, default `2`); quiet
@@ -392,9 +397,9 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   (towers, spawns, harvest bays from RCL3, extension bays in order; plain roads
   at RCL4 behind storage, swamp roads to sources/controller from RCL2). Key
   departures: near-exit source fallback (3 tiles vs 6); no harvest-bay spawn;
-  multi-seat source container before extensions; no
-  labs below RCL8; nuker last; unreachable cut pockets kept unroaded; source
-  links never split a 1-wide post; a quad or decorative wall closing a
+  multi-seat source container before extensions; no labs below RCL8 (worth
+  little early, owner); nuker last; unreachable cut pockets kept unroaded;
+  source links never split a 1-wide post; a quad or decorative wall closing a
   structure in gives way, as does one closing in what only an ore's post
   leads to (its digger yields only to a chain two weights heavier) or cuts the
   core off an exit (its outposts may lie only that way), and a pocket of roads and ramparts no walk reaches
@@ -444,7 +449,7 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   expansion scores minerals by, each to Hivemind's "high" stock, so the labs
   make what fights spend from what we dig with no operator in the loop.
   `labs::wanted` lists the reactions toward them from the empire's stock,
-  depth-first down the crate's `REACTIONS`, each target cut to whole
+  depth-first down `reaction_components()`, each target cut to whole
   reactions the stock carries through to it after the targets before it
   (`labs::makeable`), none drawing an earlier one's stock below its cap.
   `labs::assign` gives each, no two clusters the same, to a cluster its
@@ -460,8 +465,7 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   balance reagents and boosts (§5 terminal aid), and a product another
   colony is short of leaves the labs a send at a time. Labs
   reserved for active boosts (§6.5) drop out of reactions and are filled by
-  carriers via `Ground::boost_lab`. Layout places no lab below RCL8 (labs are
-  worth little early).
+  carriers via `Ground::boost_lab`.
 - **Abandon (`economy/abandon.rs`):** declared colonies stop digging, building,
   and upgrading past deadline, ship storage/terminal/lab contents out (energy
   last), destroy own structures (`destroy()` requires our controller, and owned
@@ -475,7 +479,7 @@ pricer would cost ~2× CPU and 580 lines for no gain).
 
 ### 6.1 Tracker — who is out there
 
-`tracker::step(grace, held, owned, prev_groups, hostiles, tick) -> (groups, events)`
+`tracker::step(grace, held, owned, prev, hostiles, tick) -> (groups, events)`
 
 - **Clustering:** armed hostiles cluster by connected components at Chebyshev
   distance ≤ 4 (including across room borders). Unarmed hostiles are singletons.
@@ -621,9 +625,9 @@ with one phase machine per kind under `core/fight/kinds/`.
   stood at home till they aged out).
   `❓` A sweep's candidates need stirred prey (a group newly seen there),
   which needs live vision: once the sweeps stop, nothing is stirred and none
-  reopens, so a dry spell of thousands of ticks follows (sweep-hunts seed 1
-  on the centre-first planner: no prey seen t20000-24000 while beta works the
-  same rooms). Patrol preyed rooms to keep vision?
+  reopens, so a dry spell of thousands of ticks follows
+  (sweep-hunts-creeps-before-containers seed 1 on the centre-first planner: no
+  prey seen t20000-24000 while beta works the same rooms). Patrol preyed rooms to keep vision?
 
 - **`Stronghold`** (`kinds/stronghold.rs`, L1–L3): not priced by
   `Exchange` (owner): a level's towers, ramparts, hits and garrison are the
@@ -737,11 +741,7 @@ and `cheapest_win` (adds only to already-standing `ours`).
 - **Towers alone:** with no body of ours fielded, towers that out-damage the
   raid's heal win, within the energy each holds, and if the raid razes no
   keep first.
-- `❓` Exchange prices our towers at our body's tile, though a set that
-  closes fights where the raid stands, often far weaker; counts a swinger's
-  strike-back whether or not the raid swings; and regrows a healed raid's
-  hits but not its TOUGH (fixed with `engine::strike_at` and the shared
-  `breaks()` target pick).
+- `❓` Exchange counts a swinger's strike-back whether or not the raid swings.
 - **Consequence pricing:** every threat, structure, and seat is valued in
   **energy/tick** (razed, killed, healed, or denied) — never by body parts or
   creep kind. Feature-keyed rules leave exploitable gaps; wrong choices are
@@ -751,10 +751,10 @@ and `cheapest_win` (adds only to already-standing `ours`).
   it costs no cast; the ground it holds (a blocked source) is not priced
   either, a gap the owner accepted.
 - **Tactic selection:** each kind declares candidate tactics; pricing scores
-  each candidate as `Offer { tactic, value, cost, bodies }`, and
-  `tactics::select` applies operator `forbid`/`pin` rules then picks max
-  `value − cost` (ties: fewest bodies, declared order). Offers stay heap-only
-  for `observe engagements`.
+  each candidate as `Offer { tactic, value, cost, bodies }`; the scene drops
+  operator-forbidden ones (`tactics::ruling`), and `tactics::select` takes a
+  pin still offered, else max `value − cost` (ties: fewest bodies, declared
+  order). Offers stay heap-only for `observe engagements`.
 
 ### 6.4 Tactics — what a committed body does
 
@@ -765,21 +765,22 @@ and `cheapest_win` (adds only to already-standing `ours`).
 | `Kite` | A body that does not swing walks to a shot's range of its mark round each tile a swing strikes before the body could stand on it and be gone, its rest, legs and the tile's ground counted, from inside one first onto a clear tile beside, else the one struck latest if later than its own (v1's kiteStep, kiteUnsafeFor) |
 | `Close` | Close distance + glue onto moving marks; a body that does not swing closes as `Kite` walks, and on a mark that swings stops at a shot's range; a `Defend` body (`Kite` too, not the blobs) outside its centre's room enters it by any tile and ranks no mark until in. A siege's loose bodies keep its blob's line in |
 | `Hold` | Hold rampart / `Atlas` seat: one body a rampart, as Exchange's Hold stance seats them |
-| `Pursue` | Chase across room borders |
-| `Retreat` | Fall back to `ColonyPlan.muster` (off plan structures and spawns' doors, fewest roads in reach) |
-| `Formation` | Step 2×2 footprint as one body (with `Siege`) |
-| `Dismantle` | Dismantle target; medics seat beside the body towers struck last tick |
-| `Drain` | Bouncer/medic border-gate volley soaking |
-| `Hunt` | ibex-style EV over 9 neighbouring tiles (worth − netted damage + glue) |
+| `BlobKite`, `BlobClose` | The set walks as one (`mv::blob`) into a shot's / melee reach of its mark (§6.3 Arrival) |
+
+**Helpers** kinds call per body, not tactics an offer selects: `retreat` (to
+`ColonyPlan.muster`: off plan structures and spawns' doors, fewest roads in
+reach), `siege` (dismantle; medics seat beside the body towers struck last
+tick), `drain` (bouncer/medic border-gate volley soaking), `hunt` (ibex-style
+EV over 9 neighbouring tiles: worth − netted damage + glue), `rampart`, `rest`.
 
 **Reflexes:** strike (swing + shot/volley by stance, static open-time kill
-order, overridden by `Hunt`'s scored shot) and heal run for every armed/healing
+order, overridden by `hunt`'s scored shot) and heal run for every armed/healing
 body. All creep acts pass through `intents::performed` so engine pipeline
 conflicts never silently cancel an act.
 
 ### 6.5 Casting
 
-- **Queue (`Tick::queue`):** per-room priority `Floor → home Defend → outpost
+- **Queue (`tick::queue`):** per-room priority `Floor → home Defend → outpost
   Defend → Fight → Economy` (owner, 2026-11-24); an affordable Defend ask
   waiting on energy holds the asks behind it. An unanswered home Defend is
   priced each tick, as its raid changes under the towers.
@@ -881,7 +882,7 @@ expansion, and operation priorities.
   growing.
 - **Expansion (`strategy::expand`):** automatic, one in flight. On due ticks
   (100) while GCL allows and `bucket >= expandBucket` (9000), a non-busy RCL4+
-  sponsor with storage holding `reserve + sponsorMargin` scores free 2-source rooms
+  sponsor with storage holding `reserve + sponsorMargin` (§5) scores free 2-source rooms
   ≥ 2 rooms from owned rooms and past `expandThreatRooms` (2) from rival rooms by dig + free neighbours + mineral boost demand
   (`1/(held+1)`) + `season::worth` − crossings − fading failure penalty (a
   nearby stronghold adds no cost because its creeps/towers stay at its core and
@@ -898,10 +899,10 @@ expansion, and operation priorities.
 
 ### 7.3 Operations and force allocation
 
-- Candidate operations (`Siege`, `PowerBank`, `KeeperDuty`) are priced once at
-  open via `Exchange` against intel and opened only when positive EV.
-- **Global force allocation:** engagements compete across the world by
-  `Priority` (value per body asked); highest priority is staffed first, lower
+- Planned kinds (`PowerBank`, `KeeperDuty`) are to be priced once at open via
+  `Exchange` and opened only on positive EV.
+- **Global force allocation:** engagements compete across the world by their
+  operation row's priority (below); highest priority is staffed first, lower
   starved (§6.2). This is the world-level rule that keeps one rival striking
   three rooms from being three independent fights over one force.
 - **Operations table:** `strategy::plan` writes `declarations.operations`, rows
@@ -951,13 +952,13 @@ No performance change ships without the representative benchmark:
 2. **Engine cost model:** `bench.mjs` replays under live isolate heap limits
    with Memory JSON parse/stringify, 0.2 CPU/intent, and cold ticks reported
    separately.
-3. **Live calibration:** `Main` logs per-module `Game.cpu.getUsed()` deltas to
-   `observe.cpu.modules`. The benchmark is representative once each module's
-   share is within `❓ 15%` of live (`❓` calibration waits for live capture).
+3. **Live calibration:** `app` logs per-phase `Game.cpu.getUsed()` deltas to
+   `observe.phases` (`observe cpu`). The benchmark is representative once each
+   module's share is within `❓ 15%` of live (`❓` calibration waits for live
+   capture).
 
 Noise floor: `npm run bench` reads within `±0.4%` per module on an unchanged
-bundle. Speed claims require an interleaved A/B with identical Memory
-fingerprints, or a deterministic count — never bare wall-clock.
+bundle.
 
 ### 9.2 Rust dialect — defaults, not rules
 
@@ -1098,9 +1099,8 @@ scenario that scores one seat against another.
 ### 10.3 Unit tests, where the engine would obscure
 
 Under 1 minute in `npm test`:
-1. **Property invariants** (each crate's `tests/`): Memory round-trips, Tracker id
-   permutation stability, `Ours` ∩ `assignments` = ∅, no overlapping moves, no
-   idle spawn while a cast is affordable.
+1. **Property invariants:** Memory round-trips, Tracker id permutation
+   stability, no overlapping moves.
 2. **Table-driven pure arithmetic:** `Exchange`, `Atlas`, `Tracker`, bodies,
    pricing.
 
@@ -1161,7 +1161,7 @@ on a live-sized world.
 | Milestone | Scope | Exit | Status |
 |---|---|---|---|
 | M1 economy | core economy slots, logistics, layout | seat-extreme soak beats v1 across seeds | ✅ |
-| M1b outposts | remote harvest/haul/reserve; stand-down rule: a player's armed hostile stands down an outpost while it reaches its sources/containers and no armed body of ours holds it (strikes as far and stands within its own reach of it: v1's guard), an armed Invader on sight (its only aim is that work; one shot down to no weapon holds nothing, as Defend leaves it; bodies withdraw while Defend answers, the outpost stays chosen), a stronghold core outright, and a blind room's last-seen hostile for its life (`sightings`); a harvester (at its seat or walking to it) walks round only the strikes no guard holds, every other body round all | E1 outposts net positive after Invaders | ✅ |
+| M1b outposts | remote harvest/haul/reserve; stand-down (§5) | E1 outposts net positive after Invaders | ✅ |
 | M2 structures | nodes N1–N7; links (controller's + longest-way source's first beat hub-first by +5–17k over 20k ticks on N4); labs & boosts; factory and RCL8 set wait for a sink (one room mines one ore, reactions need two, offline has no market) | links beat no-links; labs feed boosts | ✅ |
 | M3 defence | `Exchange`, `Defend`, tactics, casting, rival harness | fixed rivals & self-play held; error in bound | ✅ (self-play `❓`) |
 | M4 live | v2 replaces v1 live | v2 runs live | ✅ |
@@ -1170,6 +1170,5 @@ on a live-sized world.
 **Remaining known gaps:**
 - `Atlas` room graph ignores `Footprint` (2×2 Quad routing through 1-wide gaps);
   boosted `CARRY` priced unboosted.
-- `Economy` cross-room travel prices intermediate rooms at one room width.
 - Planned fight kinds (`KeeperDuty`, `PowerBank`, `Stronghold` L4–L5), deploy canary,
   and remaining `sim/` features (§10.2).
