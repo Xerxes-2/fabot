@@ -6,6 +6,7 @@
   "assert": [
     { "measure": "hostileTicks", "room": "W8N3", "min": 100 },
     { "measure": "castIn", "name": "fight-", "room": "W8N3", "max": 0 },
-    { "metric": "exposure", "room": "W8N3", "max": 0 }
+    { "metric": "exposure", "room": "W8N3", "max": 0 },
+    { "each": "engagement", "where": { "kind": "defend" }, "assert": { "pastBudget": { "max": 0 } } }
   ]
 }

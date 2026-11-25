@@ -4,6 +4,7 @@
   "start": { "room": "W8N3", "seed": 1, "node": "B5", "invaders": "W8N2:1000:2000" },
   "ticks": 4000,
   "assert": [
-    { "measure": "boosted", "min": 1 }
+    { "measure": "boosted", "min": 1 },
+    { "each": "engagement", "where": { "kind": "defend" }, "assert": { "pastBudget": { "max": 0 } } }
   ]
 }

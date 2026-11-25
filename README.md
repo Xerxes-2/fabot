@@ -15,6 +15,7 @@ rustup (it reads the same file) and `wasm-pack`. Then:
 
 - `npm install`
 - `cp .env.example .env` and fill in your Screeps token
+- `jj ship` (`AGENTS.md`): the `aliases.ship` that `.claude/hooks/session-start.sh` sets, and locally `jj config set --repo claude.session-branch main`
 
 ## Workflow
 

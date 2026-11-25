@@ -5,6 +5,7 @@
   "ticks": 4000,
   "assert": [
     { "measure": "strayTicks", "max": 50 },
-    { "measure": "hostileTicks", "room": "W8N2", "max": 310 }
+    { "measure": "hostileTicks", "room": "W8N2", "max": 310 },
+    { "each": "engagement", "where": { "kind": "defend" }, "assert": { "pastBudget": { "max": 0 } } }
   ]
 }

@@ -7,10 +7,9 @@ import { readFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
 import { connect, fail } from "./screeps-api.mjs";
 import { METRICS, windows } from "./metrics.mjs";
-import { replay, views } from "./observe-views.mjs";
+import { OBSERVE, replay, views } from "./observe-views.mjs";
 import { outcome, report, tested } from "./sim/prediction.mjs";
 
-const OBSERVE = 1;
 const ENGAGEMENTS = 4;
 const USAGE = `usage: npm run observe -- <command>
   health             tick, version, bucket, CPU, faults, refusals, modules off, metrics past their threshold

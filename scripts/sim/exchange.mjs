@@ -4,11 +4,12 @@
 // and set against what `Exchange.outcome` predicted for it, on the arm of the
 // tactic a home's Defend fields.
 //
-// Usage: npm run exchange -- [--count N] [--seed N] [--ticks N] [--real 1] [--rollout R --theirs 1] [--mixed 1]
+// Usage: `usage` below.
 //   --count  duels (default 200)      --seed   the draw and the engine's (default 1)
 //   --ticks  the longest a duel runs (default 400)
 //   --real   our side runs the bot's tactics, the one its Defend fields
-//   --rollout R --theirs 1   their side searches its scripts (`sim duel`'s PGS)
+//   --rollout R --theirs 1   their side searches its scripts (`sim duel`'s PGS, as
+//            its --replan and --rounds, forwarded, tune)
 //   --mixed  our side a Defend's drafted set, a 1A1M beside six small rangers:
 //            the only draw where three or more of ours share the raid's focus
 //
@@ -19,19 +20,17 @@
 // `outcome`'s clocks do.
 import { spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { COMPOUNDS, bugs, misses, outcome, report, stood } from "./prediction.mjs";
-import { simBinary } from "./run.mjs";
+import { REPO, simBinary } from "./run.mjs";
 
-const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const usage = "usage: npm run exchange -- [--count N] [--seed N] [--ticks N] [--real 1] [--rollout R --theirs 1] [--mixed 1]";
+const usage = "usage: npm run exchange -- [--count N] [--seed N] [--ticks N] [--real 1] [--rollout R --theirs 1 [--replan K] [--rounds N]] [--mixed 1]";
 const fail = (message) => {
   console.error(message);
   process.exit(1);
 };
 
-const flags = { "--count": 200, "--seed": 1, "--ticks": 400, "--real": 0, "--rollout": 0, "--theirs": 0, "--mixed": 0 };
+const flags = { "--count": 200, "--seed": 1, "--ticks": 400, "--real": 0, "--rollout": 0, "--theirs": 0, "--replan": 0, "--rounds": 0, "--mixed": 0 };
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i += 2) {
   if (!(argv[i] in flags) || !/^\d+$/.test(argv[i + 1] ?? "")) fail(usage);
@@ -154,7 +153,7 @@ const predictions = Object.fromEntries(run(join(REPO, "target/release/exchange")
 writeFileSync(join(out, "predictions.json"), JSON.stringify(predictions));
 const sim = simBinary();
 const began = performance.now();
-const forwarded = ["--real", "--rollout", "--theirs"].flatMap((f) => (flags[f] ? [f, String(flags[f])] : []));
+const forwarded = ["--real", "--rollout", "--theirs", "--replan", "--rounds"].flatMap((f) => (flags[f] ? [f, String(flags[f])] : []));
 const fielded = samples.map((s) => ({ ...s, tactic: predictions[s.id].tactic }));
 const actual = run(sim, ["duel", "--ticks", String(ticks), "--seed", String(seed), ...forwarded], fielded);
 const ms = performance.now() - began;

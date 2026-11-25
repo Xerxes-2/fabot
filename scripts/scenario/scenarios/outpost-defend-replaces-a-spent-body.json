@@ -4,6 +4,7 @@
   "start": { "world": "scripts/scenario/worlds/outpost-spent-pair.json", "seed": 1 },
   "ticks": 1000,
   "assert": [
-    { "measure": "answeredMost", "max": 400 }
+    { "measure": "answeredMost", "max": 400 },
+    { "each": "engagement", "where": { "kind": "defend" }, "assert": { "pastBudget": { "max": 0 } } }
   ]
 }

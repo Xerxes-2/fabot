@@ -23,10 +23,11 @@
 //   --jobs  soaks at once (default every hardware thread)
 //   --watch the one scenario's soak served to lazycreep (`sim --watch`), in this terminal
 //
-// A scenario file: { "why": the invariant, "modules": the core modules it tests, "nightly"?, "start": { "gen"? (sim --gen's map, which picks the room) or "room", "seed",
+// A scenario file (its keys SCENARIO, RECIPE and WORLD below): { "why": the invariant, "modules": the core modules it tests, "nightly"?, "defends"? (it stands a fight,
+// so bounds bodiesLost or each engagement's pastBudget; default a fight scenario raising a raid or reading a defend; false opts out), "start": { "gen"? (sim --gen's map, which picks the room) or "room", "seed",
 // "late"?, "node"?, "invaders"? (room:every[:first],…), "wave"? (role[:size],…), "core"? (room:tick,…), "stronghold"? ("room:tick:level[:deploy],…"), "resetEvery"? (soak:many's --reset-every), "unsafe"?, "ended"?,
-// "opponents"? (sim's scripted rivals, `sim/src/rival`), "players"? and "sectors"? (soak.mjs's: our bot in every seat; an assert's "seat" names the one it reads, unset the first) } or { "world": a capture-shaped file
-// (crafted ones under worlds/), "seed", "room"?, "node"?, "late"? (a world with no home of ours, as a recipe's), "ended"?, "invaders"?, "wave"?, "stronghold"? (as a recipe's), "opponents"? (the world's own users), "declarations"? (in place of the world's), "memory"? (keys of Memory.v2 beside the world's), "gcl"? (in place of the world's), "level"? ({ room: its controller level in place of the world's }), "roadless"? ([room]: every road in each taken up), "overlay"? (a world file whose rooms stand in for the base world's of their names, its seat ours) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"? (or "report": true, printed and bounding nothing), "room"?, "kind"?, "name"? }] };
+// "follow"? ([room] sampled beside the declared), "opponents"? (sim's scripted rivals, `sim/src/rival`), "players"? and "sectors"? (soak.mjs's: our bot in every seat; an assert's "seat" names the one it reads, unset the first) } or { "world": a capture-shaped file
+// (crafted ones under worlds/), "seed", "room"?, "node"?, "late"? (a world with no home of ours, as a recipe's), "ended"?, "follow"?, "invaders"?, "wave"?, "stronghold"? (as a recipe's), "opponents"? (the world's own users), "declarations"? (in place of the world's), "memory"? (keys of Memory.v2 beside the world's), "gcl"? (in place of the world's), "stock"? ({ room: amounts set in its terminal }), "level"? ({ room: its controller level in place of the world's }), "roadless"? ([room]: every road in each taken up), "overlay"? (a world file whose rooms stand in for the base world's of their names, its seat ours) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"? (or "report": true, printed and bounding nothing), "room"?, "kind"?, "name"? }] };
 // a measure is one of `measures` below, read off the soak's output over ticks
 // [from, to), counted from the run's first tick; { "metric": a name the bot's
 // metrics carry (`core/observe/metrics.rs`), "room"?, "total"? } bounds its worst
@@ -43,14 +44,20 @@ import { breaches, check, engagementsOf, events, measures, occurrences, roomsOf,
 import { report } from "../sim/prediction.mjs";
 import { sweep } from "./prune.mjs";
 import { unstood } from "../sim/node.mjs";
-import { SIM_START, buildPlan, runSim, simBinary, unseated } from "../sim/run.mjs";
+import { REPO, buildPlan, runSim, simBinary, soakDir } from "../sim/run.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO = resolve(HERE, "../..");
 // A count ceiling holds for every scenario (`ARCHITECTURE.md` §9.3), so an assert
 // naming one takes its bound from there rather than repeating the number.
 const countCeilings = JSON.parse(readFileSync(join(REPO, "scripts/ceilings.json"), "utf8")).counts;
 const LIBRARY = join(HERE, "scenarios");
+const SCENARIO = ["name", "why", "modules", "nightly", "defends", "start", "ticks", "assert"];
+const RECIPE = ["gen", "room", "seed", "late", "node", "invaders", "wave", "core", "stronghold", "resetEvery", "unsafe", "ended", "follow", "opponents", "players", "sectors"];
+// A "world" start's alone: each is written into the world before it stands.
+const CRAFTED = ["declarations", "memory", "gcl", "stock", "level", "roadless", "overlay"];
+const WORLD = ["world", "seed", "room", "node", "late", "ended", "follow", "invaders", "wave", "stronghold", "opponents", ...CRAFTED];
+const OPPONENT = ["name", "room", "config", "raid"];
+const defends = (s) => s.defends ?? (s.modules.includes("fight") && Boolean(s.start.invaders || s.start.wave || s.assert.some((a) => a.where?.kind === "defend")));
 const fail = (m) => {
   console.error(m);
   process.exit(1);
@@ -73,7 +80,7 @@ const library = readdirSync(LIBRARY)
   .filter((f) => f.endsWith(".json"))
   .map((f) => ({ name: basename(f, ".json"), ...JSON.parse(readFileSync(join(LIBRARY, f), "utf8")) }));
 for (const s of library)
-  if (Object.keys(s).some((k) => !["name", "why", "modules", "nightly", "start", "ticks", "assert"].includes(k))) fail(`${s.name}: a scenario takes "why", "modules", "nightly", "start", "ticks", "assert" and nothing else`);
+  if (Object.keys(s).some((k) => !SCENARIO.includes(k))) fail(`${s.name}: a scenario takes ${SCENARIO.slice(1).join(", ")} and nothing else`);
 for (const s of library)
   for (const a of s.assert) {
     if (a.metric !== undefined) a.measure = "metric";
@@ -88,13 +95,13 @@ for (const s of library) s.assert = withAlways(s.assert);
 for (const s of library) for (const a of s.assert) if (a.each) Object.assign(a, { measure: "each", max: 0 });
 for (const s of library)
   if (!s.modules?.length || s.modules.some((m) => !modules.includes(m))) fail(`${s.name}: "modules" must name some of ${modules.join(", ")}`);
-for (const s of library.filter((s) => s.name.startsWith("defend-")))
+for (const s of library.filter(defends))
   if (!s.assert.some((a) => (a.measure === "bodiesLost" && a.max !== undefined) || a.assert?.pastBudget?.max !== undefined)) fail(`${s.name}: a fight scenario bounds bodiesLost, or each engagement's pastBudget, by a "max"`);
 // What sim cannot stand or read (`scripts/sim/run.mjs`), or null.
 const unplayable = (s) =>
-  Object.keys(s.start).filter((k) => !SIM_START.includes(k)).map((k) => `its start's ${k}`)[0] ||
+  Object.keys(s.start).filter((k) => !(s.start.world ? WORLD : RECIPE).includes(k)).map((k) => `its start's ${k}; it takes ${(s.start.world ? WORLD : RECIPE).join(", ")}`)[0] ||
   (s.start.node && unstood(s.start.node)) ||
-  (s.start.opponents ?? []).map(unseated).find(Boolean) ||
+  (s.start.opponents ?? []).flatMap(Object.keys).filter((k) => !OPPONENT.includes(k)).map((k) => `an opponent's ${k}; one takes ${OPPONENT.join(", ")}`)[0] ||
   (s.start.world && Object.keys(JSON.parse(readFileSync(resolve(REPO, s.start.world), "utf8")).segments ?? {}).some((k) => k !== "2") && "a capture's segments beside intel's") ||
   null;
 for (const s of library) if (unplayable(s)) fail(`${s.name}: ${unplayable(s)}`);
@@ -125,12 +132,7 @@ if (flags["--watch"] && names.length !== 1) fail("--watch runs exactly one scena
 if (flags["--watch"]) process.on("SIGINT", () => {});
 const jobs = Number(flags["--jobs"] ?? availableParallelism());
 
-sweep(join(REPO, "soak-runs"));
-
-for (const { name, start } of scenarios)
-  if (start.world && Object.keys(start).some((k) => !["world", "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "follow", "ended", "memory", "gcl", "stock", "level", "roadless", "overlay", "stronghold"].includes(k))) fail(`${name}: a "world" start takes a "seed", "room", "node", "late", "invaders", "wave", "stronghold", "opponents", "declarations", "follow", "ended", "memory", "gcl", "stock", "level", "roadless", "overlay" and nothing else`);
-for (const { name, start } of scenarios)
-  if (!start.world && (start.declarations || start.memory || start.gcl || start.stock || start.level || start.roadless || start.overlay)) fail(`${name}: "declarations", "memory", "gcl", "stock", "level", "roadless" and "overlay" take a "world" start`);
+sweep(soakDir());
 
 for (const { name, start } of scenarios)
   if (start.stronghold !== undefined && !/^[WE]\d+[NS]\d+:\d+:[1-5](:\d+(:[a-z_]+\*\d+)?)?(,[WE]\d+[NS]\d+:\d+:[1-5](:\d+(:[a-z_]+\*\d+)?)?)*$/.test(start.stronghold)) fail(`${name}: "stronghold" takes "room:tick:level[:deploy[:resource*amount]],…"`);
@@ -153,15 +155,13 @@ for (const s of scenarios) {
 if (runs.size && !buildPlan()) fail("the plan tool did not build");
 const started = Date.now();
 const play = async ({ name, start, ticks }) => {
-  if (start.world && (start.declarations || start.memory || start.gcl || start.stock || start.level || start.roadless || start.overlay)) {
-    const world = join(REPO, "soak-runs", `world-${name}.json`);
+  if (CRAFTED.some((k) => start[k])) {
+    const world = soakDir(`world-${name}.json`);
     mkdirSync(dirname(world), { recursive: true });
-    // `overlay`: a world file whose rooms stand in for the base world's of their names, its seat ours.
     const { rooms: over = [], ...seat } = start.overlay ? JSON.parse(readFileSync(resolve(REPO, start.overlay), "utf8")) : {};
     const base = JSON.parse(readFileSync(resolve(REPO, start.world), "utf8"));
     const crafted = { ...base, ...seat, rooms: base.rooms.map((r) => over.find((o) => o.name === r.name) ?? r) };
     const v2 = { ...crafted.memory?.v2, ...start.memory };
-    // `stock`: amounts set in each named room's terminal.
     for (const [room, add] of Object.entries(start.stock ?? {})) {
       const terminal = crafted.rooms.find((r) => r.name === room)?.objects.find((o) => o.type === "terminal");
       if (!terminal) fail(`${name}: "stock" names ${room}, which holds no terminal in ${start.world}`);
@@ -183,7 +183,7 @@ const play = async ({ name, start, ticks }) => {
   const { gen, sectors, players, world, room, node, seed, late, ended, unsafe, follow, opponents, invaders, wave, core, stronghold, resetEvery } = start;
   const watch = flags["--watch"] ? { port: Number(flags["--port"] ?? 21025), ms: Number(flags["--tick-ms"] ?? 50) } : undefined;
   const capture = flags["--capture"] ? `0-${ticks}` : undefined;
-  return runSim(sim, { capture, gen, sectors, players: players && JSON.stringify(players), world: world && resolve(REPO, world), room, node, ticks, seed, late, ended, unsafe, follow, rivals: opponents, invaders, wave, core, stronghold, resetEvery, watch, out: join(REPO, "soak-runs", name) });
+  return runSim(sim, { capture, gen, sectors, players: players && JSON.stringify(players), world: world && resolve(REPO, world), room, node, ticks, seed, late, ended, unsafe, follow, rivals: opponents, invaders, wave, core, stronghold, resetEvery, watch, out: soakDir(name) });
 };
 // A long soak started last is the whole run's tail.
 const queue = [...runs.values()].sort((a, b) => b.ticks - a.ticks);
@@ -203,7 +203,7 @@ let failed = 0;
 const moved = { better: 0, worse: 0 };
 for (const s of scenarios) {
   const run = runs.get(keyOf(s));
-  const dir = join(REPO, "soak-runs", run.name);
+  const dir = soakDir(run.name);
   if (run.code !== 0) {
     failed++;
     console.log(`FAIL ${s.name}: the soak failed (exit ${run.code}); see ${dir}`);
@@ -215,7 +215,7 @@ for (const s of scenarios) {
     if (!read.has(at)) read.set(at, samplesOf(at));
     return [read.get(at), at];
   };
-  const baseDir = flags["--base"] && join(REPO, "soak-runs", keyOf(s, flags["--base"]));
+  const baseDir = flags["--base"] && soakDir(keyOf(s, flags["--base"]));
   const base = baseDir && existsSync(join(baseDir, "samples.jsonl"));
   for (const a of s.assert) {
     const [samples, at] = seat(dir, a);
@@ -252,7 +252,7 @@ if (flags["--base"]) {
     return last?.score ? Object.values(last.score).reduce((a, b) => a + b, 0) : undefined;
   };
   const rows = [...runs.values()]
-    .map((r) => ({ label: r.label, now: scoreOf(join(REPO, "soak-runs", r.name)), was: scoreOf(join(REPO, "soak-runs", keyOf(r, flags["--base"]))) }))
+    .map((r) => ({ label: r.label, now: scoreOf(soakDir(r.name)), was: scoreOf(soakDir(keyOf(r, flags["--base"]))) }))
     .filter((r) => r.now !== undefined && r.was !== undefined && r.was > 0)
     .map((r) => ({ ...r, change: r.now / r.was - 1 }));
   for (const r of rows.filter((r) => Math.abs(r.change) >= 0.005).sort((a, b) => a.change - b.change))
@@ -264,7 +264,7 @@ const slowest = [...runs.values()].sort((a, b) => b.secs - a.secs).slice(0, 5);
 console.log(`slowest: ${slowest.map((r) => `${r.label} ${r.secs.toFixed(0)} s (${r.scenarios.join(", ")})`).join("; ")}`);
 // Where the soaks' time went (each soak's timing.json, ms a tick), summed over ticks.
 const timed = [...runs.values()]
-  .map((r) => join(REPO, "soak-runs", r.name, "timing.json"))
+  .map((r) => soakDir(r.name, "timing.json"))
   .filter(existsSync)
   .map((f) => JSON.parse(readFileSync(f, "utf8")));
 if (timed.length) {

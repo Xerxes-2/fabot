@@ -4,6 +4,7 @@
   "start": { "room": "W8N3", "seed": 14, "node": "M7", "invaders": "W8N2:1000:2000" },
   "ticks": 4000,
   "assert": [
-    { "measure": "hostileTicks", "room": "W8N2", "max": 281 }
+    { "measure": "hostileTicks", "room": "W8N2", "max": 281 },
+    { "each": "engagement", "where": { "kind": "defend" }, "assert": { "pastBudget": { "max": 0 } } }
   ]
 }

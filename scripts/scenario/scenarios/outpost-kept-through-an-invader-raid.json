@@ -6,6 +6,7 @@
   "assert": [
     { "measure": "hostileTicks", "room": "W9N9", "from": 12500, "to": 22500, "max": 1500 },
     { "measure": "dug", "room": "W9N9", "from": 12500, "to": 22500, "min": 150000 },
-    { "measure": "idleMost", "max": 50 }
+    { "measure": "idleMost", "max": 50 },
+    { "each": "engagement", "where": { "kind": "defend" }, "assert": { "pastBudget": { "max": 0 } } }
   ]
 }

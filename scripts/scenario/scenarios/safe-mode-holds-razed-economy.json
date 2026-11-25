@@ -9,7 +9,6 @@
     "opponents": [
       {
         "name": "raider",
-        "bot": "rival",
         "room": "W7N3",
         "config": { "role": "raid", "target": "W8N3" },
         "raid": { "first": 300, "bodies": [{ "tough": 4, "move": 10, "ranged_attack": 8, "heal": 6, "boosts": { "tough": "XGHO2", "ranged_attack": "XKHO2", "heal": "XLHO2" } }, { "tough": 4, "move": 10, "ranged_attack": 8, "heal": 6, "boosts": { "tough": "XGHO2", "ranged_attack": "XKHO2", "heal": "XLHO2" } }] }

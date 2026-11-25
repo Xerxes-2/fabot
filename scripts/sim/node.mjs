@@ -22,7 +22,6 @@ export const NODES = {
   G2: { level: 6, stored: 100000, without: ["rampart"], claims: 1, short: true },
   X2: { level: 6, stored: 100000, without: ["rampart"], spare: 1 },
   F2: { level: 6, stored: 100000, without: ["rampart"], spare: 1, stale: true },
-  Y2: { level: 6, stored: 20000, without: ["rampart"], spare: 1 },
   // N5 with its labs and the ore for XKHO2 alone stocked.
   L5: { level: 6, stored: "100000,H:6000,O:6000,K:6000,X:6000", without: ["rampart"], labs: true },
   // L5 without its tower, its first lab holding what an outpost's ranger is
@@ -30,14 +29,9 @@ export const NODES = {
   B5: { level: 6, stored: "100000,H:6000,O:6000,U:6000", without: ["rampart", "tower"], labs: true, labStock: "energy:2000,XKHO2:900" },
   // B5's lab with no compound: the cast is not held waiting for one.
   S5: { level: 6, stored: "100000,H:6000,O:6000", without: ["rampart", "tower"], labs: true, labStock: "energy:2000" },
-  // B5 with the compound in the storage and its labs empty: a hauler fills the
-  // lab the waiting body walks to, as the minerals rest in the terminal first.
-  W5: { level: 6, stored: "100000,H:6000,O:6000,U:6000,UH2O:900", without: ["rampart", "tower"], labs: true },
-  // W5 at RCL7, six labs.
+  // B5 at RCL7, six labs, the compound in the storage.
   W7: { level: 7, stored: "100000,H:6000,O:6000,U:6000,XKHO2:900", without: ["rampart", "tower", "link", "factory"], labs: true },
   // W7 holding each T3 combat boost.
-  // M7 with a level-1 kit's TOUGH boost alone: two parts' worth.
-  K7: { level: 7, stored: "100000,H:6000,O:6000,U:6000,XGHO2:60,XLHO2:900,XKHO2:900,XZHO2:900,XUH2O:900", without: ["rampart", "tower", "link", "factory"], labs: true },
   M7: { level: 7, stored: "100000,H:6000,O:6000,U:6000,XGHO2:900,XLHO2:900,XKHO2:900,XZHO2:900,XUH2O:900", without: ["rampart", "tower", "link", "factory"], labs: true },
   // M7 with no compound.
   P7: { level: 7, stored: "100000,H:6000,O:6000,U:6000", without: ["rampart", "tower", "link", "factory"], labs: true },
@@ -54,11 +48,11 @@ export const NODES = {
   N7: { level: 8, stored: 500000, without: ["rampart"], modern: true, bodies: LATE_BODIES },
   // N6 with its storage full of its own ore, its energy under the reserve.
   F6: { level: 7, stored: "30000,H:970000", without: ["rampart"], modern: true, bodies: LATE_BODIES },
+  // RCL5 as a run whose outposts' roads went home across the ring before its walls stood on them.
+  U5: { level: 5, stored: 50000, without: ["rampart"], walled: true },
   // RCL8 as a from-zero run reaches it: RCL7's plan standing, the stock at
   // its RCL7 level, and the roads its outposts laid on RCL8's extension tiles;
   // every room in reach avoided, so the home's dig alone pays (outposts lost).
-  // RCL5 as a run whose outposts' roads went home across the ring before its walls stood on them.
-  U5: { level: 5, stored: 50000, without: ["rampart"], walled: true },
   R8: { level: 8, built: 7, stored: 50000, without: ["rampart"], modern: true, bodies: LATE_BODIES, buried: true, alone: true },
   // N7 with every room in reach avoided.
   A7: { level: 8, stored: 500000, without: ["rampart"], modern: true, bodies: LATE_BODIES, alone: true },

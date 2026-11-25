@@ -29,7 +29,7 @@ enum Role {
     Harass,
 }
 
-/// `scripts/sim/run.mjs`'s seat: the user it stood, its room, its `opponent.js` config and raid.
+/// `scripts/sim/run.mjs`'s seat: the user it stood, its room, a scenario opponent's config and raid.
 #[derive(Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Rival {

@@ -1,5 +1,5 @@
 // The boost chain's soak (ARCHITECTURE.md §10.2): `young-among-colonies` (three RCL8
-// colonies, an RCL7 and an RCL6, each with labs and a terminal) on sim, its RCL8
+// colonies, an RCL7 and an RCL6 with labs and a terminal, and an RCL3) on sim, its RCL8
 // homes digging O, U and K and the lower ones H, with the season's only X in one
 // terminal, so every T3 is reacted from ore another colony dug and balanced to it.
 // Then what each cluster produced and the ticks its labs stood idle and why
@@ -11,12 +11,9 @@
 // Each run goes to soak-runs/<tag>-s<seed>/ with its report.json beside the samples.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { exposureOf, invariants, samplesOf } from "../scenario/measures.mjs";
-import { runSim, simBinary } from "./run.mjs";
+import { REPO, runSim, simBinary, soakDir } from "./run.mjs";
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO = resolve(HERE, "../..");
 const WORLD = join(REPO, "scripts/scenario/worlds/young-among-colonies.json");
 // Each home's mineral, where the world's is another (all three RCL8 homes dig O there).
 const ORES = { W3S8: "U", W2S8: "K" };
@@ -40,7 +37,7 @@ for (const room of world.rooms) {
     if (o.type === "terminal") Object.assign(o.store, STOCK[room.name]);
   }
 }
-const stood = join(REPO, "soak-runs", `${flags["--tag"]}-world.json`);
+const stood = soakDir(`${flags["--tag"]}-world.json`);
 mkdirSync(dirname(stood), { recursive: true });
 writeFileSync(stood, JSON.stringify(world));
 
@@ -90,11 +87,11 @@ function report(dir) {
 const seeds = flags["--seed"].split(",").map(Number);
 const ticks = Number(flags["--ticks"]);
 const codes = await Promise.all(
-  seeds.map((seed) => runSim(bin, { world: stood, room: "W5S8", ticks, seed, out: join(REPO, "soak-runs", `${flags["--tag"]}-s${seed}`) })),
+  seeds.map((seed) => runSim(bin, { world: stood, room: "W5S8", ticks, seed, out: soakDir(`${flags["--tag"]}-s${seed}`) })),
 );
 const k = (n) => `${(n / 1000).toFixed(1)}k`;
 for (const [i, seed] of seeds.entries()) {
-  const dir = join(REPO, "soak-runs", `${flags["--tag"]}-s${seed}`);
+  const dir = soakDir(`${flags["--tag"]}-s${seed}`);
   if (codes[i] !== 0 || !existsSync(join(dir, "samples.jsonl"))) {
     console.log(`seed ${seed}: sim failed (exit ${codes[i]})`);
     continue;

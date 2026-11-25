@@ -11,6 +11,7 @@
     { "measure": "hostileTicks", "room": "W2N1", "max": 300 },
     { "each": "engagement", "where": { "kind": "defend", "room": "W2N1" }, "assert": { "lasted": { "max": 300 } } },
     { "measure": "dug", "room": "W2N1", "min": 6000 },
-    { "measure": "idleMost", "max": 0 }
+    { "measure": "idleMost", "max": 0 },
+    { "each": "engagement", "where": { "kind": "defend" }, "assert": { "pastBudget": { "max": 0 } } }
   ]
 }

@@ -5,6 +5,7 @@
   "ticks": 4000,
   "assert": [
     { "measure": "coresAtEnd", "to": 3000, "max": 0 },
-    { "measure": "closedOnCore", "max": 0 }
+    { "measure": "closedOnCore", "max": 0 },
+    { "each": "engagement", "where": { "kind": "defend" }, "assert": { "pastBudget": { "max": 0 } } }
   ]
 }

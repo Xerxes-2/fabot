@@ -16,7 +16,6 @@
     "opponents": [
       {
         "name": "harasser",
-        "bot": "rival",
         "room": "W6N3",
         "config": {
           "role": "harass",
@@ -113,6 +112,7 @@
       "from": 1500,
       "to": 5800,
       "report": true
-    }
+    },
+    { "each": "engagement", "where": { "kind": "defend" }, "assert": { "pastBudget": { "max": 0 } } }
   ]
 }

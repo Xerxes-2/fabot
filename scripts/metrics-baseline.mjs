@@ -8,8 +8,8 @@
 // (outpost); a metric missing from a row reads 0, but for a share whose
 // denominator is missing and a site's age where no site stands.
 import { readFileSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { basename, join } from "node:path";
+import { METRIC as consts, SOURCE as source, WINDOW } from "./metrics.mjs";
 
 const args = process.argv.slice(2);
 const at = args.indexOf("--skip");
@@ -19,8 +19,6 @@ if (!args.length || !Number.isInteger(skip)) {
   process.exit(1);
 }
 
-const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../core/observe/metrics.rs"), "utf8");
-const consts = Object.fromEntries([...source.matchAll(/^const (\w+): &str = "([^"]+)";/gm)].map((m) => [m[1], m[2]]));
 const named = (family, name) => family === name || (family.endsWith(".") && name.startsWith(family));
 const slice = (from) => source.slice(source.indexOf(from), source.indexOf("];", source.indexOf(from)));
 const table = slice("const THRESHOLDS");
@@ -50,8 +48,8 @@ console.log("run: windows alerting / complete windows past --skip; alerts by met
 for (const dir of args) {
   const lines = readFileSync(join(dir, "metrics.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
   const first = lines.reduce((a, l) => Math.min(a, l.start), Infinity);
-  const kept = lines.filter((l) => l.ticks === 100 && l.start - first >= skip);
-  const colonies = new Set(kept.filter((l) => l.values["spawn.ticks"]).map((l) => l.row));
+  const kept = lines.filter((l) => l.ticks === WINDOW && l.start - first >= skip);
+  const colonies = new Set(kept.filter((l) => l.values[consts.SPAWN_TICKS]).map((l) => l.row));
   const kind = (row) => (row === "*" ? "world" : colonies.has(row) ? "colony" : "outpost");
   const names = {};
   for (const l of kept) for (const n of Object.keys(l.values)) (names[kind(l.row)] ??= new Set()).add(n);

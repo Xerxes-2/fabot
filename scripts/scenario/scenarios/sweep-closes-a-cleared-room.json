@@ -1,5 +1,5 @@
 {
-  "why": "A sweep in a room worth nothing with nowhere onward closes, as §6.2's sweep does on no remaining targets (sweep-casts-what-its-spawns-land's self-play start). On the commit before, alpha's set stood 505 ticks on end in a room no rival creep stood in and beta's 993 (c45a8705: 1,353 and 677); 94 and 213 after",
+  "why": "A sweep in a room worth nothing with nowhere onward closes, as §6.2's sweep does on no remaining targets (sweep-harasses-in-self-play's self-play start). On the commit before, alpha's set stood 505 ticks on end in a room no rival creep stood in and beta's 993 (c45a8705: 1,353 and 677); 94 and 213 after",
   "modules": ["fight"],
   "start": {
     "gen": 7,

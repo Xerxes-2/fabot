@@ -8,7 +8,6 @@
     "opponents": [
       {
         "name": "rival",
-        "bot": "rival",
         "room": "W7N3",
         "config": { "role": "keep" }
       }

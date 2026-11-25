@@ -8,9 +8,8 @@
 //        npm run watch:sim -- …   the same, --watch implied
 //   --room  default the first room by name with a controller nobody owns and two sources
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { invariants, samplesOf } from "../scenario/measures.mjs";
-import { TEMPLATE, buildPlan, runSim, seatsUs, simBinary } from "./run.mjs";
+import { TEMPLATE, buildPlan, runSim, seatsUs, simBinary, soakDir } from "./run.mjs";
 import { report } from "./seats.mjs";
 
 const usage = "usage: npm run soak -- [--room <name>] [--world <world.json> | --gen <seed> [--sectors WxH]] [--node N] [--seed N] [--late K] [--ticks N] [--ended] [--unsafe] [--invaders …] [--wave …] [--core …] [--capture a-b] [--players <json>] [--tuning <json>] [--run name] [--watch [--port N] [--tick-ms N] [--badge <json>]]";
@@ -49,7 +48,7 @@ if (node && !buildPlan()) process.exit(1);
 const bin = simBinary();
 if (!bin) process.exit(1);
 const watch = flags["--watch"] && { port: number("--port", 21025), ms: number("--tick-ms", 50), badge: flags["--badge"] };
-const out = join(process.cwd(), "soak-runs", flags["--run"] ?? `${room ?? `gen${gen}`}${node ? `-${node}` : ""}-seed${number("--seed", 1)}`);
+const out = soakDir(flags["--run"] ?? `${room ?? `gen${gen}`}${node ? `-${node}` : ""}-seed${number("--seed", 1)}`);
 console.error(`sim: output ${out}`);
 const code = await runSim(bin, {
   world, gen, sectors, room, node, seed: number("--seed", 1), late: number("--late", 0), ticks: number("--ticks", watch ? 1e6 : node ? 5000 : 3000),

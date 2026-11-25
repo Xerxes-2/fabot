@@ -12,13 +12,10 @@ import { engagements } from "../scenario/engaged.mjs";
 import { killedBy, offsetOf } from "../scenario/measures.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO = resolve(HERE, "../..");
+export const REPO = resolve(HERE, "../..");
 const PLAN = join(REPO, "target/release/plan");
 /** The template world (every room its terrain and sources, minerals, controller, keeper lairs, nobody's), checked in. */
 export const TEMPLATE = join(REPO, "scripts/scenario/worlds/template.json");
-
-// What sim stands (`world.rs`, `node.mjs`).
-export const SIM_START = ["gen", "room", "seed", "late", "node", "ended", "unsafe", "world", "declarations", "memory", "gcl", "stock", "level", "roadless", "overlay", "follow", "opponents", "invaders", "wave", "core", "stronghold", "resetEvery", "sectors", "players"];
 
 /** Whether a `worlds/`-shaped world holds a spawn of ours: a capture, not a map. */
 export const seatsUs = (world) => (world.rooms ?? []).some((r) => (r.objects ?? []).some((o) => o.type === "spawn" && o.user === world.userId));
@@ -53,8 +50,7 @@ export function standCapture(world) {
   seal(captured);
   seal(ring);
   const rooms = [...captured, ...ring];
-  // A crafted world leaves out what live.mjs's constructors fill in: a structure's are what its site
-  // builds, a creep's its body's.
+  // A crafted world leaves out what the engine fills in: a structure's are what its site builds, a creep's its body's.
   const CARRY_BOOST = { KH: 2, KH2O: 3, XKH2O: 4 };
   for (const r of rooms) {
     const terrain = [r.terrain].flat().join("");
@@ -77,9 +73,6 @@ export function standCapture(world) {
   for (const id of crafted) text = text.replaceAll(`"${id}"`, `"${createHash("sha256").update(id).digest("hex").slice(0, 24)}"`);
   return JSON.parse(text);
 }
-
-/** Why sim cannot seat `rival` (a scenario's opponent), or null (ARCHITECTURE.md §10.2). */
-export const unseated = (rival) => (rival.bot === "rival" && rival.x === undefined ? null : `${rival.name} plays`);
 
 const rivalId = (i) => (0xe00000 + i).toString(16);
 const PARTS = ["tough", "move", "work", "carry", "attack", "ranged_attack", "heal"];
@@ -190,7 +183,7 @@ export function runSim(bin, { world, gen, sectors, room, node, ticks, seed = 1, 
       // `tuning` is each seat's that names none: the one sim seats unasked is `fabot`, in `room` off --gen.
       const asked = players ? JSON.parse(players) : [{ name: "fabot", room }];
       const seated = tuning ? JSON.stringify(asked.map((p) => ({ tuning: JSON.parse(tuning), ...p }))) : players;
-      const args = [...where, "--ticks", String(ticks), "--seed", String(seed), "--late", String(late), "--every", "100", "--out", out, ...(follow.length ? ["--follow", follow.join(",")] : []), ...(ended ? ["--ended"] : []), "--reset-every", String(resetEvery), ...(capture ? ["--capture", capture] : []), "--rivals", JSON.stringify(seats(rivals)), ...(seated ? ["--players", seated] : []),
+      const args = [...where, "--ticks", String(ticks), "--seed", String(seed), "--late", String(late), "--out", out, ...(follow.length ? ["--follow", follow.join(",")] : []), ...(ended ? ["--ended"] : []), "--reset-every", String(resetEvery), ...(capture ? ["--capture", capture] : []), "--rivals", JSON.stringify(seats(rivals)), ...(seated ? ["--players", seated] : []),
         "--npc", JSON.stringify(npc(invaders, bodies(wave), core, stronghold, ticks)), ...(watch ? ["--watch", "--port", String(watch.port), "--tick-ms", String(watch.ms), ...(watch.badge ? ["--badge", watch.badge] : [])] : [])];
       const dirs = [out, ...JSON.parse(players ?? "[]").slice(1).map((p) => join(out, p.name))];
       const sim = spawn(bin, args, { stdio: watch ? "inherit" : ["ignore", "ignore", "pipe"] });
@@ -246,5 +239,5 @@ export function pool(seeds, jobs, run) {
   return Promise.all(Array.from({ length: jobs }, async () => { for (let seed; (seed = queue.shift()) !== undefined; ) await run(seed); }));
 }
 
-/** A sweep's output directory for `name`, under the repo's soak-runs/. */
-export const soakDir = (name) => join(REPO, "soak-runs", name);
+/** `path` under the repo's soak-runs/. */
+export const soakDir = (...path) => join(REPO, "soak-runs", ...path);

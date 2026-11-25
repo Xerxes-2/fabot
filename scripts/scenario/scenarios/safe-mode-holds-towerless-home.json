@@ -6,6 +6,7 @@
   "assert": [
     { "measure": "fewestCreeps", "from": 1000, "min": 6 },
     { "measure": "predictedWinsLost", "max": 0 },
-    { "each": "safeMode", "assert": { "killed": { "max": 0 }, "exposedBefore": { "min": 1 }, "exposure": { "max": 0 } } }
+    { "each": "safeMode", "assert": { "killed": { "max": 0 }, "exposedBefore": { "min": 1 }, "exposure": { "max": 0 } } },
+    { "each": "engagement", "where": { "kind": "defend" }, "assert": { "pastBudget": { "max": 0 } } }
   ]
 }

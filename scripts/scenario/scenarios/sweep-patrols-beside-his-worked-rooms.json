@@ -1,5 +1,5 @@
 {
-  "why": "His farther outposts lie past our scouts, so a sweep's patrol takes the rooms beside those he works (sweep-casts-what-its-spawns-land's self-play start). Alpha's outpost E7S5, past beta's scouts, never entered beta's intel and no sweep of beta's went there on main; now beta's sweeps target it 11 times (E8S5 once, E9S6 never)",
+  "why": "His farther outposts lie past our scouts, so a sweep's patrol takes the rooms beside those he works (sweep-harasses-in-self-play's self-play start). Alpha's outpost E7S5, past beta's scouts, never entered beta's intel and no sweep of beta's went there on main; now beta's sweeps target it 11 times (E8S5 once, E9S6 never)",
   "modules": ["fight"],
   "start": {
     "gen": 7,

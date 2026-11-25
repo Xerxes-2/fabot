@@ -3,5 +3,5 @@
   "modules": ["fight"],
   "start": { "room": "W9N8", "seed": 1, "invaders": "W9N9:100000:12500", "wave": "melee" },
   "ticks": 14000,
-  "assert": [{ "measure": "contactWait", "room": "W9N9", "from": 12500, "to": 14000, "max": 265 }]
+  "assert": [{ "measure": "contactWait", "room": "W9N9", "from": 12500, "to": 14000, "max": 265 }, { "each": "engagement", "where": { "kind": "defend" }, "assert": { "pastBudget": { "max": 0 } } }]
 }

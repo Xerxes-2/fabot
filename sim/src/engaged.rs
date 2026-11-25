@@ -1,4 +1,4 @@
-//! A tick as `engine/engaged.mjs` reads it, a line of `fight.jsonl` while an
+//! A tick as `scripts/scenario/engaged.mjs` reads it, a line of `fight.jsonl` while an
 //! engagement is open and on the tick after: Fight's Memory, the bodies, cores
 //! and tombstones standing, and who struck or healed whom.
 use krebs::atom;

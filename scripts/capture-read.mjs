@@ -1,4 +1,4 @@
-// A capture's ticks (`engine/capture.js`) stood whole: its objects are written
+// A capture's ticks (`sim/src/capture`) stood whole: its objects are written
 // as changes since the tick before and a room's terrain once, so each tick is
 // rebuilt from the ones before it in its file. A `full` tick starts again,
 // and may carry every room's terrain (sim's), seen or not.

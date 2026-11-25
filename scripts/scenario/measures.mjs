@@ -4,13 +4,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { BOOST_MINERAL, COMPOUNDS, bugs, outcome, tested } from "../sim/prediction.mjs";
 import { OUTPOST_LOSSES } from "./engaged.mjs";
+import { METRIC, WINDOW } from "../metrics.mjs";
 
 // Ticks are counted from the bot's first, so a window means the same on every start.
-const linesOf = (path) =>
-  readFileSync(path, "utf8")
-    .split("\n")
-    .filter(Boolean)
-    .map((l) => JSON.parse(l));
+const linesOf = (path) => readFileSync(path, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
 const rowsOf = (dir) => linesOf(join(dir, "engagements.jsonl"));
 export const engagementsOf = (dir) => tested(rowsOf(dir));
 /** Every room the run's samples and engagements name: one an assert names outside these reads nothing. */
@@ -40,28 +37,24 @@ const culls = (samples, a, dir) =>
 const scoutsOf = (dir) => livesOf(dir).filter((b) => b.ours && b.name.startsWith("scout-"));
 // Rival bodies `uid`'s seat killed: what struck them last was its.
 export const killedBy = (deaths, uid) => deaths.filter((d) => d.user !== uid && d.by?.[1] === uid);
-export const samplesOf = (dir) => readFileSync(join(dir, "samples.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+export const samplesOf = (dir) => linesOf(join(dir, "samples.jsonl"));
 // soak:many's columns beside worth, off a run's metrics and its last sample:
 // the worth is not to be read once the ledger is open past a percent of what was dug.
 export const exposureOf = (dir, last) => {
   const path = join(dir, "metrics.jsonl");
-  const lines = existsSync(path) ? readFileSync(path, "utf8").split("\n").filter(Boolean) : [];
-  const sum = (named) =>
-    lines.reduce((a, l) => a + Object.entries(JSON.parse(l).values).reduce((b, [n, v]) => b + (named(n) ? v : 0), 0), 0);
+  const lines = existsSync(path) ? linesOf(path) : [];
+  const sum = (named) => lines.reduce((a, l) => a + Object.entries(l.values).reduce((b, [n, v]) => b + (named(n) ? v : 0), 0), 0);
   const ledger = last?.ledger;
   return {
-    exposure: sum((n) => n === "exposure"),
-    lost: sum((n) => n.startsWith("loss.")),
-    held: sum((n) => n === "held"),
+    exposure: sum((n) => n === METRIC.EXPOSURE),
+    lost: sum((n) => n.startsWith(METRIC.LOSS)),
+    held: sum((n) => n === METRIC.ROOMS_HELD),
     open: Boolean(ledger && ledger.dug > 0 && Math.abs(ledger.residual) > ledger.dug / 100),
   };
 };
 // `ARCHITECTURE.md` §9.3.
 const countsOf = (dir, a) =>
-  readFileSync(join(dir, "cpu.jsonl"), "utf8")
-    .split("\n")
-    .filter(Boolean)
-    .map((l) => JSON.parse(l))
+  linesOf(join(dir, "cpu.jsonl"))
     .filter((r) => r.counts && r.t >= (a.from ?? 0) && r.t < (a.to ?? Infinity))
     .map((r) => Object.fromEntries(r.counts));
 // A run that reported no counts fails its ceiling: Infinity is over any max.
@@ -97,12 +90,7 @@ const openedIn = (a) => (e) => (!a.room || e.room === a.room) && e.opened >= (a.
 const within = (samples, a) => samples.filter((s) => s.t >= (a.from ?? 0) && s.t < (a.to ?? Infinity));
 const upgradedIn = (s, a) => (a.room ? (s.rooms[a.room]?.upgrade ?? 0) : s.ledger.upgrade);
 const builtIn = (s, a) => (a.room ? (s.rooms[a.room]?.build ?? 0) : s.ledger.build);
-const windowsOf = (dir, a) =>
-  readFileSync(join(dir, "metrics.jsonl"), "utf8")
-    .split("\n")
-    .filter(Boolean)
-    .map((l) => JSON.parse(l))
-    .filter((w) => w.t >= (a.from ?? 0) && w.t < (a.to ?? Infinity));
+const windowsOf = (dir, a) => linesOf(join(dir, "metrics.jsonl")).filter((w) => w.t >= (a.from ?? 0) && w.t < (a.to ?? Infinity));
 // A spend category the ledger moved less than this in a run is too small to
 // read a percent off.
 const LEDGER_LEAST = 1000;
@@ -120,7 +108,7 @@ export const counted = (act) => act !== "observeRoom -10";
 const on = (keys, f) => Object.assign(f, { reads: keys.split(" ") });
 export const measures = {
   metric: on("metric room total from to", (_, a, dir) => {
-    const values = windowsOf(dir, a).filter((w) => w.ticks === 100 && w.row === (a.room ?? "*")).map((w) => w.values[a.metric] ?? 0);
+    const values = windowsOf(dir, a).filter((w) => w.ticks === WINDOW && w.row === (a.room ?? "*")).map((w) => w.values[a.metric] ?? 0);
     if (!values.length) return a.min !== undefined ? -Infinity : Infinity;
     if (a.total) return values.reduce((n, v) => n + v, 0);
     return a.min !== undefined ? Math.min(...values) : Math.max(...values);
@@ -131,22 +119,22 @@ export const measures = {
   spendError: on("from to", (samples, a, dir) => {
     const rooms = new Set(Object.keys(samples.at(-1).rooms));
     const seen = windowsOf(dir, a);
-    const marks = seen.filter((w) => w.ledger && w.ticks === 100);
+    const marks = seen.filter((w) => w.ledger && w.ticks === WINDOW);
     if (marks.length < 2) return Infinity;
     const [first, last] = [marks[0], marks.at(-1)];
     const inside = seen.filter((w) => rooms.has(w.row) && w.start > first.start && w.start <= last.start);
     const errors = ["build", "repair", "upgrade", "spawn", "tower"]
-      .map((k) => [inside.reduce((n, w) => n + (w.values[`spend.${k}`] ?? 0), 0), last.ledger[k] - first.ledger[k]])
+      .map((k) => [inside.reduce((n, w) => n + (w.values[METRIC[k.toUpperCase()]] ?? 0), 0), last.ledger[k] - first.ledger[k]])
       .filter(([, ledger]) => ledger >= LEDGER_LEAST)
       .map(([bot, ledger]) => Math.abs((100 * (bot - ledger)) / ledger));
     return errors.length ? Number(Math.max(...errors).toFixed(1)) : Infinity;
   }),
   // The bot's deaths (`death.*`) against the engine's kills, over the bot's full windows.
   deathsError: on("from to", (_, a, dir) => {
-    const full = windowsOf(dir, a).filter((w) => w.ticks === 100);
+    const full = windowsOf(dir, a).filter((w) => w.ticks === WINDOW);
     if (!full.length) return Infinity;
-    const [lo, hi] = [Math.min(...full.map((w) => w.start)), Math.max(...full.map((w) => w.start)) + 100];
-    const bot = full.reduce((n, w) => n + Object.entries(w.values).reduce((m, [k, v]) => m + (k.startsWith("death.") ? v : 0), 0), 0);
+    const [lo, hi] = [Math.min(...full.map((w) => w.start)), Math.max(...full.map((w) => w.start)) + WINDOW];
+    const bot = full.reduce((n, w) => n + Object.entries(w.values).reduce((m, [k, v]) => m + (k.startsWith(METRIC.DEATH) ? v : 0), 0), 0);
     return Math.abs(bot - killsOf(dir).filter((d) => d.t >= lo && d.t < hi).length);
   }),
   // Roads and containers lost between samples, over every room the soak follows.
@@ -371,7 +359,7 @@ export const measures = {
   bodiesStruck: (_, __, dir) => livesOf(dir).reduce((n, b) => n + (b.ours ? (b.struck ?? 0) : 0), 0),
   // The damage struck on the body called `name`.
   struckOn: on("name", (_, a, dir) => livesOf(dir).reduce((n, b) => n + (b.name === a.name ? (b.struck ?? 0) : 0), 0)),
-  faults: (_, __, dir) => readFileSync(join(dir, "faults.jsonl"), "utf8").split("\n").filter(Boolean).length,
+  faults: (_, __, dir) => linesOf(join(dir, "faults.jsonl")).length,
   // The most levels the room stood below the highest it held before; a room
   // lost stands at level 0.
   levelsLost: on("from to", (samples, a) => {
@@ -523,7 +511,7 @@ export const events = {
         .map((s) => {
           const raided = Math.max(0, ...rows.filter((e) => e.kind === "defend" && e.room === room && e.opened <= s.t).map((e) => e.opened));
           const killed = killsOf(dir, room).filter((d) => d.t - offset >= raided && d.t - offset <= s.t);
-          const exposed = (w) => (w.row === room ? (w.values.exposure ?? 0) : 0);
+          const exposed = (w) => (w.row === room ? (w.values[METRIC.EXPOSURE] ?? 0) : 0);
           const exposure = windows.filter((w) => w.start >= s.t).reduce((n, w) => n + exposed(w), 0);
           const exposedBefore = windows.filter((w) => w.start < s.t && w.start + w.ticks > raided).reduce((n, w) => n + exposed(w), 0);
           return { t: s.t, who: `safe mode in ${room}`, room, raided, killed: killed.length, exposure, exposedBefore };
@@ -570,8 +558,8 @@ const ALWAYS = [
   { measure: "refusals", max: 0 },
   { measure: "faults", max: 0 },
 ];
-// The count ceilings every scenario holds; `floodsMost` and `threatLookupsMost` are not, as some soaks pass them.
-const CEILED = ["coldFloodsPerColony", "atlasMissRate"].map((measure) => ({ measure }));
+// The count ceilings every scenario holds; `floodsMost` is not, as 59 soaks pass it (64-156).
+const CEILED = ["coldFloodsPerColony", "atlasMissRate", "threatLookupsMost"].map((measure) => ({ measure }));
 export const withAlways = (asserts) => [...asserts, ...[...ALWAYS, ...CEILED].filter((d) => !asserts.some((a) => a.measure === d.measure))];
 export const check = (samples, a, dir, max = a.max ?? Infinity) => {
   const value = measures[a.measure](samples, a, dir);

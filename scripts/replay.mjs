@@ -7,7 +7,7 @@
 // is stood from A's recorded world), so the count is how often B decides
 // otherwise, not how far it drifts.
 //
-// Usage: npm run replay -- --a A.js [--b B.js] [--jobs J] [--show N] [--at T] [capture.jsonl | run dir | scenario tag]…
+// Usage: `usage` below.
 //   no --b      A against itself: whether the replay repeats
 //   --at        also print tick T's intents and Memory as A decided them
 //               (ARCHITECTURE.md §10.4: an incident replayed)
@@ -26,7 +26,7 @@ import { ticksOf } from "./capture-read.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const RUNS = join(HERE, "..", "soak-runs");
-const usage = "usage: npm run replay -- --a A.js [--b B.js] [--jobs J] [--show N] [--check] [capture.jsonl | run dir | scenario tag]…";
+const usage = "usage: npm run replay -- --a A.js [--b B.js] [--jobs J] [--show N] [--at T] [--check] [capture.jsonl | run dir | scenario tag]…";
 const fail = (m) => {
   console.error(m);
   process.exit(2);

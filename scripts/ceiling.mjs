@@ -5,7 +5,8 @@
 // files to its own ceiling, a `<dir>` row its whole tree. A comment share is
 // per directory of the bot's source (`src`, `core`, `sim`), over its own .rs
 // files. Neither counts a `#[cfg(test)]` item nor a crate's suites under
-// `core/<crate>/tests`. Exits non-zero on any breach.
+// `core/<crate>/tests`. Exits non-zero on any breach, or on a shipped file no
+// row covers.
 //
 // Usage: node scripts/ceiling.mjs
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -55,6 +56,13 @@ const count = (files) =>
   );
 
 const owned = Object.keys(ceilings).map((key) => key.replace(/\/\*$/, ""));
+
+const unowned = ROOTS.flatMap(shipped).filter((f) => !owned.some((dir) => f.startsWith(dir + "/")));
+for (const f of unowned) console.error(`UNOWNED ${f}`);
+if (unowned.length > 0) {
+  console.error(`ceiling: ${unowned.length} file(s) under no row of scripts/ceilings.json; add one at its count`);
+  process.exit(1);
+}
 
 const rows = [];
 for (const [key, ceiling] of Object.entries(ceilings)) {

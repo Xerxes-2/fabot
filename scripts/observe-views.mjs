@@ -9,7 +9,7 @@ import { segmentBudget, tapWindow } from "./tap.mjs";
 
 // Segment 1 is the observe row (§4): what the operator reads, the tick it was
 // written for.
-const OBSERVE = 1;
+export const OBSERVE = 1;
 // The recorder's ring (`src/app/record.rs`): a tick's parts in slots
 // `(tick * parts + part) % RING`.
 const FIRST = RECORDER[0];

@@ -6,6 +6,7 @@
   "assert": [
     { "each": "engagement", "where": { "kind": "defend", "home": false }, "least": 1, "assert": { "bug": 0 } },
     { "measure": "liveAstray", "max": 0 },
-    { "measure": "liveEnergy", "min": 1 }
+    { "measure": "liveEnergy", "min": 1 },
+    { "each": "engagement", "where": { "kind": "defend" }, "assert": { "pastBudget": { "max": 0 } } }
   ]
 }

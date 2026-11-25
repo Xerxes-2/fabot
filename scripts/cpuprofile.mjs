@@ -1,5 +1,5 @@
-// Three reads of a V8 `.cpuprofile` (what `npm run profile -- --cpuprofile`
-// and `node --cpu-prof` write), each answering one question about one
+// Three reads of a V8 `.cpuprofile` (what `node --cpu-prof` writes, as
+// bench.mjs's usage runs it), each answering one question about one
 // function by name:
 //
 //   under    where its time went: inclusive ms of each callee path under

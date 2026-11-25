@@ -43,11 +43,10 @@ import { fileURLToPath } from "node:url";
 import { sweep } from "./prune.mjs";
 import { exposureOf, invariants } from "./measures.mjs";
 import { unstood } from "../sim/node.mjs";
-import { TEMPLATE as SIM_TEMPLATE, buildPlan, runSim, simBinary } from "../sim/run.mjs";
+import { REPO, TEMPLATE as SIM_TEMPLATE, buildPlan, jsonLines, runSim, simBinary, soakDir } from "../sim/run.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO = resolve(HERE, "../..");
-const RUNS = join(REPO, "soak-runs");
+const RUNS = soakDir();
 const CACHE = join(RUNS, ".cache");
 const usage =
   "usage: npm run soak:many -- [--bot [name=]a,...] [--seed 1,2,1+7] [--room [world:]A[@N],...] [--ticks T] [--jobs J] [--tag name] [--node N] [--fresh] [--reset-every N] [--tuning <{name: tuning}>]";
@@ -124,10 +123,11 @@ const hash = (...parts) => {
   return h.digest("hex").slice(0, 16);
 };
 const scriptsHash = hash(
-  ...[join(HERE, "../sim/node.mjs"), join(HERE, "../sim/run.mjs"), join(HERE, "engaged.mjs"), join(HERE, "seat-tile.mjs")].map((f) => readFileSync(f)),
+  ...[join(HERE, "../sim/node.mjs"), join(HERE, "../sim/run.mjs"), join(HERE, "engaged.mjs"), join(HERE, "measures.mjs"), join(HERE, "seat-tile.mjs")].map((f) => readFileSync(f)),
 );
-// A node, and a fresh colony's first spawn, stand on the plan of this tree's Layout, whatever the bundle.
-const planHash = hash(...[join(REPO, "src/bin/plan.rs"), ...readdirSync(join(REPO, "core/layout")).sort().map((f) => join(REPO, "core/layout", f))].map((f) => readFileSync(f)));
+// A node, and a fresh colony's first spawn, stand on the plan of this tree's Layout (and the crates it builds on), whatever the bundle.
+const crates = ["base", "atlas", "layout"].flatMap((c) => readdirSync(join(REPO, "core", c), { recursive: true }).filter((f) => f.endsWith(".rs") || f === "Cargo.toml").sort().map((f) => join("core", c, f)));
+const planHash = hash(...["src/bin/plan.rs", ...crates].map((f) => readFileSync(join(REPO, f))));
 for (const b of bots) b.code = hash(readFileSync(b.file));
 
 const runs = bots.flatMap((bot) =>
@@ -183,9 +183,9 @@ const read = (run, file) => {
 };
 
 const rowOf = (run) => {
-  const samples = (read(run, "samples.jsonl") ?? "").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const samples = jsonLines(join(dirOf(run), "samples.jsonl"));
   const levels = JSON.parse(read(run, "levels.json") ?? "[]");
-  const faults = (read(run, "faults.jsonl") ?? "").split("\n").filter(Boolean).length;
+  const faults = jsonLines(join(dirOf(run), "faults.jsonl")).length;
   const refusals = Object.values(JSON.parse(read(run, "refusals.json") ?? "{}")).reduce((a, b) => a + b, 0);
   const last = samples.at(-1) ?? {};
   const at = (rcl) => levels.find((l) => l.rcl >= rcl)?.t;
