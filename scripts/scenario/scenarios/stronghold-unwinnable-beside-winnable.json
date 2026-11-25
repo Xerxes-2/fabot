@@ -1,7 +1,7 @@
 {
-  "why": "a level-3 stronghold the colony's stock cannot take (TOUGH's boost for two parts alone) holds no row, so the level-1 next door it can take is taken: a row held by an open engagement that priced no win kept the L1 untouched until the L3 collapsed",
-  "modules": ["exchange", "fight", "strategy"],
-  "start": { "room": "W8N3", "seed": 1, "node": "K7", "stronghold": "W8N2:1:3,W7N3:1:1" },
+  "why": "a level-3 stronghold the colony's stock cannot take (LO, not its recipe's LHO2) holds no row, so the level-2 next door it can take is taken: a row held by an open engagement that priced no win kept the other untouched until the L3 collapsed",
+  "modules": ["fight", "strategy"],
+  "start": { "room": "W8N3", "seed": 1, "node": "Q7", "stronghold": "W8N2:1:3,W7N3:1:2" },
   "ticks": 4000,
   "assert": [
     { "measure": "strongholdFallenAt", "room": "W7N3", "max": 2000 },

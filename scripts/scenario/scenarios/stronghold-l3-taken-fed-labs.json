@@ -10,9 +10,10 @@
     "world": "scripts/scenario/worlds/template.json",
     "overlay": "scripts/scenario/worlds/w8n3-m7-centred.json",
     "seed": 1,
-    "stronghold": "W8N2:1:3"
+    "stronghold": "W8N2:1:3",
+    "stock": { "W8N3": { "GHO2": 600, "KHO2": 1200, "LHO2": 1800 } }
   },
-  "ticks": 4000,
+  "ticks": 5000,
   "assert": [
     {
       "measure": "strongholdFallenAt",

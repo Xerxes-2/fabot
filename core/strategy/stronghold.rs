@@ -14,9 +14,6 @@ use fabot_fight::shape::{Cast, Engagement, Objective};
 /// L4's fortifier and its garrison's reach are not priced yet; L5 is out (owner).
 const MOST: i32 = 3;
 
-/// Its collapse leaves a cast its walk, its kill and the haul home.
-const LEFT: i32 = 2 * engine::CREEP_LIFETIME;
-
 /// Its loot is declared with it, so the haul is cast as the core falls.
 pub fn rows(
     world: &World,
@@ -65,18 +62,14 @@ pub fn rows(
         };
         // Fight takes one at a time: none is priced while a set is cast.
         let mut ready: Vec<_> = (candidates.into_iter().filter(|_| committed.is_empty()))
-            .filter(|(_, s)| {
-                let left = s.collapses_at - world.time;
-                s.level <= MOST && s.deploys_at <= world.time && left >= LEFT
-            })
-            .filter_map(|(room, s)| Some((Reverse(s.level), near(room)?, room)))
+            .filter(|(_, s)| s.level <= MOST && s.deploys_at <= world.time)
+            .filter_map(|(room, s)| Some((Reverse(s.level), near(room)?, room, s)))
             .collect();
-        ready.sort_by_key(|(level, (_, _, _, walk), room)| (*level, *walk, *room));
-        taken = ready
-            .into_iter()
-            .find_map(|(Reverse(level), (_, stock, capacity, walk), room)| {
-                stronghold::take(level, (&stock, capacity, Some(walk))).map(|_| room)
-            });
+        ready.sort_by_key(|(level, (_, _, _, walk), room, _)| (*level, *walk, *room));
+        taken = (ready.into_iter()).find_map(|(_, (_, stock, capacity, walk), room, s)| {
+            let left = s.collapses_at - world.time;
+            stronghold::take(&s, left, (&stock, capacity, walk)).map(|_| room)
+        });
         reached = fallen.into_iter().filter(|r| near(*r).is_some()).collect();
     }
     let rooms: BTreeSet<RoomName> = committed.into_iter().chain(taken).chain(reached).collect();

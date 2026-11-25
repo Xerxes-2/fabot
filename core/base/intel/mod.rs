@@ -2,15 +2,15 @@ use std::collections::BTreeMap;
 
 use crate::declarations::{Declarations, Declared, Outpost};
 use crate::engine;
+use crate::stronghold::Stronghold;
 use crate::tiles::{self, Post, Tile};
 use crate::vocabulary::ResourceType;
 use crate::world::{Controller, Id, Owner, Pos, Room, RoomName, Source, World, push_int};
 
 pub const WRITTEN_EVERY: i32 = 100;
 
-/// A room as it stood when last seen, by username: a stance is the
-/// declarations' and changes without a sight. `lairs` and `sources` are None
-/// on a row written before they were read: unknown, not none.
+/// A room as last seen, by username: a stance is the declarations' and changes unseen. `lairs`
+/// and `sources` are None on a row written before they were read: unknown, not none.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Row {
     pub seen: i32,
@@ -34,13 +34,6 @@ pub struct Row {
 }
 
 pub type Loot = (i32, Vec<(Declared, ResourceType, i32, bool)>);
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Stronghold {
-    pub level: i32,
-    pub deploys_at: i32,
-    pub collapses_at: i32,
-}
 
 impl Row {
     /// A player's tower stood here when last seen, and the player is no ally.
@@ -114,9 +107,8 @@ const NONE: &str = "-";
 
 /// One line a room, `room seen owner level reserver lapse worker lairs controller sources
 /// contained mineral stronghold towered loot`, `-` for none (`loot` left off); `lairs` as
-/// `lair.resource,…`, `sources` `id@tile,…` (`.` for none), `stronghold` `level.deploys.collapses`,
-/// `loot` `collapse;id@tile:resource:amount[:w walled],…` (a fallen stronghold's); a segment holds
-/// thousands.
+/// `lair.resource,…`, `sources` `id@tile,…` (`.` for none), `stronghold` `Stronghold::text`, `loot`
+/// `collapse;id@tile:resource:amount[:w walled],…` (a fallen stronghold's); a segment holds thousands.
 pub fn to_text(intel: &Intel) -> String {
     use std::fmt::Write;
     fn name(user: &Option<String>) -> &str {
@@ -177,9 +169,7 @@ pub fn to_text(intel: &Intel) -> String {
             None => out.extend([" ", NONE]),
         }
         match r.stronghold {
-            Some(s) => {
-                let _ = write!(out, " {}.{}.{}", s.level, s.deploys_at, s.collapses_at);
-            }
+            Some(s) => out.extend([" ", &s.text()]),
             None => out.extend([" ", NONE]),
         }
         out.push_str(if r.towered { " 1" } else { " 0" });
@@ -238,15 +228,6 @@ fn loot_of(room: RoomName, text: &str) -> Option<Loot> {
     Some((collapse.parse().ok()?, items))
 }
 
-fn stronghold_of(text: &str) -> Option<Stronghold> {
-    let mut n = text.split('.').map(|n| n.parse().ok());
-    Some(Stronghold {
-        level: n.next()??,
-        deploys_at: n.next()??,
-        collapses_at: n.next()??,
-    })
-}
-
 pub fn of_text(text: &str) -> Intel {
     let name = |s: &str| (s != NONE).then(|| s.to_string());
     text.lines()
@@ -276,7 +257,7 @@ pub fn of_text(text: &str) -> Intel {
                 sources,
                 contained: f.get(10) == Some(&"1"),
                 mineral: f.get(11).and_then(|m| mineral_of(m)),
-                stronghold: f.get(12).and_then(|s| stronghold_of(s)),
+                stronghold: f.get(12).and_then(|s| Stronghold::of_text(s)),
                 towered: f.get(13) == Some(&"1"),
                 loot: f.get(14).and_then(|l| loot_of(room, l)),
             };
@@ -323,7 +304,7 @@ mod tests {
                 select(crate::vocabulary::ORES.to_vec()),
                 option::of(tile.clone()),
             )),
-            option::of((1..=5, 0..=9_999_999, 0..=9_999_999)),
+            option::of((1..=5, 0..=9_999_999, 0..=9_999_999, 0..=9_999_999)),
             any::<bool>(),
         );
         let loot = vec(
@@ -364,10 +345,11 @@ mod tests {
                 sources,
                 contained,
                 mineral,
-                stronghold: stronghold.map(|(level, deploys_at, collapses_at)| Stronghold {
+                stronghold: stronghold.map(|(level, deploys_at, collapses_at, loot)| Stronghold {
                     level,
                     deploys_at,
                     collapses_at,
+                    loot,
                 }),
                 towered,
                 loot: loot.map(|(collapse, loot)| {

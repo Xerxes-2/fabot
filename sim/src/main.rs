@@ -18,6 +18,7 @@ mod rival;
 mod sample;
 mod seat;
 mod start;
+mod stock;
 mod view;
 mod watch;
 mod world;
@@ -299,9 +300,8 @@ fn main() {
         for (_, room, due) in args.npc.iter().filter(|n| n.0 == t) {
             match due {
                 Some(npc::Npc::Wave(bodies)) => npc::wave(&mut k, room, bodies, || engine.next()),
-                Some(npc::Npc::Stronghold(level, deploy)) => {
-                    npc::stronghold(&mut k, room, *level, *deploy)
-                }
+                Some(npc::Npc::Stronghold(l, d)) => npc::stronghold(&mut k, room, *l, *d),
+                Some(npc::Npc::Loot(r, n)) => stock::loot(&mut k, room, r, *n),
                 None => npc::core(&mut k, room, || engine.next()),
             }
         }

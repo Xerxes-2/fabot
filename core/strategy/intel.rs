@@ -3,11 +3,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use fabot_atlas::Atlas;
 use fabot_base::declarations::{self, Declarations, Declared};
 use fabot_base::engine;
-use fabot_base::intel::{Intel, Row, STALE, Scout, Stronghold};
+use fabot_base::intel::{Intel, Row, STALE, Scout};
 use fabot_base::intents::Action;
+use fabot_base::stronghold::{Stronghold, raw};
 use fabot_base::tiles;
 use fabot_base::vocabulary::Part;
-use fabot_base::world::{Owner, RoomName, Structure, StructureType, World};
+use fabot_base::world::{Owner, Room, RoomName, Structure, StructureType, World};
 
 /// `Owner::of_user`'s inverse: a row outlives the stance it was seen under.
 fn user(me: &str, owner: &Owner) -> Option<String> {
@@ -59,6 +60,7 @@ pub fn step(world: &World, atlas: &Atlas, intel: &mut Intel) {
                 level: s.level,
                 deploys_at: world.time + s.deploy,
                 collapses_at: world.time + s.collapse,
+                loot: worth(room, atlas, s.level),
             }),
             towered: (room.structures.iter())
                 .any(|s| s.kind == StructureType::Tower && s.owner.is_theirs()),
@@ -80,6 +82,16 @@ pub fn step(world: &World, atlas: &Atlas, intel: &mut Intel) {
         };
         intel.insert(room.name, row);
     }
+}
+
+/// Loot no set reaches is none: Strategy and Fight price only what they can take.
+fn worth(room: &Room, atlas: &Atlas, level: i32) -> i32 {
+    let held = fabot_atlas::loot_in(room);
+    if held.is_empty() || !fabot_fight::kinds::stronghold::reached(room, atlas, level) {
+        return 0;
+    }
+    let held = held.into_iter();
+    held.map(|(_, r, n)| raw(r) * f64::from(n)).sum::<f64>() as i32
 }
 
 fn declared(declarations: &Declarations) -> impl Iterator<Item = &RoomName> {

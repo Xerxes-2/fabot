@@ -269,7 +269,7 @@ pub fn close(sight: &mut Sight, order: &[Id], centre: &Pos, enter: bool, creep: 
 }
 
 /// A tired body's step waits where it stands: the engine refuses it.
-fn step_to(creep: &Creep, tile: Tile) -> Wish {
+pub fn step_to(creep: &Creep, tile: Tile) -> Wish {
     let moves = plan::can_move(creep, mover_of(creep).factor);
     let at = tiles::of_pos(&creep.pos);
     Wish {

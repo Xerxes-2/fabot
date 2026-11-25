@@ -133,7 +133,7 @@ for (const { name, start } of scenarios)
   if (!start.world && (start.declarations || start.memory || start.gcl || start.stock || start.level || start.roadless || start.overlay)) fail(`${name}: "declarations", "memory", "gcl", "stock", "level", "roadless" and "overlay" take a "world" start`);
 
 for (const { name, start } of scenarios)
-  if (start.stronghold !== undefined && !/^[WE]\d+[NS]\d+:\d+:[1-5](:\d+)?(,[WE]\d+[NS]\d+:\d+:[1-5](:\d+)?)*$/.test(start.stronghold)) fail(`${name}: "stronghold" takes "room:tick:level[:deploy],…"`);
+  if (start.stronghold !== undefined && !/^[WE]\d+[NS]\d+:\d+:[1-5](:\d+(:[a-z_]+\*\d+)?)?(,[WE]\d+[NS]\d+:\d+:[1-5](:\d+(:[a-z_]+\*\d+)?)?)*$/.test(start.stronghold)) fail(`${name}: "stronghold" takes "room:tick:level[:deploy[:resource*amount]],…"`);
 
 const tag = (opponents = []) => (opponents.length ? `-o${createHash("sha256").update(JSON.stringify(opponents)).digest("hex").slice(0, 8)}` : "");
 const recipe = ({ gen, sectors, players, world, room, seed, late = 0, node, invaders, wave, core, stronghold, unsafe, ended, declarations, memory, stock, gcl, level, roadless, overlay, follow, resetEvery }, opponents) =>

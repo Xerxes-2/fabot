@@ -115,15 +115,19 @@ const bodies = (wave = "melee,healer,ranged") =>
   });
 
 /**
- * `soak.mjs`'s `--invaders room:every[:first],…` and `--core room:tick,…`, and a scenario's `stronghold` `room:tick:level[:deploy],…`
- * (sim alone stands one), as sim's `--npc`: [tick, room, a wave's bodies, [a stronghold's level, deploy] or null for a core].
+ * `soak.mjs`'s `--invaders room:every[:first],…` and `--core room:tick,…`, and a scenario's `stronghold` `room:tick:level[:deploy[:resource*amount]],…`
+ * (sim alone stands one), as sim's `--npc`: [tick, room, a wave's bodies, [a stronghold's level, deploy], [resource, amount] put in its
+ * containers once deployed, or null for a core].
  */
 function npc(invaders = "", wave, core = "", stronghold = "", ticks) {
   const waves = invaders.split(",").filter(Boolean).flatMap((w) => {
     const [room, every, first = every] = w.split(":").map((v, i) => (i ? Number(v) : v));
     return Array.from({ length: Math.max(0, Math.ceil((ticks - first) / every)) }, (_, i) => [first + i * every, room, wave]);
   });
-  const strongholds = stronghold.split(",").filter(Boolean).map((c) => c.split(":")).map(([room, tick, level, deploy = 1]) => [Number(tick), room, [Number(level), Number(deploy)]]);
+  const strongholds = stronghold.split(",").filter(Boolean).map((c) => c.split(":")).flatMap(([room, tick, level, deploy = 1, loot]) => [
+    [Number(tick), room, [Number(level), Number(deploy)]],
+    ...(loot ? [[Number(tick) + Number(deploy) + 2, room, [loot.split("*")[0], Number(loot.split("*")[1])]]] : []),
+  ]);
   return [...waves, ...core.split(",").filter(Boolean).map((c) => [Number(c.split(":")[1]), c.split(":")[0], null]), ...strongholds];
 }
 

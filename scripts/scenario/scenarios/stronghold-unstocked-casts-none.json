@@ -1,0 +1,12 @@
+{
+  "why": "a colony with no boost stock beside a level-1, a level-2 and a level-3 stronghold casts nothing: L2's and L3's recipes are boosted, and L1's bare set (four 20M5R15H, about 16000 energy for its walk and 1000-tick kill) costs more than its loot (about 700 seen in its containers, 1000 drawn into its core's ruin)",
+  "modules": ["fight", "strategy"],
+  "start": { "room": "W8N3", "seed": 1, "node": "P7", "stronghold": "W8N2:1:1,W7N3:1:2,W8N4:1:3" },
+  "ticks": 3000,
+  "assert": [
+    { "measure": "castIn", "room": "W8N3", "name": "fight-", "max": 0 },
+    { "measure": "bodiesLost", "room": "W8N2", "max": 0 },
+    { "measure": "bodiesLost", "room": "W7N3", "max": 0 },
+    { "measure": "bodiesLost", "room": "W8N4", "max": 0 }
+  ]
+}

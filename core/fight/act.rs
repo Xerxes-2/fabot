@@ -112,7 +112,8 @@ pub(super) fn act(
         let walk = (e.phase, e.unanswered, defends, raid::raids(e));
         let members = scene.members_of(e);
         let blob = formation(&mut sight, on, walk, members, centre_of(e), &fortified);
-        walking.extend(blob.into_iter().map(|w| (w.creep.clone(), w)));
+        let held = stronghold::walks(&mut sight, scene, e);
+        walking.extend(blob.into_iter().chain(held).map(|w| (w.creep.clone(), w)));
     }
 
     let fronts: BTreeMap<i32, tactics::Front> = (decided.iter())
@@ -151,7 +152,7 @@ pub(super) fn act(
             return (None, defend::idle(sight, scene, fights, c));
         };
 
-        if let Some(acted) = stronghold::act(sight, scene, (e, &middles), c) {
+        if let Some(acted) = stronghold::act(sight, scene, (e, &middles, &walking), c) {
             return acted;
         }
 

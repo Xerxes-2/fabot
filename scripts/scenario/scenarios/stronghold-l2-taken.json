@@ -1,11 +1,13 @@
 {
-  "why": "a deployed level-2 stronghold beside a colony holding T3 boosts is killed by one boosted ranger out of its melee garrison's reach, and its loot, behind the rampart its ranger breaks, hauled home: main never opens on it",
-  "modules": ["exchange", "fight", "strategy", "economy"],
-  "start": { "room": "W8N3", "seed": 1, "node": "M7", "stronghold": "W8N2:1:2" },
+  "why": "a deployed level-2 stronghold beside a colony holding its recipe's tiers (KHO2, LO) is taken by the recipe's set, gathered in a block out of its melee garrison's reach, and all its loot, behind the ramparts Economy's dismantlers break, hauled home",
+  "modules": ["fight", "strategy", "economy"],
+  "start": { "room": "W8N3", "seed": 1, "node": "Q7", "stronghold": "W8N2:1:2" },
   "ticks": 4000,
   "assert": [
     { "measure": "strongholdFallenAt", "room": "W8N2", "max": 2000 },
-    { "measure": "lootTaken", "room": "W8N2", "min": 90 },
+    { "measure": "lootTaken", "room": "W8N2", "min": 100 },
+    { "measure": "ruinLootLeft", "room": "W8N2", "max": 0 },
+    { "measure": "castIn", "room": "W8N3", "name": "fight-", "report": true },
     { "measure": "bodiesLost", "room": "W8N2", "max": 0 }
   ]
 }

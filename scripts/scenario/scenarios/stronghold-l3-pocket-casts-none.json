@@ -1,0 +1,10 @@
+{
+  "why": "stronghold-l3-taken on seed 8: every tile in a shot of the core outside its garrison's reach lies in a pocket only a single file reaches, so no recipe's square walks to a block and nothing is cast (the set cast before trickled in one by one and lost all 8 of two casts)",
+  "modules": ["fight", "strategy"],
+  "start": { "room": "W8N3", "seed": 8, "node": "V7", "stronghold": "W8N2:1:3" },
+  "ticks": 3000,
+  "assert": [
+    { "measure": "castIn", "room": "W8N3", "name": "fight-", "max": 0 },
+    { "measure": "bodiesLost", "room": "W8N2", "max": 0 }
+  ]
+}

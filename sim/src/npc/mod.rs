@@ -14,7 +14,8 @@ use serde_json::{Value, json};
 use crate::view::{View, num, store, text, used, xy};
 use crate::world::INVADER;
 
-/// On a tick, in a room: a wave's bodies, a stronghold's [level, deploy] or (null) a level-0 core.
+/// On a tick, in a room: a wave's bodies, a stronghold's [level, deploy], [resource, amount] to
+/// stock its containers with, or (null) a level-0 core.
 pub type Due = (u64, String, Option<Npc>);
 
 #[derive(serde::Deserialize)]
@@ -22,6 +23,12 @@ pub type Due = (u64, String, Option<Npc>);
 pub enum Npc {
     Wave(Vec<Vec<String>>),
     Stronghold(u32, u32),
+    Loot(String, f64),
+}
+
+pub fn index(k: &World, room: &str) -> usize {
+    let at = k.meta.rooms.iter().position(|m| &*m.name == room);
+    at.expect(room)
 }
 
 pub fn insert(k: &mut World, r: usize, docs: Vec<Value>) {
@@ -47,9 +54,7 @@ fn wall(k: &World, r: usize, (x, y): (i64, i64)) -> bool {
 /// toward a room someone owns or reserves stays open: the schedule, not genInvaders, decides
 /// that a wave lands.
 pub fn wave(k: &mut World, room: &str, bodies: &[Vec<String>], mut random: impl FnMut() -> f64) {
-    let r = (k.meta.rooms.iter())
-        .position(|m| &*m.name == room)
-        .expect(room);
+    let r = index(k, room);
     let sides: [fn(i64) -> (i64, i64); 4] = [|i| (i, 0), |i| (i, 49), |i| (0, i), |i| (49, i)];
     let open: Vec<Vec<(i64, i64)>> = (sides.iter())
         .map(|at| (0..49).map(at).filter(|&p| !wall(k, r, p)).collect())
@@ -85,9 +90,7 @@ pub fn wave(k: &mut World, room: &str, bodies: &[Vec<String>], mut random: impl 
 /// A level-0 core in `room` as a stronghold's expansion stands one: on a free tile within 5 of
 /// the controller, no wall or obstacle beside it. No parent lends it a collapse timer.
 pub fn core(k: &mut World, room: &str, mut random: impl FnMut() -> f64) {
-    let r = (k.meta.rooms.iter())
-        .position(|m| &*m.name == room)
-        .expect(room);
+    let r = index(k, room);
     let objects: Vec<Arc<Doc>> = k.rooms[r].objects.to_vec();
     let controller = objects.iter().find(|d| d.kind() == "controller");
     let (cx, cy) = xy(&controller.expect("a controller").obj);
@@ -113,9 +116,7 @@ pub fn core(k: &mut World, room: &str, mut random: impl FnMut() -> f64) {
 
 /// `bunker{level}` as the `strongholds.spawn` CLI stands it, deploying in `deploy` ticks.
 pub fn stronghold(k: &mut World, room: &str, level: u32, deploy: u32) {
-    let r = (k.meta.rooms.iter())
-        .position(|m| &*m.name == room)
-        .expect(room);
+    let r = index(k, room);
     let opts = SpawnOpts {
         template_name: Some(format!("bunker{level}")),
         deploy_time: Some(f64::from(deploy)),

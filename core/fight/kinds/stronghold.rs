@@ -1,26 +1,158 @@
-/// `Stronghold` (`ARCHITECTURE.md` §6.2): an Invader core shot dead from out
-/// of its garrison's reach, then the garrison off its ramparts.
+/// `Stronghold` (`ARCHITECTURE.md` §6.2): an Invader core struck dead from out
+/// of its garrison's reach by a recipe's set, then the garrison off its ramparts.
+use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::super::casting;
 use super::super::price;
 use super::super::scene::{Asked, Scene, fresh};
 use super::super::shape::{Engagement, Objective, Phase, Plan, enter};
+use super::square::{self, BLOCK};
+use Part::{Attack, Heal, RangedAttack, Tough};
+use ResourceType::{GhodiumAlkalide, KeaniumAlkalide, LemergiumAlkalide, LemergiumOxide};
 use fabot_atlas::Atlas;
-use fabot_base::boost::Stock;
+use fabot_base::boost::{Stock, strength};
 use fabot_base::declarations::{Declarations, OpKind, REACH_HOPS};
 use fabot_base::engine;
 use fabot_base::intents::CreepAct;
-use fabot_base::tiles;
-use fabot_base::vocabulary::Part;
+use fabot_base::stronghold::{self as bunker, Stronghold, raw};
+use fabot_base::tiles::{self, TileSet};
+use fabot_base::vocabulary::{Part, ResourceType, multiple, part_count_in, takes};
 use fabot_base::wish::Wish;
-use fabot_base::world::{Creep, Id, Owner, Pos, Room, RoomName, Structure};
-use fabot_exchange::stronghold::{self as bunker, Bunker};
-use fabot_exchange::{Outcome, Side, Terrain};
+use fabot_base::world::{Creep, Id, Pos, Room, RoomName, Structure, StructureType};
 use fabot_tactics::{self as tactics, Sight, Tactic};
 
-/// Its bodies stand beside the one the towers strike, eight at most.
-const COPIES: i32 = 8;
+/// Each body's copies and its parts, `HEAD` order: the struck body loses
+/// its TOUGH, then its MOVE, before a weapon or a HEAL.
+type Bodies = &'static [(usize, [usize; 5])];
+const HEAD: [Part; 5] = [Tough, Part::Move, Attack, RangedAttack, Heal];
+
+/// `sized`: its first body's ATTACK and MOVE as `take` prices it cheapest.
+pub struct Recipe {
+    bodies: Bodies,
+    boosts: &'static [(Part, ResourceType)],
+    sized: bool,
+}
+
+/// By level, the recipes a colony casts the first of: S11's leaders' kits run
+/// on krebs's towers. L1: a bare ATTACK beside three 17H17M (612 HEAL holds the
+/// tower's 600), striking 30 a part to RANGED's 10. L2/L3: four on T1/T2 boosts,
+/// the two within a shot of the core holding the guns, as the garrison's reach
+/// leaves the ring three off it, on GHO2 TOUGH, as HEAL alone held by 4%.
+const RECIPES: [&[Recipe]; 4] = [
+    &[],
+    &[Recipe {
+        bodies: &[(1, [0, 0, 0, 0, 0]), (3, [0, 17, 0, 0, 17])],
+        boosts: &[],
+        sized: true,
+    }],
+    &[Recipe {
+        bodies: SPLIT,
+        boosts: &[
+            (Tough, GhodiumAlkalide),
+            (RangedAttack, KeaniumAlkalide),
+            (Heal, LemergiumOxide),
+        ],
+        sized: false,
+    }],
+    &[Recipe {
+        bodies: SPLIT,
+        boosts: &[
+            (Tough, GhodiumAlkalide),
+            (RangedAttack, KeaniumAlkalide),
+            (Heal, LemergiumAlkalide),
+        ],
+        sized: false,
+    }],
+];
+const SPLIT: Bodies = &[(2, [6, 25, 0, 12, 7]), (2, [0, 18, 0, 0, 18])];
+
+impl Recipe {
+    fn set(&self, attack: usize) -> Vec<casting::Body> {
+        let body = |parts: &[usize; 5]| {
+            let b = (HEAD.iter().zip(parts)).flat_map(|(p, n)| std::iter::repeat_n(*p, *n));
+            engine::with_move_last(b.collect())
+        };
+        let sized = |i: usize, parts: &[usize; 5]| match i == 0 && self.sized {
+            true => [parts[0], attack, attack, parts[3], parts[4]],
+            false => *parts,
+        };
+        (self.bodies.iter().enumerate())
+            .flat_map(|(i, (n, parts))| std::iter::repeat_n(body(&sized(i, parts)), *n))
+            .collect()
+    }
+
+    fn sizes(&self) -> std::ops::RangeInclusive<usize> {
+        if self.sized {
+            1..=engine::MAX_BODY_PARTS / 2
+        } else {
+            0..=0
+        }
+    }
+
+    fn boosted<'a>(
+        &'a self,
+        set: &'a [casting::Body],
+    ) -> impl Iterator<Item = (Part, ResourceType, i32)> + 'a {
+        (self.boosts.iter()).map(move |(part, tier)| {
+            let parts = set.iter().map(|b| part_count_in(b, *part)).sum();
+            (*part, *tier, parts)
+        })
+    }
+
+    fn casts(&self, set: &[casting::Body], stock: &Stock, capacity: i32) -> bool {
+        let held = |part: Part, tier: ResourceType| -> i32 {
+            (stock.held.iter())
+                .filter(|h| takes(part, h.compound))
+                .filter(|h| strength(part, h.compound) >= strength(part, tier))
+                .map(|h| h.parts)
+                .sum()
+        };
+        let parts: i32 = self.boosted(set).map(|(.., n)| n).sum();
+        set.iter().all(|b| engine::body_cost(b) <= capacity)
+            && (self.boosted(set)).all(|(part, tier, n)| held(part, tier) >= n)
+            && stock.energy >= parts
+    }
+
+    fn kill(&self, set: &[casting::Body], level: usize) -> Option<i32> {
+        let boost = |part| {
+            (self.boosted(set).find(|(p, ..)| *p == part))
+                .map_or(1, |(p, tier, _)| multiple(p, Some(tier)))
+        };
+        let reach = reach(set.iter().map(|b| part_count_in(b, Attack) > 0));
+        let strike = |b: &casting::Body| {
+            let (a, r) = (part_count_in(b, Attack), part_count_in(b, RangedAttack));
+            engine::strike_at(a * boost(Attack), r * boost(RangedAttack), reach)
+        };
+        // A block may hold only its near two in reach of the core.
+        let mut strikes: Vec<i32> = set.iter().map(strike).collect();
+        strikes.sort_unstable_by_key(|s| Reverse(*s));
+        let shot: i32 = strikes.iter().take(BLOCK / 2).sum();
+        let hits = bunker::STRONGHOLD_RAMPART_HITS[level] + bunker::INVADER_CORE_HITS;
+        (shot > 0).then(|| (hits + shot - 1) / shot)
+    }
+
+    /// Each body at the share of its life `used` takes, as a body that wins
+    /// lives on (owner), and each boost whole at its raw worth.
+    fn cost(&self, set: &[casting::Body], used: i32) -> i32 {
+        let bodies: i32 = set.iter().map(|b| engine::body_cost(b)).sum();
+        let boosts: f64 = (self.boosted(set))
+            .map(|(_, tier, n)| {
+                f64::from(n * engine::BOOST_MINERAL_PER_PART) * raw(tier)
+                    + f64::from(n * engine::BOOST_ENERGY_PER_PART)
+            })
+            .sum();
+        bodies * used / engine::CREEP_LIFETIME + boosts as i32
+    }
+}
+
+fn reach(mut swings: impl Iterator<Item = bool>) -> i32 {
+    if swings.any(|s| s) {
+        engine::MELEE_RANGE
+    } else {
+        engine::RANGED_RANGE
+    }
+}
 
 pub(crate) fn step(
     scene: &Scene,
@@ -36,23 +168,18 @@ pub(crate) fn step(
     let held = (scene.in_sight(e.room))
         .is_none_or(|r| r.invader_core().is_some() || bare(r).next().is_some());
     let known = (scene.intel.get(&e.room)).is_some_and(|r| r.stronghold.is_some());
-    let arrived = scene.members_of(&next).iter().any(|c| c.pos.room == e.room);
+    let members = scene.members_of(&next);
+    // The set goes in once each body stands in the room: a body in alone takes the towers alone.
+    let gathered = !members.is_empty() && members.iter().all(|c| c.pos.room == e.room);
     let gone = next.ours.is_empty() && !asked && !(next.unanswered && known);
     if !declared || !held || gone {
         None
     } else if e.phase == Phase::Forming && !asked && !next.ours.is_empty() {
         Some(enter(Phase::Approaching, time, &next))
-    } else if e.phase == Phase::Approaching && arrived {
+    } else if e.phase == Phase::Approaching && gathered {
         Some(enter(Phase::Fighting, time, &next))
     } else {
         Some(next)
-    }
-}
-
-fn terrain() -> Terrain {
-    Terrain {
-        weight: engine::PLAIN_WEIGHT,
-        run_off: engine::ROOM_SIDE / 2,
     }
 }
 
@@ -85,9 +212,8 @@ pub(crate) fn opens(
     Some((Engagement { priority, ..e }, false))
 }
 
-/// Priced off the level intel read, unseen: its towers and ramparts are the
-/// engine's; each tick while unanswered, as the boosts asks ahead of it drew
-/// this tick may be back the next.
+/// Priced off the level and loot intel read, unseen; each tick while
+/// unanswered, as the boosts asks ahead of it drew this tick may be back the next.
 pub(crate) fn priced(
     scene: &Scene,
     atlas: &Atlas,
@@ -104,16 +230,16 @@ pub(crate) fn priced(
     let Some((_, stock, capacity, walk)) = priced_from(&colonies, walk, &asked.boosts) else {
         return e.clone();
     };
-    let Some(level) = (scene.intel.get(&e.room)).and_then(|r| Some(r.stronghold?.level)) else {
+    let Some(standing) = (scene.intel.get(&e.room)).and_then(|r| r.stronghold) else {
         return e.clone();
     };
+    let left = standing.collapses_at - scene.world.time;
     let Some(Taken {
         set,
         boosted,
-        won,
         cost,
         worth,
-    }) = take(level, (&stock, capacity, Some(walk)))
+    }) = take(&standing, left, (&stock, capacity, walk))
     else {
         return Engagement {
             capacity,
@@ -136,7 +262,6 @@ pub(crate) fn priced(
         budget: e.lost,
         unanswered: false,
         capacity,
-        predicted: Some(won),
         ..e.clone()
     }
 }
@@ -161,31 +286,42 @@ pub fn priced_from(
 pub struct Taken {
     pub set: Vec<casting::Body>,
     pub boosted: bool,
-    pub won: Outcome,
     pub cost: i32,
     pub worth: i32,
 }
 
-/// The cheapest set a colony holding `stock` and banking `capacity` casts
-/// `walk` tiles off that takes a stronghold of `level` for less than its loot.
-pub fn take(level: i32, (stock, capacity, walk): (&Stock, i32, Option<i32>)) -> Option<Taken> {
-    let bunker = Bunker::of_level(level);
-    let ours = Side {
-        cast_walk: walk,
-        together: true,
-        ..Side::default()
+/// The first recipe for `standing`'s level the colony casts, if it kills within its
+/// bodies' life, a life before the collapse, for no more than the loot (§6.2).
+pub fn take(
+    standing: &Stronghold,
+    left: i32,
+    (stock, capacity, walk): (&Stock, i32, i32),
+) -> Option<Taken> {
+    let level = usize::try_from(standing.level).ok()?;
+    let recipes = RECIPES.get(level)?;
+    let worth = standing.loot + bunker::STRONGHOLD_CORE_DENSITY[level];
+    // A body waits at home on the set's last spawn: one spawn, at worst.
+    let finishes = |set: &[casting::Body], used: i32| {
+        let spawned: i32 = set
+            .iter()
+            .map(|b| engine::SPAWN_TICKS_PER_PART * b.len() as i32)
+            .sum();
+        used + spawned <= engine::CREEP_LIFETIME && used + engine::CREEP_LIFETIME <= left
     };
-    let raider = &[Part::RangedAttack, Part::Move, Part::Heal, Part::Move];
-    let bodies: Vec<casting::Body> = (bunker::kit(bunker.strike, stock, capacity).into_iter())
-        .chain(Some(casting::most(capacity, raider)).filter(|b| !b.is_empty()))
-        .collect();
-    let worth = bunker::loot(level);
-    let (set, boosted, won, cost) =
-        bunker::cheapest_kill(&ours, (&bodies, COPIES), stock, &bunker, terrain())?;
-    (cost < worth).then_some(Taken {
+    let priced = |r: &'static Recipe| {
+        (r.sizes().map(|n| r.set(n)))
+            .filter(|set| r.casts(set, stock, capacity))
+            .filter_map(|set| {
+                let used = walk + r.kill(&set, level)?;
+                let cost = r.cost(&set, used);
+                finishes(&set, used).then_some((r, set, cost))
+            })
+            .min_by_key(|(.., cost)| *cost)
+    };
+    let (recipe, set, cost) = recipes.iter().find_map(priced)?;
+    (standing.loot > 0 && cost <= worth).then_some(Taken {
+        boosted: !recipe.boosts.is_empty(),
         set,
-        boosted,
-        won,
         cost,
         worth,
     })
@@ -210,100 +346,193 @@ fn mark(room: &Room) -> Option<(Id, Pos)> {
     Some((h.id, h.pos))
 }
 
-/// Out of the garrison's reach first: it never leaves its ramparts.
-fn post(room: &Room, atlas: &Atlas, mark: &Pos, (c, mates): (&Creep, &[Pos])) -> Option<Pos> {
-    let ramparts: Vec<Pos> = (room.structures.iter())
-        .filter(|s| fabot_atlas::invader_rampart(s))
-        .map(|s| s.pos)
-        .collect();
-    let reach = (room.hostiles())
-        .filter(|h| h.owner == Owner::Invader && ramparts.contains(&h.pos))
-        .map(|h| fabot_exchange::fighter::best_range(&casting::fighter_of(h)))
-        .max();
-    let towers = super::raid::charged(room);
-    tiles::within(engine::RANGED_RANGE, tiles::of_pos(mark))
-        .into_iter()
-        .filter(|t| !tiles::on_edge(*t) && atlas.passable(room.name, *t))
-        .map(|t| tiles::to_pos(room.name, t))
-        .filter(|p| !ramparts.contains(p) && !mates.contains(p))
-        .min_by_key(|p| {
-            let reached = reach.is_some_and(|r| ramparts.iter().any(|w| w.within(r, p)));
-            let near = c.pos.range(p).unwrap_or(engine::ROOM_SIDE);
-            let strike = fabot_exchange::tower_strike(&towers, p);
-            (reached, strike, near, p.x, p.y)
-        })
+/// The block a set stands in: a square its square walks to from the border,
+/// the most within `reach` of the mark, the least tower strike, the nearest.
+struct Ground {
+    mark: (Id, Pos),
+    walls: TileSet,
+    block: [Pos; BLOCK],
 }
 
-/// Healed before it lands, as a heal behind it lets the next strike through
-/// the TOUGH it broke; a drained tower counts, refilled and fired in a tick.
+fn ground(room: &Room, atlas: &Atlas, reach: i32, set: &[&Creep]) -> Option<Ground> {
+    let (id, at) = mark(room)?;
+    let closed = square::closed(room);
+    let walls = square::walls(room, atlas, &closed);
+    let entered = square::from_border(atlas, &walls, room.name)?;
+    let towers: Vec<Pos> = (room.structures.iter())
+        .filter(|s| s.kind == StructureType::Tower && s.owner.is_theirs())
+        .map(|s| s.pos)
+        .collect();
+    let corners = (-reach - 1..=reach).flat_map(|dx| (-reach - 1..=reach).map(move |dy| (dx, dy)));
+    let block = corners
+        .filter_map(|(dx, dy)| square::at(room, atlas, &closed, (at.x + dx, at.y + dy)))
+        .filter(|b| entered.ticks(tiles::of_pos(&b[0])).is_some())
+        .filter(|b| b.iter().filter(|p| p.within(reach, &at)).count() >= BLOCK / 2)
+        .min_by_key(|b| {
+            let striking = b.iter().filter(|p| p.within(reach, &at)).count();
+            let strike: i32 = b
+                .iter()
+                .map(|p| fabot_exchange::tower_strike(&towers, p))
+                .sum();
+            (
+                Reverse(striking),
+                strike,
+                square::far(set, &b[0]),
+                b[0].x,
+                b[0].y,
+            )
+        })?;
+    Some(Ground {
+        mark: (id, at),
+        walls,
+        block,
+    })
+}
+
+/// Whether `level`'s first recipe has a block its square walks to.
+pub fn reached(room: &Room, atlas: &Atlas, level: i32) -> bool {
+    let recipe = usize::try_from(level)
+        .ok()
+        .and_then(|l| RECIPES.get(l)?.first());
+    let swings = recipe.map(|r| {
+        r.set(1)
+            .iter()
+            .map(|b| part_count_in(b, Attack) > 0)
+            .collect::<Vec<_>>()
+    });
+    swings.is_some_and(|s| ground(room, atlas, reach(s.into_iter()), &[]).is_some())
+}
+
+/// Healed before it lands, on the body nearest the core the towers strike, the
+/// one struck last among ties; a drained tower counts, refilled and fired in a tick.
 pub(crate) fn incoming<'a>(
     scene: &'a Scene,
     decided: &'a [Engagement],
 ) -> impl Iterator<Item = (String, i32)> + 'a {
     (decided.iter())
         .filter(|e| e.objective == Objective::Stronghold)
-        .filter_map(|e| Some((scene.in_sight(e.room)?, e)))
-        .filter(|(room, _)| room.invader_core().is_some())
-        .flat_map(|(room, e)| {
-            let towers: Vec<Pos> = scene.towers_in(room).iter().map(|t| t.pos).collect();
+        .filter_map(|e| {
+            let room = scene.in_sight(e.room)?;
+            let core = room.invader_core()?;
+            let towers = scene.towers_in(room);
+            let fired: BTreeSet<&Id> = towers.iter().map(|t| &t.id).collect();
+            let last = (scene.world.attacks.iter()).find(|(by, _)| fired.contains(by));
             let here = scene
                 .members_of(e)
                 .into_iter()
                 .filter(|c| c.pos.room == room.name);
-            here.map(move |c| {
+            let struck = here.min_by_key(|c| {
+                let range = c.pos.range(&core.pos).unwrap_or(engine::ROOM_SIDE);
                 (
+                    range,
+                    last.is_none_or(|(_, at)| *at != c.id),
                     c.name.clone(),
-                    fabot_exchange::tower_strike(&towers, &c.pos),
                 )
-            })
+            })?;
+            let at: Vec<Pos> = towers.iter().map(|t| t.pos).collect();
+            let strike = fabot_exchange::tower_strike(&at, &struck.pos);
+            Some((struck.name.clone(), strike))
         })
+}
+
+/// The set's wishes, once a set: out of a square it forms one round its body
+/// nearest the mark, and a square steps as one.
+pub(crate) fn walks(sight: &mut Sight, scene: &Scene, e: &Engagement) -> Vec<Wish> {
+    let set = scene.members_of(e);
+    let fighting = e.objective == Objective::Stronghold && e.phase == Phase::Fighting;
+    let Some(room) = scene
+        .in_sight(e.room)
+        .filter(|_| fighting && !set.is_empty())
+    else {
+        return Vec::new();
+    };
+    let reach = reach(set.iter().map(|c| c.live(Attack) > 0));
+    let Some(g) = ground(room, sight.atlas, reach, &set) else {
+        return Vec::new();
+    };
+    let at = g.mark.1;
+    let stand = |sight: &mut Sight, c: &Creep, p: Option<Pos>| match p {
+        Some(p) if p != c.pos => tactics::toward(sight, c, &p, 0),
+        _ => tactics::hold(sight, c),
+    };
+    let next = |from: &Pos| square::step(sight.atlas, &g.walls, &set, (from, &g.block[0]));
+    let rested = set.iter().all(|m| m.fatigue == 0);
+    let around = |m: &&Creep| m.pos.within(2, &g.block[0]);
+    let lead = (set.iter().copied()).min_by_key(|m| (m.pos.range(&at), &m.name));
+    let formed = || {
+        lead.and_then(|l| {
+            let corners = [(0, 0), (-1, 0), (0, -1), (-1, -1)];
+            (corners.iter())
+                .filter_map(|(dx, dy)| {
+                    square::at(room, sight.atlas, &|_| false, (l.pos.x + dx, l.pos.y + dy))
+                })
+                .filter(|f| !g.walls.contains(tiles::of_pos(&f[0])) && next(&f[0]).is_some())
+                .min_by_key(|f| {
+                    (
+                        f.iter().map(|p| square::far(&set, p)).sum::<i32>(),
+                        f[0].x,
+                        f[0].y,
+                    )
+                })
+        })
+    };
+    let seat = |tiles: &[Pos; BLOCK], c: &Creep| square::seat(tiles, &at, &set, c);
+    match (set.iter().all(around), square::corner(&set)) {
+        (true, _) => set
+            .iter()
+            .map(|c| stand(sight, c, seat(&g.block, c)))
+            .collect(),
+        (_, Some(corner)) if rested => match next(&corner) {
+            Some(d) => (set.iter())
+                .map(|c| match tiles::neighbour(tiles::of_pos(&c.pos), d) {
+                    Some(t) => tactics::step_to(c, t),
+                    None => tactics::hold(sight, c),
+                })
+                .collect(),
+            None => set
+                .iter()
+                .map(|c| stand(sight, c, seat(&g.block, c)))
+                .collect(),
+        },
+        (_, Some(_)) => set.iter().map(|c| tactics::hold(sight, c)).collect(),
+        (_, None) => {
+            let tiles = formed().unwrap_or(g.block);
+            set.iter()
+                .map(|c| stand(sight, c, seat(&tiles, c)))
+                .collect()
+        }
+    }
 }
 
 pub(crate) fn act(
     sight: &mut Sight,
     scene: &Scene,
-    (e, middles): (&Engagement, &BTreeMap<RoomName, Pos>),
+    (e, middles, walking): (
+        &Engagement,
+        &BTreeMap<RoomName, Pos>,
+        &BTreeMap<String, Wish>,
+    ),
     c: &Creep,
 ) -> Option<(Option<CreepAct>, Wish)> {
     let working = matches!(e.phase, Phase::Approaching | Phase::Fighting);
     if e.objective != Objective::Stronghold || !working {
         return None;
     }
-    let mates: Vec<Pos> = (scene.members_of(e).iter())
-        .filter(|m| m.name != c.name)
-        .map(|m| m.pos)
-        .collect();
-    Some(walked(
-        sight,
-        scene.in_sight(e.room),
-        &middles[&e.room],
-        (c, &mates),
-    ))
-}
-
-fn walked(
-    sight: &mut Sight,
-    room: Option<&Room>,
-    middle: &Pos,
-    (c, mates): (&Creep, &[Pos]),
-) -> (Option<CreepAct>, Wish) {
-    let Some(room) = room else {
-        return (
-            None,
-            tactics::toward(sight, c, middle, engine::ROOM_SIDE / 2 - 2),
-        );
+    let room = scene
+        .in_sight(e.room)
+        .filter(|_| e.phase == Phase::Fighting);
+    let strike = room.and_then(mark).and_then(|(id, at)| {
+        let swings = c.live(Attack) > 0 && c.pos.within(engine::MELEE_RANGE, &at);
+        let shoots = c.live(RangedAttack) > 0 && c.pos.within(engine::RANGED_RANGE, &at);
+        (swings.then_some(CreepAct::AttackCreep(id)))
+            .or(shoots.then_some(CreepAct::RangedAttackCreep(id)))
+    });
+    let wish = match (walking.get(&c.name), room) {
+        (Some(wish), _) => wish.clone(),
+        (None, Some(_)) => tactics::hold(sight, c),
+        (None, None) => tactics::toward(sight, c, &middles[&e.room], engine::ROOM_SIDE / 2 - 2),
     };
-    let Some((mark, at)) = mark(room) else {
-        return (None, tactics::hold(sight, c));
-    };
-    let shot = (c.pos.within(engine::RANGED_RANGE, &at) && c.live(Part::RangedAttack) > 0)
-        .then_some(CreepAct::RangedAttackCreep(mark));
-    let wish = match post(room, sight.atlas, &at, (c, mates)) {
-        Some(p) if p == c.pos => tactics::hold(sight, c),
-        Some(p) => tactics::toward(sight, c, &p, 0),
-        None => tactics::toward(sight, c, &at, engine::RANGED_RANGE),
-    };
-    (shot, wish)
+    Some((strike, wish))
 }
 
 #[cfg(test)]
@@ -311,13 +540,50 @@ mod tests {
     use super::*;
     use fabot_base::boost::Held;
 
+    fn stock(held: &[(ResourceType, i32)]) -> Stock {
+        let held = (held.iter())
+            .map(|(compound, parts)| Held {
+                compound: *compound,
+                parts: *parts,
+                in_labs: 0,
+            })
+            .collect();
+        Stock { held, energy: 1000 }
+    }
+
+    /// A stronger compound stands in for its tier; a weaker one, or too
+    /// little, casts nothing.
+    #[test]
+    fn a_recipe_casts_on_its_tier_or_stronger() {
+        use ResourceType::*;
+        let l3 = &RECIPES[3][0];
+        let set = l3.set(0);
+        let casts = |held: &[(ResourceType, i32)]| l3.casts(&set, &stock(held), 5600);
+        let tier = [
+            (GhodiumAlkalide, 12),
+            (KeaniumAlkalide, 24),
+            (LemergiumAlkalide, 50),
+        ];
+        assert!(casts(&tier));
+        let t3 = [
+            (CatalyzedGhodiumAlkalide, 12),
+            (CatalyzedKeaniumAlkalide, 24),
+            (CatalyzedLemergiumAlkalide, 50),
+        ];
+        assert!(casts(&t3));
+        assert!(!casts(&[tier[0], tier[1], (LemergiumOxide, 50)]));
+        assert!(!casts(&[(GhodiumOxide, 12), tier[1], tier[2]]));
+        assert!(!casts(&[tier[0], (KeaniumAlkalide, 23), tier[2]]));
+        assert!(!l3.casts(&set, &stock(&tier), 4600));
+    }
+
     /// A colony nearer on the map but further on foot neither casts nor
     /// lends its boosts: the set is priced from the one that boosts it.
     #[test]
     fn a_stronghold_is_priced_from_the_colony_nearest_on_foot() {
         let (grid_near, walk_near) = (RoomName::W1N1, RoomName::new(-3, -3));
         let held = Held {
-            compound: fabot_base::vocabulary::ResourceType::CatalyzedGhodiumAlkalide,
+            compound: ResourceType::CatalyzedGhodiumAlkalide,
             parts: 30,
             in_labs: 0,
         };

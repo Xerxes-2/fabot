@@ -4,6 +4,7 @@ pub mod engine;
 pub mod grid;
 pub mod intel;
 pub mod intents;
+pub mod stronghold;
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing;
 pub mod tiles;

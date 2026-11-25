@@ -1,6 +1,7 @@
 pub mod defend;
 pub mod raid;
 pub mod siege;
+mod square;
 pub mod stronghold;
 pub mod sweep;
 

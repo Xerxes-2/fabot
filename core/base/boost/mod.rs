@@ -63,15 +63,17 @@ pub struct Visits {
     pub fills: usize,
 }
 
+/// What `compound` makes of `part`, in percent: TOUGH's by what it lets through.
+pub fn strength(part: Part, compound: ResourceType) -> i32 {
+    (100.0 * f64::from(vocabulary::multiple(part, Some(compound)))
+        / vocabulary::damage_ratio(part, Some(compound))) as i32
+}
+
 /// Spent from `stock` as the body's visits spend it, so neither pricing nor
 /// the cast counts one stock or one energy twice. Part types go by
 /// `vocabulary::BOOSTS` rank: a colony short of stock runs short of the
 /// lowest-ranked.
 pub fn boosted_by(body: &[Part], stock: &mut Stock) -> Visits {
-    let strength = |p: Part, c: ResourceType| {
-        (100.0 * f64::from(vocabulary::multiple(p, Some(c))) / vocabulary::damage_ratio(p, Some(c)))
-            as i32
-    };
     let rank = |p: Part| {
         (vocabulary::BOOSTS.iter())
             .filter(|(c, _)| takes(p, *c))

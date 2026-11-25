@@ -39,6 +39,11 @@ export const NODES = {
   // M7 with a level-1 kit's TOUGH boost alone: two parts' worth.
   K7: { level: 7, stored: "100000,H:6000,O:6000,U:6000,XGHO2:60,XLHO2:900,XKHO2:900,XZHO2:900,XUH2O:900", without: ["rampart", "tower", "link", "factory"], labs: true },
   M7: { level: 7, stored: "100000,H:6000,O:6000,U:6000,XGHO2:900,XLHO2:900,XKHO2:900,XZHO2:900,XUH2O:900", without: ["rampart", "tower", "link", "factory"], labs: true },
+  // M7 with no compound.
+  P7: { level: 7, stored: "100000,H:6000,O:6000,U:6000", without: ["rampart", "tower", "link", "factory"], labs: true },
+  // P7 with a level-2 stronghold recipe's boosts (GHO2, KHO2, LO), and with two level-3 sets' (GHO2, KHO2, LHO2).
+  Q7: { level: 7, stored: "100000,H:6000,O:6000,U:6000,GHO2:600,KHO2:1200,LO:1800", without: ["rampart", "tower", "link", "factory"], labs: true },
+  V7: { level: 7, stored: "100000,H:6000,O:6000,U:6000,GHO2:1200,KHO2:2400,LHO2:3600", without: ["rampart", "tower", "link", "factory"], labs: true },
   // An RCL7 node as another bot left it: its roads and containers worn to
   // half, its links and ramparts sites to build.
   T7: { level: 7, stored: 100000, without: ["link", "rampart", "factory"], worn: 0.5 },

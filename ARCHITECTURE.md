@@ -143,7 +143,7 @@ segments over multiple ticks (economy first); a cold tick never spends more than
 | `Atlas` | `fabot-atlas` | Room graph (region nodes, border-stretch crossings, keeper-strike avoidance, blind keeper penalty, a room intel last saw with towers that fire on us (a live stronghold's, a non-ally player's) never crossed, only reached) and per-room tile grid (creep-free weights, reverse floods, seats, footprint queries; a hostile's tile is walled only in this tick's step floods and passability, never in a kept flood, so one moving redoes no flood, tree or walk); out-of-sight grids hold what stood when last seen (else terrain) struck where intel places the keepers (`atlas.unseen`); a walk can run on terrain alone, as it lies or paved (`bare`) | `World`, `terrain`, `intel.rooms`, `Declarations` (colony plans, for `server`) | flood table, `atlas.carried` |
 | `Economy` | `fabot-economy` | Slots, casts, sticky tasks, logistics dispatcher, links, labs, terminals, abandon | `Derived`, `Atlas`, `declarations`, `EconomyState`, Strategy's `scouts` | tasks, casts, `assignments` |
 | `Layout` | `fabot-layout` | Colony placement plan (Hivemind's builder, centre first), rampart ring, construction sites, buried-road and off-plan wall destroy, tower firing | `Derived`, `Atlas`, `declarations` | sites, destroys, tower actions, `standing.layout` |
-| `Exchange` | `fabot-exchange` | Pure combat arithmetic (`outcome`, `cheapest_win`, breach planning, a stronghold's run) | fighters, terrain | — |
+| `Exchange` | `fabot-exchange` | Pure combat arithmetic (`outcome`, `cheapest_win`, breach planning) | fighters, terrain | — |
 | `Fight` | `fabot-fight` | Hostile `Tracker`, engagements (`kinds/`: defend, siege, sweep, raid, stronghold), casting | `Derived`, `Atlas`, `Exchange`, `declarations` (its operations table), `intel`, `FightState` | fight actions, asks, wishes, casts, `FightState` |
 | `Tactics` | `fabot-tactics` | Per-creep combat actions, stepping, and the operator's tactic rules (`ruling`, `checked`) (no `Fight` import) | `Atlas`, `Move`, `Sight` + plan | creep actions, wishes |
 | `Strategy` | `fabot-strategy` | Intel, observers/scouts, `ColonyPlan` & outpost selection, expansion/abandon, operation opening & global force priority | `World`, `Derived`, `intel`, `Season`, `standing.layout`, `economy::spare` over `EconomyState.assignments` (its colonies' own bodies, priced this tick), fight state | `declarations` (`ColonyPlan`, outposts, claims, operations), `intel`, `expansion`, `piles` |
@@ -201,7 +201,7 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
 | `piles` | colony → its hub: pile tile, or built over (`Plan::pile`) | Strategy | Memory | written from the plan whenever one stands, read only while none does (a reset redraws it over ticks), so a colony banks and picks outposts on the cold tick as warm; no `--check`: a heap's first plan apart from the hub kept before it is a live fault, a warm replan updates it; dropped with its colony |
 | `switches` | module name → bool (`false` disables; `recorder: true` opts in) | Main | Memory | live kill switches |
 | `observe.*` | health, faults, per-module CPU, counts, tactic offers, alerts | Observe | segment 1 | operator telemetry & benchmark calibration |
-| `intel.rooms` | per-room snapshot (seen tick, owner/level, reservation, worker (another player's WORK body, never an Invader), keeper posts, controller/sources/containers, mineral, stronghold (core level, deploy and collapse ticks), a tower standing, a fallen stronghold's loot no rampart covers; by username, never stance) | Strategy | heap + segment 2 (every 100 ticks) | serve out-of-sight rooms; price outposts & expansion |
+| `intel.rooms` | per-room snapshot (seen tick, owner/level, reservation, worker (another player's WORK body, never an Invader), keeper posts, controller/sources/containers, mineral, stronghold (core level, deploy and collapse ticks, the loot a set reaches that its room showed), a tower standing, a fallen stronghold's loot no rampart covers; by username, never stance) | Strategy | heap + segment 2 (every 100 ticks) | serve out-of-sight rooms; price outposts & expansion |
 | `metrics.windows` | 100-tick aligned windows (per-room + world, up to 150 windows) | Observe | segment 3 | `observe metrics` & soak `metrics.jsonl` (§10.5) |
 | `recorder` | deflated `read.js` pass + Memory + intel ring | Main | segments 10–14 | live capture for benchmark & replay (§9.1) |
 | `engagements.log` | the last 200 engagements closed (an unpriced row evicted before any priced one, owner), a JSON row a line: id, kind, room, rivals, tactic, opened, contact, seen, closed, `predicted` (priced only), our dead, energy cast, and how it ended (`disengaged`, `gaveUp`, `left`, `safe`; none: its rival's death seen) | Observe (rows Fight's closes) | segment 4, written on a close (rows closed before a reset's first read wait in heap) | live `Exchange` error tracking (§10.1): an engagement's prediction goes with it, and 200 rows (~230 B each) fit one segment |
@@ -625,30 +625,42 @@ with one phase machine per kind under `core/fight/kinds/`.
   on the centre-first planner: no prey seen t20000-24000 while beta works the
   same rooms). Patrol preyed rooms to keep vision?
 
-- **`Stronghold`** (`kinds/stronghold.rs`, L1–L3): opened on the table's
-  `Stronghold` row and priced at open off the level intel read, unseen:
-  its towers stand beside the core and its garrison never leaves its
-  ramparts, so `exchange::stronghold` runs its towers on our set tick by
-  tick (PvE is exact), the struck body healing itself alone (the towers take
-  the nearest as a set walks in apart), and every count of each candidate
-  is priced, as a boosted copy waits on its own lab fills. The candidates are S11's
-  leaders' single ranger, derived from the strike (TOUGH whose boost holds
-  it, HEAL for what passes, MOVE for plain pace, the rest RANGED), and a
-  bare ranger blob. Its value is the loot by level (`coreAmounts` +
-  `containerAmounts`) at twice its density as energy, as a commodity draws
-  about twice its density in raw resources; each cast costs the share of
-  its life its walk and kill take, as a body that wins lives on (owner:
-  leaders take L1 with one ranger). Its bodies shoot the core's rampart,
-  then the core, from the post out of the garrison's reach the towers
-  strike least, healed ahead of every strike; once the core falls its
-  towers and garrison strike nothing (`Derived.danger` drops them: a
-  garrison outlives a creep's life), and the set shoots any of its garrison
-  off a rampart; that garrison opens no Defend either. The ramparts over
-  its loot are Economy's: a dismantler (WORK/MOVE, sized to the bank) of
-  the colony hauling it breaks `fabot_atlas::loot_wall`'s choice, a wall a
-  body reaches round the garrison, as WORK dismantles five times what
-  RANGED strikes and a fight set ages out before its loot is free.
-  `❓` L4 (fortifier, ranged garrison reaching every post) and L5.
+- **`Stronghold`** (`kinds/stronghold.rs`, L1–L3): not priced by
+  `Exchange` (owner): a level's towers, ramparts, hits and garrison are the
+  engine's and its core neither strikes nor repairs, so each level has a
+  recipe table (`RECIPES`, from S11's leaders' winning kits run on krebs's
+  towers) and the colony casts its first recipe it can cast (every body in
+  its bank, each boost at its tier or stronger in its stock) if the kill
+  ends within its bodies' life, past the set's spawn on one spawn, with a
+  life to haul before the collapse, and costs no more than the loot. L1's
+  ATTACK body is sized there, the size priced cheapest. The loot is what
+  intel last saw in its room's containers and remains besides energy
+  (`Stronghold.loot`, in `stronghold::raw`: ores and deposits at one, a
+  compound or commodity at its recipe's), none where the first recipe's
+  square walks to no block, and its core's ruin at `coreAmounts`' density taken as raw (under
+  it), as the engine draws it as the core dies; the cost is each body at
+  the share of its life its walk and kill take, as a body that wins lives
+  on (owner), and each boost whole at its raw worth. Its four bodies walk in
+  and stand as one 2x2 square (`kinds/square.rs`), each beside every other,
+  so all its HEAL reaches the body the towers strike (the nearest the core):
+  its top-left walks the tiles a square stands on whole, as the atlas floods
+  no `Footprint::Quad` to a target in its own room, and its block is one
+  such square, off the ramparts and the garrison's reach, its square walks
+  to from the room's border, with the most tiles in its weapons' reach of
+  the core, its weapons on them (a kill is priced at its two strongest). The
+  blob (`mv::blob`) does not hold it: kept within two of its anchor, its
+  struck body lost the set on krebs. Its bodies strike the core's rampart,
+  then the core; once the core falls its towers and garrison strike nothing
+  (`Derived.danger` drops them: a garrison outlives a creep's life), and the
+  set shoots any of its garrison off a rampart; that garrison opens no
+  Defend either. The ramparts over its loot are Economy's: a dismantler
+  (WORK/MOVE, sized to the bank) of the colony hauling it breaks
+  `fabot_atlas::loot_wall`'s choice, a wall a body reaches round the
+  garrison, as WORK dismantles five times what RANGED strikes and a fight
+  set ages out before its loot is free. In vanilla L1's loot (about 700 in
+  its containers, 1000 drawn into its core) is under its recipe's cost, so
+  only a season's resource takes it. `❓` L4 (fortifier, ranged garrison
+  reaching every post) and L5.
 
 **Planned kinds:** `Claim` (claimer + Economy pioneers), `KeeperDuty` (lair
 rotation declaring room minable), `PowerBank` (break → declare `Pickup`).
@@ -901,9 +913,9 @@ expansion, and operation priorities.
   a rival's remote fights his guards, a stance the enemies list sets),
   `Siege` on each declared siege (0), `Sweep` on each preyed room, stalest seen
   first (0), whether or not a sweep is open, `Stronghold` and `Pickup` (0)
-  on the deployed L1–L3 within reach of a colony with two lives to its
-  collapse that the colony's stock and bank take for less than its loot
-  (`kinds::stronghold::take`, priced on the inputs Fight opens with),
+  on the deployed L1–L3 within reach of a colony that casts a recipe
+  taking it in time for less than its loot (`kinds::stronghold::take`, on
+  the inputs Fight opens with),
   highest level then nearest, and on each fallen stronghold in sight still
   holding loot. A cast set's row stands until its set or the room's core and
   loot are gone, ahead of any rank or collapse, because a commitment is
@@ -1073,7 +1085,7 @@ and dropped live, so it needs no state, Memory or segment.
 | S3 stronghold | RCL7 + neighbouring stronghold | `Stronghold` decision & execution | decision, gain vs cost |
 | S4 low CPU | N6 at CPU limit 20 | degradation, bucket | bucket curve, income lost |
 
-`N1`–`N7`, `E0`–`E2` and `S3` (`M7` beside `stronghold-lN-taken`'s stronghold)
+`N1`–`N7`, `E0`–`E2` and `S3` (`P7`, `Q7`, `V7` beside `stronghold-*`'s strongholds)
 are built; `❓` remaining nodes (`E3`, `S1`, `S2`, `S4`).
 
 **Adversaries:** scripted rivals (`sim/src/rival/`) verify plan mechanics. No
