@@ -186,7 +186,6 @@ pub fn plan<'t>(
         expansion, piles, ..
     } = state;
     let mut misfiled = Vec::new();
-    let rival = |name: &str| rival(world, declarations, name);
     let rivals = rivals(world, declarations, intel);
     let mut theirs: BTreeSet<RoomName> = BTreeSet::new();
     for (room, row) in intel {
@@ -194,7 +193,7 @@ pub fn plan<'t>(
         let reserver = (row.reservation.as_ref())
             .filter(|(user, lapse)| *lapse > world.time && user != screeps::INVADER_USERNAME)
             .map(|(user, _)| user.as_str());
-        if owner.is_some_and(|o| o != world.me) || reserver.is_some_and(rival) {
+        if owner.or(reserver).is_some_and(|user| user != world.me) {
             theirs.insert(*room);
         }
     }
