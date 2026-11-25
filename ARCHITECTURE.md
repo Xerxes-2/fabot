@@ -1149,11 +1149,14 @@ Never write unit tests pinning a specific creep's action in one scenario.
 progress), **exposure** (ticks a raid could cost a colony a level — a foe
 outliving the colony's running safe mode, in it or an outpost it serves, while
 below RCL3, lacking a stocked tower, or unable to fire safe mode), and
-**losses** (energy). Tracks idle share, churn, returned loads, spend split
-(within 2% of engine ledger), spawn use, ticks a colony left a slot uncast
-by why (`blocked.bank|spawns|fight`), stalls (`stall.ring|task`), stale paying or rampart sites per colony
-(one that becomes its structure restarts the colony's waits),
-refusals, CPU/phase, deaths, hostile dwell, and held steps (`Settled.held`).
+**losses** (energy). Tracks idle share, idle body-ticks by why (`idleBy.*`:
+`wish::Idle`, set where a wish decides the body stands; `declarations.debug.idle`
+has each such body say it, off by default as a say costs CPU), churn, returned
+loads, spend split (within 2% of engine ledger), spawn use, ticks a colony left
+a slot uncast by why (`blocked.bank|spawns|fight`), stalls (`stall.ring|task`),
+stale paying or rampart sites per colony (one that becomes its structure
+restarts the colony's waits), refusals, CPU/phase, deaths, hostile dwell, and
+held steps (`Settled.held`).
 Alert thresholds (`observe health`) are `1.5 × healthy p99` from
 `npm run metrics:baseline` (0 for invariants); a metric a healthy run already
 fires is a fault or a wrong definition, never a looser bound. CPU budget ≤ 1%

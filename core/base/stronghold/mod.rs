@@ -1,5 +1,5 @@
 //! An Invader stronghold as the engine stands it, and what its loot is worth.
-use crate::vocabulary::{ResourceType, is_mineral, ores_in};
+use crate::{boost, vocabulary::ResourceType};
 
 pub const INVADER_CORE_HITS: i32 = screeps::INVADER_CORE_HITS as i32;
 pub const STRONGHOLD_RAMPART_HITS: [i32; 4] = [0, 100_000, 200_000, 500_000];
@@ -34,7 +34,7 @@ impl Stronghold {
 /// The raw units one unit is made of, energy, ores, deposits and power one each: no market prices them.
 pub fn raw(r: ResourceType) -> f64 {
     match r.commodity_recipe().filter(|_| r != ResourceType::Energy) {
-        _ if is_mineral(r) => f64::from(ores_in(r).iter().sum::<i32>()),
+        _ if boost::is_mineral(r) => f64::from(boost::ores_in(r).iter().sum::<i32>()),
         Some(c) => {
             c.components
                 .iter()

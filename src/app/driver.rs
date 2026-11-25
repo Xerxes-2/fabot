@@ -142,11 +142,11 @@ fn run_tick() {
         counts,
         off,
         offers,
-        traces,
+        telemetry,
         closed,
         ..
     } = ran;
-    for (creep, scored) in traces {
+    for (creep, scored) in telemetry.traces {
         let tiles: Vec<String> = scored
             .iter()
             .map(|(p, score)| format!("[\"{}\",{},{},{score}]", p.room, p.x, p.y))

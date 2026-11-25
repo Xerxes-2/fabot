@@ -150,6 +150,7 @@ impl Memory {
             avoid: list(declared, "avoid"),
             tactics: list(declared, "tactics"),
             operations: Vec::new(),
+            says_idle: declared["debug"]["idle"].as_bool() == Some(true),
         };
         (declarations, faults)
     }

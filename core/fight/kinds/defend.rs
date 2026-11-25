@@ -9,7 +9,7 @@ use fabot_atlas::Atlas;
 use fabot_base::intents::{Action, SpawnAct};
 use fabot_base::tiles::{self};
 use fabot_base::vocabulary::{Part, part_count_in};
-use fabot_base::wish::Wish;
+use fabot_base::wish::{Idle, Wish};
 use fabot_base::world::{
     Controller, Creep, Fallen, Id, Oven, Owner, Pos, RoomName, Spawn, Structure, StructureType,
     World, spent,
@@ -103,7 +103,7 @@ pub(crate) fn idle(sight: &mut tactics::Sight, scene: &Scene, fights: Fights, c:
     match (released((scene, sight.atlas), fights, c), spawn) {
         (true, Some(s)) => tactics::toward(sight, c, &s.pos, engine::MELEE_RANGE),
         (true, None) => tactics::retreat(sight, c),
-        (false, _) => tactics::rest(sight, c, &scene.worked),
+        (false, _) => tactics::rest(sight, c, &scene.worked).idling(Idle::Unengaged),
     }
 }
 

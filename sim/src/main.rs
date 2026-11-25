@@ -228,7 +228,12 @@ fn main() {
     let read = || world::read(&args.world);
     let map = (args.generated.as_ref()).map_or_else(read, generated::Spec::world);
     let homes = |wanted: &[_]| (args.generated.as_ref()).map(|g| g.homes(&map, wanted));
-    let seats = seat::seats(args.players.clone(), &args.room, homes, &map.memory);
+    let mut seats = seat::seats(args.players.clone(), &args.room, homes, &map.memory);
+    for s in seats.iter_mut().take(usize::from(args.watch.is_some())) {
+        let mut m: Value = serde_json::from_str(&s.memory).unwrap_or_default();
+        m["v2"]["declarations"]["debug"]["idle"] = json!(true);
+        s.memory = m.to_string();
+    }
     let room = seats[0].room.clone();
     eprintln!("colony: {room}; output {}", args.out);
     let mut k = map.stand(&seats, args.seed, args.ended, args.badge.clone());
@@ -260,7 +265,7 @@ fn main() {
             let at = view::now();
             for (p, uid) in players.iter_mut().zip(&uids) {
                 v.us = uid;
-                p.sampler.account(&v);
+                p.sampler.account(&v, &p.driver.idle);
                 p.engaged(&v, t);
                 let rcl = p.sampler.level(&v, t);
                 if t % args.every == 0 || t == args.ticks - 1 {

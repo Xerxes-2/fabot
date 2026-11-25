@@ -1,13 +1,11 @@
 //! `boosted_by`: each part type's strongest covering compound, spent in visit
 //! order; its stock held over generated bodies.
-use crate::boost::{Held, Stock, Visits, boosted_by};
+use crate::boost::{BOOSTS, Held, Stock, Visits, boosted_by, ores_in};
 use crate::vocabulary::ResourceType::{
     self, CatalyzedGhodiumAlkalide as Tough3, CatalyzedUtriumAcid as T3, GhodiumOxide as Tough1,
     UtriumAcid as T2, UtriumHydride as T1, ZynthiumOxide as Move1,
 };
-use crate::vocabulary::{
-    ALL_BODY_PARTS, BOOSTS, Part, RESOURCES_ALL, ores_in, part_count_in, takes,
-};
+use crate::vocabulary::{ALL_BODY_PARTS, Part, RESOURCES_ALL, part_count_in, takes};
 use proptest::prelude::*;
 use proptest::sample::subsequence;
 

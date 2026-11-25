@@ -276,6 +276,7 @@ pub fn step_to(creep: &Creep, tile: Tile) -> Wish {
         working: Vec::new(),
         weight: WEIGHT,
         moves,
+        idle: None,
     }
 }
 

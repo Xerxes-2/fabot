@@ -1,10 +1,10 @@
 /// The caller reads the creep's pace once (`Grid.factorOf`) and hands it in.
-use fabot_atlas::{Atlas, Field, Mover, Target};
+use fabot_atlas::{Atlas, Mover, Target};
 use fabot_base::engine;
 use fabot_base::grid::{self, FatigueFactor, Footprint};
 use fabot_base::tiles::{self, Tile, TileSet};
 use fabot_base::vocabulary::Part;
-use fabot_base::wish::Wish;
+use fabot_base::wish::{Idle, Wish};
 use fabot_base::world::{Creep, RoomName};
 
 pub fn can_move(creep: &Creep, factor: FatigueFactor) -> bool {
@@ -42,6 +42,7 @@ fn wish(
         working,
         weight,
         moves,
+        idle: None,
     }
 }
 
@@ -90,14 +91,13 @@ pub fn toward_round(
     let at = tiles::of_pos(&creep.pos);
     let moves = can_move(creep, mover.factor);
 
-    let field: Option<Field> = if rests_soon(creep, mover.factor) {
-        atlas.field_round(mover, target, &creep.pos, danger)
-    } else {
-        None
-    };
-
-    let Some(field) = field else {
+    let refused =
+        |atlas: &Atlas| stay(atlas, creep, mover.factor, weight, danger).idling(Idle::NoWalk);
+    if !rests_soon(creep, mover.factor) {
         return stay(atlas, creep, mover.factor, weight, danger);
+    }
+    let Some(field) = atlas.field_round(mover, target, &creep.pos, danger) else {
+        return refused(atlas);
     };
 
     let ticks = |tile: Tile| field.ticks(tile).unwrap_or(grid::UNREACHED);
@@ -120,7 +120,7 @@ pub fn toward_round(
         wish(creep, moves, at, None, Vec::new(), vec![at], weight)
     } else {
         match field.step(at).and_then(|d| tiles::neighbour(at, d)) {
-            None => stay(atlas, creep, mover.factor, weight, danger),
+            None => refused(atlas),
             Some(head) => {
                 let onward = field.step(head).and_then(|d| tiles::neighbour(head, d));
                 let mut tail = beside(atlas, creep);

@@ -1,6 +1,19 @@
 use crate::grid::Footprint;
 use crate::tiles::Tile;
 
+/// Why a body stands idle, set where that is decided; no decision reads it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, strum::IntoStaticStr)]
+#[strum(serialize_all = "camelCase")]
+pub enum Idle {
+    NoTask,
+    NoSink,
+    NoSlot,
+    NoSpot,
+    NoWalk,
+    Forming,
+    Unengaged,
+}
+
 /// A wish whose `Head` is `At` stays, and `Tail` lists where it may be shoved.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Wish {
@@ -18,11 +31,17 @@ pub struct Wish {
     /// What its head is worth over standing still.
     pub weight: i32,
     pub moves: bool,
+    pub idle: Option<Idle>,
 }
 
 impl Wish {
     pub fn stays(&self) -> bool {
         self.head == self.at
+    }
+
+    pub fn idling(mut self, why: impl Into<Option<Idle>>) -> Wish {
+        self.idle = self.idle.or(why.into().filter(|_| self.stays()));
+        self
     }
 
     pub fn movable(&self) -> bool {

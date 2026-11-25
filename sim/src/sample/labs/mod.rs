@@ -3,8 +3,8 @@
 //! reaction or an unboost sets one too, but raises no output.
 use std::collections::BTreeMap;
 
+use fabot_base::boost::{ORES, ores_in};
 use fabot_base::boost::{Roles, roles_of};
-use fabot_base::vocabulary::{ORES, ores_in};
 use fabot_base::world::{Id, Pos, RoomName};
 use krebs::atom;
 use krebs::doc::{Atom, Obj, Val};

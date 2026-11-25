@@ -107,6 +107,7 @@ fn wish(draw: Draw, name: String, at: Tile) -> Wish {
         working,
         weight,
         moves,
+        idle: None,
     }
 }
 
@@ -478,6 +479,7 @@ proptest! {
             working: Vec::new(),
             weight: 1,
             moves: true,
+            idle: None,
         };
         let wishes = vec![
             Wish {

@@ -9,7 +9,7 @@
 // tick and the commands that replay and watch it; the exit is non-zero then.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { counted, failures, samplesOf } from "../scenario/measures.mjs";
+import { counted, failures, idleRuns, samplesOf } from "../scenario/measures.mjs";
 import { jsonLines, pool, runSim, seedFlags, simBinary, soakDir } from "./run.mjs";
 
 const { seeds, ticks, jobs } = seedFlags(process.argv.slice(2), "usage: npm run soak:gen -- --seeds A..B|A,B,... [--ticks N] [--jobs J]");
@@ -33,6 +33,7 @@ function firstBroken(dir, samples, broken) {
   const own = {
     faults: () => tickOf(lines(dir, "faults.jsonl")[0].tick),
     refusals: () => cpu.find((r) => Object.keys(r.refused ?? {}).some(counted))?.t,
+    idleRuns: () => Math.min(...idleRuns(dir, samples).map((r) => r.t)),
   };
   const first = broken.filter((f) => own[f.measure]).map((f) => ({ t: own[f.measure](), what: f.text }));
   if (broken.some((f) => !own[f.measure]))

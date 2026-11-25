@@ -308,7 +308,7 @@ mod tests {
             option::of(vec(site, 0..3)),
             any::<bool>(),
             option::of((
-                select(crate::vocabulary::ORES.to_vec()),
+                select(crate::boost::ORES.to_vec()),
                 option::of(tile.clone()),
             )),
             option::of((1..=5, 0..=9_999_999, 0..=9_999_999, 0..=9_999_999)),
@@ -319,7 +319,7 @@ mod tests {
                 0..=9_999_999,
                 0..=49,
                 0..=49,
-                select(crate::vocabulary::ORES.to_vec()),
+                select(crate::boost::ORES.to_vec()),
                 1..=9_999,
                 any::<bool>(),
             ),

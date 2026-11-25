@@ -116,6 +116,37 @@ const firstClaimed = (samples, met) => samples.find((s) => Object.keys(s.claimed
 // A refused "act code" that counts: not an observer's look past a cut world's
 // edge (-10), a room the live map always holds.
 export const counted = (act) => act !== "observeRoom -10";
+// A slot (a pattern at a spawn, a fight's slot: a body's name less its tick) casting bodies that
+// stand idle (`wish::Idle`, bodies.jsonl's `idle`) this share of their life spawned, this many in
+// a row, each cast before the last was gone this long: once a run, its commonest why, `t` the tick
+// its last died. A guard resting `unengaged` waits by design (`tactics::rest`).
+const IDLE_RUN = 3;
+const IDLE_SHARE = 0.9;
+const IDLE_GAP = 200;
+export const idleRuns = (dir, samples) => {
+  const [offset, end] = [offsetOf(samples), samples.at(-1).t];
+  const lives = new Map();
+  for (const b of livesOf(dir).filter((b) => b.ours && b.last - offset < end)) {
+    const was = lives.get(b.name) ?? { ...b, idle: {} };
+    for (const [why, n] of Object.entries(b.idle ?? {})) if (why !== "unengaged") was.idle[why] = (was.idle[why] ?? 0) + n;
+    lives.set(b.name, { ...was, first: Math.min(was.first, b.first), last: Math.max(was.last, b.last) });
+  }
+  const idle = (b) => Object.values(b.idle).reduce((n, k) => n + k, 0) >= IDLE_SHARE * (b.last - b.first + 1 - SPAWN_TIME_PER_PART * b.body.length);
+  const bySlot = Map.groupBy([...lives.values()].filter(idle), (b) => b.name.replace(/-\d+/, ""));
+  return [...bySlot].flatMap(([slot, bodies]) => {
+    let run = [];
+    return bodies
+      .toSorted((a, b) => a.first - b.first)
+      .flatMap((b) => {
+        run = run.length && b.first <= run.at(-1).last + IDLE_GAP ? [...run, b] : [b];
+        if (run.length !== IDLE_RUN) return [];
+        const whys = {};
+        for (const [why, n] of run.flatMap((r) => Object.entries(r.idle))) whys[why] = (whys[why] ?? 0) + n;
+        const why = Object.keys(whys).reduce((a, k) => (whys[k] > whys[a] ? k : a));
+        return [{ slot, why, t: b.last - offset, text: `${slot} ${why} t${b.last - offset}` }];
+      });
+  });
+};
 // A measure reading `keys` of its assert beside "measure", "min", "max" and "seat": `scenario.mjs` rejects any other.
 const on = (keys, f) => Object.assign(f, { reads: keys.split(" ") });
 export const measures = {
@@ -170,6 +201,7 @@ export const measures = {
   }),
   roadsAtEnd: on("room to", (samples, a) => at(samples, a.to ?? Infinity).rooms[a.room]?.roads ?? 0),
   stillLoaded: on("to", (samples, a) => at(samples, a.to ?? Infinity).stillLoaded),
+  idleRuns: (samples, _, dir) => idleRuns(dir, samples).length,
   mineralAside: on("to", (samples, a) => at(samples, a.to ?? Infinity).mineralAside),
   mineralHeld: on("to", (samples, a) => at(samples, a.to ?? Infinity).mineralHeld),
   // The ticks from every claim at RCL2 to every one with a tower, whether a safe mode ran in one, and `room`'s level.
@@ -603,9 +635,11 @@ export const failures = (dir, samples = samplesOf(dir)) => {
       ].map((a) => [home, of, a]);
     }),
     ...ALWAYS.map((a) => [rooms[0], samples, a]),
+    [rooms[0], samples, { measure: "idleRuns", max: 0 }],
   ].flatMap(([where, of, a]) => {
     const { value, ok, bound } = check(of, a, dir);
-    return ok ? [] : [{ where, ...a, value, bound, text: `${where}: ${a.measure}${a.kind ? ` ${a.kind}` : ""} ${value} (${bound})` }];
+    const runs = a.measure === "idleRuns" && !ok ? `: ${idleRuns(dir, of).map((r) => r.text).join(", ")}` : "";
+    return ok ? [] : [{ where, ...a, value, bound, text: `${where}: ${a.measure}${a.kind ? ` ${a.kind}` : ""} ${value} (${bound})${runs}` }];
   });
 };
 export const invariants = (dir) => failures(dir).map((f) => f.text);

@@ -5,8 +5,9 @@
 use std::cmp::Reverse;
 
 use fabot_base::boost::Roles;
+use fabot_base::boost::{BOOSTS, ores_in};
 use fabot_base::engine;
-use fabot_base::vocabulary::{BOOSTS, Boost, ResourceType, ores_in};
+use fabot_base::vocabulary::{Boost, ResourceType};
 use fabot_base::world::Id;
 
 /// Hivemind's "high": past it the first-ranked boost leaves the ore to the next.
@@ -347,8 +348,9 @@ pub fn ready_runs(
 mod tests {
     use super::*;
     use ResourceType::*;
+    use fabot_base::boost::ORES;
     use fabot_base::boost::roles_of;
-    use fabot_base::vocabulary::{ORES, RESOURCES_ALL};
+    use fabot_base::vocabulary::RESOURCES_ALL;
     use fabot_base::world::Pos;
     use fabot_base::world::RoomName;
 

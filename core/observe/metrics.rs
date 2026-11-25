@@ -51,6 +51,7 @@ const LOSS: &str = "loss.";
 const BODIES: &str = "bodies";
 const BODIES_OF: &str = "bodies.";
 const IDLE_OF: &str = "idle.";
+const IDLE_BY: &str = "idleBy.";
 const CHURN: &str = "churn.task";
 const STALL: &str = "stall.";
 /// Unchanged this long and acting on nothing, a body is stuck, not between two acts.
@@ -194,6 +195,11 @@ const METRICS: &[Metric] = &[
         IDLE_OF,
         Fold::Share(BODIES_OF),
         "% of the pattern's body-ticks with no task or no intent, a held step counting as one",
+    ),
+    metric(
+        IDLE_BY,
+        Fold::Sum,
+        "body-ticks of the colony that cast it stood idle, by why (`wish::Idle`)",
     ),
     metric(
         CHURN,
@@ -911,6 +917,12 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
             f64::from(*n),
         );
         owed.insert(*room);
+    }
+    for (name, why) in &seen.telemetry.idle {
+        let spawn = bodies::spawn_of_name(name);
+        let home = (world.working_spawns()).find(|s| Some(s.name.as_str()) == spawn);
+        let (row, why): (_, &str) = (home.map(|s| s.pos.room), why.into());
+        add(sums, row, &format!("{IDLE_BY}{why}"), 1.0);
     }
     for (room, why) in &seen.telemetry.blocked {
         add(sums, Some(*room), &format!("{BLOCKED}{why}"), 1.0);

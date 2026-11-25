@@ -2,11 +2,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::season;
 use fabot_atlas::{self as atlas, Atlas, Derived};
+use fabot_base::boost::{BOOSTS, ORES, ores_in};
 use fabot_base::declarations::{ColonyPlan, Declarations, Outpost, REACH_HOPS, Stage};
 use fabot_base::engine;
 use fabot_base::intel::{self, Intel, Row};
 use fabot_base::tiles;
-use fabot_base::vocabulary::{BOOSTS, ORES, ResourceType, ores_in};
+use fabot_base::vocabulary::ResourceType;
 use fabot_base::world::{Id, Mineral, Room, RoomName, World};
 use fabot_layout::{ground, plan};
 use screeps::LocalRoomTerrain;

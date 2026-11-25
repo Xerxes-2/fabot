@@ -3,8 +3,9 @@
 //! and `assign` ranks as ARCHITECTURE.md's labs paragraph says.
 use std::cmp::Reverse;
 
+use fabot_base::boost::ORES;
 use fabot_base::engine::LAB_REACTION_AMOUNT as BATCH;
-use fabot_base::vocabulary::{ORES, RESOURCES_ALL, ResourceType};
+use fabot_base::vocabulary::{RESOURCES_ALL, ResourceType};
 use fabot_economy::labs::{Bench, Reaction, assign, makeable, wanted};
 use proptest::prelude::*;
 use proptest::sample::{select, subsequence};

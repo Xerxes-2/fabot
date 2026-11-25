@@ -56,37 +56,3 @@ pub const CLAIMER: [Part; 2] = [Part::Claim, Part::Move];
 pub fn part_count_in(body: &[impl std::borrow::Borrow<Part>], part: Part) -> i32 {
     body.iter().filter(|each| *(*each).borrow() == part).count() as i32
 }
-
-pub const ORES: [ResourceType; 7] = {
-    use ResourceType::*;
-    [
-        Hydrogen, Oxygen, Utrium, Keanium, Lemergium, Zynthium, Catalyst,
-    ]
-};
-
-/// The owner's rank of the part each T3 boosts.
-pub const BOOSTS: [(ResourceType, i32); 6] = {
-    use ResourceType::*;
-    [
-        (CatalyzedGhodiumAlkalide, 4),
-        (CatalyzedLemergiumAlkalide, 3),
-        (CatalyzedKeaniumAlkalide, 2),
-        (CatalyzedGhodiumAcid, 1),
-        (CatalyzedZynthiumAlkalide, 1),
-        (CatalyzedUtriumAcid, 1),
-    ]
-};
-
-pub fn ores_in(resource: ResourceType) -> [i32; ORES.len()] {
-    match resource.reaction_components() {
-        Some([a, b]) => {
-            let (a, b) = (ores_in(a), ores_in(b));
-            std::array::from_fn(|i| a[i] + b[i])
-        }
-        None => ORES.map(|o| i32::from(o == resource)),
-    }
-}
-
-pub fn is_mineral(resource: ResourceType) -> bool {
-    ORES.contains(&resource) || resource.reaction_components().is_some()
-}

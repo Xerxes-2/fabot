@@ -44,6 +44,7 @@ pub struct Driver<W: Write> {
     pub out: [W; 3],
     pub adapter_ms: f64,
     pub decide_ms: f64,
+    pub idle: BTreeMap<String, &'static str>,
 }
 
 impl<W: Write> Driver<W> {
@@ -58,6 +59,7 @@ impl<W: Write> Driver<W> {
             out,
             adapter_ms: 0.0,
             decide_ms: 0.0,
+            idle: BTreeMap::new(),
         }
     }
 
@@ -69,8 +71,7 @@ impl<W: Write> Driver<W> {
     ) -> Vec<(usize, RoomIntents)> {
         let began = now();
         let mut memory = Memory::of_text(std::mem::take(&mut self.memory));
-        let mut written = None;
-        let mut stored = None;
+        let (mut written, mut stored) = (None, None);
         let maps = &self.maps;
         let seam = drive::Seam {
             read: |declarations: &Declarations, drain, (start, phases, _): drive::Clocked| {
@@ -98,6 +99,8 @@ impl<W: Write> Driver<W> {
             seam,
         );
         self.memory = written.unwrap_or(memory.text);
+        let idle = ran.telemetry.idle.into_iter();
+        self.idle = idle.map(|(n, w)| (n, w.into())).collect();
         let decided = phases
             .iter()
             .filter(|(p, _)| !matches!(p.as_str(), "decode" | "map" | "execute" | "metrics"));
@@ -112,7 +115,7 @@ impl<W: Write> Driver<W> {
                 let _ = writeln!(faults, "{fault}");
             }
         }
-        let mut row = json!({ "t": t, "time": ran.world.time, "cpu": decide_ms, "phases": phases, "counts": ran.counts, "closed": ran.closed, "decisions": ran.decisions });
+        let mut row = json!({ "t": t, "time": ran.world.time, "cpu": decide_ms, "phases": phases, "counts": ran.counts, "closed": ran.closed, "decisions": ran.telemetry.decisions });
         for r in &ran.refusals {
             let r = format!("{} {}", r.act, r.code);
             row["refused"][&r] = json!(row["refused"][&r].as_u64().unwrap_or(0) + 1);

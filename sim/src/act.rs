@@ -162,7 +162,7 @@ impl Run<'_> {
         let near = |t: Found| check(range(creep, t) > 1.0, NotInRange);
         let energy = store(creep.1, atom!("energy"));
         let (name, value) = match act {
-            CreepAct::Say(_) => return Ok(()),
+            CreepAct::Say(m) => ("say", json!({ "message": m, "isPublic": false })),
             CreepAct::Move(direction) => {
                 check(num(creep.1, atom!("fatigue")) > 0.0, Tired)?;
                 check(!has_active(creep.1, "move"), NoBodypart)?;

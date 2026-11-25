@@ -12,7 +12,7 @@ use fabot_base::intents::{
 use fabot_base::tiles::{self, TileSet};
 use fabot_base::vocabulary::Part;
 use fabot_base::vocabulary::ResourceType::{self, Energy};
-use fabot_base::wish::Wish;
+use fabot_base::wish::{Idle, Wish};
 use fabot_base::world::{Creep, Id, Pos, RoomName, StructureType, World};
 use fabot_mv::plan;
 
@@ -432,7 +432,7 @@ fn work(
     };
     let task = ring.as_ref().unwrap_or(task);
     let Some(at) = spot_of(derived, task) else {
-        return plan::stay(&*atlas, creep, mover.factor, 1, danger);
+        return plan::stay(&*atlas, creep, mover.factor, 1, danger).idling(Idle::NoSpot);
     };
     let (mut target, seats) = target_of(&*atlas, derived, (slot, task, at), stood, creep);
     // v1's refill cluster.
@@ -762,6 +762,8 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
         }
         assign(&creep.name, &slot.id, task.clone());
 
+        let loaded = creep.store.amount_of(Energy) > 0;
+        let why = if loaded { Idle::NoSink } else { Idle::NoTask };
         let wish = match &task {
             Some(task) => work(
                 context.atlas,
@@ -772,7 +774,7 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
                 &ready,
                 &mut acts,
             ),
-            None => plan::stay(&*context.atlas, creep, mover.factor, 1, danger),
+            None => plan::stay(&*context.atlas, creep, mover.factor, 1, danger).idling(why),
         };
         wish_in(&mut wishes, creep.pos.room, wish);
     }
@@ -822,7 +824,7 @@ fn home(
     danger: Option<&TileSet>,
 ) -> Wish {
     if derived.colonies.is_empty() || derived.colonies.iter().any(|c| c.room == creep.pos.room) {
-        return plan::stay(&*atlas, creep, mover.factor, 1, danger);
+        return plan::stay(&*atlas, creep, mover.factor, 1, danger).idling(Idle::NoSlot);
     }
     let walk =
         |c: &&derived::Colony| distance(&*atlas, &creep.pos, &c.spawns[0].pos).unwrap_or(i32::MAX);

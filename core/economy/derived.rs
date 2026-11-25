@@ -805,7 +805,7 @@ fn ores_of(room: &Room) -> Vec<(Id, Pos, ResourceType, i32)> {
             s.store
                 .held
                 .iter()
-                .filter(|(r, n)| fabot_base::vocabulary::is_mineral(*r) && *n > 0)
+                .filter(|(r, n)| fabot_base::boost::is_mineral(*r) && *n > 0)
                 .map(|(r, n)| (s.id, s.pos, *r, *n))
         })
         .collect()
@@ -1099,7 +1099,7 @@ fn plan_cluster(
             .iter()
             .flat_map(|l| &l.store.held)
         {
-            if *n > 0 && r != compound && fabot_base::vocabulary::is_mineral(*r) {
+            if *n > 0 && r != compound && fabot_base::boost::is_mineral(*r) {
                 plan.drains.push((*id, *r));
             }
         }

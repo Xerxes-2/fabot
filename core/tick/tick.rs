@@ -238,6 +238,9 @@ fn settle(context: &mut Context, layout: &LayoutState, asked: &ModuleOutput) -> 
     let (moves, held) = arbitrate(context, walks.as_deref().unwrap_or(&asked.wishes));
     out.extend(moves);
     out.extend(super::sign::reflex(context.world, context.declarations));
+    if context.declarations.says_idle {
+        out.extend(asked.telemetry.says());
+    }
     Settled { actions: out, held }
 }
 

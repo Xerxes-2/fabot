@@ -81,6 +81,8 @@ pub struct Declarations {
     pub tactics: Vec<TacticRule>,
     /// Strategy's rows: the rooms each fight may open on, ranked (§7.3).
     pub operations: Vec<Operation>,
+    /// `debug.idle`: each idle body says why, off by default as a say costs CPU.
+    pub says_idle: bool,
 }
 
 pub type Planned = (

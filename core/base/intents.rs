@@ -1,7 +1,7 @@
 use strum::IntoStaticStr;
 
 use super::vocabulary::{Part, ResourceType};
-use super::wish::Wish;
+use super::wish::{Idle, Wish};
 use super::world::{Id, RoomName, StructureType};
 
 /// Into the verb a refusal is counted under (`observe::metrics::verb`).
@@ -196,6 +196,17 @@ pub struct Telemetry {
     pub blocked: Vec<(RoomName, &'static str)>,
     pub decisions: Vec<(&'static str, Vec<(&'static str, String)>)>,
     pub struck: std::collections::BTreeSet<Id>,
+    /// Each idle body by why, read off its wish as `ModuleOutput::extend` takes it.
+    pub idle: Vec<(String, Idle)>,
+}
+
+impl Telemetry {
+    pub fn says(&self) -> impl Iterator<Item = Action> + '_ {
+        let say = |(name, why): &(String, Idle)| {
+            Action::Creep(name.clone(), CreepAct::Say(<&str>::from(why).into()))
+        };
+        self.idle.iter().map(say)
+    }
 }
 
 /// A module's tick: `Tick` settles the asks and wishes of every module as one.
@@ -211,6 +222,8 @@ impl ModuleOutput {
     pub fn extend(&mut self, other: ModuleOutput) {
         self.actions.extend(other.actions);
         self.asks.extend(other.asks);
+        let idle = (other.wishes.iter()).filter_map(|(_, w)| Some((w.creep.clone(), w.idle?)));
+        self.telemetry.idle.extend(idle);
         self.wishes.extend(other.wishes);
         self.telemetry.counts.extend(other.telemetry.counts);
         self.telemetry.short.extend(other.telemetry.short);

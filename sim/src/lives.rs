@@ -1,6 +1,6 @@
 //! Each body's life over the followed rooms and their neighbours (`bodies.jsonl`), the
 //! longest a body of ours stood loaded and idle or kept a mineral (a carrier, or any body
-//! taking energy), and its border bounces.
+//! taking energy), its border bounces, and its ticks idle by why (`wish::Idle`).
 use std::collections::{BTreeMap, BTreeSet};
 
 use fabot_base::{engine, vocabulary};
@@ -85,8 +85,7 @@ impl Lives {
     pub fn observe(
         &mut self,
         around: &[&Room],
-        followed: usize,
-        homes: &[String],
+        (followed, homes, idle): (usize, &[String], &BTreeMap<String, &str>),
         v: &View,
     ) -> BTreeMap<String, f64> {
         let time = v.k.time;
@@ -152,6 +151,10 @@ impl Lives {
                 life["boosts"] = json!(boosts(o).into_iter().collect::<BTreeSet<_>>());
                 let ticks = &mut life["rooms"][room.name];
                 *ticks = json!(ticks.as_u64().unwrap_or(0) + 1);
+                if let Some(why) = idle.get(name).filter(|_| v.ours(o)) {
+                    let n = &mut life["idle"][*why];
+                    *n = json!(n.as_u64().unwrap_or(0) + 1);
+                }
                 for act in acts(o) {
                     let n = &mut life["acts"][act];
                     *n = json!(n.as_u64().unwrap_or(0) + 1);

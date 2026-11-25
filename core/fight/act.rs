@@ -10,7 +10,7 @@ use fabot_atlas::Atlas;
 use fabot_base::declarations;
 use fabot_base::intents::{self, Action, ControllerAct, CreepAct, ModuleOutput};
 use fabot_base::tiles::Tile;
-use fabot_base::wish::Wish;
+use fabot_base::wish::{Idle, Wish};
 use fabot_base::world::{self, Creep, Id, Owner, Pos, RoomName, Structure, StructureType};
 use fabot_base::{engine, tiles};
 use fabot_exchange as exchange;
@@ -262,7 +262,8 @@ pub(super) fn act(
                 )
             }
         };
-        (None, wish)
+        let why = (e.phase == Phase::Forming).then_some(Idle::Forming);
+        (None, wish.idling(why))
     };
 
     let mut out = ModuleOutput::default();

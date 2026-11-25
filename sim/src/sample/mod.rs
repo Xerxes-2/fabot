@@ -227,7 +227,7 @@ impl Sampler {
     }
 
     /// One tick of the ledger, off the followed rooms as the tick left them.
-    pub fn account(&mut self, v: &View) {
+    pub fn account(&mut self, v: &View, idle: &BTreeMap<String, &str>) {
         if self.homes.is_empty() {
             let spawn = |r: &&Room| r.of("spawn").any(|o| v.ours(o));
             let others = v.rooms.iter().filter(spawn).map(|r| r.name.to_string());
@@ -398,7 +398,10 @@ impl Sampler {
             .filter(|r| !self.lines.contains_key(r.name))
             .filter(neighbours);
         let around: Vec<&Room> = followed.iter().copied().chain(bordering).collect();
-        for (home, out) in self.lives.observe(&around, followed.len(), &self.homes, v) {
+        for (home, out) in self
+            .lives
+            .observe(&around, (followed.len(), &self.homes, idle), v)
+        {
             self.lines
                 .get_mut(&home)
                 .expect("a home is followed")

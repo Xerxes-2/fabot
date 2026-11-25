@@ -71,11 +71,11 @@ pub fn strength(part: Part, compound: ResourceType) -> i32 {
 
 /// Spent from `stock` as the body's visits spend it, so neither pricing nor
 /// the cast counts one stock or one energy twice. Part types go by
-/// `vocabulary::BOOSTS` rank: a colony short of stock runs short of the
+/// `BOOSTS` rank: a colony short of stock runs short of the
 /// lowest-ranked.
 pub fn boosted_by(body: &[Part], stock: &mut Stock) -> Visits {
     let rank = |p: Part| {
-        (vocabulary::BOOSTS.iter())
+        (BOOSTS.iter())
             .filter(|(c, _)| takes(p, *c))
             .map(|(_, r)| *r)
             .max()
@@ -207,7 +207,7 @@ fn booster<'a>(
     let reagent = |l: &world::Structure| reagents.is_some_and(|(a, b)| l.id == a || l.id == b);
     let other = |l: &world::Structure| {
         (l.store.held.iter())
-            .filter(|(r, _)| vocabulary::is_mineral(*r))
+            .filter(|(r, _)| is_mineral(*r))
             .map(|(_, n)| *n)
             .sum::<i32>()
     };
@@ -262,7 +262,7 @@ pub fn home_holds(world: &World, room: RoomName, compound: ResourceType) -> i32 
 
 /// A lab holds one mineral: another in it leaves the compound nowhere to land.
 fn holds_room_for(lab: &world::Structure, compound: ResourceType) -> bool {
-    (lab.store.held.iter()).all(|(r, n)| *n <= 0 || *r == compound || !vocabulary::is_mineral(*r))
+    (lab.store.held.iter()).all(|(r, n)| *n <= 0 || *r == compound || !is_mineral(*r))
 }
 
 pub fn can_boost(lab: &world::Structure, compound: ResourceType) -> bool {
@@ -312,4 +312,38 @@ pub fn roles_of(labs: &[(Id, Pos)]) -> Option<Roles> {
         }
     }
     best
+}
+
+pub const ORES: [ResourceType; 7] = {
+    use ResourceType::*;
+    [
+        Hydrogen, Oxygen, Utrium, Keanium, Lemergium, Zynthium, Catalyst,
+    ]
+};
+
+/// The owner's rank of the part each T3 boosts.
+pub const BOOSTS: [(ResourceType, i32); 6] = {
+    use ResourceType::*;
+    [
+        (CatalyzedGhodiumAlkalide, 4),
+        (CatalyzedLemergiumAlkalide, 3),
+        (CatalyzedKeaniumAlkalide, 2),
+        (CatalyzedGhodiumAcid, 1),
+        (CatalyzedZynthiumAlkalide, 1),
+        (CatalyzedUtriumAcid, 1),
+    ]
+};
+
+pub fn ores_in(resource: ResourceType) -> [i32; ORES.len()] {
+    match resource.reaction_components() {
+        Some([a, b]) => {
+            let (a, b) = (ores_in(a), ores_in(b));
+            std::array::from_fn(|i| a[i] + b[i])
+        }
+        None => ORES.map(|o| i32::from(o == resource)),
+    }
+}
+
+pub fn is_mineral(resource: ResourceType) -> bool {
+    ORES.contains(&resource) || resource.reaction_components().is_some()
 }
