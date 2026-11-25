@@ -11,15 +11,9 @@ use super::ground::Ground;
 use super::place::{self, Labels, SWAMP};
 use super::shape::{self, Item, Plan};
 
-pub fn level_of(rules: &Rules, kind: StructureType, rank: i32) -> i32 {
-    (0..=engine::CONTROLLER_MAX_LEVEL)
-        .find(|level| rules.allowed(kind, *level) > rank)
-        .unwrap_or(engine::CONTROLLER_MAX_LEVEL + 1)
-}
-
 /// Below it a room's energy goes to its controller alone.
 pub fn haul_level(rules: &Rules) -> i32 {
-    level_of(rules, StructureType::Extension, 0)
+    rules.level_of(StructureType::Extension, 0)
 }
 
 /// Not links, containers or roads: they are seated by what they serve.
@@ -57,7 +51,13 @@ pub fn controller_link(
 pub const RING_LEVEL: i32 = 4;
 
 /// The room manager's order a kind is built in at a level.
-fn order(plan: &Labels, kind: &str, level: i32, controller: Option<Tile>) -> Vec<Tile> {
+fn order(
+    rules: &Rules,
+    plan: &Labels,
+    kind: &str,
+    level: i32,
+    controller: Option<Tile>,
+) -> Vec<Tile> {
     let both = |a: &str, b: &str| -> Vec<Tile> {
         (plan.of(a).into_iter())
             .filter(|t| plan.has(b, *t))
@@ -96,7 +96,7 @@ fn order(plan: &Labels, kind: &str, level: i32, controller: Option<Tile>) -> Vec
         "container" => {
             let mut v = plan.of("container.source");
             v.extend(plan.of("container.controller"));
-            if level >= 6 {
+            if level >= rules.level_of(StructureType::Extractor, 0) {
                 v.extend(plan.of("container.mineral"));
             }
             return v;
@@ -118,7 +118,7 @@ fn leveled(
     let mut built: Vec<(Tile, i32)> = Vec::new();
     for level in 1..=engine::CONTROLLER_MAX_LEVEL {
         let allowed = rules.allowed(kind, level).max(0) as usize;
-        for t in order(plan, &kind.to_string(), level, controller) {
+        for t in order(rules, plan, &kind.to_string(), level, controller) {
             if built.len() >= allowed {
                 break;
             }
@@ -134,14 +134,14 @@ fn leveled(
 /// container other seats ring goes before the extensions: its harvester digs
 /// beside the crews (main's planner), and the nuker, which pays only loaded
 /// and fired, goes last.
-fn priority(kind: StructureType, level: i32, crowded: bool) -> i32 {
+fn priority(kind: StructureType, level: i32, mined: bool, crowded: bool) -> i32 {
     use StructureType::*;
     match kind {
         Tower => 0,
         Spawn => 1,
-        Container if level < 6 && crowded => 2,
+        Container if !mined && crowded => 2,
         Extension => 3,
-        Container if level < 6 => 4,
+        Container if !mined => 4,
         Storage => 5,
         Terminal => 6,
         Road if level < 4 => 7,
@@ -170,6 +170,7 @@ fn drawn(rules: &Rules, ground: &Ground, built: &Built) -> (Plan, Vec<Item>) {
         .copied()
         .collect();
     let mut keyed: Vec<(i32, i32, usize, Item)> = Vec::new();
+    let mined = rules.level_of(Extractor, 0);
     let mut push = |kind: StructureType, tile: Tile, level: i32| {
         let filled = keyed
             .iter()
@@ -181,7 +182,7 @@ fn drawn(rules: &Rules, ground: &Ground, built: &Built) -> (Plan, Vec<Item>) {
             let crowded = (ground.sources.iter())
                 .any(|r| rock(r) && tiles::around(*r).iter().filter(seat).count() > 1);
             keyed.push((
-                priority(kind, level, crowded),
+                priority(kind, level, level >= mined, crowded),
                 level,
                 seq,
                 Item { kind, tile, level },
@@ -564,11 +565,7 @@ mod tests {
                 .filter(|i| i.kind == StructureType::Extension)
                 .filter(|i| posts.iter().any(|p| tiles::range(*p, i.tile) == 1))
                 .collect();
-            let last = level_of(
-                &rules,
-                StructureType::Extension,
-                early + bays.len() as i32 - 1,
-            );
+            let last = rules.level_of(StructureType::Extension, early + bays.len() as i32 - 1);
             for b in bays {
                 assert!(b.level <= last, "{} at level {}", b.tile, b.level);
             }

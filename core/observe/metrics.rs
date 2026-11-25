@@ -822,7 +822,7 @@ fn exposure(sums: &mut Sums, seen: &Seen) {
             continue;
         };
         let safe_left = c.our_safe_mode();
-        if c.level >= 3 && towers(&seen.world.rules, r) && c.safe() {
+        if towers(&seen.world.rules, r) && c.safe() {
             continue;
         }
         let mut outposts = (seen.telemetry.served.iter())

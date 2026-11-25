@@ -491,6 +491,7 @@ pub struct Derived<'t> {
     pub spots: HashMap<Target, Pos>,
     pub pickups: Vec<Pickup>,
     pub ours: &'t atlas::Derived,
+    pub rules: &'t Rules,
     abandoning: Vec<RoomName>,
     minerals: Vec<Shipment>,
 }
@@ -1684,7 +1685,7 @@ impl Derived<'_> {
 
 pub fn of_world<'t>(
     homes: Homes,
-    (world, creeps): (&World, &[&Creep]),
+    (world, creeps): (&'t World, &[&Creep]),
     atlas: &mut Atlas,
     declarations: &Declarations,
     ours: &'t atlas::Derived,
@@ -1768,6 +1769,7 @@ pub fn of_world<'t>(
 
     Derived {
         time: world.time,
+        rules: &world.rules,
         abandoning: (colonies.iter())
             .map(|c| c.room)
             .filter(|room| given_up(*room))

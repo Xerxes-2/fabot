@@ -633,6 +633,13 @@ impl Rules {
         at.copied().unwrap_or(0)
     }
 
+    /// The first level allowing more than `rank` of `kind`.
+    pub fn level_of(&self, kind: StructureType, rank: i32) -> i32 {
+        (0..=engine::CONTROLLER_MAX_LEVEL)
+            .find(|level| self.allowed(kind, *level) > rank)
+            .unwrap_or(engine::CONTROLLER_MAX_LEVEL + 1)
+    }
+
     pub fn energy_capacity(&self, level: i32) -> i32 {
         let extension = screeps::extension_energy_capacity(level.max(0) as u32) as i32;
         self.allowed(StructureType::Spawn, level) * screeps::SPAWN_ENERGY_CAPACITY as i32

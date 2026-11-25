@@ -835,7 +835,7 @@ impl<'a> Jobs<'a> {
     fn by_controller(&self, slot: &Slot, body: &Body, kept: Option<&Task>) -> Option<Task> {
         let g = self.derived.grounds.iter().find(|g| g.room == slot.room)?;
         let c = g.controller.as_ref()?;
-        let reach = if c.level < slots::STORAGE_LEVEL {
+        let reach = if c.level < self.derived.rules.level_of(StructureType::Storage, 0) {
             10
         } else {
             3

@@ -430,6 +430,7 @@ impl Plan<'_> {
         let mut remote: Vec<(f64, Leg)> = Vec::new();
         let mut far: Vec<String> = Vec::new();
         let fed = fed(&colony.controller);
+        let tower_level = derived.rules.level_of(StructureType::Tower, 0);
         let mut upgrade_capacity: i32 = (derived.bodies.iter().chain(derived.ovens.iter()))
             .filter(|b| b.pos.room == colony.room && b.work > 0 && b.carry > 0)
             .filter(|b| b.pattern != Pattern::Harvester)
@@ -444,7 +445,7 @@ impl Plan<'_> {
             let own = gi == ci;
             let raised = !own && g.controller.as_ref().is_some_and(|c| c.owner.is_ours());
             // Owner, 2026-11-12: the tower is rushed, so an outpost's sites wait for it.
-            if own || raised || colony.controller.level >= TOWER_LEVEL {
+            if own || raised || colony.controller.level >= tower_level {
                 owed += g.sites.iter().map(|s| s.left).sum::<i32>();
                 payback += (g.sites.iter())
                     .filter(|s| drawn_for(s.kind))
@@ -465,7 +466,7 @@ impl Plan<'_> {
             }
             // Hivemind's mine builder.
             let paves = g.sites.iter().any(|s| s.kind == StructureType::Road);
-            if !own && (at_risk || paves) && colony.controller.level >= TOWER_LEVEL {
+            if !own && (at_risk || paves) && colony.controller.level >= tower_level {
                 let mender = self.worker(ci, g.room, 0, (false, false), MENDER, MENDER_WORK);
                 fixed.add(mender, 0.0);
             }
@@ -574,7 +575,7 @@ impl Plan<'_> {
 
         for cj in (0..sponsors.len()).filter(|cj| sponsors[*cj] == Some(ci)) {
             // Past its tower's level they build: upgrading, they drank what its builders draw.
-            let builds = derived.colonies[cj].controller.level >= TOWER_LEVEL;
+            let builds = derived.colonies[cj].controller.level >= tower_level;
             for k in 0..self.tuning.pioneers {
                 let room = derived.colonies[cj].room;
                 let cost = self.worker(ci, room, k, (builds, false), PIONEER, MOST);
@@ -1128,8 +1129,6 @@ const KEPT_FLOOR: i32 = 2;
 const CREW: i32 = 8;
 /// After the sponsor's own dig and carriers, before its outposts (The International's).
 const PIONEER: i32 = 2;
-const TOWER_LEVEL: i32 = 3;
-pub const STORAGE_LEVEL: i32 = 4;
 const SPEND: i32 = 10;
 const SIGHT: i32 = 3;
 
