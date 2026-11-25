@@ -1,7 +1,7 @@
 {
-  "why": "the seventeen bodies an outpost Defend leaves free wait on the colony's muster, off the spawn's exits, so the next body the spawn makes walks out within 10 ticks of its spawn time. Main packed them on the exits: a worker stood in the spawn 1044 ticks, the haulers fell 6 to 1 and the stock 50k to 400",
+  "why": "the seventeen bodies an outpost Defend leaves free wait on the colony's muster, off the spawn's exits, so the next body the spawn makes walks out within 10 ticks of its spawn time. Main packed them on the exits: a worker stood in the spawn 1044 ticks, the haulers fell 6 to 1 and the stock 50k to 400. W8N3 stands as node E1 on the layout main planned at acbe1ab4, laid over the template map in its safe mode: under a harmless planner change (pathfinder heap order) main's own plan lost 2 bodies",
   "modules": ["fight", "layout", "mv", "strategy", "tactics"],
-  "start": { "room": "W8N3", "seed": 1, "node": "E1", "invaders": "W7N3:4000:1000,W8N2:4000:2500", "wave": "healer:big,melee,ranged" },
+  "start": { "world": "scripts/scenario/worlds/template.json", "overlay": "scripts/scenario/worlds/w8n3-e1.json", "seed": 1, "invaders": "W7N3:4000:1000,W8N2:4000:2500", "wave": "healer:big,melee,ranged" },
   "ticks": 4000,
   "assert": [
     { "measure": "spawnStuck", "max": 10 },

@@ -1,7 +1,7 @@
 {
-  "why": "Invader waves on a home whose tower is not built (S5: RCL6, no tower, no ramparts) and without safe mode are answered by its casts and held: no level or spawn lost, no wave dwelling unanswered past the threshold a window, each wave gone, its engagements logged live as the engine classes them, and every body of ours the engine killed young counted; its Defends hold the colony's spend bodies (`blocked.fight`)",
+  "why": "Invader waves on a home whose tower is not built (S5: RCL6, no tower, no ramparts) and without safe mode are answered by its casts and held: no level or spawn lost, no wave dwelling unanswered past the threshold a window, each wave gone, its engagements logged live as the engine classes them, and every body of ours the engine killed young counted; its Defends hold the colony's spend bodies (`blocked.fight`). W8N3 stands as node S5 on the layout main planned at acbe1ab4, laid over the template map with no safe mode to use: under a harmless planner change (builder scan reversed) main's own plan oscillated 62 and 28 against this bound of 5",
   "modules": ["atlas", "economy", "exchange", "fight", "layout", "mv", "observe", "strategy", "tactics"],
-  "start": { "room": "W8N3", "seed": 1, "node": "S5", "invaders": "W8N3:1000:1000", "unsafe": true },
+  "start": { "world": "scripts/scenario/worlds/template.json", "overlay": "scripts/scenario/worlds/w8n3-s5.json", "seed": 1, "invaders": "W8N3:1000:1000" },
   "ticks": 3500,
   "assert": [
     { "metric": "hostile.dwell", "room": "W8N3", "max": 20 },
