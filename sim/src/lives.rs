@@ -3,12 +3,12 @@
 //! taking energy), and its border bounces.
 use std::collections::{BTreeMap, BTreeSet};
 
-use fabot_base::vocabulary;
+use fabot_base::{engine, vocabulary};
 use krebs::atom;
 use krebs::doc::{Obj, Val};
 use serde_json::{Value, json};
 
-use crate::sample::{boosts, parts};
+use crate::sample::{boosts, made, parts};
 use crate::view::{EVENT_ATTACK, EVENT_OBJECT_DESTROYED, Room, View, num, obj, store, text, used};
 
 #[derive(Default)]
@@ -99,18 +99,14 @@ impl Lives {
                 let name = text(o, atom!("name"));
                 let key = format!("{} {name}", text(o, atom!("user")));
                 let body = parts(o);
-                let cost: u32 = body
-                    .iter()
-                    .filter_map(|p| p.parse::<screeps::Part>().ok())
-                    .map(screeps::Part::cost)
-                    .sum();
+                let typed: Vec<_> = body.iter().filter_map(|p| p.parse().ok()).collect();
                 let id = text(o, atom!("_id"));
                 if !self.keys.contains_key(id) {
                     self.keys.insert(id.to_string(), key.clone());
                 }
                 let life = self.open.entry(key).or_insert_with(|| {
                     json!({ "name": name, "ours": v.ours(o), "body": letters(&body),
-                        "cost": cost, "first": time, "rooms": {}, "acts": {} })
+                        "cost": engine::body_cost(&typed), "first": time, "rooms": {}, "acts": {} })
                 });
                 let at = format!(
                     "{} {},{}",
@@ -132,6 +128,10 @@ impl Lives {
                     .and_then(|a| a.strip_prefix(room.name))
                     .is_some_and(|a| a.starts_with(' '))
                 {
+                    if let Some([home]) = life["entered"].as_array().map(Vec::as_slice) {
+                        let at = (around.iter()).find(|r| home[0] == r.name);
+                        life["heldAtLeave"] = json!(at.map(|h| made(h, v)));
+                    }
                     array(life, "entered").push(json!([room.name, time]));
                 }
                 life["at"] = json!(at);

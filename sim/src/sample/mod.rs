@@ -10,8 +10,8 @@ use krebs::doc::{Atom, Obj, Val};
 use krebs::intents::RoomIntents;
 use screeps::{
     CONSTRUCTION_COST_ROAD_SWAMP_RATIO, CONSTRUCTION_COST_ROAD_WALL_RATIO, CREEP_LIFE_TIME,
-    ENERGY_DECAY, LINK_LOSS_RATIO, Part, REPAIR_COST, RESOURCES_ALL, SPAWN_ENERGY_CAPACITY,
-    StructureType, TOWER_ENERGY_COST, controller_levels,
+    ENERGY_DECAY, LINK_LOSS_RATIO, Part, REPAIR_COST, SPAWN_ENERGY_CAPACITY, StructureType,
+    TOWER_ENERGY_COST, controller_levels,
 };
 use serde_json::{Map, Value, json};
 
@@ -142,6 +142,21 @@ pub struct Sampler {
     signs: Vec<(String, String)>,
     pub structures_lost: u64,
     pub levels: Vec<Value>,
+}
+
+/// What a room's storage, terminal and labs of ours hold of each compound.
+pub fn made(room: &Room, v: &View) -> BTreeMap<String, f64> {
+    let mut made = BTreeMap::new();
+    for &(_, o) in (room.objects.iter()).filter(|(kind, o)| MADE_IN.contains(kind) && v.ours(o)) {
+        for (r, n) in obj(o, atom!("store")).into_iter().flat_map(Obj::iter) {
+            if (r.as_str().parse::<screeps::ResourceType>())
+                .is_ok_and(|c| c.reaction_components().is_some())
+            {
+                *made.entry(r.to_string()).or_default() += n.as_f64().unwrap_or(0.0);
+            }
+        }
+    }
+    made
 }
 
 /// Piles, tombstones (an Invader's corpse is ours to take), and stores nobody's or ours.
@@ -459,15 +474,14 @@ impl Sampler {
             .iter()
             .map(|o| used(o) - store(o, atom!("energy")))
             .sum();
-        let made_in = ours_in(&MADE_IN);
-        let made: Map<String, Value> = (RESOURCES_ALL.iter())
-            .filter(|r| r.reaction_components().is_some())
-            .map(|r| {
-                let r = Atom::intern(&r.to_string());
-                let held: f64 = made_in.iter().map(|o| store(o, r)).sum();
-                (r.to_string(), json!(held))
-            })
-            .collect();
+        let mut made = BTreeMap::<String, f64>::new();
+        for (r, n) in self
+            .rooms
+            .iter()
+            .flat_map(|name| self::made(v.room(name), v))
+        {
+            *made.entry(r).or_default() += n;
+        }
         let creeps = ours_in(&["creep"]);
         let boosts: Vec<Vec<&str>> = creeps.iter().map(|o| boosts(o)).collect();
         let boosted: usize = boosts.iter().map(Vec::len).sum();
@@ -523,7 +537,7 @@ impl Sampler {
         }
         for (k, value) in [
             ("ore", json!(ore)),
-            ("made", Value::Object(made)),
+            ("made", json!(made)),
             ("boosted", json!(boosted)),
             ("boostedWith", json!(boosted_with)),
             ("claimed", Value::Object(claimed)),
@@ -743,7 +757,7 @@ impl Sampler {
         for name in &self.rooms {
             let line = &self.lines[name];
             let (mut creeps, mut hostiles, mut roads, mut containers, mut cores) = (0, 0, 0, 0, 0);
-            let (mut held, mut ores, mut made) = (0.0, 0.0, Map::new());
+            let (mut held, mut ores) = (0.0, 0.0);
             for &(kind, o) in &v.room(name).objects {
                 match kind {
                     "creep" if v.ours(o) => creeps += 1,
@@ -758,14 +772,6 @@ impl Sampler {
                             if r.as_str() != "energy" {
                                 ores += amount;
                             }
-                            let compound = r.as_str().parse::<screeps::ResourceType>().ok();
-                            if MADE_IN.contains(&kind)
-                                && compound.is_some_and(|c| c.reaction_components().is_some())
-                            {
-                                let was =
-                                    made.get(r.as_str()).and_then(Value::as_f64).unwrap_or(0.0);
-                                made.insert(r.as_str().to_string(), json!(was + amount));
-                            }
                         }
                     }
                     _ => {}
@@ -778,7 +784,7 @@ impl Sampler {
                 "upgrade": line.upgrade, "repair": line.repair, "bodies": bodies, "reserved": line.reserved,
                 "hostile": line.hostile, "waves": 0, "carriedOut": line.carried_out, "leastDowngrade": line.least_downgrade,
                 "net": line.dug - line.decayed - line.repair - bodies, "creeps": creeps, "hostiles": hostiles,
-                "roads": roads, "containers": containers, "cores": cores, "held": held, "ores": ores, "made": made,
+                "roads": roads, "containers": containers, "cores": cores, "held": held, "ores": ores, "made": made(v.room(name), v),
                 "signed": sign.map(|s| num(s, atom!("time"))) }));
         }
         Value::Object(out)

@@ -80,7 +80,7 @@ const PART = { t: "tough", a: "attack", r: "ranged_attack", h: "heal", m: "move"
 const heldWhenShort = (samples, b) => {
   const home = b.entered[0][0];
   const left = b.entered.find(([r]) => r !== home)?.[1] ?? b.last;
-  const made = (samples.findLast((s) => s.t <= left) ?? samples[0]).rooms[home]?.made ?? {};
+  const made = b.heldAtLeave ?? (samples.findLast((s) => s.t <= left) ?? samples[0]).rooms[home]?.made ?? {};
   const parts = (p) => [...b.body].filter((x) => x === p).length;
   return Object.entries(PART).some(([p, part]) => parts(p) && !COMPOUNDS[part].some((c) => b.boosts.includes(c)) && COMPOUNDS[part].some((c) => (made[c] ?? 0) >= BOOST_MINERAL * parts(p)));
 };
