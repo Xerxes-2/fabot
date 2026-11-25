@@ -14,6 +14,8 @@ use super::derived::{Body, Derived, Ground, StoreKind, TerminalFact};
 use super::slots::{self, Job, Slot};
 use super::task::{Target, Task};
 
+const STOCK_FILLS_RING: i32 = 5000;
+
 /// Hivemind's task providers (`dispatcher/resource-destination/*`,
 /// `dispatcher/resource-source/*`) that `rank` prices.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -538,8 +540,10 @@ impl<'a> Jobs<'a> {
             }
             Of::Drop => {
                 let small = i32::from(s.amount < 100) + i32::from(s.amount < 200);
-                let reserve = self.derived.colonies[ci].reserve;
-                let busy = carrier && ring && g.stock().is_some_and(|n| n > reserve);
+                let busy = carrier
+                    && ring
+                    && body.pos.room == g.room
+                    && g.stock().is_some_and(|n| n > STOCK_FILLS_RING);
                 (4 - small - 2 * i32::from(busy), s.amount)
             }
             // Under the ring's open refill, so a few units of mineral never

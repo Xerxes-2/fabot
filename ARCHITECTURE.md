@@ -285,6 +285,10 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   larger weight, so upgraders draining it faster than it fills starve the
   bodies that refill the bank (ungated it failed three scenarios; gated on any
   waiting cast, it cost upgrade on soak).
+  The ring's room (`ring_open`) is net of the loads booked for it, where
+  Hivemind reads `energyAvailable < capacity`, so a ring fully booked demotes
+  no pile; the stock a pile yields to (`Ground::stock`) is storage and terminal
+  less the terminal's outgoing shipment, without what transporters carry.
   `❓` After a wipe the floors cast a harvester and worker at the bank held; a
   200-energy worker's 50 a trip can lag their own recasts, so no full cast pays.
 - **Hub pile (`ColonyPlan.pile`):** from RCL2 until storage stands, remotes

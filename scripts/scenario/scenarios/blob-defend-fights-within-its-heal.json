@@ -1,10 +1,10 @@
 {
-  "why": "a set priced to walk in together (BlobClose, 2R1H rangers) fights in its formation, no body out of a shot's range of the raid and of every mate in one while a mate fights: the Invader raid on an outpost, its melee guarding its healer. Main stood bodies apart 30 ticks on end (each kiting round the guard alone) and held the raid 327 ticks; in formation 9 and 235. The bound counts the fighting ticks any member stood apart, not the longest run, which no bound separates seed by seed (on seeds 19-26 the build before the formation fix read 2 to 30, the fixed builds 0 to 21): this seed reads 77 before the fix (2787c197), 12 after it and 19 with spawn doors, and 40 sits near the geometric mean of 77 and 19",
+  "why": "a set priced to walk in together (BlobClose, 2R1H rangers) fights in its formation, no body out of a shot's range of the raid and of every mate in one while a mate fights: the Invader raid on an outpost, its melee guarding its healer. Main stood bodies apart 30 ticks on end (each kiting round the guard alone) and held the raid 327 ticks; in formation 9 and 235. The bound counts the fighting ticks any member stood apart, not the longest run, which no bound separates seed by seed (on seeds 19-26 the build before the formation fix read 2 to 30, the fixed builds 0 to 21): this seed reads 77 before the fix (2787c197), 12 after it and 19 with spawn doors, and 40 sits near the geometric mean of 77 and 19. hostileTicks is bounded on main's noise: main's seeds 19-26 spread 201-250 (s25 at 250), xluyotxw's 201-251, the 1-tick-earlier casts after a pile-vs-storage pick change the focus order (evidence .scratch/blob-drift/)",
   "modules": ["fight", "mv", "tactics"],
   "start": { "room": "W8N3", "seed": 19, "node": "M7", "invaders": "W8N2:1000:2000" },
   "ticks": 4000,
   "assert": [
     { "measure": "strayTicks", "max": 40 },
-    { "measure": "hostileTicks", "room": "W8N2", "max": 250 }
+    { "measure": "hostileTicks", "room": "W8N2", "max": 260 }
   ]
 }

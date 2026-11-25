@@ -203,9 +203,9 @@ export const measures = {
     const posts = new Set(lives.flatMap((b) => b.tiles?.harvest ?? []));
     return new Set(lives.flatMap((b) => b.tiles?.reserveController ?? []).filter((t) => posts.has(t))).size;
   },
-  // Our `name`-prefixed bodies cast in the run from a spawn in `room`.
-  castIn: on("room name", (samples, a, dir) =>
-    new Set(livesOf(dir).filter((b) => b.ours && b.name.startsWith(a.name) && b.first > offsetOf(samples) && b.entered?.[0]?.[0] === a.room).map((b) => b.name)).size),
+  // Our `name`-prefixed bodies cast in the run before `to` from a spawn in `room`.
+  castIn: on("room name to", (samples, a, dir) =>
+    new Set(livesOf(dir).filter((b) => b.ours && b.name.startsWith(a.name) && b.first > offsetOf(samples) && b.first - offsetOf(samples) < (a.to ?? Infinity) && b.entered?.[0]?.[0] === a.room).map((b) => b.name)).size),
   claimersCast: on("from to", (samples, a) => new Set(within(samples, a).flatMap((s) => s.bodies.filter((b) => b.startsWith("claimer-")).map((b) => b.split("@")[0]))).size),
   claimSpawned: (samples) => firstClaimed(samples, (c) => c.spawns > 0),
   produced: on("room resource", (samples, a) => Math.max(0, ...samples.map((s) => Object.entries(s.rooms ?? {}).reduce((n, [r, x]) => n + (!a.room || r === a.room ? (x.produced?.[a.resource] ?? 0) : 0), 0)))),
