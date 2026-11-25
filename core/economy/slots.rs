@@ -613,9 +613,8 @@ impl Plan<'_> {
                     let work = f64::from(part_count_in(w, Part::Work));
                     upkeep(w) / work / upgrade_pace(atlas, derived, ci, w)
                 };
-                let piled = f64::from(pile.energy);
-                let decay = (piled / f64::from(engine::ENERGY_DECAY)).ceil();
-                piled / drain(worker.as_ref().map_or(1.0, pace)) - decay
+                let h = drain(worker.as_ref().map_or(1.0, pace));
+                f64::from(pile.energy) * (1.0 / h - 0.5 / f64::from(engine::ENERGY_DECAY))
             }
             (None, None) => 0.0,
         };
