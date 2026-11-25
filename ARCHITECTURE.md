@@ -665,7 +665,10 @@ and `cheapest_win` (adds only to already-standing `ours`).
 - **Arrival:** a body counts from the tick it lands (a cast's spawn time and
   walk included), so a set fed in one at a time prices worse than one walked
   in `together`, which pays the wait in ticks instead (a body already in the
-  raid's reach is struck alone through it). `Defend` prices both arms
+  raid's reach is struck alone through it). A forming set lands as one
+  whatever its arm, as Forming holds it until its last cast stands; casts
+  asked once it has gone in, or left behind by bodies that already win
+  alone, are fed in alone. `Defend` prices both arms
   (`Close`/`Kite`/`Hold` vs `Blob*`); where only the gathered set wins (its
   bodies standing do not, and every arm walks in together), its casts still
   to land, it forms again and gathers out of its raid's reach until they

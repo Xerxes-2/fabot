@@ -739,6 +739,7 @@ impl<'a> Scene<'a> {
             .filter_map(|(stance, together)| {
                 let side = Side {
                     together,
+                    forming: e.phase == Phase::Forming,
                     cast_walk: colony,
                     spawns,
                     ..casting::side_in(&self.world.rules, room, ours_now.clone())
