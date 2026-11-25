@@ -220,6 +220,7 @@ fn main() {
     match std::env::args().nth(1).as_deref() {
         Some("duel") => return duel::main(),
         Some("start-rooms") => return start::main(),
+        Some("constants") => return println!("{}", krebs::constants::constants_json()),
         _ => {}
     }
     let args = args();

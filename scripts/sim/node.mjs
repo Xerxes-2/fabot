@@ -68,42 +68,54 @@ export const near = (room, hops) => {
   return Array.from({ length: (2 * hops + 1) ** 2 }, (_, k) => name(cx + (k % (2 * hops + 1)) - hops, cy + Math.floor(k / (2 * hops + 1)) - hops)).filter((r) => r !== room);
 };
 
-// Mirror `sim/src/world.rs` US, the engine's CONTROLLER_DOWNGRADE and krebs's `creeps/build.rs`.
+// Mirror `sim/src/world.rs`.
 export const US = "u1";
-const DOWNGRADE = [0, 20000, 10000, 20000, 40000, 80000, 120000, 150000, 200000];
 const energy = (n) => ({ energy: n });
-export const BUILT = {
-  spawn: [5000, { storeCapacityResource: energy(300) }],
-  extension: [1000, { storeCapacityResource: energy(0) }],
-  link: [1000, { storeCapacityResource: energy(800), cooldown: 0 }],
-  storage: [10000, { storeCapacity: 1000000 }],
-  tower: [3000, { storeCapacityResource: energy(1000) }],
-  observer: [500, {}],
-  extractor: [500, {}],
-  lab: [500, { mineralAmount: 0, cooldown: 0, storeCapacity: 5000, storeCapacityResource: energy(2000) }],
-  powerSpawn: [5000, { storeCapacityResource: { energy: 5000, power: 100 } }],
-  terminal: [3000, { storeCapacity: 300000 }],
-  nuker: [1000, { storeCapacityResource: { energy: 300000, G: 5000 } }],
-  factory: [1000, { storeCapacity: 50000, cooldown: 0 }],
-  container: [250000, { storeCapacity: 2000 }],
-  road: [5000, {}],
-  rampart: [1, {}],
-  constructedWall: [1, { hitsMax: 300000000 }],
+let C;
+/**
+ * The engine's constants (krebs's constants.js, `sim constants`), read once a process: krebs is
+ * pinned, so every sim's are the same. Null off a sim built before it printed them.
+ */
+export const loadConstants = (sim) => {
+  const res = C || !sim ? null : spawnSync(sim, ["constants"], { encoding: "utf8" });
+  if (res?.status === 0) C = JSON.parse(res.stdout);
+  return C ?? null;
 };
-const RAMPART_HITS_MAX = [0, 0, 300000, 1000000, 3000000, 10000000, 30000000, 100000000, 300000000];
-const DECAY = { road: 1000, container: 100, rampart: 100 };
+// What each kind's site builds besides its hits (`<KIND>_HITS`), as krebs's `creeps/build.rs`.
+const BUILT = {
+  spawn: () => ({ storeCapacityResource: energy(C.SPAWN_ENERGY_CAPACITY) }),
+  extension: () => ({ storeCapacityResource: energy(0) }),
+  link: () => ({ storeCapacityResource: energy(C.LINK_CAPACITY), cooldown: 0 }),
+  storage: () => ({ storeCapacity: C.STORAGE_CAPACITY }),
+  tower: () => ({ storeCapacityResource: energy(C.TOWER_CAPACITY) }),
+  observer: () => ({}),
+  extractor: () => ({}),
+  lab: () => ({ mineralAmount: 0, cooldown: 0, storeCapacity: C.LAB_MINERAL_CAPACITY + C.LAB_ENERGY_CAPACITY, storeCapacityResource: energy(C.LAB_ENERGY_CAPACITY) }),
+  powerSpawn: () => ({ storeCapacityResource: { energy: C.POWER_SPAWN_ENERGY_CAPACITY, power: C.POWER_SPAWN_POWER_CAPACITY } }),
+  terminal: () => ({ storeCapacity: C.TERMINAL_CAPACITY }),
+  nuker: () => ({ storeCapacityResource: { energy: C.NUKER_ENERGY_CAPACITY, G: C.NUKER_GHODIUM_CAPACITY } }),
+  factory: () => ({ storeCapacity: C.FACTORY_CAPACITY, cooldown: 0 }),
+  container: () => ({ storeCapacity: C.CONTAINER_CAPACITY }),
+  road: () => ({}),
+  rampart: () => ({}),
+  constructedWall: () => ({ hitsMax: C.WALL_HITS_MAX }),
+};
+export const BUILT_KINDS = new Set(Object.keys(BUILT));
+const hitsOf = (kind) => C[`${kind === "constructedWall" ? "WALL" : kind.replace(/[A-Z]/g, (m) => `_${m}`).toUpperCase()}_HITS`];
+const decayOf = (kind) => ({ road: C.ROAD_DECAY_TIME, container: C.CONTAINER_DECAY_TIME, rampart: C.RAMPART_DECAY_TIME })[kind];
 
 /**
  * What a finished site of `kind` is at tick `t`, on a tile of `terrain` (its
  * digit) in a room at `level`: its store, hits, capacity and next decay.
  */
 export function built(kind, terrain, t, level) {
-  const [hits, extra] = BUILT[kind];
-  const full = kind === "road" ? hits * ({ 1: 150, 2: 5 }[terrain] ?? 1) : kind === "rampart" ? RAMPART_HITS_MAX[level] : (extra.hitsMax ?? hits);
+  const [hits, extra] = [hitsOf(kind), BUILT[kind]()];
+  const ratio = { 1: C.CONSTRUCTION_COST_ROAD_WALL_RATIO, 2: C.CONSTRUCTION_COST_ROAD_SWAMP_RATIO }[terrain] ?? 1;
+  const full = kind === "road" ? hits * ratio : kind === "rampart" ? (C.RAMPART_HITS_MAX[level] ?? 0) : (extra.hitsMax ?? hits);
   // An extension holds its level's capacity from the start, as xxscreeps' Extension.create gives it; krebs's
   // extension tick would set it only after the bot's first read.
-  const capacity = kind === "extension" && { storeCapacityResource: energy(level >= 8 ? 200 : level === 7 ? 100 : 50) };
-  return { store: energy(0), ...extra, ...capacity, hits: kind === "road" ? full : hits, hitsMax: full, ...(DECAY[kind] && { nextDecayTime: t + DECAY[kind] }) };
+  const capacity = kind === "extension" && { storeCapacityResource: energy(C.EXTENSION_ENERGY_CAPACITY[level]) };
+  return { store: energy(0), ...extra, ...capacity, hits: kind === "road" ? full : hits, hitsMax: full, ...(decayOf(kind) && { nextDecayTime: t + decayOf(kind) }) };
 }
 const STOOD = new Set(["level", "built", "stored", "without", "worn", "bodies", "outposts", "alone", "labs", "modern", "buried", "walled", "moved", "claims", "spare", "short", "stale", "labStock"]);
 const terrainOf = (room) => [room.terrain].flat().join("");
@@ -174,10 +186,10 @@ export function standNode(world, room, name, plan) {
   const nextId = () => (++id).toString(16).padStart(24, "0");
   const [stock, ...ores] = String(node.stored).split(",");
   for (const s of list) {
-    if (!BUILT[s.kind]) throw new Error(`no ${s.kind} in a node`);
+    if (!BUILT_KINDS.has(s.kind)) throw new Error(`no ${s.kind} in a node`);
     const o = { _id: nextId(), type: s.kind, room, x: s.x, y: s.y, notifyWhenAttacked: true, ...built(s.kind, terrain[s.y * 50 + s.x], t, node.level) };
     if (!["road", "container", "constructedWall"].includes(s.kind)) o.user = US;
-    if (s.kind === "spawn") Object.assign(o, s === first ? { name: "Spawn1", store: energy(300) } : { name: `Node${id}` }, { spawning: null });
+    if (s.kind === "spawn") Object.assign(o, s === first ? { name: "Spawn1", store: energy(C.SPAWN_ENERGY_START) } : { name: `Node${id}` }, { spawning: null });
     if (s.kind === "storage") o.store = { energy: Number(stock), ...Object.fromEntries(ores.map((m) => m.split(":")).map(([r, n]) => [r, Number(n)])) };
     if (s.kind === "lab" && s === list.find((l) => l.kind === "lab") && node.labStock) {
       o.store = Object.fromEntries(node.labStock.split(",").map((p) => p.split(":")).map(([r, n]) => [r, Number(n)]));
@@ -187,7 +199,7 @@ export function standNode(world, room, name, plan) {
     if (s.kind === "nuker") o.cooldownTime = t + 100000;
     home.objects.push(o);
   }
-  Object.assign(controller, { user: US, level: node.level, progress: 0, downgradeTime: t + DOWNGRADE[node.level], safeModeAvailable: node.level - 1 });
+  Object.assign(controller, { user: US, level: node.level, progress: 0, downgradeTime: t + C.CONTROLLER_DOWNGRADE[node.level], safeModeAvailable: node.level - 1 });
 
   const bodies = (node.bodies ?? "").split(",").filter(Boolean).flatMap((spec) => {
     const [, pattern, parts, count = "1"] = /^(\w+):([a-z_0-9]+)(?:\*(\d+))?$/.exec(spec);

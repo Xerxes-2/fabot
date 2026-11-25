@@ -6,12 +6,10 @@ import { availableParallelism } from "node:os";
 import { createInterface } from "node:readline";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { BUILT, US, built, near, standNode } from "./node.mjs";
+import { BUILT_KINDS, US, built, loadConstants, near, standNode } from "./node.mjs";
 import { seatTile } from "../scenario/seat-tile.mjs";
 import { engagements } from "../scenario/engaged.mjs";
 import { killedBy, offsetOf } from "../scenario/measures.mjs";
-
-const SAFE_MODE_DURATION = 20000;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "../..");
@@ -26,7 +24,7 @@ export const SIM_START = ["gen", "room", "seed", "late", "node", "ended", "unsaf
 export const seatsUs = (world) => (world.rooms ?? []).some((r) => (r.objects ?? []).some((o) => o.type === "spawn" && o.user === world.userId));
 
 // What a capture stands besides the structures a site builds: no tombstone, ruin or portal.
-const LIVE_KINDS = new Set([...Object.keys(BUILT), "controller", "source", "mineral", "constructionSite", "creep", "keeperLair", "invaderCore"]);
+const LIVE_KINDS = new Set([...BUILT_KINDS, "controller", "source", "mineral", "constructionSite", "creep", "keeperLair", "invaderCore"]);
 
 /**
  * Each room's border toward a room outside `group` walled (a capture's terrain-only ring is a group
@@ -62,7 +60,7 @@ export function standCapture(world) {
     const terrain = [r.terrain].flat().join("");
     const level = r.objects.find((o) => o.type === "controller")?.level ?? 0;
     for (const o of r.objects) {
-      if (BUILT[o.type]) for (const [k, v] of Object.entries(built(o.type, terrain[o.y * 50 + o.x], world.time, level))) o[k] ??= v;
+      if (BUILT_KINDS.has(o.type)) for (const [k, v] of Object.entries(built(o.type, terrain[o.y * 50 + o.x], world.time, level))) o[k] ??= v;
       if (o.type !== "creep") continue;
       o.storeCapacity ??= o.body.reduce((n, p) => n + (p.type === "carry" ? 50 * (CARRY_BOOST[p.boost] ?? 1) : 0), 0);
       o.hitsMax ??= 100 * o.body.length;
@@ -91,7 +89,7 @@ const seats = (rivals) =>
     bodies: raid.bodies.map(({ boosts = {}, ...counts }) => PARTS.flatMap((type) => Array(counts[type] ?? 0).fill({ type, hits: 100, boost: boosts[type] }))) } }));
 
 /** `rival`'s room as `manage bot add` seats it: its controller at level 1 in safe mode, a spawn on `seatTile`. */
-function standRival(world, rival, i) {
+function standRival(world, rival, i, C) {
   const id = rivalId(i);
   world.users = { ...world.users, [id]: rival.name };
   const home = world.rooms.find((r) => r.name === rival.room);
@@ -100,9 +98,9 @@ function standRival(world, rival, i) {
   const anchors = [controller, ...home.objects.filter((o) => o.type === "source")];
   const seat = seatTile((x, y) => Number(terrain[y * 50 + x]), new Set(home.objects.map((o) => `${o.x},${o.y}`)), anchors);
   const t = world.time ?? 0;
-  Object.assign(controller, { user: id, level: 1, progress: 0, downgradeTime: t + 20000, safeMode: t + SAFE_MODE_DURATION, safeModeAvailable: 0 });
+  Object.assign(controller, { user: id, level: 1, progress: 0, downgradeTime: t + C.CONTROLLER_DOWNGRADE[1], safeMode: t + C.SAFE_MODE_DURATION, safeModeAvailable: 0 });
   home.objects.push({ _id: `${id}ffff`, type: "spawn", room: rival.room, x: seat.x, y: seat.y, name: "Spawn1", user: id,
-    ...built("spawn", "0", t, 1), store: { energy: 300 }, spawning: null, notifyWhenAttacked: true });
+    ...built("spawn", "0", t, 1), store: { energy: C.SPAWN_ENERGY_START }, spawning: null, notifyWhenAttacked: true });
 }
 
 // cronjobs.js createCreep's bodies, by `{size}{Role}`: part letters and counts. A spent
@@ -205,8 +203,11 @@ export function runSim(bin, { world, gen, sectors, room, node, ticks, seed = 1, 
     if (!captured) seal(base.rooms);
     if (seated) room = base.rooms.find((r) => r.objects.some((o) => o.type === "spawn" && o.user === base.userId)).name;
     try {
+      // An old bundle under test prints none; this tree's sim stands its world as well.
+      const C = loadConstants(bin) ?? loadConstants(simBinary());
+      if (!C) throw new Error("no sim prints the engine's constants (`sim constants`): build this tree's");
       const stood = node ? standNode(base, room, node, PLAN) : captured ? standCapture(base) : base;
-      rivals.forEach((rival, i) => standRival(stood, rival, i));
+      rivals.forEach((rival, i) => standRival(stood, rival, i, C));
       // Beside a rival or asked: no safe mode to decide the fight for us, none to activate.
       if ((rivals.length || unsafe) && !seated && !ended)
         for (const c of stood.rooms.find((r) => r.name === room).objects.filter((o) => o.type === "controller"))

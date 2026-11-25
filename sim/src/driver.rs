@@ -41,7 +41,6 @@ pub struct Driver<W: Write> {
     pub faults: BTreeSet<(&'static str, String)>,
     pub refused: BTreeMap<String, u64>,
     windows_read: i32,
-    /// faults.jsonl, cpu.jsonl, metrics.jsonl.
     pub out: [W; 3],
     pub adapter_ms: f64,
     pub decide_ms: f64,
