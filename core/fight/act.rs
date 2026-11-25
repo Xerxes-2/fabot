@@ -6,6 +6,7 @@ use super::kinds::defend::{self, Home};
 use super::kinds::{raid, siege, stronghold};
 use super::scene::{Hunting, Scene, picket};
 use super::shape::{Engagement, Objective, Phase};
+use super::tracker::REACH;
 use fabot_atlas::Atlas;
 use fabot_base::declarations;
 use fabot_base::intents::{self, Action, ControllerAct, CreepAct, ModuleOutput};
@@ -140,7 +141,7 @@ pub(super) fn act(
             let contact = scene.members_of(e).iter().any(|m| {
                 m.pos.room == e.room
                     && (ground.threat[tiles::of_pos(&m.pos)] > 0
-                        || ground.marks.iter().any(|t| m.pos.within(4, &t.pos)))
+                        || (ground.marks.iter()).any(|t| m.pos.within(REACH, &t.pos)))
             });
             Some((e.id, (ground, contact)))
         })

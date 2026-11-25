@@ -88,8 +88,8 @@ fn step((scene, raids, fallen): Facts, prior: Option<&Engagement>, e: &mut Engag
                 _ => h.pos.room == e.room,
             })
             .collect();
-        let reached =
-            |h: &&Creep| h.hits < h.hits_max || ours.iter().any(|o| o.pos.within(3, &h.pos));
+        let shot = |h: &Creep| (ours.iter()).any(|o| o.pos.within(engine::RANGED_RANGE, &h.pos));
+        let reached = |h: &&Creep| h.hits < h.hits_max || shot(h);
         if theirs.iter().any(reached) {
             e.actual.contact = Some(world.time);
             let named = theirs.iter().filter_map(|h| h.owner.user());
