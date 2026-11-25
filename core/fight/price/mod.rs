@@ -43,7 +43,7 @@ impl<'a> Scene<'a> {
                 && (room.structures.iter()).all(|s| s.pos != b.pos || s.walkable || siege::bars(s))
             {
                 weights[tiles::of_pos(&b.pos)] =
-                    grid::weight(casting::terrain_at(Some(room), &b.pos).weight);
+                    grid::weight(casting::terrain_at(atlas, Some(room), &b.pos).weight);
             }
         }
 
@@ -673,7 +673,7 @@ impl<'a> Scene<'a> {
             .sum();
 
         let capacity = self.capacity_of(atlas, e);
-        let terrain = casting::terrain_at(room, &centre);
+        let terrain = casting::terrain_at(atlas, room, &centre);
 
         let posted = home
             && !defend::off_post(self, e)

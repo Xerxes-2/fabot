@@ -1,13 +1,14 @@
 use std::collections::BTreeMap;
 
 use crate::shape::{Cast, Engagement};
+use fabot_atlas::Atlas;
 use fabot_base::boost::{self, Boosting, Stock};
-use fabot_base::engine;
 use fabot_base::vocabulary::{Part, ResourceType};
 use fabot_base::world::{
     self, Creep, Id, Owner, Pos, Room, RoomName, Rules, Spawn, Store, Structure, StructureType,
     terrain,
 };
+use fabot_base::{engine, tiles};
 use fabot_exchange::{self as exchange, Fighter, fighter};
 
 pub type Body = Vec<Part>;
@@ -148,15 +149,16 @@ fn biggest(capacity: i32, block: &[Part]) -> Option<Body> {
     (most > 0).then(|| with_heal(block.repeat(most as usize)))
 }
 
-pub fn terrain_at(room: Option<&Room>, at: &Pos) -> exchange::Terrain {
+pub fn terrain_at(atlas: &Atlas, room: Option<&Room>, at: &Pos) -> exchange::Terrain {
     let last = engine::ROOM_SIDE - 1;
+    let bare = if terrain::is_swamp(room.and_then(|r| r.terrain), at.x, at.y) {
+        engine::SWAMP_WEIGHT
+    } else {
+        engine::PLAIN_WEIGHT
+    };
 
     exchange::Terrain {
-        weight: if terrain::is_swamp(room.and_then(|r| r.terrain), at.x, at.y) {
-            engine::SWAMP_WEIGHT
-        } else {
-            engine::PLAIN_WEIGHT
-        },
+        weight: atlas.ground_at(at.room, tiles::of_pos(at)).unwrap_or(bare),
         run_off: at.x.max(last - at.x).max(at.y.max(last - at.y)) - 1,
     }
 }
