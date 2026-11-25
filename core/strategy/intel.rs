@@ -127,40 +127,41 @@ pub fn preyed(intel: &Intel, declarations: &Declarations, time: i32) -> Vec<Room
 /// Rooms a rival raising §5's reserve could hold and the remotes outposts
 /// picks from, so from RCL1; by route too, as one walled off by terrain raids no sooner than a far one.
 /// A guarded room, in no tree, sits one past its neighbour so a scout can clear its row.
+pub fn near<'a>(
+    (world, atlas): (&'a World, &'a Atlas),
+    (intel, declarations): (&'a Intel, &'a Declarations),
+    home: RoomName,
+) -> impl Iterator<Item = (RoomName, i32)> + 'a {
+    let me = &world.me;
+    let guarded = |room: &RoomName| intel.get(room).is_some_and(|r| r.guarded(me, declarations));
+    let tree = atlas.tree(&BTreeSet::new(), super::NEAR, home);
+    (-super::NEAR..=super::NEAR)
+        .flat_map(move |dx| (-super::NEAR..=super::NEAR).map(move |dy| home.offset(dx, dy)))
+        .flatten()
+        .filter(|room| tiles::has_controller(room.coords()))
+        .filter(|room| atlas.has_terrain(*room) && !world.closed.contains(room))
+        .filter_map(move |room| {
+            let beside = || {
+                let sides = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+                let near = (sides.into_iter())
+                    .filter_map(|(dx, dy)| tree.crossings(room.offset(dx, dy)?, home))
+                    .min()?;
+                Some(near + 1).filter(|hops| *hops <= super::NEAR)
+            };
+            let hops =
+                (tree.crossings(room, home)).or_else(|| guarded(&room).then(beside).flatten())?;
+            Some((room, hops))
+        })
+}
+
 pub fn threat_radius(
     (world, atlas): (&World, &Atlas),
     (intel, declarations): (&Intel, &Declarations),
     owned: &BTreeSet<RoomName>,
 ) -> BTreeMap<RoomName, i32> {
-    let me = &world.me;
-    let guarded = |room: &RoomName| intel.get(room).is_some_and(|r| r.guarded(me, declarations));
-    (owned.iter().filter_map(|r| world.room(*r)))
-        .map(|room| {
-            (
-                room.name,
-                atlas.tree(&BTreeSet::new(), super::NEAR, room.name),
-            )
-        })
-        .flat_map(|(home, tree)| {
-            (-super::NEAR..=super::NEAR)
-                .flat_map(move |dx| (-super::NEAR..=super::NEAR).map(move |dy| home.offset(dx, dy)))
-                .flatten()
-                .filter(|room| tiles::has_controller(room.coords()))
-                .filter(|room| atlas.has_terrain(*room))
-                .filter_map(move |room| {
-                    let beside = || {
-                        let sides = [(1, 0), (-1, 0), (0, 1), (0, -1)];
-                        let near = (sides.into_iter())
-                            .filter_map(|(dx, dy)| tree.crossings(room.offset(dx, dy)?, home))
-                            .min()?;
-                        Some(near + 1).filter(|hops| *hops <= super::NEAR)
-                    };
-                    let hops = (tree.crossings(room, home))
-                        .or_else(|| guarded(&room).then(beside).flatten())?;
-                    Some((room, hops))
-                })
-        })
-        .filter(|(room, _)| !owned.contains(room) && !world.closed.contains(room))
+    (owned.iter())
+        .flat_map(|home| near((world, atlas), (intel, declarations), *home))
+        .filter(|(room, _)| !owned.contains(room))
         .fold(BTreeMap::new(), |mut radius, (room, hops)| {
             let at = radius.entry(room).or_insert(hops);
             *at = (*at).min(hops);

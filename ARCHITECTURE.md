@@ -365,8 +365,8 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   last-seen hostile for its life (`sightings`); a harvester (at its seat or
   walking to it) walks round only the strikes no guard holds, every other body
   round all.
-- **Reserve (`strategy::reserve`):** threatened colonies (rival within 3 rooms,
-  home fight open, or fight cast owed) keep `towers × TOWER_ENERGY_COST ×
+- **Reserve (`strategy::reserve`):** threatened colonies (rival within 3 route
+  crossings, `intel::near`, home fight open, or fight cast owed) keep `towers × TOWER_ENERGY_COST ×
   CREEP_LIFETIME × n` (`n` the `reserveLifetimes` tuning, default `2`); quiet
   colonies keep 1/3 (`quietReserveDivisor`) because a full reserve costs a quiet young
   colony a lifetime of upgrading while threats come from neighbours intel sees.

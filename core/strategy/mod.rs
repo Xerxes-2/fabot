@@ -15,7 +15,6 @@ use fabot_base::declarations::{
 };
 use fabot_base::engine;
 use fabot_base::intel::{Intel, Row};
-use fabot_base::tiles;
 use fabot_base::tuning::Tuning;
 use fabot_base::vocabulary::{Part, ResourceType, multiple};
 use fabot_base::world::{Owner, Pos, RoomName, Rules, StructureType, World, sightings};
@@ -204,8 +203,8 @@ pub fn plan<'t>(
     let mut plans: Vec<ColonyPlan> = (derived.owned.iter().filter_map(|r| world.room(*r)))
         .filter_map(|room| {
             let level = room.controller.as_ref()?.level;
-            let threat = (rivals.iter())
-                .filter(|(r, _)| tiles::rooms_apart(*r, room.name) <= NEAR)
+            let threat = intel::near((world, atlas), (intel, declarations), room.name)
+                .filter_map(|(near, _)| rivals.iter().find(|(r, _)| *r == near))
                 .map(|(_, l)| (*l).min(level))
                 .max();
             let near = threat.is_some();
