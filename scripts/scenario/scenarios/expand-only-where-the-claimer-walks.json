@@ -1,0 +1,15 @@
+{
+  "why": "an expansion is declared, kept and sponsored only where its claimer's own walk reaches the controller (atlas::sponsor): on gen 1121481 alpha's E3S17 chose E6S17 at t49100, three rooms off but its controller's region five crossings round, past the walk's hop bound; the claimer's walk read none, so 15 claimers stood at home a life each until t55518 and alpha claimed nothing before E1S17 at t56900. Now E5S18 is claimed at t49400",
+  "modules": ["atlas", "economy", "strategy"],
+  "start": {
+    "gen": 1121481,
+    "sectors": "2x2",
+    "seed": 1,
+    "players": [
+      { "name": "alpha", "declarations": { "enemies": ["beta"] } },
+      { "name": "beta", "declarations": { "enemies": ["alpha"] } }
+    ]
+  },
+  "ticks": 50500,
+  "assert": [{ "measure": "claimsOwned", "min": 1 }]
+}

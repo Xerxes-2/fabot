@@ -36,6 +36,15 @@ pub struct Mover {
     pub factor: FatigueFactor,
 }
 
+impl Mover {
+    pub const fn one(factor: FatigueFactor) -> Mover {
+        Mover {
+            footprint: Footprint::One,
+            factor,
+        }
+    }
+}
+
 /// `tiles` are tile indices; `avoid` never holds a walk back from its ends.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Target {

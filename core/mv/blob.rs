@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use crate::plan;
 use fabot_atlas::{Atlas, Field, Mover, Target};
 use fabot_base::engine;
-use fabot_base::grid::{self, FatigueFactor, Footprint, factor_of, step_ticks};
+use fabot_base::grid::{self, FatigueFactor, factor_of, step_ticks};
 use fabot_base::tiles::{self, Tile, TileSet};
 use fabot_base::wish::Wish;
 use fabot_base::world::{Creep, RoomName};
@@ -33,10 +33,7 @@ pub fn slowest(factors: impl IntoIterator<Item = FatigueFactor>) -> Option<Fatig
 
 fn mover(members: &[&Creep]) -> Mover {
     let factor = factor_of(members[0]);
-    Mover {
-        footprint: Footprint::One,
-        factor: slowest(members.iter().map(|c| factor_of(c))).unwrap_or(factor),
-    }
+    Mover::one(slowest(members.iter().map(|c| factor_of(c))).unwrap_or(factor))
 }
 
 fn fatigue_ticks(creep: &Creep) -> Option<i32> {

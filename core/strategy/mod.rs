@@ -295,7 +295,7 @@ pub fn plan<'t>(
         stocks: &stocks,
     };
     expand::step(
-        world,
+        (world, atlas),
         derived,
         (declarations, &plans),
         &around,

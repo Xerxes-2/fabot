@@ -213,10 +213,7 @@ pub fn strike(sight: &Sight, order: &[Id], creep: &Creep, armed: bool) -> Vec<Cr
 }
 
 fn mover_of(creep: &Creep) -> Mover {
-    Mover {
-        footprint: Footprint::One,
-        factor: grid::factor_of(creep),
-    }
+    Mover::one(grid::factor_of(creep))
 }
 
 fn target_at(sight: &Sight, at: &Pos, range: i32) -> Target {

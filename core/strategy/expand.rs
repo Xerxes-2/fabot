@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::season;
-use fabot_atlas::Derived;
+use fabot_atlas::{self as atlas, Atlas, Derived};
 use fabot_base::declarations::{ColonyPlan, Declarations, Outpost, REACH_HOPS, Stage};
 use fabot_base::engine;
 use fabot_base::intel::{self, Intel, Row};
@@ -252,7 +252,7 @@ fn fate(age: i32, owned: bool, lost: bool, stored: bool) -> Fate {
 }
 
 pub fn step<'t>(
-    world: &World,
+    (world, atlas): (&World, &Atlas),
     derived: &Derived,
     (declarations, plans): (&Declarations, &[ColonyPlan]),
     around: &Around,
@@ -273,6 +273,9 @@ pub fn step<'t>(
     (expansion.abandoned).retain(|a| derived.owned.contains(&a.room));
     let given =
         |room: RoomName, e: &Expansions| e.abandoning(room) || declarations.abandoning(room);
+    let walked = |o: &Outpost, e: &Expansions| {
+        atlas::sponsor(atlas, derived, &|r| given(r, e), &o.controller.pos).is_some()
+    };
     // Never the last colony nor one in a fight (owner).
     let may_give_up = |room: RoomName, expansion: &Expansions| {
         (derived.colonies.iter())
@@ -307,7 +310,9 @@ pub fn step<'t>(
                 (r.controller.as_ref()).is_some_and(|c| !c.safe() && c.safe_mode_cooldown > 0)
                     && !(world.rules.towers(r)).any(|s| s.owner.is_ours())
             });
-        match fate(world.time - e.since, owned, theirs || bare, stored) {
+        let unwalked = || claim(intel, derived, Some(&e)).is_some_and(|o| !walked(&o, expansion));
+        let lost = theirs || bare || (!owned && unwalked());
+        match fate(world.time - e.since, owned, lost, stored) {
             Fate::Failed if owned && may_give_up(e.room, expansion) => give_up(e.room, expansion),
             // Given up once its fight is over.
             Fate::Failed if owned => expansion.in_flight = Some(e),
@@ -378,8 +383,9 @@ pub fn step<'t>(
         }
     }
     scored.sort_by(|(a, x), (b, y)| b.total_cmp(a).then(x.room.cmp(&y.room)));
-    let best = (scored.into_iter())
-        .find(|(_, o)| terrain(o.room).is_some_and(|t| fits(world, o, intel, t)));
+    let best = (scored.into_iter()).find(|(_, o)| {
+        walked(o, expansion) && terrain(o.room).is_some_and(|t| fits(world, o, intel, t))
+    });
     if !capped {
         expansion.in_flight = best.map(|(_, o)| Expansion {
             room: o.room,

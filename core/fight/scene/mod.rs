@@ -8,7 +8,7 @@ use super::kinds::{raid, sweep};
 use super::shape::{Boosted, Cast, Engagement, Group, Objective, Phase, Plan, Slot};
 use fabot_atlas::{Atlas, Mover, Target, Tree};
 use fabot_base::declarations::{self, TacticRule};
-use fabot_base::grid::{self, Footprint};
+use fabot_base::grid;
 use fabot_base::tiles::Tile;
 use fabot_base::vocabulary::Part;
 use fabot_base::world::{
@@ -750,10 +750,7 @@ impl<'a> Scene<'a> {
             && in_room.iter().all(|m| {
                 atlas
                     .field(
-                        Mover {
-                            footprint: Footprint::One,
-                            factor: grid::factor_of(m),
-                        },
+                        Mover::one(grid::factor_of(m)),
                         &Target {
                             room: room.name,
                             tiles: vec![tiles::of_pos(&b.pos)],

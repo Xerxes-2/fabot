@@ -9,7 +9,7 @@ use crate::shape::{Cast, Engagement, Group, Objective, Phase, Plan, enter};
 pub use account::{Actual, Closed, account, closed};
 use fabot_atlas::{self as atlas, Atlas, Mover, Target};
 use fabot_base::declarations::{self, Declarations};
-use fabot_base::grid::{self, Footprint};
+use fabot_base::grid;
 use fabot_base::tiles::Tile;
 use fabot_base::vocabulary::Part::Attack;
 use fabot_base::world::{self, Creep, Id, Pos, Room, RoomName, Structure, StructureType};
@@ -889,10 +889,7 @@ pub(super) fn entries(
             .map(|c| (tiles::of_pos(&c.pos), 0, set.len() as i32))
             .collect();
     }
-    let mover = Mover {
-        footprint: Footprint::One,
-        factor: gait,
-    };
+    let mover = Mover::one(gait);
     let open = |t: &Tile| ground.weights[*t].is_some();
     [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT]
         .into_iter()

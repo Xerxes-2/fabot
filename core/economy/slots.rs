@@ -219,13 +219,13 @@ fn haulers(flows: &[(f64, Leg)], capacity: i32) -> Vec<Vec<Part>> {
     vec![most; ((carry + per - 1) / per) as usize]
 }
 
-fn sponsor(atlas: &mut Atlas, derived: &Derived, at: &Pos) -> Option<usize> {
+fn sponsor(atlas: &Atlas, derived: &Derived, at: &Pos) -> Option<usize> {
     let given_up = |room| (derived.grounds.iter()).any(|g| g.room == room && g.abandoned);
     atlas::sponsor(atlas, derived.ours, &given_up, at)
 }
 
 /// Per colony, the colony that sends its pioneers while it is young.
-fn sponsors(atlas: &mut Atlas, derived: &Derived) -> Vec<Option<usize>> {
+fn sponsors(atlas: &Atlas, derived: &Derived) -> Vec<Option<usize>> {
     (derived.colonies.iter().enumerate())
         .map(|(cj, c)| {
             let young = derived.ours.home(c.room).is_some_and(|h| h.young);

@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use super::loot::garrison;
 use super::{Atlas, Mover, Target, Tree};
 use fabot_base::declarations::{ColonyPlan, Declarations, Outpost, REACH_HOPS, Stage};
-use fabot_base::grid::{self, Footprint};
+use fabot_base::grid;
 use fabot_base::intel::Intel;
 use fabot_base::tiles::{self, TileSet};
 use fabot_base::vocabulary::{CLAIMER, Part};
@@ -41,10 +41,7 @@ pub fn nearest<'t>(
     can: impl Fn(usize) -> bool,
     at: &Pos,
 ) -> Option<usize> {
-    let walker = Mover {
-        footprint: Footprint::One,
-        factor: grid::loaded_factor(&[Part::Move]),
-    };
+    let walker = Mover::one(grid::loaded_factor(&[Part::Move]));
 
     let least =
         |atlas: &mut Atlas, measure: &dyn Fn(&mut Atlas, &Pos) -> Option<i32>| -> Option<usize> {
@@ -78,25 +75,25 @@ pub fn plan_of<'a>(
     (declarations.colonies.iter().chain(plans)).find(|p| p.room == room)
 }
 
-/// The colony a claim is served from, its claimer, raising and pioneers alike
-/// (§5), so the claim holds that one alone (§7.2): the nearest stocked, else
-/// the nearest whose bank casts a claimer, so no claim waits on a storage.
+/// The colony a claim is served from, its claimer, raising and pioneers alike (§5), so the
+/// claim holds that one alone (§7.2): nearest by the claimer's own walk, none it cannot walk
+/// to; stocked first, else one whose bank casts a claimer, so no claim waits on a storage.
 pub fn sponsor(
-    atlas: &mut Atlas,
+    atlas: &Atlas,
     derived: &Derived,
     given_up: &dyn Fn(RoomName) -> bool,
     at: &Pos,
 ) -> Option<usize> {
-    let spawns: Vec<Pos> = derived.homes.iter().map(|h| h.spawn).collect();
-    let claimer = engine::body_cost(&CLAIMER);
-    let pays = |i: usize| {
-        let room = derived.colonies[i];
-        room != at.room && !given_up(room) && derived.homes[i].capacity >= claimer
+    let claimer = Mover::one(grid::loaded_factor(&CLAIMER));
+    let walk = |h: &Home| atlas.travel_ticks(claimer, &target_at(at, 1), &h.spawn);
+    let pays = |(room, h): (&RoomName, &Home)| {
+        *room != at.room && !given_up(*room) && h.capacity >= engine::body_cost(&CLAIMER)
     };
-    let stocked = |i: usize| pays(i) && derived.homes[i].stocked;
-    let trees = |room| derived.tree(room);
-    nearest(atlas, &trees, &spawns, stocked, at)
-        .or_else(|| nearest(atlas, &trees, &spawns, pays, at))
+    (derived.colonies.iter().zip(&derived.homes).enumerate())
+        .filter(|(_, c)| pays(*c))
+        .filter_map(|(i, (_, h))| Some((!h.stocked, walk(h)?, i)))
+        .min()
+        .map(|(.., i)| i)
 }
 
 /// The colony that serves a worked room, for Economy's haul and Strategy's

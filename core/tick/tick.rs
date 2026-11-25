@@ -214,10 +214,7 @@ fn boost_stop(
         if creep.pos.within(1, at) && lab.is_some_and(|l| boost::can_boost(l, w.load.compound)) {
             actions.push(Action::Lab(w.lab, LabAct::BoostCreep(creep.id)));
         }
-        let mover = Mover {
-            footprint: Footprint::One,
-            factor: grid::factor_of(creep),
-        };
+        let mover = Mover::one(grid::factor_of(creep));
         // Beside its lab it gives way to the carrier filling it; out of reach
         // it shoves through, or a carrier parked on the lab's one free side
         // holds it off until its wait runs out and it leaves short.
