@@ -7,7 +7,7 @@ use fabot_base::engine;
 use fabot_base::intel::{self, Intel, Row};
 use fabot_base::tiles;
 use fabot_base::vocabulary::{BOOSTS, ORES, ResourceType, ores_in};
-use fabot_base::world::{Id, Mineral, Room, RoomName, StructureType, World};
+use fabot_base::world::{Id, Mineral, Room, RoomName, World};
 use fabot_layout::{ground, plan};
 use screeps::LocalRoomTerrain;
 
@@ -299,13 +299,7 @@ pub fn step<'t>(
         let owned = derived.owned.contains(&e.room);
         let theirs =
             (intel.get(&e.room).and_then(|r| r.owner.as_ref())).is_some_and(|o| o != &world.me);
-        // In flight until it stands on its own: support ends with its storage.
-        let stored = world.room(e.room).is_some_and(|r| {
-            (r.structures.iter()).any(|s| {
-                matches!(s.kind, StructureType::Storage | StructureType::Terminal)
-                    && s.owner.is_ours()
-            })
-        });
+        let stored = derived.home(e.room).is_some_and(|h| !h.young);
         // Nothing holds it once its safe mode is gone: RCL2's grant spent, the
         // cooldown running and no tower up.
         let bare = owned

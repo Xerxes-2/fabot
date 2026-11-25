@@ -137,6 +137,8 @@ pub fn server_of<'p>(
 pub struct Home {
     pub spawn: Pos,
     pub stocked: bool,
+    /// Its sponsor carries it (§5): no storage yet, and not past the level allowing one.
+    pub young: bool,
     pub capacity: i32,
 }
 
@@ -228,10 +230,13 @@ pub fn derive(world: &World, atlas: &mut Atlas) -> Derived {
     let homes = (colonies.iter())
         .filter_map(|home| {
             let room = world.room(*home)?;
+            let level = room.controller.as_ref().map_or(0, |c| c.level);
+            let stocked = (room.structures.iter())
+                .any(|s| s.kind == StructureType::Storage && s.owner.is_ours());
             Some(Home {
                 spawn: world.working_spawns().find(|s| s.pos.room == *home)?.pos,
-                stocked: (room.structures.iter())
-                    .any(|s| s.kind == StructureType::Storage && s.owner.is_ours()),
+                stocked,
+                young: !stocked && world.rules.allowed(StructureType::Storage, level - 1) == 0,
                 capacity: room.energy_capacity,
             })
         })

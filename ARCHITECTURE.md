@@ -894,8 +894,8 @@ expansion, and operation priorities.
   (`1/(held+1)`) + `season::worth` − crossings − fading failure penalty (a
   nearby stronghold adds no cost because its creeps/towers stay at its core and
   Atlas routes around its room). The best room that passes a full `Layout` fit
-  check is declared claimed until its spawn stands and tracked until storage
-  stands. Fails on rival claim, 5-life claim timeout, 40k storage timeout (~2×
+  check is declared claimed until its spawn stands and tracked while young
+  (`atlas::Home.young`, the pioneers' window). Fails on rival claim, 5-life claim timeout, 40k storage timeout (~2×
   the 21k ticks a room two crossings away takes), or expired safe mode without a
   tower (failing applies a 100k-tick penalty within 1 room).
 - **Abandon:** Strategy marks a colony `Stage::Abandon` (never the last colony

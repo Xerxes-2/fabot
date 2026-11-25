@@ -228,9 +228,9 @@ fn sponsor(atlas: &mut Atlas, derived: &Derived, at: &Pos) -> Option<usize> {
 fn sponsors(atlas: &mut Atlas, derived: &Derived) -> Vec<Option<usize>> {
     (derived.colonies.iter().enumerate())
         .map(|(cj, c)| {
-            let g = &derived.grounds[cj];
-            let young = c.controller.level <= STORAGE_LEVEL && !g.has_storage() && !g.abandoned;
-            young.then(|| sponsor(atlas, derived, &c.controller.pos))?
+            let young = derived.ours.home(c.room).is_some_and(|h| h.young);
+            (young && !derived.grounds[cj].abandoned)
+                .then(|| sponsor(atlas, derived, &c.controller.pos))?
         })
         .collect()
 }
