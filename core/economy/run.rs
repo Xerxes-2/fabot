@@ -523,15 +523,15 @@ fn seen<'w>(world: &'w World) -> Vec<&'w Creep> {
         .collect()
 }
 
-/// Each colony's spawn time a life left by its own bodies, read before
-/// Strategy picks outposts: none of them counts, so `declarations` need hold
-/// none. Its colonies' facts are `decide`'s this tick.
+/// Each colony's spawn time a life left by its own bodies and its stock, read
+/// before Strategy picks outposts: none of them counts, so `declarations` need
+/// hold none. Its colonies' facts are `decide`'s this tick.
 pub fn spare(
     (world, atlas): (&World, &mut Atlas),
     (ours, declarations): (&atlas::Derived, &Declarations),
     intel: &Intel,
     state: &mut EconomyState,
-) -> BTreeMap<RoomName, f64> {
+) -> (BTreeMap<RoomName, f64>, BTreeMap<RoomName, i32>) {
     let seen = seen(world);
     let homes = derived::homes(world, &seen, atlas, declarations, ours);
     let derived = derived::of_world(
@@ -545,8 +545,11 @@ pub fn spare(
     let owners = slots::owners(atlas, (&derived, declarations));
     let of = (&derived, &declarations.tuning);
     let (_, spare) = slots::colonies(atlas, of, &owners, &state.assignments);
+    let stocks = (derived.grounds.iter().take(derived.colonies.len()))
+        .filter_map(|g| Some((g.room, g.stock()?)))
+        .collect();
     state.homes = Some(derived.into_homes());
-    spare
+    (spare, stocks)
 }
 
 pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout]) -> ModuleOutput {

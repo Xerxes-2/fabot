@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::season;
 use fabot_atlas::Derived;
@@ -41,6 +41,7 @@ pub struct Around<'a> {
     /// The colonies an operation holds (`outposts::busy`).
     pub busy: &'a BTreeSet<RoomName>,
     pub fought: &'a BTreeSet<RoomName>,
+    pub stocks: &'a BTreeMap<RoomName, i32>,
 }
 
 /// Candidates are planned on a due tick, not each tick: a plan is a Layout draw.
@@ -163,24 +164,17 @@ pub fn facts(
 }
 
 /// One an operation holds (`outposts::busy`) sponsors nothing: a siege's successors lagged.
-fn spare(world: &World, p: &ColonyPlan, busy: &BTreeSet<RoomName>) -> Option<i32> {
-    let r = world.room(p.room)?;
-    let level = r.controller.as_ref().map_or(0, |c| c.level);
-    let storage =
-        (r.structures.iter()).find(|s| s.kind == StructureType::Storage && s.owner.is_ours())?;
-    (p.stage == Stage::Exploit && !busy.contains(&p.room) && level >= SPONSOR_LEVEL)
-        .then(|| storage.store.amount_of(ResourceType::Energy) - p.reserve)
+fn spare(world: &World, p: &ColonyPlan, around: &Around) -> Option<i32> {
+    let stock = around.stocks.get(&p.room)?;
+    let level = (world.room(p.room)?.controller.as_ref()).map_or(0, |c| c.level);
+    (p.stage == Stage::Exploit && !around.busy.contains(&p.room) && level >= SPONSOR_LEVEL)
+        .then(|| stock - p.reserve)
 }
 
 /// `margin`: the stock past its reserve a sponsor carries a young room on.
-fn sponsors(
-    world: &World,
-    plans: &[ColonyPlan],
-    busy: &BTreeSet<RoomName>,
-    margin: i32,
-) -> Vec<RoomName> {
+fn sponsors(world: &World, plans: &[ColonyPlan], around: &Around, margin: i32) -> Vec<RoomName> {
     (plans.iter())
-        .filter(|p| spare(world, p, busy).is_some_and(|s| s >= margin))
+        .filter(|p| spare(world, p, around).is_some_and(|s| s >= margin))
         .map(|p| p.room)
         .collect()
 }
@@ -204,14 +198,14 @@ pub fn book(
     world: &World,
     derived: &Derived,
     plans: &mut [ColonyPlan],
-    (busy, margin): (&BTreeSet<RoomName>, i32),
+    (around, margin): (&Around, i32),
     may_start: bool,
 ) {
     if derived.capped || !may_start {
         return;
     }
     let richest = (plans.iter_mut())
-        .filter_map(|p| Some((spare(world, p, busy)?, std::cmp::Reverse(p.room), p)))
+        .filter_map(|p| Some((spare(world, p, around)?, std::cmp::Reverse(p.room), p)))
         .max_by_key(|(s, room, _)| (*s, *room));
     if let Some((_, _, p)) = richest {
         p.reserve += margin + world.room(p.room).map_or(0, |r| r.energy_capacity);
@@ -271,6 +265,7 @@ pub fn step<'t>(
         outposts,
         busy,
         fought,
+        ..
     } = *around;
     let raising = raising(derived, declarations, None).next().is_some();
     let tuning = &declarations.tuning;
@@ -351,7 +346,7 @@ pub fn step<'t>(
             .map(|f| 1.0 - f64::from(world.time - f.since) / f64::from(FORGET))
             .sum()
     };
-    let sponsors = sponsors(world, plans, busy, tuning.sponsor_margin);
+    let sponsors = sponsors(world, plans, around, tuning.sponsor_margin);
     let worked =
         |room: RoomName| (declarations.outposts.iter().chain(outposts)).any(|o| o.room == room);
     let mut scored: Vec<(f64, Outpost)> = Vec::new();

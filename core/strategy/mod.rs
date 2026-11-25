@@ -285,7 +285,7 @@ pub fn plan<'t>(
     );
     let homes =
         (declarations.clone()).planned((plans.clone(), Vec::new(), claiming.clone(), Vec::new()));
-    let spare = fabot_economy::spare((world, atlas), (derived, &homes), intel, economy);
+    let (spare, stocks) = fabot_economy::spare((world, atlas), (derived, &homes), intel, economy);
     let chosen = outposts::chosen(
         world,
         candidates,
@@ -298,6 +298,7 @@ pub fn plan<'t>(
         outposts: &chosen,
         busy: &busy,
         fought: &fought,
+        stocks: &stocks,
     };
     expand::step(
         world,
@@ -310,7 +311,7 @@ pub fn plan<'t>(
     );
     let may_start = expand::may_start(derived, declarations, expansion);
     let margin = declarations.tuning.sponsor_margin;
-    expand::book(world, derived, &mut plans, (&busy, margin), may_start);
+    expand::book(world, derived, &mut plans, (&around, margin), may_start);
     let claim = expand::claim(intel, derived, expansion.in_flight.as_ref());
     let mut operations = operations(derived, declarations, (&chosen, claim.as_ref()), &preyed);
     let (planned, worked) = ((declarations, &plans[..]), (&chosen[..], claim.as_ref()));
