@@ -490,6 +490,10 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   overlap. Splits keep the id on the largest fragment; merges keep the older id.
   Emits `Split`, `Merged`, `Left`, `Newcomer`. New ids strictly exceed `held`
   (highest id in groups or engagements).
+  `❓` A healer pacing 4 and 5 tiles from its striker splits and merges their
+  group every other tick, so its centre flaps and each split re-prices its
+  Defend (soak:many W8N3 1+7, W7N3 t10487–10521); damping it is hysteresis
+  (owner's call). Reach reads the room's armed meanwhile (`Scene::raid`).
 - **Vision grace:** invisible groups turn `Lost` and expire after
   `LOST_GROUP_TICKS = 30` — the sole vision grace in Fight.
 

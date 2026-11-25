@@ -579,13 +579,16 @@ impl<'a> Scene<'a> {
         self.ask_slots(atlas, e, due, asked);
     }
 
+    /// Its room's armed and with `own` its own, as Price fights: the tracker may split a raid.
+    pub(super) fn raid<'s>(&'s self, g: &'s Group, own: bool) -> impl Iterator<Item = &'s Creep> {
+        (self.foes.get(&g.room()).into_iter().flatten())
+            .filter(move |h| self.armed.contains(&h.id) || own && g.members.contains(&h.id))
+    }
+
     pub(crate) fn in_reach(&self, e: &Engagement) -> bool {
-        let members = self
-            .by_id
-            .get(&e.group)
-            .into_iter()
-            .flat_map(|g| &g.members);
-        let raid: Vec<&Pos> = members.filter_map(|m| self.hostile_at.get(m)).collect();
+        let raid: Vec<&Pos> = (self.by_id.get(&e.group).into_iter())
+            .flat_map(|g| self.raid(g, true).map(|h| &h.pos))
+            .collect();
         let near = |c: &&Creep| raid.iter().any(|at| c.pos.within(engine::RANGED_RANGE, at));
         self.members_of(e).iter().any(near)
     }

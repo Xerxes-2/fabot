@@ -15,6 +15,7 @@ export const OUTPOST_LOSSES = 2;
 export function engagements(write, bodyOf, offset, closes, killedAt) {
   const open = new Map();
   let lastCreeps = new Set();
+  const pending = [];
   const run = (time) => (time == null ? null : time - offset);
   // `merged`: `run::merged` folded it into an older open Defend on its raid (the older one's group holds
   // its raid's bodies, or its `ours` its bodies), so it did not close and writes no row.
@@ -48,6 +49,9 @@ export function engagements(write, bodyOf, offset, closes, killedAt) {
       const now = new Set();
       const asked = new Set((fight?.casts ?? []).map((c) => c.engagement));
       const struck = new Set(strikes.map(([by]) => by));
+      const holds = (g, raid) => g.members.some((m) => raid.includes(m));
+      for (const { rec, t: at, closing } of pending.splice(0))
+        close(rec, at, (fight?.groups ?? []).some((g) => holds(g, rec.raid) && closing.some((o) => holds(g, o.raid))));
       const creeps = new Set(objects.filter((o) => o.type === "creep").map((o) => o.id));
       // `sweep::prey`: his bodies that work, carry or claim and strike back with nothing.
       const preyIn = new Set(objects.filter((o) => o.type === "creep" && !o.ours && /[wck]/.test(bodyOf(o.name)) && !/[ar]/.test(bodyOf(o.name))).map((o) => o.room));
@@ -123,16 +127,20 @@ export function engagements(write, bodyOf, offset, closes, killedAt) {
         rec.plinked += strikes.filter(([by, hit]) => roomOf.has(by) && hit && !creeps.has(hit) && !lastCreeps.has(hit) && preyIn.has(roomOf.get(by))).length;
       }
       lastCreeps = creeps;
-      for (const [id, rec] of open)
-        if (!now.has(id)) {
-          open.delete(id);
-          const raid = (e) => (fight?.groups ?? []).find((g) => g.id === e.group)?.members ?? [];
-          const older = (fight?.engagements ?? []).filter((e) => (e.kind ?? "defend") === "defend" && e.id < rec.id);
-          const merged = older.some((e) => raid(e).some((m) => rec.raid.includes(m)) || namesOf(e.ours).some((n) => rec.standing.includes(n)));
-          close(rec, t, rec.kind === "defend" && merged);
-        }
+      const gone = [...open.values()].filter((rec) => !now.has(rec.id));
+      for (const rec of gone) {
+        open.delete(rec.id);
+        const raid = (e) => (fight?.groups ?? []).find((g) => g.id === e.group)?.members ?? [];
+        const older = (fight?.engagements ?? []).filter((e) => (e.kind ?? "defend") === "defend" && e.id < rec.id);
+        const merged = older.some((e) => raid(e).some((m) => rec.raid.includes(m)) || namesOf(e.ours).some((n) => rec.standing.includes(n)));
+        // Or into one closing this same tick, its row the pair's: the next tick's groups show the merge.
+        const closing = gone.filter((o) => o.kind === "defend" && o.id < rec.id && closes.has(`${o.id} ${t + offset}`));
+        if (rec.kind === "defend" && !merged && closing.length && !closes.has(`${rec.id} ${t + offset}`)) pending.push({ rec, t, closing });
+        else close(rec, t, rec.kind === "defend" && merged);
+      }
     },
     end() {
+      for (const { rec, t } of pending) close(rec, t, false);
       for (const rec of open.values()) close(rec, null);
     },
   };

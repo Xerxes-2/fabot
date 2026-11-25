@@ -1,0 +1,10 @@
+{
+  "why": "a set beside the raid's armed body is in its reach though the tracker splits it from its healer: soak:many W8N3 seed 1+7 (W7N3, t10384), a boosted Invader healer pacing 4 and 5 tiles from its striker split the group every other tick; with reach measured to the healer alone, each re-price read the set out of reach and re-formed it, one body fought alone while three held, four died and the raid held the outpost 1500 ticks (roadsLost 1)",
+  "modules": ["fight"],
+  "start": { "room": "W8N3", "seed": 1, "late": 7 },
+  "ticks": 11900,
+  "assert": [
+    { "measure": "hostileTicks", "room": "W7N3", "from": 10300, "to": 11900, "max": 400 },
+    { "measure": "predictedWinsLost", "room": "W7N3", "from": 10300, "to": 11900, "max": 0 }
+  ]
+}

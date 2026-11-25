@@ -600,10 +600,7 @@ impl<'a> Scene<'a> {
         let home = room.is_some_and(|r| self.homes.contains(&r.name));
         // A home's towers leave a body they cannot out-heal, armed or not, to its Defend.
         let raid: Vec<Creep> = match (g, room) {
-            (Some(g), Some(room)) => (self.foes[&room.name].iter())
-                .filter(|h| self.armed.contains(&h.id) || home && g.members.contains(&h.id))
-                .cloned()
-                .collect(),
+            (Some(g), Some(_)) => self.raid(g, home).cloned().collect(),
             _ => self.remembered.get(&at).cloned().unwrap_or_default(),
         };
         // Its kill order is the raid's owner's, a third party's bodies struck after.
