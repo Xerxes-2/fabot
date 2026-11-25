@@ -96,7 +96,7 @@ pub fn fighter_of(c: &Creep) -> Fighter {
     let (body, boosts) = (world::body_kinds(c), world::body_boosts(c));
     let mut f = fighter::of_parts(&body, &boosts, c.hits, Some(c.pos));
     // The stand-down and the price must agree on whether a hostile strikes.
-    if !c.owner.is_ours() && world::hostiles::strikes(c) {
+    if !c.owner.is_friend() && world::hostiles::strikes(c) {
         f.reach = f.reach.max(engine::strike_reach(|p| body.contains(&p)));
     }
     f.invader = c.owner == Owner::Invader;

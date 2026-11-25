@@ -285,8 +285,12 @@ impl Owner {
         matches!(self, Owner::Ally(_))
     }
 
+    pub fn is_friend(&self) -> bool {
+        self.is_ours() || self.is_ally()
+    }
+
     pub fn is_theirs(&self) -> bool {
-        !self.is_ours() && !self.is_ally() && *self != Owner::Nobody
+        !self.is_friend() && *self != Owner::Nobody
     }
 
     /// The username behind the stance; none for an Invader, a keeper or an
@@ -755,13 +759,8 @@ pub mod hostiles {
     }
 
     pub fn owned(rooms: &[Room]) -> BTreeSet<RoomName> {
-        rooms
-            .iter()
-            .filter_map(|r| match &r.controller {
-                Some(c) if c.owner.is_ours() => Some(r.name),
-                _ => None,
-            })
-            .collect()
+        let ours = |r: &&Room| r.controller.as_ref().is_some_and(|c| c.owner.is_ours());
+        rooms.iter().filter(ours).map(|r| r.name).collect()
     }
 
     /// HEAL and WORK threaten beside a striker (owner's call): alone they are

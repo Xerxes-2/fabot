@@ -40,7 +40,7 @@ impl<'a> Scene<'a> {
 
         for b in &barriers {
             if !room.blocked.contains(&b.pos)
-                && (room.structures.iter()).all(|s| s.pos != b.pos || s.walkable || Scene::rival(s))
+                && (room.structures.iter()).all(|s| s.pos != b.pos || s.walkable || siege::bars(s))
             {
                 weights[tiles::of_pos(&b.pos)] =
                     grid::weight(casting::terrain_at(Some(room), &b.pos).weight);
@@ -426,9 +426,7 @@ impl<'a> Scene<'a> {
             })
             .filter_map(|(name, g)| {
                 let room = self.in_sight(*name).filter(|r| {
-                    r.controller
-                        .as_ref()
-                        .is_none_or(|c| !c.owner.is_ours() && !c.owner.is_ally())
+                    r.controller.as_ref().is_none_or(|c| !c.owner.is_friend())
                         && !self.homes.contains(&r.name)
                         && !Scene::safe(r)
                 })?;

@@ -419,7 +419,7 @@ fn front_of(scene: &Scene, atlas: &Atlas, e: &Engagement) -> Option<tactics::Fro
     Some(tactics::Front {
         breach: wall.pos,
         wall: (!room.controller.as_ref().is_some_and(|c| c.id == wall.id)).then_some(wall.id),
-        line: (room.structures.iter().filter(|s| Scene::rival(s)))
+        line: (room.structures.iter().filter(|s| siege::bars(s)))
             .map(|s| s.pos)
             .collect(),
         posts,

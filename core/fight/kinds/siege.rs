@@ -208,11 +208,14 @@ pub fn replanned(time: i32, held: bool, e: &Engagement) -> Engagement {
     }
 }
 
+/// What a siege breaches: a wall is nobody's, an ally's rampart never ours to raze.
+pub fn bars(s: &Structure) -> bool {
+    matches!(s.kind, StructureType::Rampart | StructureType::Wall) && !s.owner.is_friend()
+}
+
 pub fn barrier_at<'a>(room: &'a Room) -> BTreeMap<Id, &'a Structure> {
-    use StructureType::*;
-    room.structures
-        .iter()
-        .filter(|s| !s.owner.is_ours() && matches!(s.kind, Rampart | Wall))
+    (room.structures.iter())
+        .filter(|s| bars(s))
         .map(|s| (s.id, s))
         .collect()
 }

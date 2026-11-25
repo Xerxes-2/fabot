@@ -135,14 +135,10 @@ impl<'a> Scene<'a> {
         }
     }
 
-    pub(super) fn rival(s: &Structure) -> bool {
-        !s.owner.is_ours() && matches!(s.kind, StructureType::Rampart | StructureType::Wall)
-    }
-
     pub(super) fn safe(room: &Room) -> bool {
         room.controller
             .as_ref()
-            .is_some_and(|c| !c.owner.is_ours() && c.safe_mode > 0)
+            .is_some_and(|c| c.owner.is_theirs() && c.safe_mode > 0)
     }
 
     pub(super) fn in_sight(&self, room: RoomName) -> Option<&'a Room<'a>> {
@@ -288,7 +284,7 @@ impl<'a> Scene<'a> {
                 .iter()
                 .filter(|s| {
                     s.kind == StructureType::Container
-                        || s.kind == StructureType::Link && !s.owner.is_ours()
+                        || s.kind == StructureType::Link && s.owner.is_theirs()
                 })
                 .filter(|s| creepless && siege::beside(&reached, &s.pos))
                 .map(|s| tactics::Mark {
