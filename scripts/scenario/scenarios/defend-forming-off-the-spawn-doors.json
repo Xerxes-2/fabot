@@ -1,0 +1,10 @@
+{
+  "why": "a forming body standing on a spawn's door waits at the muster instead, so the casts still to come walk out: W8N3's outpost W8N2 raided by a ranger, three healers and a melee at t14520 (soak:many W8N3 1+7's raid). On 8cc35dd8 its Blob set, out of the raid's reach, held where each body was born: sixteen packed the spawn's doors, the seventeenth stood finished in the spawn 1500 ticks, the Defend never left Forming (formingMost 1501) and the spawn made nothing else; the fix forms in 309 (seeds 1-5: 180-309)",
+  "modules": ["fight"],
+  "start": { "room": "W8N3", "seed": 1, "late": 7, "invaders": "W8N2:100000:14520", "wave": "ranged,healer,healer,healer,melee" },
+  "ticks": 16300,
+  "assert": [
+    { "measure": "formingMost", "room": "W8N2", "kind": "defend", "from": 14000, "max": 600 },
+    { "each": "engagement", "where": { "kind": "defend" }, "assert": { "pastBudget": { "max": 2 } } }
+  ]
+}

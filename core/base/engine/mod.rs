@@ -1,3 +1,4 @@
+use super::tiles::Tile;
 use super::vocabulary::{Boost, Part, ResourceType, damage_ratio, multiple, part_count_in};
 use screeps::{StructureType, Terrain};
 
@@ -17,23 +18,22 @@ pub fn core_clock(collapse: Option<i32>, deploy: i32) -> (i32, i32) {
     collapse.map_or((deploy + STRONGHOLD_LONGEST_COLLAPSE, deploy), |c| (c, 0))
 }
 pub const SPAWN_TICKS_PER_PART: i32 = screeps::CREEP_SPAWN_TIME as i32;
-
 pub const fn spawn_ticks(parts: usize) -> i32 {
     SPAWN_TICKS_PER_PART * parts as i32
 }
-
+/// A spawn bears its body onto a tile around it, so a body held there bars it.
+pub fn spawn_door(spawn: Tile, at: Tile) -> bool {
+    super::tiles::around(spawn).contains(&at)
+}
 pub fn carry_capacity(body: &[Part]) -> i32 {
     part_count_in(body, Part::Carry) * CARRY_PART_CAPACITY
 }
-
 pub fn carry_parts(amount: f64) -> f64 {
     amount / f64::from(CARRY_PART_CAPACITY)
 }
-
 pub fn dig_rate(work: i32) -> i32 {
     work * HARVEST_PER_WORK
 }
-
 pub fn dug(work: i32, rate: i32) -> i32 {
     dig_rate(work).min(rate)
 }

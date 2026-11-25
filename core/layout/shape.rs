@@ -1,4 +1,5 @@
 use fabot_base::declarations::MUSTER_RANGE;
+use fabot_base::engine;
 /// Ahead of `State` so `State` can hold the standing plan.
 use fabot_base::tiles::{self, Tile};
 use fabot_base::world::{Built, Pos, RoomName, StructureType};
@@ -103,7 +104,7 @@ pub fn muster(
         taken[i.tile] = true;
         paved[i.tile] |= i.kind == StructureType::Road;
         if i.kind == StructureType::Spawn {
-            for n in tiles::within(1, i.tile) {
+            for n in tiles::all().filter(|n| engine::spawn_door(i.tile, *n)) {
                 doorway[n] = true;
             }
         }

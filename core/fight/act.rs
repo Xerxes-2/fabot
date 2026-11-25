@@ -183,9 +183,10 @@ pub(super) fn act(
         }
 
         let (centre, _) = centre_of(e);
-        let order = &e.plan.order;
         let enter = e.objective == Objective::Defend;
         let gathers = enter && matches!(e.plan.tactic, Tactic::BlobClose | Tactic::BlobKite);
+        let mut spawns = (scene.world.working_spawns()).filter(|s| s.pos.room == c.pos.room);
+        let door = spawns.any(|s| engine::spawn_door(tiles::of_pos(&s.pos), tiles::of_pos(&c.pos)));
 
         if e.unanswered {
             return (None, tactics::rampart(sight, &fighters, c));
@@ -205,9 +206,11 @@ pub(super) fn act(
                 Some(gate) => tactics::drain(sight, gate, c),
                 None => tactics::hold(sight, c),
             },
+            // Held on a spawn's door a forming body bars it to the casts still to come.
+            Phase::Forming if !scene.in_reach(e) && door => tactics::retreat(sight, c),
             Phase::Forming if !gathers || !scene.in_reach(e) => tactics::hold(sight, c),
             Phase::Forming | Phase::Disengaging => tactics::retreat(sight, c),
-            Phase::Pursuing => tactics::close(sight, order, &centre, enter, c),
+            Phase::Pursuing => tactics::close(sight, &e.plan.order, &centre, enter, c),
             Phase::Approaching | Phase::Fighting => {
                 if raid::raids(e) {
                     return (
@@ -252,7 +255,7 @@ pub(super) fn act(
                 let members = scene.members_of(e);
                 tactics::engage(
                     sight,
-                    (e.plan.tactic, order),
+                    (e.plan.tactic, &e.plan.order),
                     (&centre, enter),
                     (&members, &fighters),
                     c,
