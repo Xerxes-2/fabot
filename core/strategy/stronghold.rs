@@ -39,7 +39,7 @@ pub fn rows(
                 .is_some_and(|(c, l)| *c > world.time && !l.is_empty())
     });
     let fallen: Vec<RoomName> = (world.rooms.iter())
-        .filter(|r| stronghold::fallen_with_loot(r))
+        .filter(|r| fabot_atlas::fallen_with_loot(r))
         .map(|r| r.name)
         .chain(unseen.map(|(room, _)| *room))
         .collect();

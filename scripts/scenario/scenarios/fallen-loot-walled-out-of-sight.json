@@ -1,0 +1,7 @@
+{
+  "why": "a fallen stronghold's loot stays declared out of sight while all of it is walled: intel keeps what stands there (W3N2's container of 500 utrium_bar under an Invader rampart, its core gone, last seen as the run starts), so the room's Pickup row stands, a dismantler walks in to see its wall, breaks it and the loot comes home. On 3ccb7893 intel kept only the loot a carrier could take, an empty row once all of it was walled, and nothing went (lootTaken 0)",
+  "modules": ["economy", "strategy", "atlas"],
+  "start": { "world": "scripts/scenario/worlds/fallen-loot-out-of-sight.json", "seed": 1 },
+  "ticks": 1500,
+  "assert": [{ "measure": "lootTaken", "room": "W3N2", "min": 100 }]
+}

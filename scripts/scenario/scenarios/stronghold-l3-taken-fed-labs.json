@@ -1,5 +1,5 @@
 {
-  "why": "stronghold-l3-taken on the W8N3 M7 layout the centre-first planner stands (laid over the template map): a carrier owing a waiting ranger's lab its energy topped itself up from piles and the store first (t649 to t757, t797 to t858), so the first ranger left with two of its four compounds, the stronghold fell at t1900, the set aged out before its last defender died and no loot came home (main at acbe1ab4: lootTaken 0); and with the ring open and the second ranger waiting, carriers gathered piles while the stock stood under the reserve (main at b7e0f921: cast at t952)",
+  "why": "stronghold-l3-taken on the W8N3 M7 layout the centre-first planner stands (laid over the template map): a carrier owing a waiting ranger's lab its energy topped itself up from piles and the store first (t649 to t757, t797 to t858), so the first ranger left with two of its four compounds, the stronghold fell at t1900, the set aged out before its last defender died and no loot came home (main at acbe1ab4: lootTaken 0); and with the ring open and the second ranger waiting, carriers gathered piles while the stock stood under the reserve (main at b7e0f921: cast at t952); and all of its loot comes home, the containers its ramparts wall too, broken by Economy's dismantlers round its inert garrison: main at 796c32ca took 64 2 59 46 56 35 46 22 percent over seeds 1-8, its fight set aging out with containers still walled",
   "modules": [
     "exchange",
     "fight",
@@ -22,7 +22,7 @@
     {
       "measure": "lootTaken",
       "room": "W8N2",
-      "min": 30
+      "min": 100
     },
     {
       "measure": "ruinLootLeft",

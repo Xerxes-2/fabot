@@ -17,7 +17,10 @@ pub use self::derived::{
 };
 pub use self::graph::Tree;
 use self::graph::Way;
-pub use self::loot::loot_in;
+pub use self::loot::{
+    cast_by_core, fallen, fallen_with_loot, garrison, invader_rampart, invader_rampart_at, loot,
+    loot_in, loot_wall, walls_of,
+};
 
 use fabot_base::engine;
 use fabot_base::grid::{
@@ -1329,12 +1332,12 @@ impl Atlas {
         self.field_round(mover, target, at, None)
     }
 
-    pub fn reaches_live(&self, from: &Pos, to: &Pos) -> bool {
+    pub fn reaches_live(&self, from: Option<&Pos>, to: &Pos) -> bool {
         let Some(field) = self.field(Atlas::PACE, &target_at(to, 1), to) else {
             return true;
         };
         let walked = |t: &Tile| field.ticks(*t).is_some();
-        if from.room == to.room {
+        if let Some(from) = from.filter(|f| f.room == to.room) {
             return walked(&tiles::of_pos(from));
         }
         (Atlas::EXITS.iter()).any(|e| tiles::exit_tiles(*e).iter().any(walked))

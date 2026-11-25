@@ -29,6 +29,7 @@ pub enum Job {
     Reserve(Id),
     Claim(Id),
     Scout(RoomName),
+    Dismantle(RoomName),
 }
 
 impl Job {
@@ -45,6 +46,7 @@ impl Job {
             Job::Upgrade => Pattern::Upgrader,
             Job::Reserve(_) | Job::Claim(_) => Pattern::Claimer,
             Job::Scout(_) => Pattern::Scout,
+            Job::Dismantle(_) => Pattern::Dismantler,
         }
     }
 }
@@ -1037,6 +1039,13 @@ pub fn plan(
             });
         }
     }
+    for p in &derived.pickups {
+        let Some((_, at)) = p.wall else { continue };
+        let capacity = derived.colonies[p.colony].bank_capacity;
+        let body = bodies::sized(Pattern::Dismantler, MOST, capacity);
+        let slot = |b| Slot::new(p.colony, false, Job::Dismantle(at.room), at, at.room, 0, b);
+        out.extend(body.map(slot));
+    }
     for c in &derived.claims {
         let ci = sponsor(atlas, derived, &c.pos);
         out.extend(ci.and_then(|ci| errand(derived, ci, Job::Claim(c.id), c.pos, &c.id.text())));
@@ -1143,6 +1152,7 @@ fn rank_of(job: &Job, own: bool) -> i32 {
         (Job::Fill, _) => 1,
         (Job::Reserve(_) | Job::Claim(_), _) => SIGHT,
         (Job::Scout(_), _) => 12,
+        (Job::Dismantle(_), _) => SPEND - 1,
         (Job::Dig(_), false) => 4,
         (Job::Work(_), _) => SPEND,
         (Job::Upgrade, _) => 11,

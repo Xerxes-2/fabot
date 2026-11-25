@@ -64,6 +64,7 @@ pub enum Task {
     Upgrade(Target),
     Reserve(Target),
     Claim(Target),
+    Dismantle(Target),
     /// A carrier bringing this body its load.
     Meet(Target),
     /// A room, by name: what it holds is not seen until a body stands in it.
@@ -82,6 +83,7 @@ impl Task {
             | Task::Upgrade(t)
             | Task::Reserve(t)
             | Task::Claim(t)
+            | Task::Dismantle(t)
             | Task::Meet(t) => Some(*t),
             Task::Scout(_) => None,
         }
@@ -100,6 +102,7 @@ pub fn task_id(task: &Task) -> String {
         Task::Upgrade(_) => "u:",
         Task::Reserve(_) => "v:",
         Task::Claim(_) => "c:",
+        Task::Dismantle(_) => "d:",
         Task::Meet(_) => "m:",
         Task::Scout(_) => "s:",
     };
@@ -135,6 +138,7 @@ pub fn of_task_id(id: &str) -> Option<Task> {
         ("u", None, _) => Some(Task::Upgrade(t)),
         ("v", None, _) => Some(Task::Reserve(t)),
         ("c", None, _) => Some(Task::Claim(t)),
+        ("d", None, _) => Some(Task::Dismantle(t)),
         ("m", None, _) => Some(Task::Meet(t)),
         _ => None,
     }
@@ -164,6 +168,7 @@ impl Task {
             | Task::Refill(_, _)
             | Task::Reserve(_)
             | Task::Claim(_)
+            | Task::Dismantle(_)
             | Task::Meet(_) => 1,
             Task::Scout(_) => RANGE_SCOUT,
         }

@@ -14,6 +14,7 @@ pub enum Pattern {
     Upgrader,
     Claimer,
     Scout,
+    Dismantler,
 }
 
 pub fn block_of(pattern: Pattern) -> &'static [Part] {
@@ -29,6 +30,7 @@ pub fn block_of(pattern: Pattern) -> &'static [Part] {
         Pattern::Upgrader => &UPGRADER,
         Pattern::Claimer => &CLAIMER,
         Pattern::Scout => &[Part::Move],
+        Pattern::Dismantler => &[Part::Work, Part::Move],
     }
 }
 
@@ -222,7 +224,7 @@ pub fn sized(pattern: Pattern, most: i32, capacity: i32) -> Option<Vec<Part>> {
         Pattern::Harvester => harvester_body(|n| (n + 1) / 2, most.max(2), capacity),
         Pattern::Hauler => whole_blocks(block_of(pattern), (most + 1) / 2, capacity),
         Pattern::Upgrader => upgrader_body(0, 0, most, capacity),
-        Pattern::Claimer => whole_blocks(block_of(pattern), most, capacity),
+        Pattern::Claimer | Pattern::Dismantler => whole_blocks(block_of(pattern), most, capacity),
         Pattern::Scout => block_of(pattern).to_vec(),
     };
     Some(engine::with_move_last(body))

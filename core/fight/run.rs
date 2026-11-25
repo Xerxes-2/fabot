@@ -133,8 +133,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
 
     let (mut engagements, casts) = merged(&events, &state.engagements, &state.casts);
 
-    let (armed, opens) =
-        open::armed_and_opening(world, owned, (&worked, &homes), &hostiles, &cores);
+    let (armed, opens) = open::armed_and_opening(owned, (&worked, &homes), &hostiles, &cores);
     open::newcomers(
         &mut engagements,
         &events,

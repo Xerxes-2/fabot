@@ -396,6 +396,8 @@ pub struct LinkNet {
 pub struct Pickup {
     pub colony: usize,
     pub loot: Vec<(Id, Pos, ResourceType, i32)>,
+    /// The wall a dismantler breaks, its id unknown out of sight.
+    pub wall: Option<(Option<Id>, Pos)>,
 }
 
 fn pickups_of(
@@ -408,19 +410,32 @@ fn pickups_of(
         let home = colonies[ci].room;
         ours.tree(home)?.crossings(home, room)
     };
-    let seen = |room: RoomName| match world.room(room) {
-        Some(r) => Some(fabot_atlas::loot_in(r, atlas)),
-        None => (intel.get(&room)?.loot.clone())
-            .filter(|(c, _)| *c > world.time)
-            .map(|l| l.1),
+    let seen = |room: RoomName| {
+        if let Some(r) = world.room(room) {
+            let loot: Vec<_> = (fabot_atlas::loot_in(r).into_iter())
+                .filter(|l| fabot_atlas::invader_rampart_at(r, &l.0.pos).is_none())
+                .collect();
+            let wall = fabot_atlas::loot_wall(r, atlas).map(|(id, at)| (Some(id), at));
+            return Some((loot, wall));
+        }
+        let (_, loot) = (intel.get(&room)?.loot.clone()).filter(|(c, _)| *c > world.time)?;
+        let wall = loot.iter().find(|l| l.3).map(|l| (None, l.0.pos));
+        Some((
+            loot.into_iter()
+                .filter(|l| !l.3)
+                .map(|(at, r, n, _)| (at, r, n))
+                .collect(),
+            wall,
+        ))
     };
     (declarations.rooms(OpKind::Pickup))
         .filter_map(|room| {
-            let loot: Vec<(Id, Pos, ResourceType, i32)> = (seen(room)?.into_iter())
+            let (loot, wall) = seen(room)?;
+            let loot: Vec<(Id, Pos, ResourceType, i32)> = (loot.into_iter())
                 .map(|(at, r, n)| (at.id, at.pos, r, n))
                 .collect();
             // `jobs` fetches only for a bank with room for the load: one with none idles a carrier.
-            let least = loot.iter().map(|l| l.3).min()?;
+            let least = loot.iter().map(|l| l.3).min().or(wall.map(|_| 0))?;
             let takes =
                 |ci: usize| (grounds[ci].bank()).is_some_and(|b| b.owned && b.free >= least);
             let colony = (0..colonies.len())
@@ -428,7 +443,7 @@ fn pickups_of(
                 .filter_map(|ci| Some((crossed(ci, room)?, ci)))
                 .min()?
                 .1;
-            Some(Pickup { colony, loot })
+            Some(Pickup { colony, loot, wall })
         })
         .collect()
 }
@@ -1741,8 +1756,14 @@ pub fn of_world<'t>(
         (&colonies, &grounds),
     );
     let mut spots = spots_of(&grounds, &claims, &bodies);
-    for (id, pos, _, _) in pickups.iter().flat_map(|p| &p.loot) {
-        spots.entry(Target::Object(*id)).or_insert(*pos);
+    let walls = pickups.iter().filter_map(|p| Some((p.wall?.0?, p.wall?.1)));
+    for (id, pos) in pickups
+        .iter()
+        .flat_map(|p| &p.loot)
+        .map(|l| (l.0, l.1))
+        .chain(walls)
+    {
+        spots.entry(Target::Object(id)).or_insert(pos);
     }
 
     Derived {

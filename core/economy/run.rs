@@ -170,6 +170,7 @@ fn act_of(derived: &Derived, task: &Task) -> Option<CreepAct> {
         Task::Reserve(id) if held(*id) => CreepAct::Unreserve(at(id)?),
         Task::Reserve(id) => CreepAct::Reserve(at(id)?),
         Task::Claim(id) => CreepAct::ClaimController(at(id)?),
+        Task::Dismantle(id) => CreepAct::Dismantle(at(id)?),
         Task::Scout(_) | Task::Meet(_) => return None,
     })
 }
@@ -321,7 +322,7 @@ fn weight_of(job: &Job) -> i32 {
     match job {
         Job::Dig(_) | Job::Reserve(_) | Job::Claim(_) => 41,
         Job::Fill => 31,
-        Job::Work(_) => 21,
+        Job::Work(_) | Job::Dismantle(_) => 21,
         Job::Upgrade => 11,
         Job::Scout(_) => 1,
     }
@@ -468,7 +469,7 @@ fn work(
         // The API refuses a spend from an empty store before the draw lands.
         let can = match task {
             Task::Upgrade(_) | Task::Build(_) | Task::Repair(_) => body.energy > 0 && body.work > 0,
-            Task::Harvest(_) => body.work > 0,
+            Task::Harvest(_) | Task::Dismantle(_) => body.work > 0,
             Task::Reserve(_) | Task::Claim(_) => body.claim > 0,
             Task::Withdraw(id, r) => holds(derived, *id, *r) > 0 && body.free > 0,
             Task::Pickup(..) => body.free > 0,

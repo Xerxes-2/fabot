@@ -1,6 +1,5 @@
 /// `Stronghold` (`ARCHITECTURE.md` §6.2): an Invader core shot dead from out
-/// of its garrison's reach, then the ramparts over its loot; `step` closes it
-/// with None once its room holds neither.
+/// of its garrison's reach, then the garrison off its ramparts.
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::super::casting;
@@ -13,9 +12,9 @@ use fabot_base::declarations::{Declarations, OpKind, REACH_HOPS};
 use fabot_base::engine;
 use fabot_base::intents::CreepAct;
 use fabot_base::tiles;
-use fabot_base::vocabulary::{Part, ResourceType};
+use fabot_base::vocabulary::Part;
 use fabot_base::wish::Wish;
-use fabot_base::world::{Creep, Id, Owner, Pos, Room, RoomName, Structure, StructureType};
+use fabot_base::world::{Creep, Id, Owner, Pos, Room, RoomName, Structure};
 use fabot_exchange::stronghold::{self as bunker, Bunker};
 use fabot_exchange::{Outcome, Side, Terrain};
 use fabot_tactics::{self as tactics, Sight, Tactic};
@@ -34,9 +33,8 @@ pub(crate) fn step(
     let next = super::pruned(e, standing, aging_out);
     let asked = scene.spawning.iter().any(|c| c.engagement == e.id);
     let declared = declarations.priority(OpKind::Stronghold, e.room).is_some();
-    let held = scene
-        .in_sight(e.room)
-        .is_none_or(|r| r.invader_core().is_some() || !loot(r).is_empty());
+    let held = (scene.in_sight(e.room))
+        .is_none_or(|r| r.invader_core().is_some() || bare(r).next().is_some());
     let known = (scene.intel.get(&e.room)).is_some_and(|r| r.stronghold.is_some());
     let arrived = scene.members_of(&next).iter().any(|c| c.pos.room == e.room);
     let gone = next.ours.is_empty() && !asked && !(next.unanswered && known);
@@ -193,76 +191,29 @@ pub fn take(level: i32, (stock, capacity, walk): (&Stock, i32, Option<i32>)) -> 
     })
 }
 
-fn invader(s: &Structure, kind: StructureType) -> bool {
-    s.kind == kind && s.owner == Owner::Invader
+/// A fallen core's garrison strikes nothing and stands where it was: off a
+/// rampart it is shot, as it walls a loot's side.
+fn bare<'a>(room: &'a Room) -> impl Iterator<Item = &'a Creep> {
+    (room.hostiles()).filter(|h| {
+        fabot_atlas::garrison(room, h) && fabot_atlas::invader_rampart_at(room, &h.pos).is_none()
+    })
 }
 
-fn rampart_at<'a>(room: &'a Room, at: &Pos) -> Option<&'a Structure> {
-    (room.structures.iter()).find(|s| invader(s, StructureType::Rampart) && s.pos == *at)
-}
-
-fn loot(room: &Room) -> Vec<Pos> {
-    let held = |store: &fabot_base::world::Store| {
-        (store.held.iter()).any(|(r, n)| *r != ResourceType::Energy && *n > 0)
-    };
-    let containers = (room.structures.iter())
-        .filter(|s| s.kind == StructureType::Container && held(&s.store))
-        .map(|s| s.pos);
-    (room.remains.iter())
-        .filter(|r| held(&r.store))
-        .map(|r| r.pos)
-        .chain(containers)
-        .collect()
-}
-
-/// A stronghold's ramparts stand to its collapse, its core gone or not.
-pub fn fallen_with_loot(room: &Room) -> bool {
-    let rampart = |s: &Structure| invader(s, StructureType::Rampart);
-    room.structures.iter().any(rampart) && room.invader_core().is_none() && !loot(room).is_empty()
-}
-
-/// The core's own rampart, then one over loot or over a walkable side of
-/// loot walled in on every side: the fewest hits, then the most it frees.
-fn mark(room: &Room, atlas: &Atlas) -> Option<(Id, Pos)> {
+fn mark(room: &Room) -> Option<(Id, Pos)> {
     let of = |s: &Structure| (s.id, s.pos);
     if let Some(c) = room.invader_core() {
-        return Some(of(rampart_at(room, &c.pos).unwrap_or(c)));
+        return Some(of(
+            fabot_atlas::invader_rampart_at(room, &c.pos).unwrap_or(c)
+        ));
     }
-    // A fallen core's garrison strikes nothing and stands where it was: off
-    // a rampart it is shot, as it walls a loot's side.
-    let bare = (room.hostiles())
-        .filter(|h| h.owner == Owner::Invader && rampart_at(room, &h.pos).is_none());
-    if let Some(h) = bare.min_by_key(|h| (h.hits, h.id)) {
-        return Some((h.id, h.pos));
-    }
-    let walkable = |p: &Pos| {
-        (room.structures.iter())
-            .all(|s| s.pos != *p || s.walkable || s.kind == StructureType::Rampart)
-    };
-    let open = |p: &Pos| {
-        walkable(p) && atlas.passable(room.name, tiles::of_pos(p)) && rampart_at(room, p).is_none()
-    };
-    let mut walls: BTreeMap<(Id, Pos), (i32, i32)> = BTreeMap::new();
-    let mut wall = |s: &Structure| walls.entry(of(s)).or_insert((s.hits, 0)).1 -= 1;
-    for at in loot(room) {
-        rampart_at(room, &at).into_iter().for_each(&mut wall);
-        let around: Vec<Pos> = (tiles::around(tiles::of_pos(&at)).iter())
-            .map(|t| tiles::to_pos(room.name, *t))
-            .collect();
-        if !around.iter().any(open) {
-            let sides = around.iter().filter(|p| walkable(p));
-            sides
-                .filter_map(|p| rampart_at(room, p))
-                .for_each(&mut wall);
-        }
-    }
-    Some(walls.into_iter().min_by_key(|(at, rank)| (*rank, *at))?.0)
+    let h = bare(room).min_by_key(|h| (h.hits, h.id))?;
+    Some((h.id, h.pos))
 }
 
 /// Out of the garrison's reach first: it never leaves its ramparts.
 fn post(room: &Room, atlas: &Atlas, mark: &Pos, (c, mates): (&Creep, &[Pos])) -> Option<Pos> {
     let ramparts: Vec<Pos> = (room.structures.iter())
-        .filter(|s| invader(s, StructureType::Rampart))
+        .filter(|s| fabot_atlas::invader_rampart(s))
         .map(|s| s.pos)
         .collect();
     let reach = (room.hostiles())
@@ -342,7 +293,7 @@ fn walked(
             tactics::toward(sight, c, middle, engine::ROOM_SIDE / 2 - 2),
         );
     };
-    let Some((mark, at)) = mark(room, sight.atlas) else {
+    let Some((mark, at)) = mark(room) else {
         return (None, tactics::hold(sight, c));
     };
     let shot = (c.pos.within(engine::RANGED_RANGE, &at) && c.live(Part::RangedAttack) > 0)

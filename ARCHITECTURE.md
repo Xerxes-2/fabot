@@ -625,10 +625,13 @@ with one phase machine per kind under `core/fight/kinds/`.
   leaders take L1 with one ranger). Its bodies shoot the core's rampart,
   then the core, from the post out of the garrison's reach the towers
   strike least, healed ahead of every strike; once the core falls its
-  towers and garrison strike nothing (`Derived.danger` drops them), and
-  the set shoots any of its garrison off a rampart, then breaks the
-  ramparts over its loot, until Economy has hauled it; that garrison opens
-  no Defend either.
+  towers and garrison strike nothing (`Derived.danger` drops them: a
+  garrison outlives a creep's life), and the set shoots any of its garrison
+  off a rampart; that garrison opens no Defend either. The ramparts over
+  its loot are Economy's: a dismantler (WORK/MOVE, sized to the bank) of
+  the colony hauling it breaks `fabot_atlas::loot_wall`'s choice, a wall a
+  body reaches round the garrison, as WORK dismantles five times what
+  RANGED strikes and a fight set ages out before its loot is free.
   `❓` L4 (fortifier, ranged garrison reaching every post) and L5.
 
 **Planned kinds:** `Claim` (claimer + Economy pioneers), `KeeperDuty` (lair

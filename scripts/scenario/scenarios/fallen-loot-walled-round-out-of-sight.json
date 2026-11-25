@@ -1,0 +1,7 @@
+{
+  "why": "fallen-loot-walled-out-of-sight with the container's own tile bare and Invader ramparts on all eight sides: intel marks loot walled by what a dismantler must break, its sides too, so out of sight the room's Pickup keeps the wall its dismantler walks in to see. On 722a7f62 a sight marked only loot under a rampart, the container read takeable out of sight, no wall stood in the Pickup and the dismantler's slot went with the sight",
+  "modules": ["economy", "strategy", "atlas"],
+  "start": { "world": "scripts/scenario/worlds/fallen-loot-walled-round.json", "seed": 1 },
+  "ticks": 1500,
+  "assert": [{ "measure": "lootTaken", "room": "W3N2", "min": 100 }]
+}

@@ -33,7 +33,7 @@ pub struct Row {
     pub loot: Option<Loot>,
 }
 
-pub type Loot = (i32, Vec<(Declared, ResourceType, i32)>);
+pub type Loot = (i32, Vec<(Declared, ResourceType, i32, bool)>);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Stronghold {
@@ -115,7 +115,8 @@ const NONE: &str = "-";
 /// One line a room, `room seen owner level reserver lapse worker lairs controller sources
 /// contained mineral stronghold towered loot`, `-` for none (`loot` left off); `lairs` as
 /// `lair.resource,…`, `sources` `id@tile,…` (`.` for none), `stronghold` `level.deploys.collapses`,
-/// `loot` `collapse;id@tile:resource:amount,…` (a fallen stronghold's); a segment holds thousands.
+/// `loot` `collapse;id@tile:resource:amount[:w walled],…` (a fallen stronghold's); a segment holds
+/// thousands.
 pub fn to_text(intel: &Intel) -> String {
     use std::fmt::Write;
     fn name(user: &Option<String>) -> &str {
@@ -184,9 +185,9 @@ pub fn to_text(intel: &Intel) -> String {
         out.push_str(if r.towered { " 1" } else { " 0" });
         if let Some((collapse, loot)) = &r.loot {
             let _ = write!(out, " {collapse};");
-            for (i, (at, resource, n)) in loot.iter().enumerate() {
+            for (i, (at, resource, n, walled)) in loot.iter().enumerate() {
                 id_at(&mut out, if i == 0 { "" } else { "," }, at.id, &at.pos);
-                let _ = write!(out, ":{resource}:{n}");
+                let _ = write!(out, ":{resource}:{n}{}", if *walled { ":w" } else { "" });
             }
         }
         out.push('\n');
@@ -230,7 +231,8 @@ fn loot_of(room: RoomName, text: &str) -> Option<Loot> {
     let item = |l: &str| {
         let mut f = l.split(':');
         let at = site_of(room, f.next()?)?;
-        Some((at, f.next()?.parse().ok()?, f.next()?.parse().ok()?))
+        let (resource, n) = (f.next()?.parse().ok()?, f.next()?.parse().ok()?);
+        Some((at, resource, n, f.next() == Some("w")))
     };
     let items = list.split(',').filter_map(item).collect();
     Some((collapse.parse().ok()?, items))
@@ -331,6 +333,7 @@ mod tests {
                 0..=49,
                 select(crate::vocabulary::ORES.to_vec()),
                 1..=9_999,
+                any::<bool>(),
             ),
             0..3,
         );
@@ -368,7 +371,7 @@ mod tests {
                 }),
                 towered,
                 loot: loot.map(|(collapse, loot)| {
-                    let loot = (loot.into_iter()).map(|(id, x, y, resource, amount)| {
+                    let loot = (loot.into_iter()).map(|(id, x, y, resource, amount, walled)| {
                         let id = format!("{id:x}").as_str().into();
                         (
                             Declared {
@@ -377,6 +380,7 @@ mod tests {
                             },
                             resource,
                             amount,
+                            walled,
                         )
                     });
                     (collapse, loot.collect())

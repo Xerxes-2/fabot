@@ -2,22 +2,14 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::shape::{Engagement, Group, Objective, Phase};
 use crate::tracker;
-use fabot_base::world::{Creep, Id, Owner, RoomName, StructureType, World, hostiles};
+use fabot_base::world::{Creep, Id, RoomName, hostiles};
 
 pub fn armed_and_opening(
-    world: &World,
     owned: &BTreeSet<RoomName>,
     (worked, homes): (&BTreeSet<RoomName>, &BTreeSet<RoomName>),
     hostiles: &[Creep],
     cores: &BTreeSet<Id>,
 ) -> (BTreeSet<Id>, BTreeSet<Id>) {
-    let stronghold: BTreeSet<RoomName> = (world.rooms.iter())
-        .filter(|r| {
-            (r.structures.iter())
-                .any(|s| s.kind == StructureType::Rampart && s.owner == Owner::Invader)
-        })
-        .map(|r| r.name)
-        .collect();
     // An outpost has no towers to answer a body that works it (§7.2).
     let outpost = |r: &RoomName| worked.contains(r) && !homes.contains(r);
     let works = |h: &Creep| outpost(&h.pos.room) && hostiles::works(h);
@@ -26,10 +18,8 @@ pub fn armed_and_opening(
         .filter(|h| cores.contains(&h.id) || hostiles::armed(owned, hostiles, h) || works(h))
         .map(|h| h.id)
         .collect();
-    // A stronghold's garrison stands down unfought; `armed` keeps it for every other reader.
-    let garrison = |h: &Creep| h.owner == Owner::Invader && stronghold.contains(&h.pos.room);
     let opens: BTreeSet<Id> = (hostiles.iter())
-        .filter(|h| armed.contains(&h.id) && !garrison(h))
+        .filter(|h| armed.contains(&h.id) && !fabot_atlas::cast_by_core(h))
         .map(|h| h.id)
         .collect();
     (armed, opens)

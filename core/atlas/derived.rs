@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use super::loot::{fallen, garrison};
 use super::{Atlas, Mover, Target, Tree};
 use fabot_base::declarations::{ColonyPlan, Declarations, Outpost, REACH_HOPS, Stage};
 use fabot_base::grid::{self, Footprint};
@@ -180,21 +181,15 @@ impl Derived {
 fn danger(world: &World, owned: &BTreeSet<RoomName>, guarded: bool) -> Vec<(RoomName, TileSet)> {
     let reaches = |r: &Room| {
         let guards = guards(world, r.name);
-        let fallen = |o: &Owner, at: &Pos| {
-            *o == Owner::Invader
-                && r.invader_core().is_none()
-                && (r.structures.iter())
-                    .any(|s| s.kind == StructureType::Rampart && s.pos == *at && s.owner == *o)
-        };
         let creeps = (r.hostiles())
-            .filter(|c| hostiles::foe(c) && hostiles::strikes(c) && !fallen(&c.owner, &c.pos))
+            .filter(|c| hostiles::foe(c) && hostiles::strikes(c) && !garrison(r, c))
             .filter(|c| !(guarded && held(&guards, c)))
             .map(|c| (tiles::of_pos(&c.pos), hostiles::reach(c)));
         let towers = (r.structures.iter())
             .filter(|s| {
                 s.kind == StructureType::Tower
                     && s.owner.is_theirs()
-                    && !fallen(&s.owner, &s.pos)
+                    && !(s.owner == Owner::Invader && fallen(r))
                     && s.store.amount_of(ResourceType::Energy) >= engine::TOWER_ENERGY_COST
             })
             .map(|s| (tiles::of_pos(&s.pos), engine::TOWER_FALLOFF_RANGE));

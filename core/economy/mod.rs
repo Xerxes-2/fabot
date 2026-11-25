@@ -53,7 +53,7 @@ pub(crate) mod arb {
     }
 
     pub fn task_on(target: impl Strategy<Value = Target>) -> impl Strategy<Value = Task> {
-        (target, select(resources()), 0..=10).prop_map(|(target, resource, kind)| match kind {
+        (target, select(resources()), 0..=11).prop_map(|(target, resource, kind)| match kind {
             0 => Task::Harvest(target),
             1 => Task::Withdraw(target, resource),
             2 => Task::Pickup(target, resource),
@@ -64,6 +64,7 @@ pub(crate) mod arb {
             7 => Task::Reserve(target),
             8 => Task::Scout(at().room),
             9 => Task::Meet(target),
+            10 => Task::Dismantle(target),
             _ => Task::Claim(target),
         })
     }

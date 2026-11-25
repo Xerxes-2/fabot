@@ -237,11 +237,12 @@ fn sinks_of(derived: &Derived, ci: usize) -> Vec<Spot> {
     out
 }
 
-/// A load in a raided room is reached only by a walk round the foes there:
-/// Hivemind's path check (`drop.ts`) is terrain alone.
+/// A load in a raided room or a fallen stronghold's is reached only by a walk
+/// round the creeps there: Hivemind's path check (`drop.ts`) is terrain alone.
 fn reached((atlas, derived): (&Atlas, &Derived), from: &Pos, to: &Pos) -> bool {
-    let raided = (derived.grounds.iter()).any(|g| g.room == to.room && g.raided);
-    !raided || atlas.reaches_live(from, to)
+    let raided = (derived.grounds.iter()).any(|g| g.room == to.room && g.raided)
+        || (derived.pickups.iter()).any(|p| p.loot.iter().any(|l| l.1.room == to.room));
+    !raided || atlas.reaches_live(Some(from), to)
 }
 
 fn ores_aboard(derived: &Derived) -> Vec<ResourceType> {
@@ -749,6 +750,11 @@ impl<'a> Jobs<'a> {
             Job::Reserve(id) => Some(Task::Reserve((*id).into())),
             Job::Claim(id) => Some(Task::Claim((*id).into())),
             Job::Scout(room) => Some(Task::Scout(*room)),
+            Job::Dismantle(room) => Some(
+                (self.derived.pickups.iter())
+                    .find_map(|p| p.wall.filter(|(_, at)| at.room == *room)?.0)
+                    .map_or(Task::Scout(*room), |id| Task::Dismantle(id.into())),
+            ),
             Job::Fill => {
                 // Energy is fetched only for a sink with room: with none, the
                 // dig waits in its container for the workers, not aboard.
