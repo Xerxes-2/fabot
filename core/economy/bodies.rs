@@ -38,6 +38,10 @@ pub fn cast_name(pattern: Pattern, time: i32, spawn: &str) -> String {
     format!("{name}-{time}-{spawn}")
 }
 
+pub fn spawn_of_name(name: &str) -> Option<&str> {
+    name.rsplit_once('-').map(|(_, spawn)| spawn)
+}
+
 /// Read off the name, not the parts: damage strips parts head-first, so no
 /// reading of the standing parts holds the pattern for the body's life.
 pub fn pattern_of_name(name: &str) -> Option<Pattern> {

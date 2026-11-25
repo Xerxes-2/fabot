@@ -739,7 +739,9 @@ conflicts never silently cancel an act.
   priced each tick, as its raid changes under the towers.
   `❓` A cast waits behind a body its spawn already began, which the engine
   cannot cancel: a home raided on the tick an outpost's cast begins is drafted
-  after it (defend-prioritises-home-over-outpost seed 1: 65 ticks).
+  after it (defend-prioritises-home-over-outpost seed 1: 65 ticks), and a raid
+  that appears unseen waits behind economy bodies already spawning
+  (boost-labs-fed-while-the-ring-casts: two haulers, 89 ticks).
 - **Colony choice (`fight/price/casting.rs`):** picks the colony landing the body
   soonest (hops + spawn queue + energy refill time); home `Defend` casts at
   home. Bodies end with one `MOVE` (`with_move_last`) and carry `HEAL` when

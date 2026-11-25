@@ -633,20 +633,34 @@ impl Plan<'_> {
         // A worker draws only a full load past the reserve from one store
         // (`jobs::fuel`), a payback site's builder past none: short of it the
         // surplus is the hand-fed upgraders'; its body refilled from the stock
-        // first, or it is cast to stand under the reserve its life.
-        let load = worker.as_deref().map_or(0, |w| {
-            part_count_in(w, Part::Carry) * engine::CARRY_PART_CAPACITY + engine::body_cost(w)
+        // first, or it is cast to stand under the reserve its life. One standing
+        // is paid for but a dying one, so its successor pays its body.
+        let workers = self
+            .paid(ci, Pattern::Worker)
+            .filter(|b| !expires(b, 0))
+            .count() as i32;
+        let (load, body) = worker.as_deref().map_or((0, 0), |w| {
+            let load = part_count_in(w, Part::Carry) * engine::CARRY_PART_CAPACITY;
+            (load, engine::body_cost(w))
         });
-        let drawn = |kept: i32| {
+        let drawn = |kept: i32, load: i32| {
             storage.is_none()
                 || kept <= 0
                 || (ground.stores.iter()).any(|s| ground.banks(s) && ground.spare(s, kept) >= load)
         };
-        let past_reserve = drawn(colony.reserve);
-        let draws = past_reserve || drawn(ground.kept_from_builders(colony.reserve));
+        let either = |load: i32| {
+            let past = drawn(colony.reserve, load);
+            (
+                past,
+                past || drawn(ground.kept_from_builders(colony.reserve), load),
+            )
+        };
+        let (past_reserve, draws) = either(load + if workers > 0 { 0 } else { body });
+        let casts = either(load + body).1;
         let owed = if past_reserve { owed } else { payback };
+        let unpaid = i32::from(inside_deadline(&colony.controller) || mends);
         let floor = match () {
-            _ if !draws => i32::from(inside_deadline(&colony.controller) || mends),
+            _ if !draws => unpaid,
             _ if owed > 0 || repairs => 2,
             _ => 1,
         };
@@ -740,10 +754,8 @@ impl Plan<'_> {
 
         let mut drunk = 0.0;
         let mut upgraded = if fed { surplus - build - mend } else { 0.0 };
-        // A standing upgrader's body is paid for: only its drink is owed.
-        let standing = (derived.bodies.iter().chain(derived.ovens.iter()))
-            .filter(|b| b.pattern == Pattern::Upgrader && b.pos.room == colony.room)
-            .count() as i32;
+        // A standing upgrader is paid for, a dying one too (dropped, E23S9's RCL4 came late).
+        let standing = self.paid(ci, Pattern::Upgrader).count() as i32;
         let work = upgrader
             .as_deref()
             .map_or(1, |b| part_count_in(b, Part::Work));
@@ -797,7 +809,8 @@ impl Plan<'_> {
         // them stands in the others' way and spends nothing.
         let spenders = (builders + upgraders).min(ground.upgrade_seats.unwrap_or(i32::MAX));
         let spenders = if draws { spenders } else { 0 };
-        for k in 0..(floor.max(spenders) + crews) {
+        let cast = if casts { i32::MAX } else { workers.max(unpaid) };
+        for k in 0..(floor.max(spenders).min(cast) + crews) {
             let rank = match k {
                 0 if inside_deadline(&colony.controller) => DEADLINE,
                 0 if mends && !draws => MEND,
@@ -813,7 +826,11 @@ impl Plan<'_> {
                 rank => rank,
             };
             let builds = (all_build || k < builders) && rank != DEADLINE;
+            let pushed = self.out.len();
             self.worker(ci, colony.room, k as usize, (builds, spends), rank, MOST);
+            if let Some(slot) = self.out.get_mut(pushed).filter(|_| rank == CREW) {
+                slot.id = format!("{}:{}:crew{k}", <&str>::from(Pattern::Worker), colony.room);
+            }
         }
 
         // The dig, the ring's upkeep, the controller's drink and the ore, each
@@ -896,6 +913,23 @@ impl Plan<'_> {
             own.extend(std::iter::repeat_n(w, workers));
         }
         self.spare(ci, &own);
+    }
+
+    /// Colony `ci`'s bodies of `pattern` whose cost is spent: each holding a
+    /// home slot of it, or none and cast by its spawns.
+    fn paid(&self, ci: usize, pattern: Pattern) -> impl Iterator<Item = &Body> {
+        let colony = &self.derived.colonies[ci];
+        let home = format!("{}:{}:", <&str>::from(pattern), colony.room);
+        let cast_here = move |b: &Body| {
+            let spawn = bodies::spawn_of_name(&b.name);
+            colony.spawns.iter().any(|s| spawn == Some(s.name.as_str()))
+        };
+        let ours = move |b: &Body| match self.held.get(&b.name) {
+            Some(a) => (a.slot.strip_prefix(&home)).is_some_and(|k| k.parse::<usize>().is_ok()),
+            None => cast_here(b),
+        };
+        (self.derived.bodies.iter().chain(&self.derived.ovens))
+            .filter(move |b| b.pattern == pattern && ours(b))
     }
 
     fn spare(&mut self, ci: usize, own: &[Vec<Part>]) {

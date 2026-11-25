@@ -1,0 +1,7 @@
+{
+  "why": "a home worker standing draws a load past the reserve, its body already paid: an RCL4 home with no controller buffer (so no upgrader stands), its sources dry, one 4W4C4M worker holding its home slot and 10,500 stored over the 10k reserve, past a load (200) but not a load and a body (1000). The stack before this read the body's cost again and dropped the slot (upgrade 0 in 300 ticks), as did a cap that counted standing upgraders for workers",
+  "modules": ["economy"],
+  "start": { "world": "scripts/scenario/worlds/worker-paid-under-a-cast.json", "seed": 1 },
+  "ticks": 300,
+  "assert": [{ "measure": "upgrade", "room": "W1N1", "from": 0, "min": 1 }]
+}
