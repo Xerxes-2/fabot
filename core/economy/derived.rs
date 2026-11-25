@@ -225,7 +225,6 @@ pub struct PileFact {
 #[derive(Clone, Debug)]
 pub struct Ground {
     pub room: RoomName,
-    pub raided: bool,
     pub controller: Option<Controller>,
     pub sources: Vec<SourceFact>,
     pub minerals: Vec<MineralFact>,
@@ -840,11 +839,6 @@ fn buffer_seats_of(atlas: &Atlas, room: &Room, buffer: Option<&StoreFact>) -> Ve
     }
 }
 
-fn raided(room: &Room, owned: bool) -> bool {
-    let ours: BTreeSet<RoomName> = owned.then_some(room.name).into_iter().collect();
-    (room.hostiles()).any(|c| fabot_base::world::hostiles::armed(&ours, room.hostiles(), c))
-}
-
 fn ground_of(
     (atlas, rules): (&Atlas, &Rules),
     capacity: i32,
@@ -954,7 +948,6 @@ fn ground_of(
 
     Ground {
         room: room.name,
-        raided: raided(room, owned_room),
         controller: room.controller.clone(),
         sources,
         minerals,

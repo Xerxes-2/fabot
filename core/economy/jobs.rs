@@ -239,7 +239,7 @@ fn sinks_of(derived: &Derived, ci: usize) -> Vec<Spot> {
 /// A load in a raided room or a fallen stronghold's is reached only by a walk
 /// round the creeps there: Hivemind's path check (`drop.ts`) is terrain alone.
 fn reached((atlas, derived): (&Atlas, &Derived), from: &Pos, to: &Pos) -> bool {
-    let raided = (derived.grounds.iter()).any(|g| g.room == to.room && g.raided)
+    let raided = derived.ours.raided.contains(&to.room)
         || (derived.pickups.iter()).any(|p| p.loot.iter().any(|l| l.1.room == to.room));
     !raided || atlas.reaches_live(Some(from), to)
 }
@@ -353,7 +353,7 @@ fn takes_of(derived: &Derived, ci: usize, outposts: &[&Ground], short: i32) -> V
         .map_or(0, |b| b.free);
     for o in std::iter::once(g)
         .chain(outposts.iter().copied())
-        .filter(|o| !o.raided)
+        .filter(|o| !derived.ours.raided.contains(&o.room))
     {
         let piles = (o.piles.iter())
             .filter(|p| p.resource != Energy)
@@ -502,7 +502,8 @@ impl<'a> Jobs<'a> {
             ),
             Of::Tower if 5 * lacks <= engine::TOWER_CAPACITY => (-1, 0),
             Of::Tower => (
-                3 + i32::from(g.raided) + i32::from(5 * lacks > 4 * engine::TOWER_CAPACITY),
+                3 + i32::from(self.derived.ours.raided.contains(&g.room))
+                    + i32::from(5 * lacks > 4 * engine::TOWER_CAPACITY),
                 lacks,
             ),
             Of::Lab => (6, s.amount / 30),

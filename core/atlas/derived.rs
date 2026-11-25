@@ -138,6 +138,7 @@ pub struct Derived {
     /// The declared outposts and raised claims a colony reaches, whose work
     /// no foe stands down (`ARCHITECTURE.md` §13, M1b).
     pub worked: Vec<Outpost>,
+    pub raided: BTreeSet<RoomName>,
     /// What a body outside a fight walks round, per room with any.
     pub danger: Vec<(RoomName, TileSet)>,
     /// What a harvester walks round, its seat and the walk to it: the strikes no guard holds (v1).
@@ -229,8 +230,13 @@ pub fn derive(world: &World, atlas: &mut Atlas) -> Derived {
             })
         })
         .collect();
+    let raided = (world.rooms.iter())
+        .filter(|r| raided(world, &owned, colonies.contains(&r.name), r))
+        .map(|r| r.name)
+        .collect();
     Derived {
         danger: danger(world, &owned, false),
+        raided,
         exposed: danger(world, &owned, true),
         homes,
         capped: owned.len() as i32 >= world.rooms_allowed,
@@ -256,7 +262,10 @@ pub fn worked(
         .filter(|o| !owned.contains(&o.room))
         .chain(raised)
         .filter(|o| {
-            open(world, sightings, owned, o.room)
+            let unarmed = || fabot_base::world::sightings::unarmed(sightings, world.time, o.room);
+            world
+                .room(o.room)
+                .map_or_else(unarmed, |_| !derived.raided.contains(&o.room))
                 && (derived.trees.iter()).any(|(_, tree)| tree.contains(o.room))
         })
         .cloned()
@@ -277,34 +286,25 @@ fn held(guards: &[&Creep], foe: &Creep) -> bool {
     })
 }
 
-/// Whether an outpost's work is open (`ARCHITECTURE.md` §13, M1b): a foe
-/// stands down the work it can reach and no more.
-fn open(world: &World, sightings: &Sightings, owned: &BTreeSet<RoomName>, room: RoomName) -> bool {
-    let Some(seen) = world.room(room) else {
-        return fabot_base::world::sightings::unarmed(sightings, world.time, room);
-    };
-
-    let core = seen.invader_core().is_some();
-    let foes: Vec<Creep> = seen.hostiles().cloned().collect();
-    let guards = guards(world, room);
-    let work: Vec<&Pos> = seen
-        .sources
+/// Whether a room in sight is raided (`ARCHITECTURE.md` §13, M1b): a colony
+/// by any armed body; elsewhere a foe stands down the work it can reach and no more.
+fn raided(world: &World, owned: &BTreeSet<RoomName>, colony: bool, seen: &Room) -> bool {
+    let guards = guards(world, seen.name);
+    let containers = seen
+        .structures
         .iter()
-        .map(|s| &s.pos)
-        .chain(
-            seen.structures
-                .iter()
-                .filter(|s| s.kind == StructureType::Container)
-                .map(|s| &s.pos),
-        )
+        .filter(|s| s.kind == StructureType::Container);
+    let work: Vec<&Pos> = (seen.sources.iter().map(|s| &s.pos))
+        .chain(containers.map(|s| &s.pos))
         .collect();
 
-    !core
-        && !foes.iter().any(|c| {
+    seen.invader_core().is_some()
+        || seen.hostiles().any(|c| {
             // An armed Invader only ever walks to the work, so it stands the
             // room down on sight; a player's only the work it can strike.
-            hostiles::armed(owned, foes.iter(), c)
-                && (c.owner == Owner::Invader
+            hostiles::armed(owned, seen.hostiles(), c)
+                && (colony
+                    || c.owner == Owner::Invader
                     || !held(&guards, c)
                         && work.iter().any(|at| c.pos.within(hostiles::reach(c), at)))
         })

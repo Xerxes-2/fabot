@@ -40,7 +40,7 @@ pub struct Facts {
     pub on_our_ground: bool,
     pub returned: bool,
     pub clear: bool,
-    pub raided: bool,
+    pub armed_in: bool,
     pub remembered: bool,
 }
 
@@ -255,7 +255,7 @@ pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
 
     // Closed while the raid stands, it reopens on it with a fresh budget.
     if e.phase == Phase::Disengaging {
-        return match (facts.home && !facts.raided, facts.returned && !spent) {
+        return match (facts.home && !facts.armed_in, facts.returned && !spent) {
             (true, _) => None,
             (_, true) => toward(Phase::Forming),
             _ => Some(e.clone()),
@@ -874,7 +874,7 @@ mod tests {
                 on_our_ground,
                 returned,
                 clear,
-                raided: true,
+                armed_in: true,
                 remembered,
             };
 
@@ -901,7 +901,7 @@ mod tests {
             lost in 0..=OUTPOST_LOSSES,
             budget in 0..=3,
             (unanswered, stands) in any::<(bool, bool)>(),
-            [in_reach, home, asked, on_our_ground, raided, remembered] in any::<[bool; 6]>(),
+            [in_reach, home, asked, on_our_ground, armed_in, remembered] in any::<[bool; 6]>(),
         ) {
             let e = Engagement {
                 phase,
@@ -924,7 +924,7 @@ mod tests {
                 on_our_ground,
                 returned: false,
                 clear: false,
-                raided,
+                armed_in,
                 remembered,
             };
 
