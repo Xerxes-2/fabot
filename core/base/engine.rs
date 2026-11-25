@@ -226,9 +226,7 @@ pub fn power_at<'a>(
         .zip(boosts[skip..].iter().copied())
         .collect();
     Box::new(move |part| {
-        acting
-            .iter()
-            .filter(|(p, _)| *p == part)
+        (acting.iter().filter(|(p, _)| *p == part))
             .map(|(p, boost)| multiple(*p, *boost))
             .sum()
     })

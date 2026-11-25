@@ -60,7 +60,7 @@ fn clusters<'a>(owned: &BTreeSet<RoomName>, hostiles: &'a [Creep]) -> Vec<Vec<&'
     let mut root: Vec<usize> = (0..n).collect();
     let armed: Vec<bool> = sorted
         .iter()
-        .map(|c| hostiles::armed(owned, hostiles, c))
+        .map(|c| hostiles::armed(owned, hostiles.iter(), c))
         .collect();
 
     for (i, and) in armed.iter().enumerate() {
@@ -426,7 +426,7 @@ mod tests {
 
             let positions =
                 |g: &Group| -> Vec<&Creep> { g.members.iter().map(|m| at[m]).collect() };
-            let armed_of = |c: &Creep| hostiles::armed(&BTreeSet::new(), &now, c);
+            let armed_of = |c: &Creep| hostiles::armed(&BTreeSet::new(), now.iter(), c);
 
             let narrow = |g: &Group| -> bool {
                 let ps = positions(g);

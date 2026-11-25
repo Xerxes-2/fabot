@@ -293,8 +293,7 @@ impl Owner {
         !self.is_friend() && *self != Owner::Nobody
     }
 
-    /// The username behind the stance; none for an Invader, a keeper or an
-    /// empty seat.
+    /// The username behind the stance; none for an Invader, keeper or empty seat.
     pub fn user(&self) -> Option<&str> {
         match self {
             Owner::Ally(user) | Owner::Enemy(user) | Owner::Stranger(user) => Some(user),
@@ -320,8 +319,7 @@ impl Store {
 
     #[inline]
     pub fn amount_of(&self, resource: ResourceType) -> i32 {
-        self.held
-            .iter()
+        (self.held.iter())
             .filter_map(|(r, n)| (*r == resource).then_some(n))
             .sum()
     }
@@ -765,15 +763,20 @@ pub mod hostiles {
 
     /// HEAL and WORK threaten beside a striker (owner's call): alone they are
     /// a rival's healer in transit or its remote harvester, but WORK in a room
-    /// whose controller is ours can only be there to dismantle.
-    pub fn armed(owned: &BTreeSet<RoomName>, hostiles: &[Creep], creep: &Creep) -> bool {
+    /// whose controller is ours can only be there to dismantle. No keeper is:
+    /// the Atlas walls its strikes.
+    pub fn armed<'c>(
+        owned: &BTreeSet<RoomName>,
+        mut hostiles: impl Iterator<Item = &'c Creep>,
+        creep: &Creep,
+    ) -> bool {
         let works = creep.body.iter().any(|p| p.kind == Part::Work);
-        strikes(creep)
-            || works && owned.contains(&creep.pos.room)
-            || (works || creep.body.iter().any(|p| p.kind == Part::Heal))
-                && hostiles
-                    .iter()
-                    .any(|o| o.pos.room == creep.pos.room && strikes(o))
+        let beside = |o: &Creep| foe(o) && o.pos.room == creep.pos.room && strikes(o);
+        foe(creep)
+            && (strikes(creep)
+                || works && owned.contains(&creep.pos.room)
+                || (works || creep.body.iter().any(|p| p.kind == Part::Heal))
+                    && hostiles.any(beside))
     }
 }
 
@@ -833,9 +836,8 @@ pub mod sightings {
         for room in &world.rooms {
             let mut seen: BTreeMap<Id, Seen> = BTreeMap::new();
 
-            let foes: Vec<Creep> = room.hostiles().cloned().collect();
-            for creep in &foes {
-                if hostiles::armed(&owned, &foes, creep) {
+            for creep in room.hostiles() {
+                if hostiles::armed(&owned, room.hostiles(), creep) {
                     seen.insert(
                         creep.id,
                         Seen {
@@ -939,10 +941,9 @@ pub mod sightings {
         let owned = hostiles::owned(&world.rooms);
         let blind = |room: &RoomName| world.rooms.iter().all(|r| r.name != *room);
         let glimpsed = world.rooms.iter().all(|r| {
-            let foes: Vec<Creep> = r.hostiles().cloned().collect();
             let seen = |h: &Creep| sightings.get(&r.name)?.get(&h.id)?.last.as_ref();
-            (foes.iter())
-                .filter(|h| hostiles::armed(&owned, &foes, h))
+            (r.hostiles())
+                .filter(|h| hostiles::armed(&owned, r.hostiles(), h))
                 .all(|h| seen(h).is_some())
         });
         glimpsed
@@ -1120,6 +1121,45 @@ mod tests {
     fn an_ally_is_not_theirs() {
         assert!(!Owner::Ally("a".to_string()).is_theirs());
         assert!(Owner::Enemy("e".to_string()).is_theirs() && Owner::Invader.is_theirs());
+    }
+
+    /// A keeper's strikes are the Atlas's walls, never a raid's, even in a room of ours.
+    #[test]
+    fn no_keeper_is_armed_nor_arms_a_healer() {
+        let body = |parts: Vec<Part>| {
+            (parts.into_iter().map(|kind| BodyPart {
+                kind,
+                hits: 100,
+                boost: None,
+            }))
+            .collect()
+        };
+        let creep = |id: &str, owner: Owner, parts: Vec<Part>| Creep {
+            id: Id::from(id),
+            name: String::new(),
+            owner,
+            pos: Pos::new(RoomName::W1N1, 25, 25),
+            body: body(parts),
+            hits: 100,
+            hits_max: 100,
+            ticks_to_live: 300,
+            fatigue: 0,
+            store: Store::empty(),
+        };
+        let keeper = creep("k", Owner::Keeper, crate::engine::keeper_body());
+        let healer = creep(
+            "h",
+            Owner::Stranger("s".to_string()),
+            vec![Part::Heal, Part::Work],
+        );
+        let owned = [RoomName::W1N1].into_iter().collect();
+        let all = [keeper.clone(), healer.clone()];
+        assert!(!super::hostiles::armed(&owned, all.iter(), &keeper));
+        assert!(!super::hostiles::armed(
+            &Default::default(),
+            all.iter(),
+            &healer
+        ));
     }
 
     fn seen_in(name: RoomName, others: Vec<Creep>) -> Room<'static> {

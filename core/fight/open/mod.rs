@@ -14,8 +14,7 @@ pub fn armed_and_opening(
     let outpost = |r: &RoomName| worked.contains(r) && !homes.contains(r);
     let works = |h: &Creep| outpost(&h.pos.room) && hostiles::works(h);
     let armed: BTreeSet<Id> = (hostiles.iter())
-        .filter(|h| hostiles::foe(h))
-        .filter(|h| cores.contains(&h.id) || hostiles::armed(owned, hostiles, h) || works(h))
+        .filter(|h| cores.contains(&h.id) || hostiles::armed(owned, hostiles.iter(), h) || works(h))
         .map(|h| h.id)
         .collect();
     let opens: BTreeSet<Id> = (hostiles.iter())

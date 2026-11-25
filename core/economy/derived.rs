@@ -841,9 +841,8 @@ fn buffer_seats_of(atlas: &Atlas, room: &Room, buffer: Option<&StoreFact>) -> Ve
 }
 
 fn raided(room: &Room, owned: bool) -> bool {
-    let foes: Vec<Creep> = room.hostiles().cloned().collect();
     let ours: BTreeSet<RoomName> = owned.then_some(room.name).into_iter().collect();
-    (foes.iter()).any(|c| fabot_base::world::hostiles::armed(&ours, &foes, c))
+    (room.hostiles()).any(|c| fabot_base::world::hostiles::armed(&ours, room.hostiles(), c))
 }
 
 fn ground_of(

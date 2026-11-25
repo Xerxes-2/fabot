@@ -781,9 +781,9 @@ fn lost(sums: &mut Sums, world: &World) {
     }
 }
 
-fn armed(r: &Room, safe_left: i32) -> bool {
-    (r.hostiles())
-        .any(|h| hostiles::foe(h) && hostiles::strikes(h) && hostiles::outlives(h, safe_left))
+fn armed(seen: &Seen, r: &Room, safe_left: i32) -> bool {
+    let armed = |h: &Creep| hostiles::armed(&seen.derived.owned, r.hostiles(), h);
+    (r.hostiles()).any(|h| armed(h) && hostiles::outlives(h, safe_left))
 }
 
 fn towers(rules: &Rules, r: &Room) -> bool {
@@ -799,7 +799,7 @@ fn dwell(sums: &mut Sums, seen: &Seen) {
         let worked = r.controller.as_ref().is_some_and(|c| c.owner.is_ours())
             || (seen.declarations.outposts.iter()).any(|o| o.room == r.name);
         let safe_left = r.controller.as_ref().map_or(0, Controller::our_safe_mode);
-        let (armed, towers) = (armed(r, safe_left), towers(&seen.world.rules, r));
+        let (armed, towers) = (armed(seen, r, safe_left), towers(&seen.world.rules, r));
         let answered = seen.engagements.iter().any(|e| {
             e.room == r.name
                 && e.phase != Phase::Disengaging
@@ -836,7 +836,7 @@ fn exposure(sums: &mut Sums, seen: &Seen) {
         let mut outposts = (seen.declarations.outposts.iter())
             .filter(|o| nearest(o.room) == Some(*colony))
             .filter_map(|o| seen.world.room(o.room));
-        if armed(r, safe_left) || outposts.any(|o| armed(o, safe_left)) {
+        if armed(seen, r, safe_left) || outposts.any(|o| armed(seen, o, safe_left)) {
             add(sums, Some(*colony), EXPOSURE, 1.0);
         }
     }

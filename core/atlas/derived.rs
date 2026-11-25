@@ -303,7 +303,7 @@ fn open(world: &World, sightings: &Sightings, owned: &BTreeSet<RoomName>, room: 
         && !foes.iter().any(|c| {
             // An armed Invader only ever walks to the work, so it stands the
             // room down on sight; a player's only the work it can strike.
-            hostiles::armed(owned, &foes, c)
+            hostiles::armed(owned, foes.iter(), c)
                 && (c.owner == Owner::Invader
                     || !held(&guards, c)
                         && work.iter().any(|at| c.pos.within(hostiles::reach(c), at)))

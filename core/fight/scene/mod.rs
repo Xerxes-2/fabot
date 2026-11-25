@@ -207,8 +207,8 @@ impl<'a> Scene<'a> {
         let exposed = siege::exposed_in(&reached, room);
         let escort: Vec<Creep> = (room.hostiles())
             .filter(|h| {
-                (self.armed.contains(&h.id) || fabot_base::world::hostiles::strikes(h))
-                    && all.iter().all(|p| p.id != h.id)
+                let strikes = hostiles::foe(h) && hostiles::strikes(h);
+                (self.armed.contains(&h.id) || strikes) && all.iter().all(|p| p.id != h.id)
             })
             .cloned()
             .collect();
