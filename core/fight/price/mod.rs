@@ -65,7 +65,7 @@ impl<'a> Scene<'a> {
 
         let rate = engine::DISMANTLE_POWER * set.iter().map(|f| f.work).sum::<i32>() - repair;
 
-        let towers: Vec<Pos> = self.towers_in(room).into_iter().map(|s| s.pos).collect();
+        let towers = raid::charged(&self.world.rules, room);
 
         let sources = entries(atlas, &ground, gait, from, set, standing);
 
@@ -153,7 +153,7 @@ impl<'a> Scene<'a> {
             // plan never breaks: it dismantles nothing. What the dismantlers'
             // own plan has to break, they break, and a room whose way in to his
             // towers still stands behind a rampart keeps them (owner, 2026-10-21).
-            let siege = casting::siege(capacity, &priced);
+            let siege = casting::reinforce(capacity, &[], &priced);
             let open = siege
                 .as_ref()
                 .is_some_and(|(_, (order, _))| order.is_empty());
@@ -250,7 +250,7 @@ impl<'a> Scene<'a> {
                 .collect();
             let breaking: Vec<&Creep> = in_room.iter().copied().filter(|m| !picket(e, m)).collect();
 
-            let towers: Vec<Pos> = self.towers_in(room).into_iter().map(|s| s.pos).collect();
+            let towers = raid::charged(rules, room);
 
             let late = matches!(e.predicted, Some(Outcome::Win(ticks, _))
                 if e.phase == Phase::Fighting && self.world.time > e.since + ticks);

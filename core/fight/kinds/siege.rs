@@ -258,36 +258,28 @@ pub fn exposed_in(reached_from_exits: &TileSet, room: &Room) -> Vec<Pos> {
         .collect()
 }
 
-pub fn drain_pays(room: RoomName, capacity: i32, towers: &[Pos], gate: &tactics::Gate) -> bool {
+/// The gate a drain works from `from`: one his volley leaves the pairs the
+/// bank buys healing over (§6.2).
+pub fn drainable(
+    atlas: &Atlas,
+    room: RoomName,
+    from: RoomName,
+    capacity: i32,
+    towers: &[Pos],
+) -> Option<tactics::Gate> {
+    if towers.is_empty() {
+        return None;
+    }
+    let gate = gate(atlas, room, from, towers)?;
     let at = tiles::landing(gate.bounce).unwrap_or(gate.bounce);
     let volley = exchange::tower_strike(towers, &tiles::to_pos(room, at));
 
-    volley <= casting::pair_heal(casting::pairs(capacity))
-}
-
-/// His towers leave a border tile the pairs' heal holds: the cheapest gate.
-pub fn drainable(room: RoomName, capacity: i32, towers: &[Pos]) -> bool {
-    if towers.is_empty() {
-        return false;
-    }
-    let least = [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT]
-        .iter()
-        .flat_map(|side| tiles::exit_tiles(*side))
-        .map(|t| exchange::tower_strike(towers, &tiles::to_pos(room, *t)))
-        .min()
-        .unwrap_or(i32::MAX);
-
-    least <= casting::pair_heal(casting::pairs(capacity))
+    (volley <= casting::pair_heal(casting::pairs(capacity))).then_some(gate)
 }
 
 /// The edge a drain bounces through: his border tile his towers reach, the
 /// nearest of them.
-pub fn gate(
-    atlas: &Atlas,
-    room: RoomName,
-    from: RoomName,
-    towers: &[Pos],
-) -> Option<tactics::Gate> {
+fn gate(atlas: &Atlas, room: RoomName, from: RoomName, towers: &[Pos]) -> Option<tactics::Gate> {
     let side = tiles::exit_toward(room, from)?;
     let nearest = |at: &Pos| {
         (towers.iter()).fold(engine::ROOM_SIDE, |least, t| {

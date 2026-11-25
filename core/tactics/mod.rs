@@ -522,6 +522,7 @@ pub fn focus_of<'a>(front: &Front, members: &[&'a Creep]) -> Option<&'a Creep> {
 
 /// The edge a drain bounces through (`ARCHITECTURE.md` §6.2): `bounce`'s
 /// mirror is his.
+#[derive(Clone)]
 pub struct Gate {
     pub room: RoomName,
     pub from: RoomName,

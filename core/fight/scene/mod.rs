@@ -632,9 +632,9 @@ impl<'a> Scene<'a> {
         &self,
         e: &Engagement,
         declared: bool,
-        standing: &BTreeSet<String>,
-        aging_out: &BTreeSet<String>,
+        (standing, aging_out): (&BTreeSet<String>, &BTreeSet<String>),
         gate: Option<&tactics::Gate>,
+        priced: bool,
     ) -> SiegeFacts {
         let room = self.in_sight(e.room);
         let towers = room.map_or_else(Vec::new, |r| raid::charged(&self.world.rules, r));
@@ -652,7 +652,7 @@ impl<'a> Scene<'a> {
             }),
             charged: !towers.is_empty(),
             drain: gate.is_some(),
-            priced: siege::drainable(e.room, e.capacity, &towers),
+            priced,
             // A drain with no pair standing, in an oven, or tripped holds nothing.
             worked: e.ignored > 0
                 || self.paired(e, &self.spawning, &casting::drains(e.capacity)) > 0,

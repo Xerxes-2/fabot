@@ -266,23 +266,22 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
     let mut claimed: BTreeSet<RoomName> = sweeps().map(|e| e.room).collect();
     let candidates = scene.candidates(atlas, &grounds, &stirred);
 
-    // The edge each siege would drain at: his border tile his towers reach,
-    // nearest them, and the room across it our medics wait in. The gate is the
-    // pair's: a tile his volley leaves the pairs the bank buys healing over (§6.2).
-    let gates: BTreeMap<i32, tactics::Gate> = (engagements.iter())
-        .filter(|e| matches!(e.objective, Objective::Siege(_)) && !raid::raids(e))
+    let edges: BTreeMap<i32, (tactics::Gate, bool)> = (engagements.iter())
+        .filter(|e| matches!(e.objective, Objective::Siege(_)))
         .filter_map(|e| {
             let room = scene.in_sight(e.room)?;
             let towers = raid::charged(&world.rules, room);
-            let drains = !towers.is_empty()
+            let from = scene.enter_room(&*atlas, e)?;
+            let gate = siege::drainable(&*atlas, e.room, from, e.capacity, &towers)?;
+            let drains = !raid::raids(e)
                 && matches!(e.phase, Phase::Approaching | Phase::Draining)
                 && (Scene::safe(room) || scene.outstruck(e, &towers));
-            if !drains {
-                return None;
-            }
-            let gate = siege::gate(&*atlas, e.room, scene.enter_room(&*atlas, e)?, &towers)?;
-            siege::drain_pays(e.room, e.capacity, &towers, &gate).then_some((e.id, gate))
+            Some((e.id, (gate, drains)))
         })
+        .collect();
+    let gates: BTreeMap<i32, tactics::Gate> = (edges.iter())
+        .filter(|(_, (_, drains))| *drains)
+        .map(|(id, (gate, _))| (*id, gate.clone()))
         .collect();
     let given_up: BTreeSet<i32> = (engagements.iter())
         .filter(|e| matches!(e.objective, Objective::Siege(_)) && siege::gave_up(e))
@@ -300,7 +299,13 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
                 }
                 Objective::Siege(_) => {
                     let declared = declarations.priority(OpKind::Siege, e.room).is_some();
-                    let f = scene.siege_facts(e, declared, &standing, &aging_out, gates.get(&e.id));
+                    let f = scene.siege_facts(
+                        e,
+                        declared,
+                        (&standing, &aging_out),
+                        gates.get(&e.id),
+                        edges.contains_key(&e.id),
+                    );
                     siege::step(&f, e)
                 }
                 Objective::Sweep => {
@@ -395,7 +400,9 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
                 Tactic::BlobClose,
             );
             watch.capacity = scene.capacity_of(&*atlas, &watch);
-            siege::drainable(room.name, watch.capacity, &towers).then_some((op, target))
+            let from = scene.enter_room(&*atlas, &watch)?;
+            siege::drainable(&*atlas, room.name, from, watch.capacity, &towers)?;
+            Some((op, target))
         })
         .enumerate()
         .map(|(i, (op, target))| {

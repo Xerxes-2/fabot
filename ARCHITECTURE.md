@@ -580,9 +580,13 @@ with one phase machine per kind under `core/fight/kinds/`.
   breach heal, using **one bouncer/medic pair per 5,100 bank capacity (three
   pairs at most, full speed on plain)** bouncing across the border gate; a safe
   mode refuses a breach but not the border edge, so a siege still opens and
-  drains charged towers while safe mode runs if drain pairs out-heal the gate
-  volley (spending safe mode rather than letting it block; otherwise safe mode
-  stands the set off), then enters on the breach plan once drain ends. If towers
+  drains charged towers while safe mode runs if drain pairs out-heal the volley
+  on its gate, a passable border tile toward our colony (spending safe mode
+  rather than letting it block; otherwise safe mode stands the set off), then
+  enters on the breach plan once drain ends. The breach is priced and re-priced
+  against the same charged towers the drain empties. `❓` A tower he refills
+  after the price re-prices it only if it strikes the barrier's work tiles (the
+  Fighting event reads those), not when it strikes only the walk in. If towers
   leave `Ignored` consecutive trips unanswered in the event log (reset on any
   tower attack), the drain gives up and holds the edge without casting more —
   staying open so the room does not reopen afresh. Breach barrier order is

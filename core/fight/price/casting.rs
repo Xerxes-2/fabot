@@ -287,23 +287,6 @@ pub fn most(capacity: i32, block: &[Part]) -> Body {
     engine::with_move_last(block.repeat(blocks_fit(capacity, block)))
 }
 
-pub fn siege<T>(
-    capacity: i32,
-    mut priced: impl FnMut(&[Body]) -> Option<T>,
-) -> Option<(Vec<Body>, T)> {
-    let dismantler = most(capacity, &[Part::Work, Part::Move]);
-    let medic = most(capacity, &[Part::Move, Part::Heal]);
-
-    if dismantler.is_empty() {
-        return None;
-    }
-    (1..=AROUND_ONE).find_map(|n| {
-        let mut set = vec![dismantler.clone(), dismantler.clone()];
-        set.extend((0..n).map(|_| medic.clone()));
-        priced(&set).map(|plan| (set, plan))
-    })
-}
-
 /// The fewest medics beside two dismantlers the price takes, topped up onto `fielded`.
 pub fn reinforce<T>(
     capacity: i32,
