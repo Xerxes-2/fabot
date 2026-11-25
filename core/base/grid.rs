@@ -27,8 +27,7 @@ pub struct FatigueFactor {
     pub moves: i32,
 }
 
-/// The engine's rule: a destroyed part still weighs; only a live one carries
-/// or moves.
+/// The engine's rule: a destroyed part still weighs; only a live one carries or moves.
 pub fn factor(
     parts: impl Iterator<Item = (Part, Option<ResourceType>, bool)>,
     mut load: i32,

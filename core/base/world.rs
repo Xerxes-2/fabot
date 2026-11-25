@@ -436,7 +436,6 @@ pub struct Controller {
     pub progress_total: i32,
     /// 0 on a controller nobody owns.
     pub ticks_to_downgrade: i32,
-    /// Who holds it and the ticks left.
     pub reservation: Option<(Owner, i32)>,
     pub sign: Option<(Owner, String)>,
     pub safe_mode: i32,
@@ -455,6 +454,10 @@ impl Controller {
 
     pub fn our_safe_mode(&self) -> i32 {
         self.safe_mode * i32::from(self.owner.is_ours())
+    }
+
+    pub fn safe(&self) -> bool {
+        self.our_safe_mode() > 0 || self.safe_mode_fireable()
     }
 }
 

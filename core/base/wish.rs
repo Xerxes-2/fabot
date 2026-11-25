@@ -5,8 +5,7 @@ use crate::tiles::Tile;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Wish {
     pub creep: String,
-    /// A `Quad` is held where it stands: formation stepping is not
-    /// arbitrated.
+    /// A `Quad` is held where it stands: formation stepping is not arbitrated.
     pub footprint: Footprint,
     pub at: Tile,
     pub head: Tile,
@@ -14,8 +13,7 @@ pub struct Wish {
     pub onward: Option<Tile>,
     /// Best first.
     pub tail: Vec<Tile>,
-    /// Its work area when it stands inside it, else empty; holds `At` when
-    /// not empty.
+    /// Its work area when it stands inside it, else empty; holds `At` when not empty.
     pub working: Vec<Tile>,
     /// What its head is worth over standing still.
     pub weight: i32,
