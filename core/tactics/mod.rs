@@ -721,25 +721,19 @@ pub fn rest(sight: &mut Sight, creep: &Creep, outposts: &BTreeSet<RoomName>) -> 
 
 const REST_RANGE: i32 = 8;
 
+/// By the walk's own ticks: the nearest by the room graph may lie only through a room it refuses.
 pub fn retreat(sight: &mut Sight, creep: &Creep) -> Wish {
-    let room = creep.pos.room;
-    let here = (sight.musters.iter()).filter(|p| p.room == room);
-    let home = here.min_by_key(|p| (p.x, p.y)).copied().or_else(|| {
-        let onto: Vec<RoomName> = sight.musters.iter().map(|p| p.room).collect();
-        let tree = (sight.atlas).tree_to(&BTreeSet::new(), declarations::SIEGE_HOPS, room, &onto);
-        (sight.musters.iter())
-            .filter_map(|p| tree.crossings(room, p.room).map(|n| (n, *p)))
-            .min_by_key(|(hops, p)| (*hops, p.room, p.x, p.y))
-            .map(|(_, p)| p)
-    });
-    let Some(home) = home else {
-        return hold(sight, creep);
-    };
-    // Waits as a body with no work, so any walker shoves it.
-    if !creep.pos.within(declarations::MUSTER_RANGE, &home) {
-        return toward(sight, creep, &home, declarations::MUSTER_RANGE);
+    let mustered = |p: &Pos| creep.pos.within(declarations::MUSTER_RANGE, p);
+    let walk = |p: &Pos| target_at(sight, p, declarations::MUSTER_RANGE);
+    let ticks = |p: &Pos| sight.atlas.ticks_to(mover_of(creep), &walk(p), &creep.pos);
+    let soonest = (!sight.musters.iter().any(mustered))
+        .then(|| sight.musters.iter().filter_map(|p| Some((ticks(p)?, p))))
+        .and_then(|tried| tried.min_by_key(|(ticks, p)| (*ticks, p.room, p.x, p.y)))
+        .map(|(_, p)| *p);
+    match soonest {
+        Some(p) => toward(sight, creep, &p, declarations::MUSTER_RANGE),
+        None => hold(sight, creep),
     }
-    hold(sight, creep)
 }
 
 /// v1's heal reflex. The engine keeps one of a swing and a heal, and one of a

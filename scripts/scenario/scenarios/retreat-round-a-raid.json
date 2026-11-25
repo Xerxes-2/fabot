@@ -1,0 +1,8 @@
+{
+  "why": "a body with no fight retreats to the muster its own walk reaches soonest: from W3N1 W1N1's muster is nearest by the room graph, but only through W2N1, where two Invaders stand and which the declarations avoid; W6N1's, three rooms west, is clear. On main it picked W1N1's on a graph that ignored the avoid set, its walk found no way there and it stood in W3N1 all run (crossed W4N1 0); the fix walks to W6N1",
+  "modules": ["fight", "tactics", "atlas"],
+  "defends": false,
+  "start": { "world": "scripts/scenario/worlds/retreat-round-a-raid.json", "seed": 1, "follow": ["W3N1", "W4N1", "W5N1"] },
+  "ticks": 400,
+  "assert": [{ "measure": "crossed", "room": "W4N1", "min": 1 }]
+}

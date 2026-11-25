@@ -431,14 +431,14 @@ pub fn search(
     ways
 }
 
-/// A stop's room has a region holding its tile, or every stretch of its
-/// borders lies in a region settled already: the tile's region has no way out.
+/// A stop's room has a region settled (holding its tile if named), or its
+/// borders all lie in settled regions: the tile's region has no way out.
 fn resolved(atlas: &Atlas, mover: Mover, ways: &Ways, (room, at): Stop) -> bool {
     let dists: Vec<&Table<i32>> = (ways.regions(room))
         .filter_map(|n| ways.nodes[n].dist.as_deref())
         .collect();
     let (Some(at), Some(grid)) = (at, atlas.rooms.get(&room)) else {
-        return true;
+        return ways.regions(room).next().is_some();
     };
     if dists.iter().any(|d| holds(mover, d, grid, at)) {
         return true;

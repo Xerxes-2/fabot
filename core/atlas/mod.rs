@@ -1301,18 +1301,6 @@ impl Atlas {
         })
     }
 
-    /// `tree`, grown only until each of `onto` is reached.
-    pub fn tree_to(
-        &self,
-        avoid: &BTreeSet<RoomName>,
-        max_hops: i32,
-        root: RoomName,
-        onto: &[RoomName],
-    ) -> Tree {
-        let stops: Vec<graph::Stop> = (onto.iter()).map(|r| (r.coords(), None)).collect();
-        graph::search(self, Atlas::PACE, root, None, avoid, max_hops, &stops).tree()
-    }
-
     pub fn route(
         &self,
         avoid: &BTreeSet<RoomName>,
