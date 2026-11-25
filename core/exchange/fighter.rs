@@ -28,6 +28,8 @@ pub struct Fighter {
     pub invader: bool,
     /// The ticks it still stands at its home's labs before it walks.
     pub lab_wait: i32,
+    /// Our safe mode refuses its every act, yet the ground it stands on is ours to clear.
+    pub harmless: bool,
 }
 
 pub fn of_parts(
@@ -55,6 +57,20 @@ pub fn of_parts(
         strikes_back: engine::strike_at(attack, 0, engine::MELEE_RANGE),
         invader: false,
         lab_wait: 0,
+        harmless: false,
+    }
+}
+
+pub fn harmless(f: Fighter) -> Fighter {
+    Fighter {
+        harmless: true,
+        attack: 0,
+        ranged: 0,
+        heal: 0,
+        work: 0,
+        reach: 0,
+        strikes_back: 0,
+        ..f
     }
 }
 

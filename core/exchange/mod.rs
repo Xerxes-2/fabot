@@ -242,10 +242,10 @@ struct Price {
     hits: i32,
     /// What `hits` heals back to: struck under its heal, the raid regrows.
     whole: i32,
-    /// It dismantles: a raid dealing our bodies nothing is won only by outhealing it.
+    /// It dismantles or holds our ground: a raid dealing our bodies nothing is won only by outhealing it.
     breaches: bool,
     dismantlers: Vec<(Fighter, i32)>,
-    /// Its dismantlers' hits that strike nothing: the kill where no striker stands.
+    /// Its breachers' hits that strike nothing: the kill where no striker stands.
     razing: i32,
     /// Its swings land, struck back by ours; else it holds them (a dismantle drops a swing).
     swings: bool,
@@ -291,7 +291,10 @@ fn price_as(
         .collect();
 
     let heal_on = |target: &Foe| heal_from(terrain.weight, horizon, &healers, target);
-    let breachers: Vec<Foe> = raid.iter().filter(|h| h.f.work > 0).cloned().collect();
+    let breachers: Vec<Foe> = (raid.iter())
+        .filter(|h| h.f.work > 0 || h.f.harmless)
+        .cloned()
+        .collect();
 
     let focus: Option<Foe> = raid
         .iter()

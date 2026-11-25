@@ -768,10 +768,11 @@ and `cheapest_win` (adds only to already-standing `ours`).
   **energy/tick** (razed, killed, healed, or denied) — never by body parts or
   creep kind. Feature-keyed rules leave exploitable gaps; wrong choices are
   fixed by adding the missing term to the price.
-- **Our safe mode:** a hostile that ages out before it ends strikes nothing
-  in its life (the engine refuses its attacks and heals), so it is not priced:
-  it costs no cast; the ground it holds (a blocked source) is not priced
-  either, a gap the owner accepted.
+- **Our safe mode:** a hostile that ages out before it ends strikes, heals
+  and dismantles nothing in its life (the engine refuses it), so it is priced
+  as a target that cannot strike back and the smallest set that kills it is
+  cast (owner): the ground it holds can cut a home's only way between its
+  sources and its spawn.
 - **Tactic selection:** each kind declares candidate tactics; pricing scores
   each candidate as `Offer { tactic, value, cost, bodies }`; the scene drops
   operator-forbidden ones (`tactics::ruling`), and `tactics::select` takes a

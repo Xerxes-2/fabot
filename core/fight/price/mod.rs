@@ -620,8 +620,15 @@ impl<'a> Scene<'a> {
             (room.and_then(|r| r.controller.as_ref())).map_or(0, world::Controller::our_safe_mode);
         let theirs = Side {
             bodies: (raid.iter())
-                .filter(|h| !self.cores.contains(&h.id) && world::hostiles::outlives(h, safe_left))
-                .map(casting::fighter_of)
+                .filter(|h| !self.cores.contains(&h.id))
+                .map(|h| {
+                    let f = casting::fighter_of(h);
+                    if world::hostiles::outlives(h, safe_left) {
+                        f
+                    } else {
+                        fighter::harmless(f)
+                    }
+                })
                 .collect(),
             ..Side::default()
         };

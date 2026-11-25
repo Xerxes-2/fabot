@@ -1,0 +1,9 @@
+{
+  "why": "an Invader parked on a home's only one-tile way between its sources and its spawn, under our safe mode, is killed: it strikes nothing, but its ground starves the spawn (29ab0c06 cast nothing; it stood its 1500 ticks and creeps fell 38 to 18)",
+  "modules": ["exchange", "fight"],
+  "start": { "gen": 333, "seed": 1 },
+  "ticks": 10000,
+  "assert": [
+    { "measure": "hostileTicks", "room": "E1S6", "max": 400 }
+  ]
+}
