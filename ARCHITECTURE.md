@@ -205,7 +205,7 @@ the compiler holds ownership. Adding a row is an architecture change, not a fix.
 | `metrics.windows` | 100-tick aligned windows (per-room + world, up to 150 windows) | Observe | segment 3 | `observe metrics` & soak `metrics.jsonl` (§10.5) |
 | `recorder` | deflated `read.js` pass + Memory + intel ring | Main | segments 10–14 | live capture for benchmark & replay (§9.1) |
 | `engagements.log` | the last 200 engagements closed (an unpriced row evicted before any priced one, owner), a JSON row a line: id, kind, room, rivals, tactic, opened, contact, seen, closed, `predicted` (priced only), our dead, energy cast, and how it ended (`disengaged`, `gaveUp`, `left`, `safe`; none: its rival's death seen) | Observe (rows Fight's closes) | segment 4, written on a close (rows closed before a reset's first read wait in heap) | live `Exchange` error tracking (§10.1): an engagement's prediction goes with it, and 200 rows (~230 B each) fit one segment |
-| `metrics` | open window sums & per-creep/site/room deltas | Observe | heap | incremental tick deltas |
+| `metrics` | open window sums & per-creep/site/room deltas (a creep's task, load and tile, and the ticks they held) | Observe | heap | incremental tick deltas; a body stuck on its task is read across ticks |
 | `standing.layout` | per-room layout plan & incremental drawing state + ground key + `cold` (drawn with no standing held: a reset or a new colony) | Layout | heap | rebuilds at 4 variations/tick after reset; `cold` marks the first plan `piles` is checked against |
 | `scouts` | scout targets | Strategy | heap (this tick) | derived from intel for Economy |
 | `homes` | the colonies' own economy facts (`derived::Homes`) | Economy | heap (this tick) | read once by `economy::spare` before outposts are picked, finished by Economy's `of_world` |
@@ -1057,7 +1057,7 @@ outliving the colony's running safe mode, in it or its nearest outposts, while
 below RCL3, lacking a stocked tower, or unable to fire safe mode), and
 **losses** (energy). Tracks idle share, churn, returned loads, spend split
 (within 2% of engine ledger), spawn use, ticks a colony left a slot uncast
-by why (`blocked.bank|spawns|fight`), stale paying or rampart sites per colony
+by why (`blocked.bank|spawns|fight`), stalls (`stall.ring|task`), stale paying or rampart sites per colony
 (one that becomes its structure restarts the colony's waits),
 refusals, CPU/phase, deaths, hostile dwell, and held steps (`Settled.held`).
 Alert thresholds (`observe health`) are `1.5 × healthy p99` from

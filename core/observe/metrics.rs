@@ -17,6 +17,7 @@ use fabot_base::world::{
     Controller, Creep, Id, Owner, Pos, Room, RoomName, Rules, StructureType, World, hostiles,
 };
 use fabot_economy::bodies::{self, Pattern};
+use fabot_economy::derived::stores_of;
 use fabot_economy::task::{Assignment, Task};
 use fabot_economy::{abandon, derived::drawn_for};
 use fabot_fight::shape::{Cast, Engagement, Phase};
@@ -51,6 +52,9 @@ const BODIES: &str = "bodies";
 const BODIES_OF: &str = "bodies.";
 const IDLE_OF: &str = "idle.";
 const CHURN: &str = "churn.task";
+const STALL: &str = "stall.";
+/// Unchanged this long and acting on nothing, a body is stuck, not between two acts.
+const STALLED_AFTER: i32 = 50;
 const RETURNED: &str = "carry.returned";
 const RING_FED: &str = "carry.ring";
 const HELD: &str = "move.held";
@@ -197,6 +201,11 @@ const METRICS: &[Metric] = &[
         "task changes on a tick the body's load held, per 100 economy bodies",
     ),
     metric(
+        STALL,
+        Fold::Sum,
+        "ring: ticks a cast waited on the bank while the room's stores and piles held what its spawns and extensions lacked; task: body-ticks past 50 on one task, its load and tile unchanged and no act taken",
+    ),
+    metric(
         RETURNED,
         Fold::Sum,
         "energy a body transferred into the store it last withdrew energy from, no transfer, build, repair or upgrade between: at most what it drew",
@@ -305,6 +314,8 @@ struct Pace {
 struct Held {
     task: Task,
     load: i32,
+    at: Pos,
+    still: i32,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -341,6 +352,8 @@ struct Track {
 #[derive(Clone, Copy, Debug, Default)]
 struct Asked {
     held: bool,
+    /// An act but a step taken this tick: a body seated at its work is not stuck.
+    worked: bool,
     strike: bool,
     heal: bool,
 }
@@ -744,6 +757,17 @@ fn deaths(sums: &mut Sums, tracks: &mut HashMap<String, Track>, world: &World) {
     });
 }
 
+fn ring_starved(r: &Room) -> bool {
+    let short = r.energy_capacity - r.energy_available;
+    let stores = stores_of(r, false, &|_| false, &|_| 0);
+    let piled = (r.piles.iter()).filter(|p| p.resource == Energy);
+    let held = stores
+        .iter()
+        .map(|s| s.energy)
+        .chain(piled.map(|p| p.amount));
+    short > 0 && held.sum::<i32>() >= short
+}
+
 /// A body of ours that dismantles is no loss's cause.
 fn lost(sums: &mut Sums, world: &World) {
     for (room, id, cost) in &world.destroyed {
@@ -853,6 +877,8 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
         match intent {
             Action::Creep(name, act) => {
                 let a = asked.entry(name.as_str()).or_default();
+                let moved = matches!(act, CreepAct::Move(_) | CreepAct::Say(_));
+                a.worked |= !moved && !refused.contains(&(name.as_str(), act.into()));
                 match act {
                     CreepAct::AttackCreep(_)
                     | CreepAct::RangedAttackCreep(_)
@@ -897,6 +923,9 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
     }
     for (room, why) in seen.blocked {
         add(sums, Some(*room), &format!("{BLOCKED}{why}"), 1.0);
+        if *why == "bank" && world.room(*room).is_some_and(ring_starved) {
+            add(sums, Some(*room), &format!("{STALL}ring"), 1.0);
+        }
     }
 
     for c in world
@@ -916,18 +945,26 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
         let load = c.store.used();
         match (task, m.tasks.get_mut(&c.name)) {
             (Some(now), Some(held)) => {
+                let worked = asked.get(c.name.as_str()).is_some_and(|a| a.worked);
+                let same = *now == held.task && held.load == load && held.at == c.pos && !worked;
+                held.still = if same { held.still + 1 } else { 0 };
+                if held.still >= STALLED_AFTER {
+                    add(sums, None, &format!("{STALL}task"), 1.0);
+                }
                 if *now != held.task {
                     if held.load == load {
                         add(sums, None, CHURN, 1.0);
                     }
                     now.clone_into(&mut held.task);
                 }
-                held.load = load;
+                (held.load, held.at) = (load, c.pos);
             }
             (Some(now), None) => {
                 let held = Held {
                     task: now.clone(),
                     load,
+                    at: c.pos,
+                    still: 0,
                 };
                 m.tasks.insert(c.name.clone(), held);
             }

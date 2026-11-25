@@ -715,7 +715,7 @@ fn minerals_of(room: &Room, working: &[&Structure]) -> Vec<MineralFact> {
 /// The stores a body draws energy from or fills: its containers, storage and
 /// terminal, and any remains with energy. `buffered`: an owned room's buffer
 /// container is its buffer.
-fn stores_of(
+pub fn stores_of(
     room: &Room,
     buffered: bool,
     is_buffer: &dyn Fn(Id) -> bool,
