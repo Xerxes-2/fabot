@@ -275,7 +275,10 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   harvest-bay containers keep a full bay's reserve for their harvester; a hub
   pile outranks other sources while the ring has room; workers fetching their
   own take the nearest load; held loads book before any fresh pick and run to
-  completion; a lab a body stands waiting at outranks the ring unless a spawn
+  completion; a carrier already holding what a sink a body waits at lacks (at
+  least one part's boost) brings it rather than topping up, as Hivemind's
+  `delivering` fills to 90% first while that body ages (for every sink kind it
+  failed six scenarios); a lab a body stands waiting at outranks the ring unless a spawn
   is open, as the body ages there and a spawning colony's ring never empties;
   while a home harvester or carrier waits on the bank, the controller
   container ranks under an open ring, as Hivemind ties it with extensions on a

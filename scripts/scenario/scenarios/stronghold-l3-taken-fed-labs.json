@@ -1,0 +1,33 @@
+{
+  "why": "stronghold-l3-taken on the W8N3 M7 layout the centre-first planner stands (laid over the template map): a carrier owing a waiting ranger's lab its energy topped itself up from piles and the store first (t649 to t757, t797 to t858), so the first ranger left with two of its four compounds, the stronghold fell at t1900, the set aged out before its last defender died and no loot came home (main at acbe1ab4: lootTaken 0)",
+  "modules": [
+    "exchange",
+    "fight",
+    "strategy",
+    "economy"
+  ],
+  "start": {
+    "world": "scripts/scenario/worlds/template.json",
+    "overlay": "scripts/scenario/worlds/w8n3-m7-centred.json",
+    "seed": 1,
+    "stronghold": "W8N2:1:3"
+  },
+  "ticks": 4000,
+  "assert": [
+    {
+      "measure": "strongholdFallenAt",
+      "room": "W8N2",
+      "max": 2000
+    },
+    {
+      "measure": "lootTaken",
+      "room": "W8N2",
+      "min": 30
+    },
+    {
+      "measure": "bodiesLost",
+      "room": "W8N2",
+      "max": 0
+    }
+  ]
+}

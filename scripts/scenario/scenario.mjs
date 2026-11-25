@@ -26,7 +26,7 @@
 // A scenario file: { "why": the invariant, "modules": the core modules it tests, "nightly"?, "start": { "gen"? (sim --gen's map, which picks the room) or "room", "seed",
 // "late"?, "node"?, "invaders"? (room:every[:first],…), "wave"? (role[:size],…), "core"? (room:tick,…), "stronghold"? ("room:tick:level[:deploy],…"), "resetEvery"? (soak:many's --reset-every), "unsafe"?, "ended"?,
 // "opponents"? (sim's scripted rivals, `sim/src/rival`), "players"? and "sectors"? (soak.mjs's: our bot in every seat; an assert's "seat" names the one it reads, unset the first) } or { "world": a capture-shaped file
-// (crafted ones under worlds/), "seed", "room"?, "node"?, "late"? (a world with no home of ours, as a recipe's), "ended"?, "invaders"?, "wave"?, "opponents"? (the world's own users), "declarations"? (in place of the world's), "memory"? (keys of Memory.v2 beside the world's), "gcl"? (in place of the world's), "level"? ({ room: its controller level in place of the world's }), "roadless"? ([room]: every road in each taken up) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"? (or "report": true, printed and bounding nothing), "room"?, "kind"?, "name"? }] };
+// (crafted ones under worlds/), "seed", "room"?, "node"?, "late"? (a world with no home of ours, as a recipe's), "ended"?, "invaders"?, "wave"?, "stronghold"? (as a recipe's), "opponents"? (the world's own users), "declarations"? (in place of the world's), "memory"? (keys of Memory.v2 beside the world's), "gcl"? (in place of the world's), "level"? ({ room: its controller level in place of the world's }), "roadless"? ([room]: every road in each taken up), "overlay"? (a world file whose rooms stand in for the base world's of their names, its seat ours) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"? (or "report": true, printed and bounding nothing), "room"?, "kind"?, "name"? }] };
 // a measure is one of `measures` below, read off the soak's output over ticks
 // [from, to), counted from the run's first tick; { "metric": a name the bot's
 // metrics carry (`core/observe/metrics.rs`), "room"?, "total"? } bounds its worst
@@ -128,9 +128,12 @@ const jobs = Number(flags["--jobs"] ?? availableParallelism());
 sweep(join(REPO, "soak-runs"));
 
 for (const { name, start } of scenarios)
-  if (start.world && Object.keys(start).some((k) => !["world", "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "follow", "ended", "memory", "gcl", "stock", "level", "roadless", "overlay"].includes(k))) fail(`${name}: a "world" start takes a "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "follow", "ended", "memory", "gcl", "stock", "level", "roadless", "overlay" and nothing else`);
+  if (start.world && Object.keys(start).some((k) => !["world", "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "follow", "ended", "memory", "gcl", "stock", "level", "roadless", "overlay", "stronghold"].includes(k))) fail(`${name}: a "world" start takes a "seed", "room", "node", "late", "invaders", "wave", "stronghold", "opponents", "declarations", "follow", "ended", "memory", "gcl", "stock", "level", "roadless", "overlay" and nothing else`);
 for (const { name, start } of scenarios)
   if (!start.world && (start.declarations || start.memory || start.gcl || start.stock || start.level || start.roadless || start.overlay)) fail(`${name}: "declarations", "memory", "gcl", "stock", "level", "roadless" and "overlay" take a "world" start`);
+
+for (const { name, start } of scenarios)
+  if (start.stronghold !== undefined && !/^[WE]\d+[NS]\d+:\d+:[1-5](:\d+)?(,[WE]\d+[NS]\d+:\d+:[1-5](:\d+)?)*$/.test(start.stronghold)) fail(`${name}: "stronghold" takes "room:tick:level[:deploy],…"`);
 
 const tag = (opponents = []) => (opponents.length ? `-o${createHash("sha256").update(JSON.stringify(opponents)).digest("hex").slice(0, 8)}` : "");
 const recipe = ({ gen, sectors, players, world, room, seed, late = 0, node, invaders, wave, core, stronghold, unsafe, ended, declarations, memory, stock, gcl, level, roadless, overlay, follow, resetEvery }, opponents) =>

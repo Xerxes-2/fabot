@@ -39,6 +39,13 @@ enum Of {
     Received,
 }
 
+impl Of {
+    /// A body stands waiting at it, ageing.
+    fn waited(self) -> bool {
+        matches!(self, Of::Lab)
+    }
+}
+
 #[derive(Clone, Debug)]
 struct Spot {
     task: Task,
@@ -497,8 +504,6 @@ impl<'a> Jobs<'a> {
                 3 + i32::from(g.raided) + i32::from(5 * lacks > 4 * engine::TOWER_CAPACITY),
                 lacks,
             ),
-            // A body ages at it, so it goes before the ring: level with it, the
-            // ring's weight outbids it while a spawning colony keeps it open.
             Of::Lab => (6, s.amount / 30),
             Of::Reagent => {
                 let held = engine::LAB_MINERAL_CAPACITY - lacks;
@@ -686,6 +691,15 @@ impl<'a> Jobs<'a> {
                 })
                 && let Task::Refill(to, r) = &sinks[d].task
             {
+                let part = if *r == Energy {
+                    engine::BOOST_ENERGY_PER_PART
+                } else {
+                    engine::BOOST_MINERAL_PER_PART
+                };
+                let lacks = sinks[d].amount;
+                if sinks[d].of.waited() && lacks >= part && body.store.amount_of(*r) >= lacks {
+                    return self.deliver(ci, body, None, true);
+                }
                 let drop = Some(sinks[d].pos);
                 let source = |s: &Spot| {
                     fits(s)
