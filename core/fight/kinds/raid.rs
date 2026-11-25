@@ -111,12 +111,7 @@ pub fn hardest<'a>(rules: &Rules, room: &'a Room) -> Option<&'a Structure> {
 
     (room.structures.iter())
         .filter(|s| siege::razed(s.kind) && s.owner.is_theirs())
-        .max_by_key(|s| {
-            (
-                exchange::tower_strike(&towers, &s.pos) + exchange::guard_strike(&guards, &s.pos),
-                s.id,
-            )
-        })
+        .max_by_key(|s| (exchange::struck(&towers, &guards, &s.pos), s.id))
 }
 
 /// The set's price: a way to within a shot of `goal` no step of which his
@@ -197,9 +192,7 @@ pub fn dance(sight: &mut Sight, room: &Room, members: &[&Creep], c: &Creep) -> W
     };
     let net = |tile: Tile| -> i32 {
         let at = tiles::to_pos(room.name, tile);
-        let strike = exchange::tower_strike(&towers, &at) + exchange::guard_strike(&guards, &at);
-
-        strike - heal_at(&at)
+        exchange::struck(&towers, &guards, &at) - heal_at(&at)
     };
     let hurt = c.hits < c.hits_max;
     let Some((target, stop)) = target else {

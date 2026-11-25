@@ -528,15 +528,20 @@ pub struct Gate {
     pub bounce: Tile,
     pub rest: Tile,
 }
+impl Gate {
+    /// The set waits beside his room, off the pair's tiles: the entry is the plan's.
+    pub fn wait(&self) -> (Pos, i32) {
+        (tiles::middle(self.from), engine::ROOM_SIDE / 2)
+    }
+}
 pub fn drain(sight: &mut Sight, gate: &Gate, creep: &Creep) -> Wish {
     let at = tiles::of_pos(&creep.pos);
     let there = |t: Tile| tiles::to_pos(gate.from, t);
     let strikes = creep.live(Part::Attack) > 0 || creep.live(Part::RangedAttack) > 0;
 
-    // The set waits beside his room, off the pair's tiles: the entry is the plan's.
     if strikes || creep.live(Part::Work) > 0 {
-        let wait = tiles::middle(gate.from);
-        return toward(sight, creep, &wait, engine::ROOM_SIDE / 2);
+        let (wait, near) = gate.wait();
+        return toward(sight, creep, &wait, near);
     }
 
     if creep.live(Part::Heal) > 0 {
@@ -828,12 +833,19 @@ pub fn nets(
         .collect()
 }
 
-/// No tile a body may step to is one it would stand three ticks on: an event
-/// for its engagement, which a tactic cannot answer.
+/// `hunt` steps off a tile lethal in this many ticks; `cornered` answers when all are.
+const LETHAL_TICKS: i32 = 3;
+
+fn lethal(net: i32, hits: i32) -> bool {
+    net * LETHAL_TICKS >= hits
+}
+
+/// No tile a body may step to is one it would stand on safely: an event for
+/// its engagement, which a tactic cannot answer.
 pub fn cornered(atlas: &Atlas, threat: &tiles::Table<i32>, mates: &[&Creep], c: &Creep) -> bool {
     nets(atlas, threat, mates, c)
         .iter()
-        .all(|(t, net)| tiles::on_edge(*t) || net * 3 >= c.hits)
+        .all(|(t, net)| tiles::on_edge(*t) || lethal(*net, c.hits))
 }
 
 pub fn heals(
@@ -985,9 +997,10 @@ pub fn hunt(
         .map(|m| (tiles::of_pos(&m.pos), threat[tiles::of_pos(&m.pos)]));
     let scored: Vec<(Tile, i64)> = (nets.iter().copied())
         .chain(glue)
-        .filter(|(t, net)| !tiles::on_edge(*t) && net * 3 < c.hits)
+        .filter(|(t, net)| !tiles::on_edge(*t) && !lethal(*net, c.hits))
         .map(|(t, net)| {
-            let risk = i64::from(net.max(0)) * cost / i64::from(threat[t].max(c.hits / 3).max(1));
+            let risk = i64::from(net.max(0)) * cost
+                / i64::from(threat[t].max(c.hits / LETHAL_TICKS).max(1));
             let at = tiles::to_pos(room, t);
             (t, landed(&at, true).0 + swung(&at) - risk)
         })

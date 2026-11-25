@@ -95,15 +95,10 @@ pub fn next_razed<'a>(
     let sources: Vec<Pos> = room.sources.iter().map(|s| s.pos).collect();
     let theirs = || room.structures.iter().filter(|s| s.owner.is_theirs());
     let charged = super::raid::charged(rules, room);
-    let struck = |at: &Pos| -> i32 {
-        (charged.iter().filter_map(|t| t.range(at)))
-            .map(engine::tower_attack_at)
-            .sum()
-    };
 
     theirs().filter(|s| razed(s.kind)).min_by_key(|&s| {
         (
-            struck(&s.pos),
+            exchange::tower_strike(&charged, &s.pos),
             std::cmp::Reverse(taken(s, &sources)),
             walk(s),
             s.id,
@@ -234,6 +229,21 @@ pub fn denied(room: &Room, post: &Pos) -> i32 {
         .filter(|s| s.pos == *post)
         .map(|s| sweep::yield_of(s, engine::CREEP_LIFETIME))
         .sum()
+}
+
+/// Each source a picket denies him from and the squad that holds it under his towers.
+pub fn posts(
+    atlas: &Atlas,
+    room: &Room,
+    capacity: i32,
+    towers: &[Pos],
+) -> Vec<(Pos, Vec<casting::Body>)> {
+    (exposed(atlas, room).into_iter())
+        .map(|post| {
+            let strike = exchange::tower_strike(towers, &post);
+            (post, casting::squad(capacity, strike, denied(room, &post)))
+        })
+        .collect()
 }
 
 pub fn exposed(atlas: &Atlas, room: &Room) -> Vec<Pos> {

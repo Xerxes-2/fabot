@@ -180,10 +180,8 @@ impl<'a> Scene<'a> {
                 let mut set = set;
 
                 if raid.is_none() {
-                    for post in siege::exposed(atlas, room) {
-                        let strike = exchange::tower_strike(&charged, &post);
-                        set.extend(casting::squad(capacity, strike, siege::denied(room, &post)));
-                    }
+                    let posts = siege::posts(atlas, room, capacity, &charged);
+                    set.extend(posts.into_iter().flat_map(|(_, squad)| squad));
                 }
 
                 let declared = if raid.is_some() {

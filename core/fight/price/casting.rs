@@ -304,8 +304,7 @@ pub fn siege<T>(
     })
 }
 
-/// A set re-planned onto a harder target or short of a body lost is topped up,
-/// not recast.
+/// The fewest medics beside two dismantlers the price takes, topped up onto `fielded`.
 pub fn reinforce<T>(
     capacity: i32,
     fielded: &[Body],

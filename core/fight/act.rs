@@ -1,7 +1,6 @@
 /// What each committed body does this tick (§7): its walk, its strike and its heal.
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::casting;
 use super::kinds::defend::{self, Home};
 use super::kinds::{raid, siege, stronghold};
 use super::scene::{Hunting, Scene, picket};
@@ -92,9 +91,7 @@ pub(super) fn act(
         ) {
             // His towers are spent at the edge before the set breaches: it
             // waits in the room beside his, off the tiles a pair works.
-            (Objective::Siege(_), _, _) if gates.contains_key(&e.id) => {
-                (tiles::middle(gates[&e.id].from), engine::ROOM_SIDE / 2)
-            }
+            (Objective::Siege(_), _, _) if gates.contains_key(&e.id) => gates[&e.id].wait(),
             (Objective::Siege(_), _, Some(b)) => (b.pos, engine::RANGED_RANGE),
             (Objective::Defend, Some(g), _) => (g.centre, engine::RANGED_RANGE),
             (Objective::Defend, None, _) => (
@@ -202,7 +199,8 @@ pub(super) fn act(
             // The towers' room is the only one a drain presses into.
             Phase::Draining => match gates.get(&e.id) {
                 Some(gate) if given_up.contains(&e.id) => {
-                    tactics::toward(sight, c, &tiles::middle(gate.from), engine::ROOM_SIDE / 2)
+                    let (wait, near) = gate.wait();
+                    tactics::toward(sight, c, &wait, near)
                 }
                 Some(gate) => tactics::drain(sight, gate, c),
                 None => tactics::hold(sight, c),
@@ -403,17 +401,10 @@ fn front_of(scene: &Scene, atlas: &Atlas, e: &Engagement) -> Option<tactics::Fro
     let struck = (scene.world.attacks.iter())
         .find(|(by, _)| fired.contains(by))
         .map(|(_, at)| *at);
-    let breach_strike = (towers.iter())
-        .map(|t| t.range(&wall.pos).map_or(0, engine::tower_attack_at))
-        .sum();
+    let breach_strike = exchange::tower_strike(&towers, &wall.pos);
     let posts = if scene.members_of(e).iter().any(|c| tactics::picket_of(c)) {
-        siege::exposed(atlas, room)
-            .into_iter()
-            .map(|post| {
-                let strike = exchange::tower_strike(&towers, &post);
-                let worth = siege::denied(room, &post);
-                (post, casting::squad(e.capacity, strike, worth).len())
-            })
+        (siege::posts(atlas, room, e.capacity, &towers).into_iter())
+            .map(|(post, squad)| (post, squad.len()))
             .filter(|(_, n)| *n > 0)
             .collect()
     } else {
