@@ -9,7 +9,7 @@ use fabot_base::engine;
 use fabot_base::grid::{self, Footprint};
 use fabot_base::tiles;
 use fabot_base::tuning::Tuning;
-use fabot_base::vocabulary::{Part, part_count_in};
+use fabot_base::vocabulary::{Part, ResourceType, part_count_in};
 use fabot_base::world::{Controller, Id, Pos, RoomName, Spawn, StructureType};
 
 use super::bodies::{self, Leg, Pattern};
@@ -1313,10 +1313,16 @@ pub fn assign<'a>(
             }
             continue;
         }
+        // Hivemind's haulers serve the room they stand in: no pile elsewhere takes the mineral.
+        let laden = (b.store.held.iter()).any(|(r, n)| *r != ResourceType::Energy && *n > 0);
+        let stays = (derived.colonies.iter().zip(&derived.grounds)).position(|(c, g)| {
+            laden && c.room == b.pos.room && !g.abandoned && g.deposit().is_some()
+        });
         // A mender is a body of its own size: a home's loose worker taking it
         // left that home's work, and a young one's.
-        let near = |open: bool| {
+        let near = |open: bool, within: Option<usize>| {
             let ends = (slots.iter().enumerate())
+                .filter(|(_, s)| within.is_none_or(|c| s.colony == c))
                 .filter(|(i, s)| {
                     s.job.pattern() == b.pattern
                         && (if open { !taken[*i] } else { !s.job.seated() })
@@ -1326,7 +1332,9 @@ pub fn assign<'a>(
                 .map(|(i, s)| ((s.body.is_empty(), s.rank != DEADLINE), s.seat, i));
             nearest(&b.pos, ends, |seat| distance(atlas, &b.pos, seat)).map(|(i, _)| i)
         };
-        if let Some(i) = near(true).or_else(|| near(false)) {
+        let found = (near(true, stays).or_else(|| near(false, stays)))
+            .or_else(|| stays.and_then(|_| near(true, None).or_else(|| near(false, None))));
+        if let Some(i) = found {
             out.insert(b.name.clone(), i);
             holders.entry(slots[i].id.as_str()).or_default().push(b);
             taken[i] |= stands(b, &slots[i]);
