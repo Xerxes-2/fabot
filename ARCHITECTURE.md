@@ -724,8 +724,13 @@ conflicts never silently cancel an act.
 
 ### 6.5 Casting
 
-- **Queue (`Tick::queue`):** per-room priority `Floor → Fight → Economy`; an
-  affordable fight ask waiting on energy holds economy asks behind it.
+- **Queue (`Tick::queue`):** per-room priority `Floor → home Defend → outpost
+  Defend → Fight → Economy` (owner, 2026-11-24); an affordable Defend ask
+  waiting on energy holds the asks behind it. An unanswered home Defend is
+  priced each tick, as its raid changes under the towers.
+  `❓` A cast waits behind a body its spawn already began, which the engine
+  cannot cancel: a home raided on the tick an outpost's cast begins is drafted
+  after it (defend-prioritises-home-over-outpost seed 1: 65 ticks).
 - **Colony choice (`fight/price/casting.rs`):** picks the colony landing the body
   soonest (hops + spawn queue + energy refill time); home `Defend` casts at
   home. Bodies end with one `MOVE` (`with_move_last`) and carry `HEAL` when

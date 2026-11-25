@@ -329,8 +329,8 @@ export const measures = {
   // The most re-prices while Fighting, and the most bodies held at once, of one engagement of `kind` (none named: any) opened in [from, to).
   repriced: on("room kind from to", (_, a, dir) => Math.max(0, ...rowsOf(dir).filter((e) => (!a.kind || e.kind === a.kind) && openedIn(a)(e)).map((e) => e.repriced ?? 0))),
   held: on("room kind from to", (_, a, dir) => Math.max(0, ...rowsOf(dir).filter((e) => (!a.kind || e.kind === a.kind) && openedIn(a)(e)).map((e) => e.held ?? 0))),
-  // Our bodies the engagements of `kind` drew at any time that the engine killed, held or no longer (one
-  // killed retreating from a given-up Defend counts).
+  // Our bodies the engagements of `kind` drew at any time that the engine killed, held or no longer: fight
+  // losses, a body disarmed in the fight and finished as it leaves counted as one.
   bodiesLost: on("room kind from to", (_, a, dir) => {
     const drew = new Set(rowsOf(dir).filter(kindIn(a)).flatMap((e) => e.drew));
     return killsOf(dir).filter((d) => drew.has(d.name)).length;

@@ -92,7 +92,8 @@ fn queue(context: &Context, layout: &LayoutState, asks: &[(RoomName, Ask)]) -> V
         let mut bank = r.energy_available;
         for a in &asks {
             let cost = engine::body_cost(&a.body);
-            if cost > bank && a.rank == Rank::Defend && cost <= r.energy_capacity {
+            let defends = matches!(a.rank, Rank::Defend | Rank::DefendOutpost);
+            if cost > bank && defends && cost <= r.energy_capacity {
                 break;
             }
             if cost > bank {

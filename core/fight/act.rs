@@ -165,7 +165,6 @@ pub(super) fn act(
             );
         }
 
-        // A picket walks with the set and takes its post once the set fights.
         if e.phase == Phase::Fighting
             && picket(e, c)
             && let Some(front) = fronts.get(&e.id)
@@ -352,7 +351,6 @@ pub fn formation(
         _ => engine::MELEE_RANGE,
     };
     let (centre, range) = mark.map_or((centre, range), |h| (h.pos, reach));
-    // One still walking in from another room is no mate present: it closes alone.
     let present = |c: &&Creep| phase != Phase::Fighting || c.pos.room == centre.room;
     let members: Vec<&Creep> = (members.into_iter())
         .filter(|c| (raids || defends || !c.swings()) && present(c))

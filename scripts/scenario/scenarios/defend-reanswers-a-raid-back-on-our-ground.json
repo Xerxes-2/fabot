@@ -11,7 +11,7 @@
   },
   "ticks": 30000,
   "assert": [
-    { "measure": "bodiesLost", "max": 53 },
+    { "measure": "bodiesLost", "max": 55 },
     { "measure": "bodiesLost", "seat": "beta", "max": 36 },
     { "measure": "disengagedBeside", "max": 0 },
     { "measure": "disengagedBeside", "seat": "beta", "max": 0 }

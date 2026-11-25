@@ -129,14 +129,9 @@ pub enum TowerAct {
 pub enum Rank {
     Floor,
     Defend,
+    DefendOutpost,
     Fight,
     Economy,
-}
-
-impl Rank {
-    pub fn fight(defends: bool) -> Rank {
-        if defends { Rank::Defend } else { Rank::Fight }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

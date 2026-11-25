@@ -476,7 +476,8 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
                     || grew
                     || changed(&e, &events, &scene.by_id)
                     || e.since == world.time && e.phase == Phase::Forming
-                    || defend::unvisited(&scene, &e) =>
+                    || defend::unvisited(&scene, &e)
+                    || e.unanswered && scene.homes.contains(&e.room) =>
             {
                 decided.push(scene.priced(atlas, &mut asked, &e, &mut free, declarations));
             }
@@ -504,8 +505,10 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
         .filter_map(|s| s.spawning.as_ref().map(|o| &o.name))
         .collect();
 
-    let defends = |c: &Cast| {
-        (decided.iter()).any(|e| e.id == c.engagement && e.objective == Objective::Defend)
+    let rank = |c: &Cast| match decided.iter().find(|e| e.id == c.engagement) {
+        Some(e) if e.objective != Objective::Defend => Rank::Fight,
+        Some(e) if scene.homes.contains(&e.room) => Rank::Defend,
+        _ => Rank::DefendOutpost,
     };
     let asks = (casts.iter())
         .filter(|c| !ovens.contains(&c.name))
@@ -515,7 +518,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
                 Ask {
                     body: c.body.clone(),
                     name: c.name.clone(),
-                    rank: Rank::fight(defends(c)),
+                    rank: rank(c),
                 },
             )
         })
