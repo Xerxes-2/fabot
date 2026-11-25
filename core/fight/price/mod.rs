@@ -787,7 +787,10 @@ impl<'a> Scene<'a> {
                     offers,
                 };
                 if e.unanswered && first_answer {
-                    next.budget = e.lost + price.outcome.losses().dead;
+                    let wounded_before = (joining.iter().filter_map(|n| self.ours.get(n.as_str())))
+                        .filter(|c| c.hits < c.hits_max);
+                    next.budget =
+                        e.lost + price.outcome.losses().dead + wounded_before.count() as i32;
                 }
                 next.unanswered = false;
                 next.capacity = capacity;

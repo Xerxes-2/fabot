@@ -63,6 +63,14 @@
       "max": 3000
     },
     {
+      "metric": "hostile.dwell",
+      "room": "W7N3",
+      "from": 2000,
+      "to": 8000,
+      "total": true,
+      "max": 20
+    },
+    {
       "measure": "defendsOpened",
       "room": "W7N3",
       "from": 2000,
