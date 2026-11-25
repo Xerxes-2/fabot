@@ -670,8 +670,9 @@ and `cheapest_win` (adds only to already-standing `ours`).
   bodies standing do not, and every arm walks in together), its casts still
   to land, it forms again and gathers out of its raid's reach until they
   land, then goes in as one (owner, 2026-11-25: a set fed in one at a time
-  loses what the gathered set wins). `❓` A raid that grows
-  after contact cannot be gathered against. A `Defend`'s `Blob*` set walks as
+  loses what the gathered set wins); one already in contact
+  withdraws to gather when the raid grows past what its bodies standing win
+  (owner, 2026-11-25). A `Defend`'s `Blob*` set walks as
   one while it fights too, as its price pools its heal: its bodies in the
   raid's room into the reach its tactic names (`BlobClose` melee,
   `BlobKite` a shot) of the kill order's first standing, or, with no body

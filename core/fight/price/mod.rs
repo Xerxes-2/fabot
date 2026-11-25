@@ -839,7 +839,6 @@ impl<'a> Scene<'a> {
 
                 let gathers = price.together
                     && (price.cast > 0 || !asked_bodies.is_empty())
-                    && !self.in_reach(e)
                     && arms.iter().all(|a| a.together);
                 if casting::wins(
                     price.stance,
@@ -849,7 +848,7 @@ impl<'a> Scene<'a> {
                 ) {
                     defend::stands_alone(self.world.time, &next)
                 } else if gathers && matches!(next.phase, Phase::Approaching | Phase::Fighting) {
-                    // Owner (2026-11-25): where only the gathered set wins, it gathers before it goes in.
+                    // Owner (2026-11-25): where only the gathered set wins, it gathers first, withdrawing from contact.
                     enter(Phase::Forming, self.world.time, &next)
                 } else {
                     next

@@ -1,11 +1,11 @@
 {
-  "why": "Invader waves its towers alone do not out-kill (a big melee and two big healers) land on a home and both its outposts on one tick, each Defend asking the one spawn: the home's casts rank ahead of the outposts' and an unanswered home Defend is priced each tick, so its body is drafted before the outposts' (with the ranks swapped the home never gets one), and nothing of the home is lost. Seed 3, never drafted on 35ecdbba; the bounds are seeds 2-8's maxima (hostile ticks 163, bodies lost 2). Seed 1 is waived (agent, with the evidence in the commit): its home has no winning price on the tick the raid lands and the spawn begins an outpost's body that tick, so the home's lands 65 ticks after it, ARCHITECTURE §6.5's ❓",
+  "why": "Invader waves its towers alone do not out-kill (a big melee and two big healers) land on a home and both its outposts on one tick, each Defend asking the one spawn: the home's casts rank ahead of the outposts' and an unanswered home Defend is priced each tick, so its body is drafted before the outposts' (with the ranks swapped the home never gets one), and nothing of the home is lost. Seed 3, never drafted on 35ecdbba; the bounds are seeds 2-8's maxima (hostile ticks 176, 163 before a Defend's set gathered before it went in: the home's second body now goes in with the first, some 10-26 ticks later (seed 3: Approaching at t1126, not t1117 with the first alone; cleared t1182, not t1170; no more deaths); bodies lost 3, 2 before: seed 5's W7N3 set, the same 8 bodies, met its raid 34 ticks later and lost 2 where it lost none). Seed 1 is waived (agent, with the evidence in the commit): its home has no winning price on the tick the raid lands and the spawn begins an outpost's body that tick, so the home's lands 65 ticks after it, ARCHITECTURE §6.5's ❓",
   "modules": ["atlas", "exchange", "fight", "mv", "observe", "strategy", "tactics"],
   "start": { "room": "W8N3", "seed": 3, "node": "E0", "invaders": "W8N3:4000:1000,W7N3:4000:1000,W8N2:4000:1000", "wave": "melee:big,healer:big,healer:big", "unsafe": true },
   "ticks": 2500,
   "assert": [
     { "measure": "draftedAfterOthers", "room": "W8N3", "max": 0 },
-    { "measure": "hostileTicks", "max": 163 },
+    { "measure": "hostileTicks", "max": 176 },
     { "metric": "hostile.dwell", "room": "W8N3", "max": 20 },
     { "metric": "hostile.dwell", "room": "W7N3", "max": 20 },
     { "metric": "hostile.dwell", "room": "W8N2", "max": 20 },
@@ -13,6 +13,6 @@
     { "measure": "spawnsLost", "max": 0 },
     { "measure": "hostilesAtEnd", "max": 0 },
     { "measure": "predictedWinsLost", "max": 0 },
-    { "measure": "bodiesLost", "max": 2 }
+    { "measure": "bodiesLost", "max": 3 }
   ]
 }
