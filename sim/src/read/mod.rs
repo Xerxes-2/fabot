@@ -215,7 +215,7 @@ impl Reader<'_> {
 }
 
 /// The World `decide` reads, as `read.js` and `app/world.rs` hand it over.
-pub fn world(v: &View, declarations: &Declarations) -> World<'static> {
+pub fn world(v: &View, declarations: &Declarations, drain: Option<RoomName>) -> World<'static> {
     let k = v.k;
     let time = k.time as i32;
     let me = username(k, v.us);
@@ -341,7 +341,11 @@ pub fn world(v: &View, declarations: &Declarations) -> World<'static> {
             }
             world.spawns.push(spawn);
         }
-        for e in at.events() {
+        let held = (room.controller.as_ref()).is_some_and(|c| {
+            c.owner.is_ours() || c.reservation.as_ref().is_some_and(|r| r.0.is_ours())
+        });
+        let logged = held || drain == Some(name) || world.creeps.iter().any(|c| c.pos.room == name);
+        for e in at.events().filter(|_| logged) {
             if e.kind == EVENT_ATTACK {
                 let target = e.data["targetId"].as_str().unwrap_or_default();
                 world

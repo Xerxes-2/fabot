@@ -77,7 +77,7 @@ fn rank(map: &Map, maps: &Maps, room: &str) -> Option<(f64, Vec<String>)> {
         r.presence = (r.presence.iter().cloned()).chain([(us, sight)]).collect();
     }
     let declarations = Declarations::default();
-    let mut world = read::world(&View::of(&k), &declarations);
+    let mut world = read::world(&View::of(&k), &declarations, None);
     world.closed = maps.1.clone();
     (world.rooms.iter_mut()).for_each(|r| r.terrain = maps.terrain(r.name));
     let mut intel = Intel::default();

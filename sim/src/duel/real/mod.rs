@@ -46,7 +46,7 @@ impl Real {
             fabot_base::declarations::Declarations::default(),
         );
         let terrain = LocalRoomTerrain::new_from_bits(Box::new(*k.terrain.raw(0)));
-        let mut world = read::world(&v, &declarations);
+        let mut world = read::world(&v, &declarations, None);
         world.rooms[0].terrain = Some(&terrain);
         let (room, t) = (world.rooms[0].name, world.time);
         let terrains = [(room, terrain.get_bits())];
