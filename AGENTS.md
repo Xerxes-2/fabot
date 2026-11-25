@@ -8,34 +8,11 @@ Reading costs more than writing: every line is written once and read by every
 agent and review after. Prefer deleting to adding, a type or name to a sentence,
 one place for a fact to two, and short reports to long ones.
 
-## Rewrite period (active)
-
-The season is over. Until the owner deletes this section, conflicting rules
-below are suspended and this section wins:
-
-- **"Refactor" means rewrite.** Behaviour may change. Identical replay is not
-  required; report the first differing tick, do not fix it.
-- **Architecture changes are in scope.** A store, memo, `static`, `Tuning`
-  field, new/merged/deleted module, or `ARCHITECTURE.md` §4 row: decide it, do
-  not stop and ask. The agent is the owner for these decisions; record each in
-  `ARCHITECTURE.md` with its why in one sentence and the rest in the commit.
-- **The ask is the target, not the permission.** Work to the destination (the
-  modules after, the structure, a measure). List options most radical first and
-  take the most radical that reaches it; take the safest only when the others
-  are shown not to work.
-- **Verification is scenarios and soak**, not replay: `npm run scenario` passes
-  and `npm run soak:many` does not regress beyond noise (§Verification). Add a
-  scenario when none covers the rewrite.
-
-What stays: deterministic `decide`; no names or ids in source; `Fight` and
-`Economy` do not import each other; no ceiling in `scripts/ceilings.json`
-rises; the paraphrase test; `jj ship` and its gates.
-
 ## Boundaries
 
 - **Stop and ask the owner** before adding a §4 state row, a memo/cache outside
-  `Derived`/`Atlas`, a `thread_local!`/`static`, a Memory or segment read
-  outside `src/app/driver.rs`, a `Tuning` field, or any cooldown / latch /
+  `Derived`/`Atlas`, a `thread_local!`/`static`, a Memory or segment read or write
+  outside `src/app/wire.rs`, a `Tuning` field, or any cooldown / latch /
   grace / hold-while / hysteresis. These are architecture changes and never
   fixes. Owner away: label `needs-owner`, park it, take other work. Never work
   around it.
@@ -128,7 +105,7 @@ Full engine and metric details live in `ARCHITECTURE.md` §10.
   Before shipping, `npm run soak:many` over its default starts (two seeds and a
   late start) shows no room regressing beyond base start-spread noise.
 - **Unit tests:** invariants and pure arithmetic only (`npm test` < 1 min);
-  scenarios and soak run on `jj ship` for the modules a change touches. Reject
+  scenarios run on `jj ship` for the modules a change touches. Reject
   any test asserting one creep's action in one scenario.
 - **Large fight changes:** the owner watches siege/sweep/defend scenarios in
   lazycreep (`npm run scenario -- <name> --watch`). Report scenario name,

@@ -5,8 +5,6 @@
 
 use std::fmt::Write;
 
-use screeps::raw_memory;
-
 use super::world::Pass;
 use fabot_base::world::push_int;
 
@@ -68,12 +66,11 @@ pub fn record(time: i32, cpu_limit: f64, pass: &Pass, memory: &str, intel: &str)
             packed.len()
         ));
     }
-    let segments = raw_memory::segments();
     let first = time.unsigned_abs() as usize * parts;
     for (part, chunk) in packed.as_bytes().chunks(room).enumerate() {
         let id = FIRST + (first + part) % RING;
         let chunk = std::str::from_utf8(chunk).unwrap_or_default();
-        segments.set(id as u8, format!("{time} {part} {parts} {chunk}"));
+        super::wire::write_segment(id as u8, format!("{time} {part} {parts} {chunk}"));
     }
     None
 }

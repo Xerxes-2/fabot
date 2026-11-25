@@ -137,7 +137,7 @@ segments over multiple ticks (economy first); a cold tick never spends more than
 
 | Module | Crate | Owns | Reads | Writes |
 |---|---|---|---|---|
-| `Bindings` / `app` | `fabot` | Screeps JS API seam, packed `read.js`, `driver.rs` | `Game`, `RawMemory` | `Game`, `RawMemory`, segments |
+| `Bindings` / `app` | `fabot` | Screeps JS API seam, packed `read.js`, `driver.rs`, `wire.rs` | `Game`, `RawMemory` | `Game`, `RawMemory`, segments |
 | `Engine` | `fabot-base` | Game formulas & non-global server constants (vanilla tables from `screeps-game-api`) | — | — |
 | `World` | `fabot-base` | Single-pass tick snapshot, event-log strikes/destroys, per-tick `rules` (`CONTROLLER_STRUCTURES`) | `Game` | — |
 | `Atlas` | `fabot-atlas` | Room graph (region nodes, border-stretch crossings, keeper-strike avoidance, blind keeper penalty, a room intel last saw with towers that fire on us (a live stronghold's, a non-ally player's) never crossed, only reached) and per-room tile grid (creep-free weights, reverse floods, seats, footprint queries; a hostile's tile is walled only in this tick's step floods and passability, never in a kept flood, so one moving redoes no flood, tree or walk); out-of-sight grids hold what stood when last seen (else terrain) struck where intel places the keepers (`atlas.unseen`); a walk can run on terrain alone, as it lies or paved (`bare`) | `World`, `terrain`, `intel.rooms`, `Declarations` (colony plans, for `server`) | flood table, `atlas.carried` |
@@ -1154,8 +1154,7 @@ on a live-sized world.
 - **Shape audit** (`❓` every 30 issues or monthly): report line counts vs
   ceilings, §4 vs actual Memory/segments, per-module CPU shares,
   `engagements.log` error, and `Tuning` count.
-- The owner owns this document; agents propose changes via issues (suspended
-  during active rewrite period in `AGENTS.md`).
+- The owner owns this document; agents propose changes via issues.
 
 ## 13. Port manifest
 
