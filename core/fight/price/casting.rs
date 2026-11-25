@@ -42,8 +42,7 @@ pub const KITER: [Part; 3] = [Part::RangedAttack, Part::Move, Part::Move];
 pub const HOME_COPIES: i32 = 2;
 
 pub fn copies_within(worth: i32, spawn_ticks: i32, body: &[Part]) -> i32 {
-    (worth / engine::body_cost(body))
-        .min(spawn_ticks / (engine::SPAWN_TICKS_PER_PART * body.len() as i32))
+    (worth / engine::body_cost(body)).min(spawn_ticks / (engine::spawn_ticks(body.len())))
 }
 
 fn blocks_fit(capacity: i32, block: &[Part]) -> usize {
@@ -401,7 +400,7 @@ pub fn colony_for(
     body: &[Part],
 ) -> Option<RoomName> {
     let cost = engine::body_cost(body);
-    let spawn_ticks = engine::SPAWN_TICKS_PER_PART * body.len() as i32;
+    let spawn_ticks = engine::spawn_ticks(body.len());
 
     let wait = |room: &Room| -> i64 {
         let busy: Vec<i32> = (spawns.iter().filter(|s| s.pos.room == room.name))

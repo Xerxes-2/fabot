@@ -229,7 +229,7 @@ pub fn dance(sight: &mut Sight, room: &Room, members: &[&Creep], c: &Creep) -> W
             (tiles::around(here))
                 .iter()
                 .copied()
-                .filter(|t| !tiles::on_edge(*t) && sight.atlas.passable(room.name, *t)),
+                .filter(|t| sight.atlas.standable(room.name, *t)),
         )
         .min_by_key(|t| {
             let at = tiles::to_pos(room.name, *t);

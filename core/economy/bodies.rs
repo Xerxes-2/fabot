@@ -169,7 +169,7 @@ fn upgrader_body(roads: i32, plains: i32, most: i32, capacity: i32) -> Vec<Part>
             return (work, 0.0);
         };
         let arrives = roads * road + plains * plain;
-        let spawned = engine::SPAWN_TICKS_PER_PART * (work + 1 + moves);
+        let spawned = engine::spawn_ticks((work + 1 + moves) as usize);
         let upgrading = (engine::CREEP_LIFETIME - arrives - spawned).max(0);
         let cost = work * work_cost + carry_cost + moves * move_cost;
         (work, f64::from(work * upgrading) / f64::from(cost))
@@ -244,11 +244,13 @@ pub struct Leg {
 /// life per energy spent decides; a tie goes to 2, fewer parts and creeps a
 /// load.
 pub fn carry_per_move(leg: Leg) -> i32 {
-    let delivered = |carry: i32, cost: i32, loaded: i32| {
-        f64::from(carry) / f64::from(cost) / f64::from(loaded + leg.empty).max(1.0)
+    let delivered = |body: &[Part], loaded: i32| {
+        f64::from(engine::carry_capacity(body))
+            / f64::from(engine::body_cost(body))
+            / f64::from(loaded + leg.empty).max(1.0)
     };
-    let even = delivered(engine::CARRY_PART_CAPACITY, 100, leg.even);
-    let roaded = delivered(2 * engine::CARRY_PART_CAPACITY, 150, leg.roaded);
+    let even = delivered(&[Part::Carry, Part::Move], leg.even);
+    let roaded = delivered(&[Part::Carry, Part::Carry, Part::Move], leg.roaded);
     if even > roaded { 1 } else { 2 }
 }
 
@@ -277,8 +279,7 @@ const HARVEST_SPARE_WORK: i32 = 1;
 
 /// `home`: a seat in the casting colony's own room, which it walks once.
 pub fn harvester(home: bool, rate: i32, capacity: i32) -> Option<Vec<Part>> {
-    let work = (rate + engine::HARVEST_PER_WORK - 1) / engine::HARVEST_PER_WORK;
-    let work = work + HARVEST_SPARE_WORK;
+    let work = engine::work_to_dig(rate) + HARVEST_SPARE_WORK;
     if home {
         home_harvester(work, capacity)
     } else {

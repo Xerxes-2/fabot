@@ -196,7 +196,7 @@ impl<'a> Scene<'a> {
         let e = fresh(0, Objective::Sweep, room.name, 0, Tactic::Kite);
         let walk = self.nearest(atlas, &e).map(|(walk, _)| walk);
         let parts = sweep::HARASSERS.iter().map(|b| b.len()).max().unwrap_or(0);
-        let spawn = engine::SPAWN_TICKS_PER_PART * parts as i32;
+        let spawn = engine::spawn_ticks(parts);
         let held = walk.map_or(0, |w| engine::CREEP_LIFETIME - spawn - w);
         let all = sweep::prey(room);
         let prey: Vec<&Creep> = all
@@ -548,7 +548,7 @@ impl<'a> Scene<'a> {
         let members = self.slotted(e);
 
         let lasts = |c: &Creep, lead: i32| {
-            c.ticks_to_live > engine::SPAWN_TICKS_PER_PART * c.body.len() as i32 + walk + lead
+            c.ticks_to_live > engine::spawn_ticks(c.body.len()) + walk + lead
         };
 
         let held: BTreeSet<Slot> = (members.iter())
@@ -571,7 +571,7 @@ impl<'a> Scene<'a> {
             })
             .collect();
 
-        let lead = engine::SPAWN_TICKS_PER_PART * engine::MAX_BODY_PARTS as i32;
+        let lead = engine::spawn_ticks(engine::MAX_BODY_PARTS);
         asked
             .due
             .extend(members.iter().any(|(_, c)| !lasts(c, lead)).then_some(home));

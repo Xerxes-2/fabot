@@ -27,12 +27,6 @@ pub const REACH: i32 = 4;
 /// The owner's starting value, to be tuned.
 pub const LOST_GROUP_TICKS: i32 = 30;
 
-/// A seam's two tiles are one apart.
-pub fn world_of(pos: &Pos) -> (i32, i32) {
-    let (rx, ry) = pos.room.coords();
-    (rx * 50 + pos.x, ry * 50 + pos.y)
-}
-
 pub fn linked(a: &Pos, b: &Pos) -> bool {
     if a.room == b.room {
         a.within(REACH, b)
@@ -97,11 +91,11 @@ fn clusters<'a>(owned: &BTreeSet<RoomName>, hostiles: &'a [Creep]) -> Vec<Vec<&'
 fn centre<'a>(members: &[&'a Creep]) -> Pos {
     let n = members.len() as i32;
     let (sx, sy) = (members.iter()).fold((0, 0), |(sx, sy), m| {
-        let (x, y) = world_of(&m.pos);
+        let (x, y) = m.pos.world();
         (sx + x, sy + y)
     });
     let off = |m: &Creep| {
-        let (x, y) = world_of(&m.pos);
+        let (x, y) = m.pos.world();
         (n * x - sx).abs().max((n * y - sy).abs())
     };
     let nearer = |a: &'a Creep, b: &'a Creep| if off(b) < off(a) { b } else { a };

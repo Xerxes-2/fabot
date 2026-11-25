@@ -12,13 +12,35 @@ pub const CLAIM_LIFETIME: i32 = screeps::CREEP_CLAIM_LIFE_TIME as i32;
 /// ×1.1: the longest a deployed core stands.
 pub const STRONGHOLD_LONGEST_COLLAPSE: i32 = screeps::STRONGHOLD_DECAY_TICKS as i32 * 11 / 10;
 pub const SPAWN_TICKS_PER_PART: i32 = screeps::CREEP_SPAWN_TIME as i32;
+
+pub const fn spawn_ticks(parts: usize) -> i32 {
+    SPAWN_TICKS_PER_PART * parts as i32
+}
+
+pub fn carry_capacity(body: &[Part]) -> i32 {
+    part_count_in(body, Part::Carry) * CARRY_PART_CAPACITY
+}
+
+pub fn carry_parts(amount: f64) -> f64 {
+    amount / f64::from(CARRY_PART_CAPACITY)
+}
+
+pub fn dig_rate(work: i32) -> i32 {
+    work * HARVEST_PER_WORK
+}
+
+pub fn dug(work: i32, rate: i32) -> i32 {
+    dig_rate(work).min(rate)
+}
+
+/// The fewest WORK that dig `rate` a tick.
+pub fn work_to_dig(rate: i32) -> i32 {
+    (rate + HARVEST_PER_WORK - 1) / HARVEST_PER_WORK
+}
 pub const BOOST_ENERGY_PER_PART: i32 = screeps::LAB_BOOST_ENERGY as i32;
 pub const BOOST_MINERAL_PER_PART: i32 = screeps::LAB_BOOST_MINERAL as i32;
 pub const RESERVATION_CAP: i32 = screeps::CONTROLLER_RESERVE_MAX as i32;
 
-pub fn extension_energy(level: i32) -> i32 {
-    screeps::extension_energy_capacity(level.max(0) as u32) as i32
-}
 /// The reservation decays by one a tick, so N parts gain N - 1.
 pub const RESERVE_PER_CLAIM: i32 = screeps::CONTROLLER_RESERVE as i32;
 pub const CONTAINER_CAPACITY: i32 = screeps::CONTAINER_CAPACITY as i32;
@@ -101,6 +123,7 @@ pub const RAMPART_DECAY_AMOUNT: i32 = screeps::RAMPART_DECAY_AMOUNT as i32;
 pub const RAMPART_DECAY_TIME: i32 = screeps::RAMPART_DECAY_TIME as i32;
 /// REPAIR_COST: 0.01 energy a hit.
 pub const REPAIR_HITS_PER_ENERGY: i32 = 100;
+pub const REPAIR_ENERGY_PER_WORK: i32 = REPAIR_POWER / REPAIR_HITS_PER_ENERGY;
 pub const MAX_CONSTRUCTION_SITES: i32 = screeps::MAX_CONSTRUCTION_SITES as i32;
 pub const ROOM_SIDE: i32 = screeps::ROOM_SIZE as i32;
 

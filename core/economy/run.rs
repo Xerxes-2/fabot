@@ -88,7 +88,7 @@ fn ring_members<'a>(derived: &'a Derived, task: &Task, at: &Pos) -> Vec<&'a Refi
 
 fn spot_of(derived: &Derived, task: &Task) -> Option<Pos> {
     match task {
-        Task::Scout(room) => Some(Pos::new(*room, 25, 25)),
+        Task::Scout(room) => Some(tiles::middle(*room)),
         _ => derived.spots.get(&task.target()?).copied(),
     }
 }
@@ -660,7 +660,7 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
                     0,
                     false,
                     Job::Scout(room),
-                    Pos::new(room, 25, 25),
+                    tiles::middle(room),
                     "",
                     0,
                     Vec::new(),
@@ -710,10 +710,10 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
                     {
                         (g.sites.iter())
                             .min_by_key(|s| creep.pos.range(&s.pos))
-                            .map(|s| (s.pos, task::RANGE_UPGRADE, CreepAct::Build(s.id)))
+                            .map(|s| (s.pos, engine::UPGRADE_RANGE, CreepAct::Build(s.id)))
                     }
                     (true, Some(c), _) if c.owner.is_ours() && slots::fed(c) => {
-                        Some((c.pos, task::RANGE_UPGRADE, CreepAct::Upgrade(c.id)))
+                        Some((c.pos, engine::UPGRADE_RANGE, CreepAct::Upgrade(c.id)))
                     }
                     (_, _, Some(s)) if !s.kind.is_pile() => {
                         (s.id.object()).map(|id| (s.pos, 1, CreepAct::Transfer(id, Energy)))

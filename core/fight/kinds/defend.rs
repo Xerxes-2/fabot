@@ -187,8 +187,7 @@ pub(crate) fn cast_of(name: &str) -> Option<(i32, i32)> {
 /// A body its spawn began before the ask was in its price; one begun after, or a
 /// spawn idle short of a cast's energy, passed the set over.
 fn passed_over(time: i32, since: i32, landing: i32, (ovens, idle): (&[&Oven], bool)) -> bool {
-    let began =
-        |o: &&&Oven| time - (engine::SPAWN_TICKS_PER_PART * o.body.len() as i32 - o.remaining);
+    let began = |o: &&&Oven| time - (engine::spawn_ticks(o.body.len()) - o.remaining);
     time > since + landing && (idle || ovens.iter().any(|o| began(&o) > since))
 }
 

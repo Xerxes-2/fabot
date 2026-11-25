@@ -10,7 +10,7 @@ use fabot_base::declarations::{Declarations, OpKind};
 use fabot_base::intel::Row;
 use fabot_base::tiles;
 use fabot_base::vocabulary::Part;
-use fabot_base::world::{Creep, Fallen, Owner, Pos, Room, RoomName, Source, hostiles};
+use fabot_base::world::{Creep, Fallen, Pos, Room, RoomName, Source, hostiles};
 use fabot_base::{engine, grid};
 use fabot_exchange::Fighter;
 use fabot_tactics::Tactic;
@@ -32,7 +32,7 @@ pub struct Facts {
 
 pub fn prey<'a>(room: &'a Room) -> Vec<&'a Creep> {
     room.hostiles()
-        .filter(|h| matches!(h.owner, Owner::Enemy(_)))
+        .filter(|h| h.owner.is_enemy())
         .filter(|h| !hostiles::weaponed(h) && hostiles::works(h))
         .collect()
 }
@@ -46,11 +46,9 @@ pub fn worth(c: &Creep) -> i32 {
 /// Owner: denied harvest is worth as much as bodies killed; a source is seen
 /// dug by its running regeneration timer.
 pub fn room_worth(room: &Room, prey: &[&Creep], exposed: &[Pos], held: i32) -> i32 {
-    let enemy = |o: &Owner| matches!(o, Owner::Enemy(_));
-    let enemy_s =
-        room.controller.as_ref().is_some_and(|c| {
-            enemy(&c.owner) || c.reservation.as_ref().is_some_and(|(o, _)| enemy(o))
-        }) || !prey.is_empty();
+    let enemy_s = room.controller.as_ref().is_some_and(|c| {
+        c.owner.is_enemy() || c.reservation.as_ref().is_some_and(|(o, _)| o.is_enemy())
+    }) || !prey.is_empty();
     let denied: i32 = room
         .sources
         .iter()
@@ -106,8 +104,8 @@ pub(crate) fn room_for(scene: &Scene, sweeps: &[&Engagement]) -> i32 {
     let homes: Vec<&Room> = (scene.world.rooms.iter())
         .filter(|r| scene.homes.contains(&r.name))
         .collect();
-    let spawn = engine::SPAWN_TICKS_PER_PART * engine::MAX_BODY_PARTS as i32;
-    let ticks = |body: &[Part]| engine::SPAWN_TICKS_PER_PART * body.len() as i32;
+    let spawn = engine::spawn_ticks(engine::MAX_BODY_PARTS);
+    let ticks = |body: &[Part]| engine::spawn_ticks(body.len());
     let fielded: i32 = (sweeps.iter())
         .flat_map(|e| scene.members_of(e))
         .map(|c| ticks(&fabot_base::world::body_kinds(c)))

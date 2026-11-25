@@ -343,7 +343,7 @@ impl<'a> Scene<'a> {
             let held = (self.members_of(e).iter())
                 .any(|m| tactics::claims(m) && m.ticks_to_live > c.upgrade_blocked)
                 || asked.casts.iter().any(|cast| cast.engagement == e.id);
-            let spawn = engine::SPAWN_TICKS_PER_PART * body.len() as i32;
+            let spawn = engine::spawn_ticks(body.len());
 
             if !held && siege::tap_due(c, spawn) {
                 self.ask(atlas, e, casting::bare(std::slice::from_ref(body)), asked);
@@ -712,8 +712,7 @@ impl<'a> Scene<'a> {
                     let worth = tick_worth * ticks - fielded_cost;
 
                     let spawn_ticks = spawns * ticks
-                        - engine::SPAWN_TICKS_PER_PART
-                            * asked_bodies.iter().map(|b| b.len() as i32).sum::<i32>();
+                        - engine::spawn_ticks(asked_bodies.iter().map(Vec::len).sum());
 
                     (
                         Box::new(move |body: &casting::Body| {

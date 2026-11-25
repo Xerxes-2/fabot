@@ -568,7 +568,7 @@ pub fn dug_at(capacity: i32, home: bool, rate: i32, posted: bool, seats: Option<
     let Some(body) = body else { return 0 };
     // Not knowing a source's seats is no crew.
     let diggers = if posted { 1 } else { seats.unwrap_or(0) };
-    rate.min(diggers * part_count_in(&body, Part::Work) * engine::HARVEST_PER_WORK)
+    engine::dug(diggers * part_count_in(&body, Part::Work), rate)
 }
 
 /// Every bot's rampart margin in decay periods, the next counted.
@@ -591,7 +591,7 @@ fn repair_of(room: &Room, wall: i32, owned_room: bool, s: &Structure) -> Option<
             let ratio = engine::road_ratio(bits);
             let chunk = engine::ROAD_DECAY_AMOUNT * ratio;
             let block = bodies::block_of(Pattern::Hauler);
-            let load = part_count_in(block, Part::Carry) * engine::CARRY_PART_CAPACITY;
+            let load = engine::carry_capacity(block);
             let steps = 2.0 / f64::from(load);
             let decay = per(chunk, engine::ROAD_DECAY_TIME);
             let wear = decay * steps * f64::from(block.len() as i32 * engine::ROAD_WEAROUT);
@@ -818,7 +818,7 @@ fn ores_of(room: &Room) -> Vec<(Id, Pos, ResourceType, i32)> {
 fn buffer_seats_of(atlas: &Atlas, room: &Room, buffer: Option<&StoreFact>) -> Vec<Pos> {
     match (buffer, &room.controller) {
         (Some(b), Some(c)) if atlas.sees(room.name) => {
-            let walkable = |t: Tile| atlas.passable(room.name, t) && !tiles::on_edge(t);
+            let walkable = |t: Tile| atlas.standable(room.name, t);
             Atlas::upgrader_seats(walkable, tiles::of_pos(&c.pos), tiles::of_pos(&b.pos))
                 .into_iter()
                 .map(|t| tiles::to_pos(room.name, t))
@@ -968,7 +968,7 @@ fn ground_of(
         reservable: room.controller.as_ref().is_some_and(takeable),
         our_reservation: (room.controller.as_ref())
             .and_then(|c| c.reservation.as_ref())
-            .filter(|(owner, _)| *owner == Owner::Ours)
+            .filter(|(owner, _)| owner.is_ours())
             .map_or(0, |(_, ticks)| *ticks),
         upgrade_seats: match &room.controller {
             Some(c) => seats_at(atlas, engine::UPGRADE_RANGE, &c.pos),
@@ -1776,7 +1776,7 @@ pub fn of_world<'t>(
         grounds,
         scouts: scouts
             .iter()
-            .map(|s| (Pos::new(s.room, 25, 25), s.age, s.cast))
+            .map(|s| (tiles::middle(s.room), s.age, s.cast))
             .collect(),
         spots,
         pickups,

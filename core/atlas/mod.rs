@@ -1069,6 +1069,10 @@ impl Atlas {
             .is_some_and(|grid| grid.held()[tile].is_some())
     }
 
+    pub fn standable(&self, room: RoomName, tile: Tile) -> bool {
+        !tiles::on_edge(tile) && self.passable(room, tile)
+    }
+
     /// Walled for a walk in, open for a body standing in it to walk out.
     pub fn is_struck(&self, room: RoomName, tile: Tile) -> bool {
         let grid = self.grid(room).and_then(|g| g.struck.as_ref());

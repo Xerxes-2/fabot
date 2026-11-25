@@ -1,6 +1,7 @@
 /// What a body is hired to do; Memory holds it as its `task_id`.
 use std::fmt::Write;
 
+use fabot_base::engine;
 use fabot_base::vocabulary::ResourceType;
 use fabot_base::world::{Id, RoomName};
 
@@ -144,9 +145,6 @@ pub fn of_task_id(id: &str) -> Option<Task> {
     }
 }
 
-/// `range_of` of a build, a repair or an upgrade: `upgradeController`'s reach.
-pub const RANGE_UPGRADE: i32 = 3;
-
 /// From the room's centre, every tile but its edges: a body in sight of the
 /// room has arrived, whatever its terrain.
 const RANGE_SCOUT: i32 = 23;
@@ -161,7 +159,7 @@ impl Task {
 
     pub fn range_of(&self) -> i32 {
         match self {
-            Task::Build(_) | Task::Repair(_) | Task::Upgrade(_) => RANGE_UPGRADE,
+            Task::Build(_) | Task::Repair(_) | Task::Upgrade(_) => engine::UPGRADE_RANGE,
             Task::Harvest(_)
             | Task::Withdraw(_, _)
             | Task::Pickup(_, _)

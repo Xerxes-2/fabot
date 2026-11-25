@@ -438,8 +438,7 @@ pub fn blob(
 /// A medic's seat beside a dismantler: open ground off every tile beside the
 /// rival's line, where a body would be struck from a rampart.
 fn seat(atlas: &Atlas, line: &[Pos], room: RoomName, t: Tile) -> bool {
-    !tiles::on_edge(t)
-        && atlas.passable(room, t)
+    atlas.standable(room, t)
         && !line
             .iter()
             .any(|p| p.within(engine::MELEE_RANGE, &tiles::to_pos(room, t)))

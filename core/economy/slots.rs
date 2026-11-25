@@ -209,7 +209,7 @@ fn haulers(flows: &[(f64, Leg)], capacity: i32) -> Vec<Vec<Part>> {
             rate * f64::from(2 + loaded + leg.empty)
         })
         .sum();
-    let carry = (ticks / f64::from(engine::CARRY_PART_CAPACITY)).ceil() as i32;
+    let carry = engine::carry_parts(ticks).ceil() as i32;
     let Some(most) = bodies::hauler(ratio, engine::MAX_BODY_PARTS as i32, capacity) else {
         return Vec::new();
     };
@@ -326,7 +326,7 @@ fn worker_pace(atlas: &Atlas, derived: &Derived, ci: usize, body: &[Part], power
             weights += w;
         }
     }
-    let load = f64::from(part_count_in(body, Part::Carry) * engine::CARRY_PART_CAPACITY);
+    let load = f64::from(engine::carry_capacity(body));
     let working = load / f64::from(work * power);
     let trip = if weights == 0 {
         f64::from(engine::CREEP_LIFETIME)
@@ -474,18 +474,17 @@ impl Plan<'_> {
                 // An outpost out of sight shows no post: its harvester walks
                 // to the source, where the post comes into view.
                 let body = body.filter(|_| s.post.is_some() || !own);
-                let rate = body.as_ref().map_or(0, |b| {
-                    s.rate
-                        .min(part_count_in(b, Part::Work) * engine::HARVEST_PER_WORK)
-                });
+                let rate = body
+                    .as_ref()
+                    .map_or(0, |b| engine::dug(part_count_in(b, Part::Work), s.rate));
                 // A crew digs what the post's harvester leaves of a source
                 // whose container does not stand, and builds it, a worker
                 // digging a third of its life; not knowing its seats is no crew.
                 if s.container.is_none() && own {
                     let seats = s.seats.map_or(0, |n| n - i32::from(s.post.is_some()));
-                    let crew = worker.as_ref().map_or(1, |w| {
-                        part_count_in(w, Part::Work) * engine::HARVEST_PER_WORK / 3
-                    });
+                    let crew = worker
+                        .as_ref()
+                        .map_or(1, |w| engine::dig_rate(part_count_in(w, Part::Work)) / 3);
                     crews += seats.min((s.rate - rate + crew - 1) / crew.max(1));
                 }
                 let Some(body) = body else { continue };
@@ -634,7 +633,7 @@ impl Plan<'_> {
             .filter(|b| !expires(b, 0))
             .count() as i32;
         let (load, body) = worker.as_deref().map_or((0, 0), |w| {
-            let load = part_count_in(w, Part::Carry) * engine::CARRY_PART_CAPACITY;
+            let load = engine::carry_capacity(w);
             (load, engine::body_cost(w))
         });
         let drawn = |kept: i32, load: i32| {
@@ -787,10 +786,7 @@ impl Plan<'_> {
             let pace = |power: i32| worker_pace(atlas, derived, ci, body, power);
             (
                 bodies(build, pace(engine::BUILD_POWER))
-                    + bodies(
-                        mend,
-                        pace(engine::REPAIR_POWER / engine::REPAIR_HITS_PER_ENERGY),
-                    ),
+                    + bodies(mend, pace(engine::REPAIR_ENERGY_PER_WORK)),
                 bodies(upgraded, upgrade_pace(atlas, derived, ci, body)),
             )
         });
@@ -842,7 +838,7 @@ impl Plan<'_> {
                 .map(|o| {
                     let kinds: Vec<Part> = o.body.iter().map(|p| p.kind).collect();
                     f64::from(engine::body_cost(&kinds))
-                        / f64::from(engine::SPAWN_TICKS_PER_PART * kinds.len().max(1) as i32)
+                        / f64::from(engine::spawn_ticks(kinds.len().max(1)))
                 })
                 .sum();
             let brought = |at: &Pos| {
@@ -868,12 +864,12 @@ impl Plan<'_> {
         let mut carriers = haulers(&[&local.all[..], &remote].concat(), capacity);
         let spawn_time = f64::from(engine::CREEP_LIFETIME) * colony.spawns.len() as f64;
         let mut spent = (self.out.iter().filter(|s| s.colony == ci))
-            .map(|s| spawn_ticks(&s.body))
-            .chain(carriers.iter().take(home_carriers).map(|b| spawn_ticks(b)))
+            .map(|s| spawn_load(&s.body))
+            .chain(carriers.iter().take(home_carriers).map(|b| spawn_load(b)))
             .sum::<f64>();
         let far_carriers = (carriers.iter().skip(home_carriers))
             .take_while(|b| {
-                spent += spawn_ticks(b);
+                spent += spawn_load(b);
                 spent <= spawn_time
             })
             .count();
@@ -935,7 +931,7 @@ impl Plan<'_> {
             .filter(|s| s.rank == PIONEER || (s.room == home && !matches!(s.job, Job::Work(_))))
             .map(|s| &s.body)
             .chain(own)
-            .map(|b| spawn_ticks(b))
+            .map(|b| spawn_load(b))
             .sum();
         let life = f64::from(engine::CREEP_LIFETIME);
         let spawns = self.derived.colonies[ci].spawns.len() as f64;
@@ -959,7 +955,7 @@ impl Plan<'_> {
         let seat = (self.derived.grounds.iter())
             .find(|g| g.room == room)
             .and_then(|g| g.controller.as_ref().map(|c| c.pos))
-            .unwrap_or_else(|| Pos::new(room, 25, 25));
+            .unwrap_or_else(|| tiles::middle(room));
         let caster = self.derived.colonies[ci].room;
         let key = if caster == room {
             room.to_string()
@@ -1153,8 +1149,8 @@ fn rank_of(job: &Job, own: bool) -> i32 {
     }
 }
 
-pub fn spawn_ticks(body: &[Part]) -> f64 {
-    f64::from(engine::SPAWN_TICKS_PER_PART * body.len() as i32 * engine::CREEP_LIFETIME)
+pub fn spawn_load(body: &[Part]) -> f64 {
+    f64::from(engine::spawn_ticks(body.len()) * engine::CREEP_LIFETIME)
         / f64::from(engine::lifetime(body.iter().copied()))
 }
 
@@ -1231,12 +1227,11 @@ fn outgrown(derived: &Derived, body: &Body, slot: &Slot) -> bool {
         .flat_map(|g| g.sources.iter())
         .find(|s| &s.id == id)
         .map_or(0, |s| s.rate);
-    let dug = |work: i32| (work * engine::HARVEST_PER_WORK).min(rate);
-    dug(body.cast_work) < dug(part_count_in(&slot.body, Part::Work))
+    engine::dug(body.cast_work, rate) < engine::dug(part_count_in(&slot.body, Part::Work), rate)
 }
 
 fn expires(body: &Body, home_walk: i32) -> bool {
-    body.ticks_to_live <= body.size * engine::SPAWN_TICKS_PER_PART + home_walk
+    body.ticks_to_live <= engine::spawn_ticks(body.size as usize) + home_walk
 }
 
 pub type Holders<'a> = BTreeMap<&'a str, Vec<&'a Body>>;

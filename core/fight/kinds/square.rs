@@ -11,8 +11,7 @@ use fabot_base::world::{Creep, Pos, Room, RoomName};
 
 pub(crate) const BLOCK: usize = 4;
 
-/// The tiles a body never stands on: the ramparts and the garrison's
-/// reach, as it never leaves them.
+/// The tiles a body never stands on: the ramparts and the garrison's reach, as it never leaves them.
 pub(crate) fn closed(room: &Room) -> impl Fn(&Pos) -> bool {
     let ramparts: Vec<Pos> = (room.structures.iter())
         .filter(|s| fabot_atlas::invader_rampart(s))
@@ -37,7 +36,7 @@ pub(crate) fn at(
     let tiles = [at(x, y)?, at(x + 1, y)?, at(x, y + 1)?, at(x + 1, y + 1)?];
     let open = |p: &Pos| {
         let t = tiles::of_pos(p);
-        !tiles::on_edge(t) && atlas.passable(room.name, t) && !closed(p)
+        atlas.standable(room.name, t) && !closed(p)
     };
     tiles.iter().all(open).then_some(tiles)
 }

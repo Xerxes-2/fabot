@@ -302,10 +302,7 @@ pub fn take(
     let worth = standing.loot + bunker::STRONGHOLD_CORE_DENSITY[level];
     // A body waits at home on the set's last spawn: one spawn, at worst.
     let finishes = |set: &[casting::Body], used: i32| {
-        let spawned: i32 = set
-            .iter()
-            .map(|b| engine::SPAWN_TICKS_PER_PART * b.len() as i32)
-            .sum();
+        let spawned: i32 = set.iter().map(|b| engine::spawn_ticks(b.len())).sum();
         used + spawned <= engine::CREEP_LIFETIME && used + engine::CREEP_LIFETIME <= left
     };
     let priced = |r: &'static Recipe| {

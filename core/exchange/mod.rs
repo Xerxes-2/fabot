@@ -1048,7 +1048,7 @@ pub fn spawned_after(free: &[i32], parts: impl IntoIterator<Item = usize>) -> Ve
     (parts.into_iter())
         .map(|n| {
             free.iter_mut().min().map_or(0, |next| {
-                *next += engine::SPAWN_TICKS_PER_PART * n as i32;
+                *next += engine::spawn_ticks(n);
                 *next
             })
         })
@@ -1064,7 +1064,7 @@ fn walks_in(terrain: Terrain, side: &Side, bodies: &[Fighter], raid: &[Fighter])
         .map(|f| {
             let walk = walk_in(terrain, side.cast_walk, f, raid);
             match cast(f).then(|| queued.next()).flatten() {
-                Some(made) => walk + made - engine::SPAWN_TICKS_PER_PART * f.body.len() as i32,
+                Some(made) => walk + made - engine::spawn_ticks(f.body.len()),
                 None => walk,
             }
         })
@@ -1087,8 +1087,7 @@ fn walk_in(terrain: Terrain, cast_walk: Option<i32>, f: &Fighter, raid: &[Fighte
         + match (&f.pos, cast_walk) {
             (None, None) => CAST_WALK,
             (None, Some(tiles)) => {
-                engine::SPAWN_TICKS_PER_PART * f.body.len() as i32
-                    + tiles * step(engine::PLAIN_WEIGHT)
+                engine::spawn_ticks(f.body.len()) + tiles * step(engine::PLAIN_WEIGHT)
             }
             (Some(at), _) => (raid.iter())
                 .filter_map(|h| Some(at.crow_flies(h.pos.as_ref()?)))

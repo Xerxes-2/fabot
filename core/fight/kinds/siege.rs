@@ -7,9 +7,7 @@ use super::sweep;
 use fabot_atlas::Atlas;
 use fabot_base::engine;
 use fabot_base::tiles::{self, Tile, TileSet};
-use fabot_base::world::{
-    Controller, Id, Owner, Pos, Room, RoomName, Rules, Structure, StructureType,
-};
+use fabot_base::world::{Controller, Id, Pos, Room, RoomName, Rules, Structure, StructureType};
 use fabot_exchange::{self as exchange, Outcome};
 use fabot_tactics::{self as tactics, Offer, Tactic};
 
@@ -107,7 +105,7 @@ pub fn next_razed<'a>(
 }
 
 fn declaimed<'a>(room: &'a Room) -> Option<&'a Controller> {
-    (room.controller.as_ref()).filter(|c| matches!(c.owner, Owner::Enemy(_)))
+    (room.controller.as_ref()).filter(|c| c.owner.is_enemy())
 }
 
 pub fn next_target(rules: &Rules, room: &Room, near: Option<&Pos>) -> Option<Id> {

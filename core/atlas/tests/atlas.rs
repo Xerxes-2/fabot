@@ -434,7 +434,7 @@ proptest! {
             ticks_to_live: 1,
             fatigue: 0,
             store: Store {
-                held: vec![(ResourceType::Energy, engine::CARRY_PART_CAPACITY * 50)],
+                held: vec![(ResourceType::Energy, engine::carry_capacity(&[Part::Carry; 50]))],
                 capacity: 0,
             },
         };

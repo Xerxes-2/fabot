@@ -74,17 +74,16 @@ fn worked(c: &Candidate, capacity: i32, reserved: bool, spend: &dyn Fn(f64) -> f
     let dig = bodies::harvester(false, rate, capacity).unwrap_or_default();
     // A new remote has no road: its haulers are 1:1.
     let pair = [Carry, Move];
-    let carry =
-        |walk: i32| n * f64::from(rate * (2 * walk + 2)) / f64::from(engine::CARRY_PART_CAPACITY);
+    let carry = |walk: i32| engine::carry_parts(n * f64::from(rate * (2 * walk + 2)));
     let (carry, walked) = (carry(c.walk), carry(c.walked));
     let per_body = f64::from((capacity / engine::body_cost(&pair)).clamp(1, 25));
 
     let mut upkeep = n * slots::upkeep(&dig) + carry * slots::upkeep(&pair);
-    let mut spawn = n * slots::spawn_ticks(&dig) + walked * slots::spawn_ticks(&pair);
+    let mut spawn = n * slots::spawn_load(&dig) + walked * slots::spawn_load(&pair);
     let mut bodies = n + (carry / per_body).ceil();
     if reserved {
         upkeep += slots::upkeep(&CLAIMER);
-        spawn += slots::spawn_ticks(&CLAIMER);
+        spawn += slots::spawn_load(&CLAIMER);
         bodies += 1.0;
     }
     let lost = if c.contested { upkeep } else { 0.0 };
@@ -173,8 +172,7 @@ pub fn chosen(
     // Before a storage the spawns' share the outposts leave is the spend's;
     // spend parts (spenders' and their carriers', an energy a tick) measured at RCL5.
     let spend = |home: RoomName, net: f64| {
-        let ticks =
-            net.max(0.0) * tuning.outpost_spend_parts * f64::from(engine::SPAWN_TICKS_PER_PART);
+        let ticks = net.max(0.0) * tuning.outpost_spend_parts * f64::from(engine::spawn_ticks(1));
         if stocked(home) { ticks } else { 0.0 }
     };
     let mut spawn_left: BTreeMap<RoomName, f64> = BTreeMap::new();

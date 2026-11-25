@@ -88,7 +88,7 @@ const NEAR: i32 = 3;
 
 /// The longest a rampart holds, as v1's floor priced it: the ticks a colony
 /// takes to cast its answer twice, the first lost.
-const HOLD: i32 = 2 * engine::MAX_BODY_PARTS as i32 * engine::SPAWN_TICKS_PER_PART;
+const HOLD: i32 = 2 * engine::spawn_ticks(engine::MAX_BODY_PARTS);
 
 /// A quad, as TooAngel and most bots send: one dismantler, three healers.
 const HEALERS: i32 = 3;
@@ -101,9 +101,7 @@ pub fn wall(
     (rival, level): (i32, i32),
     threatened: bool,
 ) -> (i32, bool) {
-    let capacity = rules.allowed(StructureType::Spawn, rival)
-        * screeps::SPAWN_ENERGY_CAPACITY as i32
-        + rules.allowed(StructureType::Extension, rival) * engine::extension_energy(rival);
+    let capacity = rules.energy_capacity(rival);
     let pairs = |part: Part| {
         (capacity / engine::body_cost(&[part, Part::Move])).min(engine::MAX_BODY_PARTS as i32 / 2)
     };

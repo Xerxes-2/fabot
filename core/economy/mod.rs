@@ -14,7 +14,7 @@ pub use run::{EconomyState, decide, spare};
 pub(crate) mod arb {
     use fabot_base::declarations::{Declared, Outpost};
     use fabot_base::engine;
-    use fabot_base::vocabulary::{Part, ResourceType, part_count_in};
+    use fabot_base::vocabulary::{Part, ResourceType};
     use fabot_base::world::{
         BodyPart, Built, Controller, Creep, Id, Owner, Pile, Pos, Room, RoomName, Site, Source,
         Spawn, Store, Structure, StructureType, World,
@@ -305,7 +305,7 @@ pub(crate) mod arb {
         );
         draws.prop_map(|(at, prefix, parts, life, energy)| {
             let n = parts.len() as i32;
-            let carry = part_count_in(&parts, Part::Carry) * engine::CARRY_PART_CAPACITY;
+            let carry = engine::carry_capacity(&parts);
             let energy = energy.index(carry as usize + 1) as i32;
 
             Creep {

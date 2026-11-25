@@ -485,9 +485,12 @@ fn spent(
                     let s = room()?.structures.iter().find(|s| s.id == *id)?;
                     let per = engine::REPAIR_HITS_PER_ENERGY;
                     let target = (s.id, (s.hits_max - s.hits + per - 1) / per);
-                    (REPAIR, target, works)
+                    (REPAIR, target, works * engine::REPAIR_ENERGY_PER_WORK)
                 }
-                CreepAct::Upgrade(_) => return Some((c.pos.room, UPGRADE, works.min(held))),
+                CreepAct::Upgrade(_) => {
+                    let most = works * engine::UPGRADE_DRAIN_PER_WORK;
+                    return Some((c.pos.room, UPGRADE, most.min(held)));
+                }
                 _ => return None,
             };
             let left = undone.entry(id).or_insert(total);

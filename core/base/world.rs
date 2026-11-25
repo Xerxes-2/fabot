@@ -229,13 +229,15 @@ impl Pos {
         self.range(b).map(|r| r <= range).unwrap_or_default()
     }
 
-    pub fn crow_flies(&self, b: &Pos) -> i32 {
-        let ((ax, ay), (bx, by)) = (self.room.coords(), b.room.coords());
-        let side = engine::ROOM_SIDE;
+    /// On one grid over every room, a seam's two tiles one apart.
+    pub fn world(&self) -> (i32, i32) {
+        let ((rx, ry), side) = (self.room.coords(), engine::ROOM_SIDE);
+        (rx * side + self.x, ry * side + self.y)
+    }
 
-        (side * (ax - bx) + self.x - b.x)
-            .abs()
-            .max((side * (ay - by) + self.y - b.y).abs())
+    pub fn crow_flies(&self, b: &Pos) -> i32 {
+        let ((ax, ay), (bx, by)) = (self.world(), b.world());
+        (ax - bx).abs().max((ay - by).abs())
     }
 }
 
@@ -283,6 +285,10 @@ impl Owner {
 
     pub fn is_ally(&self) -> bool {
         matches!(self, Owner::Ally(_))
+    }
+
+    pub fn is_enemy(&self) -> bool {
+        matches!(self, Owner::Enemy(_))
     }
 
     pub fn is_friend(&self) -> bool {
@@ -625,6 +631,12 @@ impl Rules {
         let row = (self.structures.get(kind as usize)).map_or(&[][..], Vec::as_slice);
         let at = usize::try_from(level).map_or(None, |l| row.get(l).or(row.last()));
         at.copied().unwrap_or(0)
+    }
+
+    pub fn energy_capacity(&self, level: i32) -> i32 {
+        let extension = screeps::extension_energy_capacity(level.max(0) as u32) as i32;
+        self.allowed(StructureType::Spawn, level) * screeps::SPAWN_ENERGY_CAPACITY as i32
+            + self.allowed(StructureType::Extension, level) * extension
     }
 
     /// `room`'s structures the engine lets act (`utils.checkStructureAgainstController`),
