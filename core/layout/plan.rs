@@ -17,7 +17,7 @@ pub fn level_of(rules: &Rules, kind: StructureType, rank: i32) -> i32 {
         .unwrap_or(engine::CONTROLLER_MAX_LEVEL + 1)
 }
 
-/// At the first level a room's energy goes to its controller alone.
+/// Below it a room's energy goes to its controller alone.
 pub fn haul_level(rules: &Rules) -> i32 {
     level_of(rules, StructureType::Extension, 0)
 }

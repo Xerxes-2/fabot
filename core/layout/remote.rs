@@ -105,13 +105,11 @@ fn sink_for<'p>(
     planned: &dyn Fn(RoomName) -> Option<&'p ColonyPlan>,
     room: &Room,
 ) -> Option<Pos> {
-    let from = room
-        .controller
-        .as_ref()
-        .map(|c| c.pos)
-        .or_else(|| room.sources.first().map(|s| s.pos))?;
-    let claim = (room.controller.as_ref()).is_some_and(|c| c.owner.is_ours());
-    let home = derived.colonies[atlas::server(atlas, derived, planned, (&from, claim))?];
+    let anchors = (
+        room.controller.as_ref(),
+        room.sources.first().map(|s| s.pos),
+    );
+    let home = derived.colonies[atlas::server_of(atlas, derived, planned, anchors)?];
 
     (world.room(home)?.structures.iter())
         .find(|s| s.kind == StructureType::Storage && s.owner.is_ours())

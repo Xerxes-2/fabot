@@ -11,8 +11,8 @@ use fabot_base::tiles;
 use fabot_base::tuning::Tuning;
 use fabot_base::vocabulary::{CLAIMER, Part};
 use fabot_base::world::{Pos, RoomName, StructureType, World};
-use fabot_economy::bodies::{self, Pattern};
-use fabot_economy::{derived, slots};
+use fabot_economy::bodies;
+use fabot_economy::slots;
 use fabot_fight::casting;
 use fabot_fight::shape::{Engagement, Objective};
 
@@ -71,8 +71,7 @@ fn worked(c: &Candidate, capacity: i32, reserved: bool, spend: &dyn Fn(f64) -> f
         engine::NEUTRAL_OUTPUT_PER_TICK
     };
     let n = c.outpost.sources.len() as f64;
-    let dig =
-        bodies::sized(Pattern::Harvester, derived::dig_work(rate), capacity).unwrap_or_default();
+    let dig = bodies::harvester(false, rate, capacity).unwrap_or_default();
     // A new remote has no road: its haulers are 1:1.
     let pair = [Carry, Move];
     let carry =

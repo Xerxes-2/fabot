@@ -13,7 +13,7 @@ use fabot_base::vocabulary::{Part, ResourceType, part_count_in};
 use fabot_base::world::{Controller, Id, Pos, RoomName, Spawn, StructureType};
 
 use super::bodies::{self, Leg, Pattern};
-use super::derived::{Body, Derived, Ground, MineralFact, SiteFact, dig_work, drawn_for};
+use super::derived::{Body, Derived, Ground, MineralFact, SiteFact, drawn_for};
 use super::task::Assignment;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -79,9 +79,8 @@ impl Slot {
         k: usize,
         body: Vec<Part>,
     ) -> Slot {
-        let pattern: &str = job.pattern().into();
         Slot {
-            id: format!("{pattern}:{key}:{k}"),
+            id: Slot::id_of(job.pattern(), key, k),
             colony: ci,
             room: seat.room,
             rank: rank_of(&job, own),
@@ -93,6 +92,10 @@ impl Slot {
             closed: false,
             home_walk: 0,
         }
+    }
+
+    pub fn id_of(pattern: Pattern, key: impl Display, k: impl Display) -> String {
+        format!("{}:{key}:{k}", <&str>::from(pattern))
     }
 
     /// A lost controller loses the room; a lost road costs more than its repair.
@@ -232,26 +235,18 @@ fn sponsors(atlas: &mut Atlas, derived: &Derived) -> Vec<Option<usize>> {
         .collect()
 }
 
-fn server(
+pub fn owners(
     atlas: &mut Atlas,
     (derived, declarations): (&Derived, &Declarations),
-    at: (&Pos, bool),
-) -> Option<usize> {
+) -> Vec<Option<usize>> {
     let planned = |room| atlas::plan_of(declarations, &[], room);
-    atlas::server(atlas, derived.ours, &planned, at)
-}
-
-pub fn owners(atlas: &mut Atlas, of: (&Derived, &Declarations)) -> Vec<Option<usize>> {
-    let derived = of.0;
     (derived.grounds.iter().enumerate())
-        .map(|(gi, ground)| {
+        .map(|(gi, g)| {
             if gi < derived.colonies.len() {
                 return Some(gi);
             }
-            let claim = (ground.controller.as_ref()).is_some_and(|c| c.owner.is_ours());
-            let at = (ground.controller.as_ref().map(|c| c.pos))
-                .or_else(|| ground.sources.first().map(|s| s.pos))?;
-            server(atlas, of, (&at, claim))
+            let anchors = (g.controller.as_ref(), g.sources.first().map(|s| s.pos));
+            atlas::server_of(atlas, derived.ours, &planned, anchors)
         })
         .collect()
 }
@@ -475,11 +470,7 @@ impl Plan<'_> {
                 fixed.add(mender, 0.0);
             }
             for s in &g.sources {
-                let body = if own {
-                    bodies::home_harvester(dig_work(s.rate), capacity)
-                } else {
-                    bodies::sized(Pattern::Harvester, dig_work(s.rate), capacity)
-                };
+                let body = bodies::harvester(own, s.rate, capacity);
                 // An outpost out of sight shows no post: its harvester walks
                 // to the source, where the post comes into view.
                 let body = body.filter(|_| s.post.is_some() || !own);
@@ -509,11 +500,13 @@ impl Plan<'_> {
                             && b.pattern == Pattern::Harvester
                             && raised_by(g, b).is_some()
                     });
-                let dig_id = format!("harvester:{}:0", s.id);
+                let dig_id = self
+                    .push(ci, Job::Dig(s.id), post, s.id, 0, body)
+                    .id
+                    .clone();
                 if own {
                     digs.push(dig_id.clone());
                 }
-                self.push(ci, Job::Dig(s.id), post, s.id, 0, body);
                 if raises {
                     continue;
                 }
@@ -831,7 +824,7 @@ impl Plan<'_> {
             let pushed = self.out.len();
             self.worker(ci, colony.room, k as usize, (builds, spends), rank, MOST);
             if let Some(slot) = self.out.get_mut(pushed).filter(|_| rank == CREW) {
-                slot.id = format!("{}:{}:crew{k}", <&str>::from(Pattern::Worker), colony.room);
+                slot.id = Slot::id_of(Pattern::Worker, colony.room, format!("crew{k}"));
             }
         }
 
@@ -921,7 +914,7 @@ impl Plan<'_> {
     /// home slot of it, or none and cast by its spawns.
     fn paid(&self, ci: usize, pattern: Pattern) -> impl Iterator<Item = &Body> {
         let colony = &self.derived.colonies[ci];
-        let home = format!("{}:{}:", <&str>::from(pattern), colony.room);
+        let home = Slot::id_of(pattern, colony.room, "");
         let cast_here = move |b: &Body| {
             let spawn = bodies::spawn_of_name(&b.name);
             colony.spawns.iter().any(|s| spawn == Some(s.name.as_str()))
@@ -1020,9 +1013,10 @@ pub fn plan(
     let (mut out, _) = colonies(atlas, (derived, &declarations.tuning), owners, held);
     // A stood-down outpost keeps its dig and reserver slots, never cast, so
     // its bodies hold them and come back when it reopens.
+    let planned = |room| atlas::plan_of(declarations, &[], room);
     for o in &derived.closed {
         let at = o.controller.pos;
-        let Some(ci) = server(atlas, (derived, declarations), (&at, false)) else {
+        let Some(ci) = atlas::server(atlas, derived.ours, &planned, (&at, false)) else {
             continue;
         };
         let jobs = (o.sources.iter())
@@ -1065,8 +1059,7 @@ pub fn plan(
             continue;
         };
         if held.insert(slot.colony) {
-            let scout: &str = Pattern::Scout.into();
-            slot.id = format!("{scout}:{}:0", derived.colonies[slot.colony].room);
+            slot.id = Slot::id_of(Pattern::Scout, derived.colonies[slot.colony].room, 0);
             if !cast {
                 slot.body.clear();
             }
@@ -1171,8 +1164,7 @@ pub fn far(slot: &Slot) -> bool {
 /// Numbered apart from home's, so a pool that shrinks never turns an outpost's
 /// slot into a home one under its body.
 fn far_id(home: RoomName) -> String {
-    let hauler: &str = Pattern::Hauler.into();
-    format!("{hauler}:{home}:far:")
+    Slot::id_of(Pattern::Hauler, home, "far:")
 }
 
 /// An id is its holders' key.
@@ -1461,7 +1453,7 @@ pub fn casts(
             anchor.filter(|_| !digging && bank < colony.bank_capacity && !idle.is_empty())
             && let Job::Dig(id) = &s.job
             && let Some(rate) = sources.iter().find(|x| &x.id == id).map(|x| x.rate)
-            && let Some(body) = bodies::home_harvester(dig_work(rate), bank)
+            && let Some(body) = bodies::harvester(true, rate, bank)
             && engine::body_cost(&body) <= bank
         {
             casts.push(cast(s, body, true, &mut idle, &mut bank));

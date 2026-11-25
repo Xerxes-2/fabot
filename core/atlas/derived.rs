@@ -8,7 +8,7 @@ use fabot_base::intel::Intel;
 use fabot_base::tiles::{self, TileSet};
 use fabot_base::vocabulary::{CLAIMER, Part};
 use fabot_base::world::{
-    Creep, Owner, Pos, Room, RoomName, Sightings, StructureType, World, hostiles,
+    Controller, Creep, Owner, Pos, Room, RoomName, Sightings, StructureType, World, hostiles,
 };
 use fabot_base::{boost, engine};
 
@@ -118,6 +118,18 @@ pub fn server<'p>(
     };
     let spawns: Vec<Pos> = derived.homes.iter().map(|h| h.spawn).collect();
     nearest(atlas, &|room| derived.tree(room), &spawns, banks, at)
+}
+
+/// A seen room's server, anchored on its controller, else its first source.
+pub fn server_of<'p>(
+    atlas: &mut Atlas,
+    derived: &Derived,
+    planned: &dyn Fn(RoomName) -> Option<&'p ColonyPlan>,
+    (controller, source): (Option<&Controller>, Option<Pos>),
+) -> Option<usize> {
+    let at = controller.map(|c| c.pos).or(source)?;
+    let claim = controller.is_some_and(|c| c.owner.is_ours());
+    server(atlas, derived, planned, (&at, claim))
 }
 
 /// A colony's facts a sponsor is picked by, `Derived.colonies`' order.

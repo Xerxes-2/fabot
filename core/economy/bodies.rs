@@ -271,9 +271,23 @@ pub fn upgradable_at(level: i32) -> i32 {
     }
 }
 
-/// For a seat in the casting colony's own room, which it walks once: legs
-/// never cost it a Work.
-pub fn home_harvester(most: i32, capacity: i32) -> Option<Vec<Part>> {
+/// So the dig finishes the source inside its regeneration window despite the
+/// ticks a body loses walking and dropping its load.
+const HARVEST_SPARE_WORK: i32 = 1;
+
+/// `home`: a seat in the casting colony's own room, which it walks once.
+pub fn harvester(home: bool, rate: i32, capacity: i32) -> Option<Vec<Part>> {
+    let work = (rate + engine::HARVEST_PER_WORK - 1) / engine::HARVEST_PER_WORK;
+    let work = work + HARVEST_SPARE_WORK;
+    if home {
+        home_harvester(work, capacity)
+    } else {
+        sized(Pattern::Harvester, work, capacity)
+    }
+}
+
+/// Its legs never cost it a Work.
+fn home_harvester(most: i32, capacity: i32) -> Option<Vec<Part>> {
     if capacity < engine::body_cost(block_of(Pattern::Harvester)) {
         return None;
     }

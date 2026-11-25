@@ -12,8 +12,8 @@ mod graph;
 mod loot;
 
 pub use self::derived::{
-    BANK_LEVEL, Context, Derived, Home, derive, nearest, plan_of, server, sponsor, target_at,
-    worked,
+    BANK_LEVEL, Context, Derived, Home, derive, nearest, plan_of, server, server_of, sponsor,
+    target_at, worked,
 };
 pub use self::graph::Tree;
 use self::graph::Way;

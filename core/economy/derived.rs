@@ -305,8 +305,7 @@ impl Ground {
         (bank.free > 0).then_some(bank).or_else(open).or(Some(bank))
     }
 
-    /// The energy the terminal's shipment takes, sent and fees, a hundred over
-    /// as the fee rounds up per send.
+    /// The energy the terminal's shipment takes, sent and fees.
     pub fn shipped(&self) -> i32 {
         let Some((home, _)) = &self.ship_to else {
             return 0;
@@ -559,21 +558,11 @@ fn seats_at(atlas: &Atlas, range: i32, target: &Pos) -> Option<i32> {
     Some(atlas.seats(Footprint::One, range, target).len() as i32).filter(|n| *n > 0)
 }
 
-/// So the dig finishes the source inside its regeneration window despite the
-/// ticks a body loses walking and dropping its load.
-pub const HARVEST_SPARE_WORK: i32 = 1;
-
-pub fn dig_work(rate: i32) -> i32 {
-    (rate + engine::HARVEST_PER_WORK - 1) / engine::HARVEST_PER_WORK + HARVEST_SPARE_WORK
-}
-
 pub fn dug_at(capacity: i32, home: bool, rate: i32, posted: bool, seats: Option<i32>) -> i32 {
-    let body = if !posted {
-        bodies::sized(Pattern::Worker, engine::MAX_BODY_PARTS as i32, capacity)
-    } else if home {
-        bodies::home_harvester(dig_work(rate), capacity)
+    let body = if posted {
+        bodies::harvester(home, rate, capacity)
     } else {
-        bodies::sized(Pattern::Harvester, dig_work(rate), capacity)
+        bodies::sized(Pattern::Worker, engine::MAX_BODY_PARTS as i32, capacity)
     };
 
     let Some(body) = body else { return 0 };
@@ -582,7 +571,7 @@ pub fn dug_at(capacity: i32, home: bool, rate: i32, posted: bool, seats: Option<
     rate.min(diggers * part_count_in(&body, Part::Work) * engine::HARVEST_PER_WORK)
 }
 
-/// Every bot's rampart margin in decay periods, the next counted: 3000 hits unstruck.
+/// Every bot's rampart margin in decay periods, the next counted.
 const SAFE_PERIODS: i32 = 10;
 
 /// What keeping `s` standing costs, where it is below the hits we hold it at.
