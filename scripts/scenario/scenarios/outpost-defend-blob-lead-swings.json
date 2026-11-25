@@ -1,0 +1,10 @@
+{
+  "why": "a swinging set's lead walks into its mark's swing, not round it: soak:gen seed 172 (E4S7, t17072), a boosted Invader striker and healer; the BlobClose lead (3-ATTACK, the median member) kited round the striker's swing at range 2 while one mate fought alone, all four bodies died and the raid held the outpost 1500 ticks (roadsLost 1)",
+  "modules": ["fight", "mv"],
+  "start": { "gen": 172, "seed": 1 },
+  "ticks": 18700,
+  "assert": [
+    { "measure": "hostileTicks", "room": "E4S7", "from": 17000, "to": 18700, "max": 400 },
+    { "measure": "predictedWinsLost", "room": "E4S7", "from": 17000, "to": 18700, "max": 0 }
+  ]
+}

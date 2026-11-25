@@ -144,11 +144,11 @@ pub fn wishes(
     ranked.sort_by_cached_key(|&i| (lags[i], members[i].name.as_str()));
     let a = ranked[(ranked.len() - 1) / 2];
     let anchor = members[a];
-    // The lead and a struck body kite round the raid's swings; the rest close on the lead, as a
-    // body kiting its own way round leaves the set.
+    // A lead that does not swing and a struck body kite round the raid's swings; the rest close
+    // on the lead, as a body kiting its own way round leaves the set.
     let walk = |atlas: &mut Atlas, i: usize, to: &Target| {
         let c = members[i];
-        if i == a || struck[i] {
+        if i == a && !c.swings() || struck[i] {
             plan::kited(atlas, c, (mover, to, weight), raid)
         } else {
             plan::toward(atlas, c, mover, to, weight)
