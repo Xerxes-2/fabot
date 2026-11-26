@@ -255,6 +255,17 @@ pub fn placeable(item: &Item, level: i32) -> bool {
     item.level <= level && (item.kind != StructureType::Lab || engine::topped_out(level))
 }
 
+/// Whether a planned rampart's site may go down on a tile: one over a
+/// structure due by this level waits for it to stand; a later one would hold
+/// a ring tile open until it stands.
+pub fn rampart_fits(plan: &Plan, level: i32) -> impl Fn(&Census, Tile) -> bool {
+    let mut under = [false; tiles::COUNT];
+    for i in plan.items.iter().filter(|i| placeable(i, level)) {
+        under[i.tile] |= !matches!(i.kind, StructureType::Road | StructureType::Rampart);
+    }
+    move |census, t| (census.solid[t] > 0 || !under[t]) && census.rampart[t] == 0
+}
+
 /// The engine stacks a road only with a rampart, any other kind only with a
 /// road or a rampart.
 pub fn place(
@@ -273,19 +284,13 @@ pub fn place(
 
     let mut planned = [0u8; tiles::COUNT];
     let mut solid = [0u8; tiles::COUNT];
-    // A rampart over a structure due by this level waits for it to stand; a
-    // later one would hold a ring tile open until it stands.
-    let mut under = [0u8; tiles::COUNT];
+    let rampart_fits = rampart_fits(plan, level);
 
     for i in &plan.items {
         planned[i.tile] = 1;
 
         if !i.kind.walkable() {
             solid[i.tile] = 1;
-        }
-        if i.kind != StructureType::Road && i.kind != StructureType::Rampart && placeable(i, level)
-        {
-            under[i.tile] = 1;
         }
     }
 
@@ -370,7 +375,7 @@ pub fn place(
                     } < SITES_IN_FLIGHT
                     && census.site[t] == 0
                     && (if item.kind == StructureType::Rampart {
-                        (census.solid[t] > 0 || under[t] == 0) && census.rampart[t] == 0
+                        rampart_fits(census, t)
                     } else {
                         census.solid[t] == 0
                     })
@@ -636,6 +641,58 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A tunnel's site holds its slot for thousands of ticks, so it takes
+    /// none a ring rampart could.
+    #[test]
+    fn no_tunnel_takes_a_slot_while_a_ring_rampart_is_placeable_at_any_ring_level() {
+        let rules = Rules::vanilla();
+        let mut tunnelled = 0;
+        for real in fabot_base::testing::real_rooms().step_by(3) {
+            let mut room = real.room();
+            let Some(mut plan) =
+                crate::ground::of_room(&room).and_then(|g| crate::plan::of_ground(&rules, &g))
+            else {
+                continue;
+            };
+            let wall = census_of(&room, &[]).wall;
+            let tunnel =
+                |p: &Placement| p.kind == StructureType::Road && wall[tiles::index(p.x, p.y)] > 0;
+            if !plan.items.iter().any(|i| i.kind == StructureType::Road && wall[i.tile] > 0) {
+                continue;
+            }
+            tunnelled += 1;
+            let ring: Vec<Item> =
+                plan.ring.iter().filter(|i| i.kind == StructureType::Rampart).cloned().collect();
+            plan.items.append(&mut plan.ring);
+            for level in crate::RING_LEVEL..=engine::CONTROLLER_MAX_LEVEL {
+                let fits = rampart_fits(&plan, level);
+                loop {
+                    let census = census_of(&room, &[]);
+                    let placed = place(&rules, &census, level, &plan, i32::MAX);
+                    if placed.is_empty() {
+                        break;
+                    }
+                    let sited = |t: Tile| placed.iter().any(|p| tiles::index(p.x, p.y) == t);
+                    let open = (ring.iter())
+                        .filter(|i| placeable(i, level) && fits(&census, i.tile) && !sited(i.tile))
+                        .map(|i| i.tile)
+                        .next();
+                    let tunnels = placed.iter().any(tunnel);
+                    assert!(open.is_none() || !tunnels, "{} {level} {open:?}", real.name);
+                    for p in placed {
+                        let t = tiles::index(p.x, p.y);
+                        let id = format!("s{t}.{}", p.kind as usize);
+                        room.structures.push(fx::structure(&id, p.kind, Owner::Ours, t));
+                    }
+                }
+            }
+            if tunnelled >= 6 {
+                break;
+            }
+        }
+        assert!(tunnelled >= 6, "{tunnelled}");
     }
 
     #[test]
