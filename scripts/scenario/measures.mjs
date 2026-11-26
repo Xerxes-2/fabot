@@ -272,8 +272,6 @@ export const measures = {
     const of = (s) => (a.resource ? s.sentOf?.[a.resource] : s.sent)?.[a.room] ?? 0;
     return of(at(samples, a.to ?? Infinity)) - of(at(samples, a.from ?? 0));
   }),
-  // Minerals (or `resource`) that went out and came back between two of our rooms: each pair's lesser way (sim's `reversedOf`).
-  sentBack: on("resource", (samples, a) => Object.entries(samples.at(-1)?.reversedOf ?? {}).reduce((n, [r, v]) => n + ((a.resource ? r === a.resource : r !== "energy") ? v : 0), 0)),
   // Energy spent on construction (`room`: in that room alone).
   build: on("room from to", (samples, a) => builtIn(at(samples, a.to ?? Infinity), a) - builtIn(at(samples, a.from ?? 0), a)),
   upgradeWhileQueued: on("room from to", (samples, a) => {

@@ -217,7 +217,21 @@ fn labs() -> impl Strategy<Value = Labs> {
             reach: vec![near.clone(), near],
         }
     };
-    prop_oneof![8 => generated_labs(), 1 => Just(pinned(3)), 1 => Just(pinned(1))]
+    // A reagent standing at one bench outranks a nearer pair at another: it travels once.
+    let stands = Labs {
+        wanted: vec![(UtriumHydride, [Utrium, Hydrogen], 1)],
+        benches: vec![Some(Bench { reagents_held: Vec::new(), outputs: 4 }); 2],
+        reach: vec![
+            vec![(Utrium, Some(0)), (Hydrogen, Some(3))],
+            vec![(Utrium, Some(1)), (Hydrogen, Some(1))],
+        ],
+    };
+    prop_oneof![
+        8 => generated_labs(),
+        1 => Just(pinned(3)),
+        1 => Just(pinned(1)),
+        1 => Just(stands),
+    ]
 }
 
 fn generated_labs() -> impl Strategy<Value = Labs> {

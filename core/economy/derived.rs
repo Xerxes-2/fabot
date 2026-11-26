@@ -1673,3 +1673,82 @@ fn spots_of(grounds: &[Ground], claims: &[Controller], bodies: &[Body]) -> HashM
     }
     spots
 }
+
+#[cfg(test)]
+mod tests {
+    use fabot_base::testing;
+
+    use super::*;
+
+    fn colony(
+        name: &str,
+        labs: i32,
+        (terminal, free): (&[(ResourceType, i32)], i32),
+    ) -> Room<'static> {
+        let name: RoomName = name.parse().unwrap();
+        let plain = world::terrain::leak(vec![0; 2500]).unwrap();
+        let mut room = testing::ours(name, 8, plain);
+        let at = |x, y| Pos::new(name, x, y);
+        room.structures.push(testing::built(&format!("{name}s"), StructureType::Spawn, at(10, 10)));
+        let held = terminal.to_vec();
+        let capacity = held.iter().map(|(_, n)| n).sum::<i32>() + free;
+        room.structures.push(Structure {
+            store: Store { held, capacity },
+            ..testing::built(&format!("{name}t"), StructureType::Terminal, at(30, 30))
+        });
+        for i in 0..labs {
+            let lab = testing::built(
+                &format!("{name}l{i}"),
+                StructureType::Lab,
+                at(20 + i % 3, 20 + i / 3),
+            );
+            room.structures
+                .push(Structure { store: Store { held: Vec::new(), capacity: 5_000 }, ..lab });
+        }
+        room
+    }
+
+    fn reactions(rooms: Vec<Room<'static>>) -> Vec<(RoomName, Option<ResourceType>)> {
+        let mut world = testing::world(r#"{"rooms":[]}"#);
+        for r in &rooms {
+            let id = format!("{}s", r.name);
+            let pos = Pos::new(r.name, 10, 10);
+            world.spawns.push(Spawn { id: id.as_str().into(), name: id, pos, spawning: None });
+        }
+        world.rooms = rooms;
+        let mut atlas = Atlas::of_world(&world);
+        let mut ours = atlas::derive(&world, &mut atlas);
+        let declarations = Declarations::default();
+        ours.boosts = (boost::clusters(&world, &declarations).into_iter())
+            .map(|r| (r, boost::boosting(&world, r, &[])))
+            .collect();
+        let homes = homes(&world, &[], &atlas, &declarations, &ours);
+        (homes.grounds.iter())
+            .map(|g| (g.room, g.lab_plan.as_ref().and_then(|p| p.reaction.as_ref().map(|r| r.0))))
+            .collect()
+    }
+
+    /// A cluster whose terminal takes no send runs only a reaction whose
+    /// reagents stand there, however many outputs it has.
+    #[test]
+    fn a_full_terminal_takes_no_reaction_whose_reagents_stand_elsewhere() {
+        use ResourceType::{Catalyst, Hydrogen, Oxygen, Utrium, UtriumHydride};
+        let ores = [(Utrium, 3_000), (Hydrogen, 3_000), (Oxygen, 3_000), (Catalyst, 3_000)];
+        let energy = [(Energy, 50_000)];
+        let run = |full: &[(ResourceType, i32)]| {
+            let rooms = vec![
+                colony("W1N1", 0, (&[&ores[..], &energy].concat(), 100_000)),
+                colony("W2N1", 6, (full, 50)),
+                colony("W3N1", 4, (&energy, 100_000)),
+            ];
+            let room = |name: &str| name.parse::<RoomName>().unwrap();
+            let made = reactions(rooms);
+            let of = |name| made.iter().find(|(r, _)| *r == room(name)).and_then(|m| m.1);
+            (of("W2N1"), of("W3N1"))
+        };
+        let (full, open) = run(&energy);
+        assert!(full.is_none() && open.is_some(), "{full:?} {open:?}");
+        let stands = [(Utrium, 3_000), (Hydrogen, 3_000), (Energy, 50_000)];
+        assert_eq!(run(&stands).0, Some(UtriumHydride));
+    }
+}
