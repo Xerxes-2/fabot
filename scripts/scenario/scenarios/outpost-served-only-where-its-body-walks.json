@@ -1,0 +1,15 @@
+{
+  "why": "an outpost is served only by a colony whose body's own walk reaches its controller (atlas::server): on gen 1121481 alpha's E3S17 declared E6S17, three rooms off but its controller's region five crossings round, past the walk's hop bound; main served it from E3S17 through nearest's ticks_toward fallback, so its reserver was cast every life and stood at home (noWalk)",
+  "modules": ["atlas", "economy", "strategy"],
+  "start": {
+    "gen": 1121481,
+    "sectors": "2x2",
+    "seed": 1,
+    "players": [
+      { "name": "alpha", "declarations": { "enemies": ["beta"], "outposts": [{ "room": "E6S17", "controller": { "id": "00000000000047d", "x": 43, "y": 33 }, "sources": [{ "id": "00000000000047b", "x": 30, "y": 30 }, { "id": "00000000000047c", "x": 31, "y": 33 }] }] } },
+      { "name": "beta", "declarations": { "enemies": ["alpha"] } }
+    ]
+  },
+  "ticks": 14000,
+  "assert": [{ "measure": "idleRuns", "max": 0 }]
+}
