@@ -8,7 +8,7 @@
 //        npm run watch:sim -- …   the same, --watch implied
 //   --room  default the first room by name with a controller nobody owns and two sources
 import { readFileSync } from "node:fs";
-import { invariants, samplesOf } from "../scenario/measures.mjs";
+import { idleFindings, invariants, samplesOf } from "../scenario/measures.mjs";
 import { TEMPLATE, buildPlan, runSim, seatsUs, simBinary, soakDir } from "./run.mjs";
 import { report } from "./seats.mjs";
 
@@ -59,6 +59,7 @@ if (code === 0) {
   const last = samplesOf(out).at(-1);
   console.log(`t${last.t} rcl${last.rcl} progress ${last.progress} creeps ${last.creeps}`);
   for (const broken of invariants(out)) console.log(`invariant broken: ${broken}`);
+  for (const idle of idleFindings(out)) console.log(`idle run: ${idle}`);
   if (flags["--players"]) console.log(report(out));
 }
 process.exit(code);

@@ -635,11 +635,11 @@ export const failures = (dir, samples = samplesOf(dir)) => {
       ].map((a) => [home, of, a]);
     }),
     ...ALWAYS.map((a) => [rooms[0], samples, a]),
-    [rooms[0], samples, { measure: "idleRuns", max: 0 }],
   ].flatMap(([where, of, a]) => {
     const { value, ok, bound } = check(of, a, dir);
-    const runs = a.measure === "idleRuns" && !ok ? `: ${idleRuns(dir, of).map((r) => r.text).join(", ")}` : "";
-    return ok ? [] : [{ where, ...a, value, bound, text: `${where}: ${a.measure}${a.kind ? ` ${a.kind}` : ""} ${value} (${bound})${runs}` }];
+    return ok ? [] : [{ where, ...a, value, bound, text: `${where}: ${a.measure}${a.kind ? ` ${a.kind}` : ""} ${value} (${bound})` }];
   });
 };
 export const invariants = (dir) => failures(dir).map((f) => f.text);
+// Reported, not held: an idle run can pay off later (RCL1's extra workers build RCL2).
+export const idleFindings = (dir) => idleRuns(dir, samplesOf(dir)).map((r) => r.text);

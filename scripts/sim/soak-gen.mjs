@@ -33,7 +33,6 @@ function firstBroken(dir, samples, broken) {
   const own = {
     faults: () => tickOf(lines(dir, "faults.jsonl")[0].tick),
     refusals: () => cpu.find((r) => Object.keys(r.refused ?? {}).some(counted))?.t,
-    idleRuns: () => Math.min(...idleRuns(dir, samples).map((r) => r.t)),
   };
   const first = broken.filter((f) => own[f.measure]).map((f) => ({ t: own[f.measure](), what: f.text }));
   if (broken.some((f) => !own[f.measure]))
@@ -62,6 +61,7 @@ const rows = seeds.map((seed) => {
     at: Object.fromEntries([2, 3, 4, 5, 6, 7, 8].map((l) => [l, levels.find((x) => x.rcl >= l)?.t])),
     score: s ? Math.round(s.controller + s.structures + s.fortification + s.stock) : 0,
     broken,
+    idle: idleRuns(dir, samples),
     first: broken.length ? firstBroken(dir, samples, broken) : [],
   };
 });
@@ -81,6 +81,8 @@ const spread = (vs) => {
 };
 for (const l of [2, 3, 4, 5, 6, 7, 8]) console.log(`rcl${l} at: ${spread(ran.map((r) => r.at[l]))}`);
 console.log(`score: ${spread(ran.map((r) => r.score))}`);
+for (const r of ran) for (const i of r.idle) console.log(`idle run: seed ${r.seed} (${r.room}): ${i.text}`);
+console.log(`idle runs: ${ran.reduce((n, r) => n + r.idle.length, 0)}`);
 for (const r of rows.filter((r) => r.crashed !== undefined || r.broken.length)) {
   const first = r.first?.[0];
   console.log(`\nseed ${r.seed}${r.room ? ` (${r.room})` : ""}: ${r.crashed !== undefined ? `sim exited ${r.crashed}` : `first broken at t${first.t}: ${first.what}`}`);

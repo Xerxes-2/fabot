@@ -41,7 +41,7 @@ import { availableParallelism } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sweep } from "./prune.mjs";
-import { exposureOf, invariants } from "./measures.mjs";
+import { exposureOf, idleFindings, invariants } from "./measures.mjs";
 import { unstood } from "../sim/node.mjs";
 import { REPO, TEMPLATE as SIM_TEMPLATE, buildPlan, jsonLines, runSim, simBinary, soakDir } from "../sim/run.mjs";
 
@@ -228,5 +228,8 @@ for (const start of starts)
     }
 const broken = runs.filter((r) => !failed(r)).flatMap((r) => invariants(dirOf(r)).map((b) => `${r.name}: ${b}`));
 for (const b of broken) console.log(`invariant broken: ${b}`);
+const idle = runs.filter((r) => !failed(r)).map((r) => [r, idleFindings(dirOf(r))]);
+for (const [r, found] of idle) for (const i of found) console.log(`idle run: ${r.name}: ${i}`);
+console.log(`idle runs: ${bots.map((b) => `${b.name} ${idle.filter(([r]) => r.bot === b).reduce((n, [, i]) => n + i.length, 0)}`).join(", ")}`);
 unrun.forEach((u) => console.log(u));
 if (broken.length || Object.values(codes).some((c) => c !== 0)) process.exit(1);
