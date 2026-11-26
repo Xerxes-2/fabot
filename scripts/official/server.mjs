@@ -11,7 +11,7 @@ import { modulesOf, upload as post } from "../upload.mjs";
 
 const HERE = new URL(".", import.meta.url).pathname;
 const REPO = join(HERE, "../..");
-const shell = (cmd, args, opts) => execFileSync("nix", ["develop", `${REPO}#official`, "-c", cmd, ...args], opts);
+const shell = (cmd, args, opts) => execFileSync("nix", ["develop", REPO, "-c", cmd, ...args], opts);
 const node = String(shell("node", ["-p", "process.execPath"])).trim();
 const pins = ["package.json", "package-lock.json"].map((f) => readFileSync(join(HERE, f)));
 const key = createHash("sha256").update(node).update(pins[0]).update(pins[1]).digest("hex").slice(0, 12);

@@ -1039,10 +1039,10 @@ was not seen to die (the engine's word: its tombstone), offline one it outlived.
   scenario -- <name> --watch`, `npm run watch:sim`, `sim/src/watch`): the run
   lazycreep shows is the one scenarios and soaks measure.
 - **Official server (`scripts/official/`):** the bundle itself, on the
-  flake's Node 24 (`nix develop .#official`) and isolated-vm, installed once
-  per machine under `~/.cache/fabot-official`. `npm run smoke:real` plays a
-  fresh colony with a global reset halfway and fails on any error, fault or
-  heap past its limit.
+  flake's Node 24 (`nix develop`) and isolated-vm, installed once per
+  machine under `~/.cache/fabot-official`. `npm run smoke:real` plays a fresh
+  colony with a global reset halfway and fails on any error, fault or heap
+  past its limit.
 
 **Scenario library (`npm run scenario`):** every live incident becomes a recipe
 scenario with outcome bounds (`scripts/scenario/scenarios/`). `jj ship` runs

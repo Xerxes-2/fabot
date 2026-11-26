@@ -32,10 +32,10 @@
             pkgs.nodejs_24
             (pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml)
             pkgs.wasm-pack
+            # node-gyp, for the official server's native modules (`scripts/official/`).
+            pkgs.python3
           ];
         };
-        # `scripts/official/`'s server: default's Node without its Rust toolchain; python3 for node-gyp.
-        official = pkgs.mkShell { packages = [ pkgs.nodejs_24 pkgs.python3 ]; };
       });
     };
 }
