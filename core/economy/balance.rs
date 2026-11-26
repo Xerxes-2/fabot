@@ -21,15 +21,9 @@ pub fn gives(spare: i32) -> bool {
     spare >= engine::LAB_REACTION_AMOUNT
 }
 
-/// A cluster's reagents, and the target boosts while the colony fights.
-pub fn want(
-    r: ResourceType,
-    reagents: &[ResourceType],
-    boosts: &[ResourceType],
-    fights: bool,
-) -> i32 {
-    let boost = fights && boosts.contains(&r);
-    REAGENT * i32::from(reagents.contains(&r)) + BOOST * i32::from(boost)
+/// A cluster's reagents, and a target boost while the colony boosts with it.
+pub fn want(r: ResourceType, reagents: &[ResourceType], used: bool) -> i32 {
+    REAGENT * i32::from(reagents.contains(&r)) + BOOST * i32::from(used)
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -180,15 +174,6 @@ mod tests {
         let (from, to) = (from.parse().unwrap(), to.parse().unwrap());
         let (taker_free, load) = (100_000, vec![(r, n)]);
         vec![Shipment { from, to, taker_free, load }]
-    }
-
-    #[test]
-    fn a_fighting_colony_wants_each_target_boost_and_its_reagents() {
-        let boosts = [CatalyzedGhodiumAlkalide];
-        let want = |r, fights| want(r, &[Oxygen], &boosts, fights);
-        assert_eq!(want(CatalyzedGhodiumAlkalide, true), BOOST);
-        assert_eq!(want(CatalyzedGhodiumAlkalide, false), 0);
-        assert_eq!(want(Oxygen, false), REAGENT);
     }
 
     #[test]

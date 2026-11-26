@@ -3,16 +3,24 @@
 use proptest::{prelude::*, sample::subsequence};
 
 use crate::{
-    boost::{BOOSTS, Held, Stock, Visits, boosted_by, ores_in},
+    boost::{self, Act, BOOSTS, Held, Stock, Visits, ores_in},
     vocabulary::{
         ALL_BODY_PARTS, Part, RESOURCES_ALL,
         ResourceType::{
             self, CatalyzedGhodiumAlkalide as Tough3, CatalyzedUtriumAcid as T3,
             GhodiumOxide as Tough1, UtriumAcid as T2, UtriumHydride as T1, ZynthiumOxide as Move1,
         },
-        part_count_in, takes,
+        part_count_in,
     },
 };
+
+fn takes(part: Part, compound: ResourceType) -> bool {
+    boost::takes(Act::Fight, part, compound)
+}
+
+fn boosted_by(body: &[Part], stock: &mut Stock) -> Visits {
+    boost::boosted_by(Act::Fight, body, stock)
+}
 
 fn stock(held: &[(ResourceType, i32)], energy: i32) -> Stock {
     let held = (held.iter())
@@ -44,7 +52,7 @@ fn energy_runs_short_of_the_later_part_types_first() {
 
 const CASES: u32 = 256;
 
-/// Every compound that boosts some part, as `Stock::of` reads them.
+/// Every compound that boosts some part in a fight.
 fn compounds() -> Vec<ResourceType> {
     (RESOURCES_ALL.iter().copied())
         .filter(|c| ALL_BODY_PARTS.iter().any(|p| takes(*p, *c)))

@@ -46,10 +46,6 @@ pub fn damage_ratio(part: Part, compound: Option<ResourceType>) -> f64 {
     }
 }
 
-pub fn takes(part: Part, compound: ResourceType) -> bool {
-    multiple(part, Some(compound)) > 1 || damage_ratio(part, Some(compound)) < 1.0
-}
-
 pub const CLAIMER: [Part; 2] = [Part::Claim, Part::Move];
 
 #[inline]

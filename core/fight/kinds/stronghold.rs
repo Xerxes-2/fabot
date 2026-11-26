@@ -7,13 +7,13 @@ use Part::{Attack, Heal, RangedAttack, Tough};
 use ResourceType::{GhodiumAlkalide, KeaniumAlkalide, LemergiumAlkalide, LemergiumOxide};
 use fabot_atlas::Atlas;
 use fabot_base::{
-    boost::{Stock, strength},
+    boost::{Act::Fight, Stock, strength, takes},
     declarations::{Declarations, OpKind, REACH_HOPS},
     engine,
     intents::CreepAct,
     stronghold::{self as bunker, Stronghold, raw},
     tiles::{self, TileSet},
-    vocabulary::{Part, ResourceType, multiple, part_count_in, takes},
+    vocabulary::{Part, ResourceType, multiple, part_count_in},
     wish::Wish,
     world::{Creep, Id, Pos, Room, RoomName, Rules, Structure},
 };
@@ -101,8 +101,8 @@ impl Recipe {
     fn casts(&self, set: &[casting::Body], stock: &Stock, capacity: i32) -> bool {
         let held = |part: Part, tier: ResourceType| -> i32 {
             (stock.held.iter())
-                .filter(|h| takes(part, h.compound))
-                .filter(|h| strength(part, h.compound) >= strength(part, tier))
+                .filter(|h| takes(Fight, part, h.compound))
+                .filter(|h| strength(Fight, part, h.compound) >= strength(Fight, part, tier))
                 .map(|h| h.parts)
                 .sum()
         };

@@ -7,7 +7,11 @@ use fabot_base::{
 
 use super::{derive, remote, shape::LayoutState, sites, towers};
 
-pub fn decide_over(rules: &Rules, colonies: &[derive::Colony], mut budget: i32) -> Vec<Action> {
+pub fn decide_over(
+    (rules, labs_from): (&Rules, i32),
+    colonies: &[derive::Colony],
+    mut budget: i32,
+) -> Vec<Action> {
     let mut intents: Vec<Action> = Vec::new();
 
     for colony in colonies {
@@ -16,7 +20,7 @@ pub fn decide_over(rules: &Rules, colonies: &[derive::Colony], mut budget: i32) 
             && colony.census.paying < sites::SITES_IN_FLIGHT
             && sites::may_place(rules, &colony.census, colony.target)
         {
-            for p in sites::place(rules, &colony.census, colony.target, plan, budget) {
+            for p in sites::place(rules, &colony.census, (colony.target, labs_from), plan, budget) {
                 budget -= 1;
                 intents.push(Action::Room(colony.room, RoomAct::CreateSite(p.x, p.y, p.kind)));
             }
@@ -50,7 +54,7 @@ pub fn decide(ctx: &mut Context, standing: &mut LayoutState) -> ModuleOutput {
     );
 
     let budget = engine::MAX_CONSTRUCTION_SITES - world.our_sites;
-    let home = decide_over(&world.rules, &colonies, budget);
+    let home = decide_over((&world.rules, ctx.derived.labs_from), &colonies, budget);
 
     let placed = (home.iter())
         .filter(|i| matches!(i, Action::Room(_, RoomAct::CreateSite(..))))

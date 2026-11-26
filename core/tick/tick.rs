@@ -280,7 +280,7 @@ pub fn decide<'t>(
     (clock, began): (impl Fn() -> f64, f64),
     phases: &mut Vec<(String, f64)>,
     (world, trace): (&World, bool),
-    (mut declarations, state): (Declarations, State),
+    (mut declarations, mut state): (Declarations, State),
     (sightings, atlas): (Sightings, Atlas),
     intel: &'t mut Intel,
     (terrain, terrains): (
@@ -288,7 +288,6 @@ pub fn decide<'t>(
         impl IntoIterator<Item = (RoomName, &'t [u8; tiles::COUNT])>,
     ),
 ) -> Decided {
-    let mut state = state;
     let refused = refuse(&mut declarations, &world.closed);
     let sightings = fabot_base::world::sightings::step(world, sightings);
     let kept = !atlas.check || fabot_base::world::sightings::kept(world, &sightings);
@@ -304,15 +303,9 @@ pub fn decide<'t>(
     let start = clock();
     let mut derived = derive(world, &mut atlas);
     phases.push(("derive".to_string(), clock() - start));
-    // Before Strategy: Economy's home pass stocks the labs these waits keep.
-    let boosted: Vec<_> = fabot_fight::boosted(&state.fight.engagements).collect();
-    derived.boosts = (boost::clusters(world, &declarations).into_iter())
-        .map(|r| {
-            let here: Vec<&str> =
-                (boosted.iter()).filter(|b| b.colony == r).map(|b| b.name.as_str()).collect();
-            (r, boost::boosting(world, r, &here))
-        })
-        .collect();
+    let fight: Vec<_> =
+        fabot_fight::boosted(&state.fight.engagements).map(|b| (b.colony, &*b.name)).collect();
+    fabot_economy::labs::derive(world, &declarations, &fight, &mut derived);
     let (plans, misfiled) = strategy::plan(
         (!state.off.contains(STRATEGY), world, &mut atlas),
         &derived,

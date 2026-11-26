@@ -1,15 +1,19 @@
-/// Each lab cluster's reaction plan, pure over stocks and labs: which compound
-/// it makes next, which lab plays which part, what each lab is filled with or
-/// drained of. Derived whole every tick from what the stores hold, so a lost
-/// tick or a reset loses nothing.
+/// Each lab cluster's reaction plan, the economy's boosts, and the level labs
+/// are placed from: which compound it makes next, which lab plays which part,
+/// what each lab is filled with or drained of. Derived whole every tick from
+/// what the stores hold, so a lost tick or a reset loses nothing.
 use std::cmp::Reverse;
 
+use fabot_atlas as atlas;
 use fabot_base::{
-    boost::{BOOSTS, Roles, ores_in},
+    boost::{self, Act, BOOSTS, Roles, ores_in, strength, takes},
+    declarations::Declarations,
     engine,
-    vocabulary::{Boost, ResourceType},
-    world::Id,
+    vocabulary::{ALL_BODY_PARTS, Part, RESOURCES_ALL, ResourceType},
+    world::{Id, Mineral, RoomName, Structure, StructureType, World},
 };
+
+use super::bodies::{self, Pattern};
 
 /// Hivemind's "high": past it the first-ranked boost leaves the ore to the next.
 const BOOST_STOCK: i32 = 7_500;
@@ -26,17 +30,89 @@ pub fn ores_held(target: ResourceType, have: &[ResourceType]) -> bool {
     (ores_in(target).iter().enumerate()).all(|(ore, n)| *n == 0 || held(ore))
 }
 
-pub fn targets(have: &[ResourceType]) -> Vec<(ResourceType, i32)> {
-    (BOOSTS.iter())
-        .filter(|(boost, _)| {
-            use Boost::*;
-            matches!(
-                boost.boost(),
-                Some(Attack(_) | RangedAttack(_) | Heal(_) | Tough(_) | Move(_))
-            )
+/// While labs come at RCL7 (the chain held) and below RCL8: there the
+/// controller is upgraded only against downgrade (owner), so a boost buys nothing.
+pub fn boosts_upgrade(labs_from: i32, level: i32) -> bool {
+    labs_from < engine::CONTROLLER_MAX_LEVEL && !engine::topped_out(level)
+}
+
+pub fn dug_or_held(world: &World, colonies: &[RoomName]) -> Vec<ResourceType> {
+    use StructureType::*;
+    let mut out: Vec<ResourceType> = Vec::new();
+    for r in world.rooms.iter().filter(|r| colonies.contains(&r.name)) {
+        let ours: Vec<&Structure> = world.rules.working(r).filter(|s| s.owner.is_ours()).collect();
+        let dug = |m: &&Mineral| ours.iter().any(|s| s.kind == Extractor && s.pos == m.pos);
+        out.extend(r.minerals.iter().filter(dug).filter_map(|m| m.resource));
+        let stores = ours.iter().filter(|s| matches!(s.kind, Storage | Terminal | Lab));
+        out.extend(stores.flat_map(|s| s.store.held.iter().filter(|(_, n)| *n > 0).map(|h| h.0)));
+    }
+    let carried = (world.creeps.iter()).filter(|c| c.owner.is_ours()).flat_map(|c| &c.store.held);
+    out.extend(carried.filter(|(_, n)| *n > 0).map(|h| h.0));
+    out
+}
+
+/// Before Strategy, as Economy's home pass stocks the labs these waits keep.
+pub fn derive(
+    world: &World,
+    declarations: &Declarations,
+    fight: &[(RoomName, &str)],
+    derived: &mut atlas::Derived,
+) {
+    derived.minerals = dug_or_held(world, &derived.colonies);
+    derived.labs_from = labs_from(&derived.minerals);
+    let from = derived.labs_from;
+    derived.boosts = (boost::clusters(world, declarations).into_iter())
+        .map(|r| {
+            let fights = fight.iter().filter(|b| b.0 == r).map(|b| (b.1, Act::Fight));
+            let here: Vec<_> = fights.chain(boosted(world, r, from)).collect();
+            (r, boost::boosting(world, r, &here))
         })
-        .filter(|(boost, _)| ores_held(*boost, have))
-        .map(|(boost, _)| (*boost, BOOST_STOCK))
+        .collect();
+}
+
+fn boosted<'w>(
+    world: &'w World,
+    room: RoomName,
+    labs_from: i32,
+) -> impl Iterator<Item = (&'w str, Act)> {
+    let controller = world.room(room).and_then(|r| r.controller.as_ref());
+    let upgrades = controller.is_some_and(|c| boosts_upgrade(labs_from, c.level));
+    (world.creeps.iter())
+        .filter(move |c| upgrades && c.owner.is_ours() && c.pos.room == room)
+        .filter(|c| bodies::pattern_of_name(&c.name) == Some(Pattern::Upgrader))
+        .map(|c| (c.name.as_str(), Act::Upgrade))
+}
+
+fn chain_time(compound: ResourceType) -> i32 {
+    let made = (compound.reaction_components()).map_or(0, |rs| rs.map(chain_time).iter().sum());
+    compound.reaction_time().map_or(0, |t| t as i32) + made
+}
+
+/// Labs, not ore, bind: the compound adding most to `part` at `act` per lab tick of its chain.
+fn cheapest(act: Act, part: Part) -> Option<ResourceType> {
+    let gain = |c: ResourceType| i64::from(strength(act, part, c) - 100);
+    let time = |c: ResourceType| i64::from(chain_time(c));
+    (RESOURCES_ALL.iter().copied())
+        .filter(|c| takes(act, part, *c))
+        .max_by(|a, b| (gain(*a) * time(*b)).cmp(&(gain(*b) * time(*a))))
+}
+
+/// The level labs are placed from: RCL7 (owner; S11's median) once the upgrade
+/// boost's ores are held, so the labs pay below RCL8; else RCL8, where they wait for a sink.
+pub fn labs_from(have: &[ResourceType]) -> i32 {
+    let upgrade = cheapest(Act::Upgrade, Part::Work).is_some_and(|c| ores_held(c, have));
+    if upgrade { engine::CONTROLLER_MAX_LEVEL - 1 } else { engine::CONTROLLER_MAX_LEVEL }
+}
+
+/// Fight boosts come first, so the economy's take what they leave.
+pub fn targets(have: &[ResourceType], upgrading: bool) -> Vec<(ResourceType, i32)> {
+    let upgrade = cheapest(Act::Upgrade, Part::Work).filter(|_| upgrading);
+    (BOOSTS.iter())
+        .map(|(boost, _)| *boost)
+        .filter(|boost| ALL_BODY_PARTS.iter().any(|p| takes(Act::Fight, *p, *boost)))
+        .chain(upgrade)
+        .filter(|boost| ores_held(*boost, have))
+        .map(|boost| (boost, BOOST_STOCK))
         .collect()
 }
 
@@ -389,7 +465,7 @@ mod tests {
 
     #[test]
     fn clusters_never_share_a_reaction_and_leave_one_only_once_unwanted() {
-        let targets = targets(&ORES);
+        let targets = targets(&ORES, false);
         let mut stock: Vec<(ResourceType, i32)> = ORES.map(|o| (o, 3000)).to_vec();
         let mut held: Vec<Option<Vec<ResourceType>>> = vec![Some(Vec::new()); 3];
         let mut kinds = Vec::new();
@@ -428,6 +504,12 @@ mod tests {
         assert!(ores_held(GhodiumHydride, &[ZynthiumKeanite, UtriumLemergite, Hydrogen]));
         assert!(!ores_held(GhodiumHydride, &[GhodiumOxide, Hydrogen]));
         assert!(ores_held(CatalyzedGhodiumAlkalide, &[GhodiumOxide, Hydroxide, Catalyst]));
+    }
+
+    #[test]
+    fn upgrade_boosts_with_gh_its_chain_the_shortest_per_gain() {
+        assert_eq!(chain_time(GhodiumHydride), 25);
+        assert_eq!(cheapest(Act::Upgrade, Part::Work), Some(GhodiumHydride));
     }
 
     #[test]
@@ -492,7 +574,7 @@ mod tests {
     #[test]
     fn a_target_is_each_combat_t3_whose_every_ore_is_held() {
         let made = |have: &[ResourceType]| -> Vec<ResourceType> {
-            targets(have).into_iter().map(|(t, _)| t).collect()
+            targets(have, false).into_iter().map(|(t, _)| t).collect()
         };
         assert_eq!(made(&[Keanium, Oxygen, Hydrogen, Catalyst]), [CatalyzedKeaniumAlkalide]);
         assert_eq!(made(&[KeaniumOxide, Hydroxide, Catalyst]), [CatalyzedKeaniumAlkalide]);
@@ -508,7 +590,7 @@ mod tests {
         // XGHO2 is first and Z too short to make it; the rest leave leftovers.
         let ore = |o| (o, if o == Zynthium { 3 } else { 3003 });
         let mut stock: Vec<(ResourceType, i32)> = ORES.map(ore).to_vec();
-        let targets = targets(&ORES);
+        let targets = targets(&ORES, false);
         assert!(targets.len() > 1);
         for _ in 0..10_000 {
             let Some(next) = next_reaction(&targets, &stocked(&stock)) else {

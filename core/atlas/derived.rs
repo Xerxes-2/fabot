@@ -6,7 +6,7 @@ use fabot_base::{
     engine, grid,
     intel::Intel,
     tiles::{self, TileSet},
-    vocabulary::{CLAIMER, Part},
+    vocabulary::{CLAIMER, Part, ResourceType},
     world::{
         Controller, Creep, Owner, Pos, Room, RoomName, Sightings, StructureType, World, hostiles,
     },
@@ -156,6 +156,9 @@ pub struct Derived {
     /// The colonies whose labs react and boost (`boost::clusters`), their
     /// boosting read before Strategy plans, as Economy's labs are.
     pub boosts: Vec<(RoomName, boost::Boosting)>,
+    /// What the colonies dig or hold, and `labs::labs_from` of it.
+    pub minerals: Vec<ResourceType>,
+    pub labs_from: i32,
 }
 
 /// A colony banks its haul from here (§5): on its storage, else on its hub's pile.
@@ -248,6 +251,8 @@ pub fn derive(world: &World, atlas: &mut Atlas) -> Derived {
         worked: Vec::new(),
         trees,
         boosts: Vec::new(),
+        minerals: Vec::new(),
+        labs_from: engine::CONTROLLER_MAX_LEVEL,
     }
 }
 
