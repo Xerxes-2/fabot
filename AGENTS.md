@@ -94,7 +94,9 @@ Full engine and metric details live in `ARCHITECTURE.md` §10.
   against base (§10.4). Behaviour changes read their first differing tick there
   before running scenarios.
 - **Behaviour fix:** add a scenario reproducing the incident and pass
-  `npm run scenario` without regression.
+  `npm run scenario` without regression. A planner/layout fix instead pins its
+  invariant with a unit test over terrain fixtures (real-room terrain where it
+  can); a scenario only when the invariant can't be stated on the plan alone.
 - **Fight changes:** no scenario seats an open-source bot to prove a fight
   (`ARCHITECTURE.md` §10.2, Adversaries). Scenarios verify mechanics against
   scripted rivals (`sim/src/rival/`, each explaining `why`); what a fight pays
