@@ -1,0 +1,19 @@
+{
+  "why": "unarmed claimers in a young colony fire its safe mode before the first attackController lands: each strike blocks upgrade (and so safe mode) 1000 ticks, and S11's W2N24 (RCL2) fell to 2C2M/1C1M claimers striking each time the block lapsed, its safe mode never fired. Unarmed, they open no Defend: only the claimer rule fires it (t2613, two ticks before one stands beside the controller). Shapes from S11 t38101-45159; the raid stands one tile inside W7N3, as young-colony-safe-mode-on-raid's",
+  "modules": ["economy", "fight", "strategy"],
+  "start": {
+    "room": "W8N3",
+    "seed": 1,
+    "node": "E2",
+    "opponents": [
+      {
+        "name": "raider",
+        "room": "W6N3",
+        "config": { "role": "raid" },
+        "raid": { "first": 2600, "room": "W7N3", "inside": true, "bodies": [{ "claim": 2, "move": 2 }, { "claim": 1, "move": 1 }] }
+      }
+    ]
+  },
+  "ticks": 4000,
+  "assert": [{ "measure": "claimSafeMode", "from": 2600, "min": 1 }]
+}

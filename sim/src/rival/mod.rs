@@ -1,7 +1,7 @@
 //! The scenarios' scripted rivals (`ARCHITECTURE.md` §10.2), ported from the xxscreeps rival's
-//! `roles.js` (removed with the port): `harass` kites an outpost, `raid` fights where `stand` put
-//! its bodies, and `keep` does nothing, since its level-1 room holds no tower and never the 600
-//! energy its repairer cost.
+//! `roles.js` (removed with the port): `harass` kites an outpost, `raid` fights (or with CLAIM
+//! alone attacks the controller) where `stand` put its bodies, and `keep` does nothing, since
+//! its level-1 room holds no tower and never the 600 energy its repairer cost.
 use std::cell::Cell;
 
 use fabot_base::engine;
@@ -259,7 +259,7 @@ fn target_of<'a>(v: &View<'a>, c: &It, foes: &[It<'a>], me: &str) -> Option<It<'
         "powerCreep",
     ];
     let theirs = |spawn: bool| {
-        let owned = all(v, c.room).filter(|s| !s.user().is_empty() && s.user() != me);
+        let owned = all(v, c.room).filter(|s| theirs(s, me));
         closest(
             c,
             owned.filter(|s| !unbuilt.contains(&s.kind) && (!spawn || s.kind == "spawn")),
@@ -317,6 +317,21 @@ fn healer(v: &View, o: &mut Orders, c: &It, allies: &[It]) {
     }
 }
 
+fn theirs(s: &It, me: &str) -> bool {
+    !s.user().is_empty() && s.user() != me
+}
+
+/// CLAIM strikes our controller each time its upgrade block lapses: the block also
+/// refuses safe mode, which is how S11's W2N24 fell to bodies with no weapon.
+fn unclaim(v: &View, o: &mut Orders, c: &It) {
+    let reach = engine::MELEE_RANGE;
+    match all(v, c.room).find(|s| s.kind == "controller" && theirs(s, o.me)) {
+        Some(t) if c.range(&t) <= reach => o.put(c, "attackController", json!({ "id": t.id() })),
+        Some(t) => o.step(v, c, &[(t, reach)], false, Edges::Built),
+        None => {}
+    }
+}
+
 impl Rival {
     /// With nothing to strike where it stands, a raid walks on to `target`.
     fn raid(&self, v: &View, o: &mut Orders) {
@@ -329,6 +344,7 @@ impl Rival {
                     _ if c.has("attack") => swing(v, o, c, target),
                     _ if c.has("ranged_attack") => gun(v, o, c, &foes, target),
                     _ if c.has("heal") => healer(v, o, c, &allies),
+                    _ if c.has("claim") => unclaim(v, o, c),
                     _ => {}
                 }
             }

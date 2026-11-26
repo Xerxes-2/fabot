@@ -75,7 +75,7 @@ export function standCapture(world) {
 }
 
 const rivalId = (i) => (0xe00000 + i).toString(16);
-const PARTS = ["tough", "move", "work", "carry", "attack", "ranged_attack", "heal"];
+const PARTS = ["tough", "move", "work", "carry", "attack", "ranged_attack", "heal", "claim"];
 /** sim's `--rivals` (`sim/src/rival`): each rival's user, room, config and raid, a raid's bodies part by part. */
 const seats = (rivals) =>
   rivals.map(({ room, config, raid }, i) => ({ id: rivalId(i), room, ...config, raid: raid && { ...raid,
