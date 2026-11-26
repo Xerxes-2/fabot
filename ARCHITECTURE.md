@@ -980,7 +980,10 @@ Pure at module boundaries, systems Rust inside (measurements override defaults):
 - **Single-pass JS→WASM seam:** a per-field world read costs ~90% seam calls
   rather than work, so `src/app/read.js` packs the tick into one `Int32Array` +
   interned string buffer (interning saves 17% of `read.*` and `decode`), decoded by
-  `core/base/world/read`; never add per-field JS calls.
+  `core/base/world/read`; never add per-field JS calls. `❓` Engine getters
+  are ≈2/3 of `read.structures`; keeping roads, walls and ramparts across
+  ticks would save ≈0.9 ms/tick official at t94k, but needs a §4 row and an
+  exception to derive-once: deferred until CPU is tight (owner, 2026-11-26).
 - **Copy `world::Id`:** 96-bit left-aligned hex + length (`Copy`, lex-ordered as
   text), avoiding `String` allocations and pointer hashing.
 - **`#[inline]` across crates:** rustc inlines a function into another
