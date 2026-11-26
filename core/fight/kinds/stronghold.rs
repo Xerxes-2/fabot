@@ -388,13 +388,8 @@ pub fn reached(rules: &Rules, room: &Room, atlas: &Atlas, level: i32) -> bool {
     let recipe = usize::try_from(level)
         .ok()
         .and_then(|l| RECIPES.get(l)?.first());
-    let swings = recipe.map(|r| {
-        r.set(1)
-            .iter()
-            .map(|b| part_count_in(b, Attack) > 0)
-            .collect::<Vec<_>>()
-    });
-    swings.is_some_and(|s| ground(rules, room, atlas, reach(s.into_iter()), &[]).is_some())
+    let swings = recipe.map(|r| r.set(1).into_iter().map(|b| part_count_in(&b, Attack) > 0));
+    swings.is_some_and(|s| ground(rules, room, atlas, reach(s), &[]).is_some())
 }
 
 /// Healed before it lands, on the body nearest the core the towers strike, the
