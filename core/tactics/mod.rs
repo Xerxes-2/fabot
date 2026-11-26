@@ -476,12 +476,12 @@ pub fn retreat(sight: &mut Sight, creep: &Creep) -> Wish {
 /// beside it. A heal lands in the tick's sum with the strikes, so what is
 /// `incoming` is owed. Each healer comes with its `world::power` of HEAL.
 pub fn allot<'p>(
-    healers: &[(&Creep, i32)],
+    healers: impl IntoIterator<Item = (&'p Creep, i32)>,
     patients: &[&'p Creep],
     owed: &mut BTreeMap<String, i32>,
     shooting: &dyn Fn(&str) -> bool,
 ) -> Vec<(String, &'p Creep, bool, i32)> {
-    let mut healers = healers.to_vec();
+    let mut healers: Vec<_> = healers.into_iter().collect();
     healers.sort_by(|a, b| a.0.name.cmp(&b.0.name));
     let mut out = Vec::new();
     for (healer, power) in healers {
@@ -553,7 +553,7 @@ pub fn nets(
                     )
                 })
                 .collect();
-            let heal: i32 = allot(&healers, &patients, &mut owed, &|_| true)
+            let heal: i32 = allot(healers.iter().copied(), &patients, &mut owed, &|_| true)
                 .iter()
                 .filter(|(_, p, _, _)| p.name == c.name)
                 .map(|(_, _, _, heal)| heal)
@@ -592,14 +592,11 @@ pub fn heals(
             (p.name.clone(), p.hits_max - p.hits + more)
         })
         .collect();
-    let healers: Vec<(&Creep, i32)> = healers
-        .iter()
-        .copied()
+    let healers = (healers.iter().copied())
         .filter(|h| !swinging.contains(&h.name))
-        .map(|h| (h, world::power(h, Part::Heal)))
-        .collect();
+        .map(|h| (h, world::power(h, Part::Heal)));
     let patients: Vec<&Creep> = patients.iter().collect();
-    allot(&healers, &patients, &mut owed, &|n| shooting.contains(n))
+    allot(healers, &patients, &mut owed, &|n| shooting.contains(n))
         .into_iter()
         .map(|(healer, p, beside, _)| {
             let act = if beside {
@@ -713,7 +710,7 @@ pub fn hunt(
             .unwrap_or(i32::MAX / 2)
     };
     let nets = nets(&*sight.atlas, threat, mates, c);
-    let open: Vec<Tile> = nets.iter().map(|(t, _)| *t).collect();
+    let open = nets.iter().map(|(t, _)| *t);
     let net = |t: Tile| {
         nets.iter()
             .find(|(o, _)| *o == t)
@@ -740,7 +737,7 @@ pub fn hunt(
         .iter()
         .max_by_key(|(t, score)| (*score, approach(*t), std::cmp::Reverse(*t)))
         .map(|(t, _)| *t)
-        .or_else(|| open.iter().copied().min_by_key(|t| (net(*t), *t)));
+        .or_else(|| open.min_by_key(|t| (net(*t), *t)));
     let wish = best.map_or_else(|| hold(sight, c), |t| step_to(c, t));
     (strike, wish, scored)
 }
