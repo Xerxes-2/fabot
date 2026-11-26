@@ -85,7 +85,7 @@ pub fn sponsor(
     at: &Pos,
 ) -> Option<usize> {
     let claimer = Mover::one(grid::loaded_factor(&CLAIMER));
-    let walk = |h: &Home| atlas.travel_ticks(claimer, &target_at(at, 1), &h.spawn);
+    let walk = |h: &Home| atlas.ticks_to(claimer, &target_at(at, 1), &h.spawn);
     let pays = |(room, h): (&RoomName, &Home)| {
         *room != at.room && !given_up(*room) && h.capacity >= engine::body_cost(&CLAIMER)
     };
