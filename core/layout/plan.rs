@@ -570,10 +570,10 @@ mod tests {
         }
     }
 
-    /// The tiles a body stands on once the plan is built.
-    fn open_of(ground: &Ground, plan: &Plan) -> Vec<bool> {
+    /// The tiles a body stands on once the plan is built to `level`.
+    fn open_of(ground: &Ground, plan: &Plan, level: i32) -> Vec<bool> {
         let mut open: Vec<bool> = ground.terrain.iter().map(|t| *t != place::WALL).collect();
-        let planned = || plan.items.iter().chain(&plan.ring);
+        let planned = || plan.items.iter().chain(&plan.ring).filter(|i| i.level <= level);
         planned().for_each(|i| open[i.tile] |= i.kind == StructureType::Road);
         planned().for_each(|i| open[i.tile] &= i.kind.walkable());
         let rocks = (ground.sources.iter().chain(&ground.minerals)).chain(&ground.controller);
@@ -583,16 +583,16 @@ mod tests {
 
     /// The tiles a body walks to from `starts`, past every planned structure.
     fn walked(ground: &Ground, plan: &Plan, starts: &[Tile]) -> Vec<bool> {
-        let open = open_of(ground, plan);
+        let open = open_of(ground, plan, engine::CONTROLLER_MAX_LEVEL);
         let steps = tiles::reach(starts.iter().copied(), |t| open[t]);
         steps.iter().map(|s| *s != tiles::UNREACHED).collect()
     }
 
     /// A digger holds its post while it works (`reached`'s `held`): every
-    /// rock's post is walked to, and no exit or anything planned is
-    /// reached past a post alone.
+    /// rock's post is walked to, from the level it is built at on, and no
+    /// exit or anything planned is reached past a post alone.
     #[test]
-    fn every_post_is_walked_to_and_never_the_only_way_on() {
+    fn every_post_is_walked_to_from_its_level_on_and_never_the_only_way_on() {
         let rules = Rules::vanilla();
         let crafted = [
             ("W1N1", include_str!("../../scripts/scenario/worlds/corridor-post.json")),
@@ -614,7 +614,7 @@ mod tests {
             let rocks = (ground.sources.iter().chain(&ground.minerals)).chain(&ground.controller);
             let planned = plan.items.iter().chain(&plan.ring).map(|i| i.tile);
             let ends: Vec<Tile> = planned.chain(rocks.copied()).collect();
-            let open = open_of(&ground, &plan);
+            let open = open_of(&ground, &plan, engine::CONTROLLER_MAX_LEVEL);
             let alone = |seat: Tile| {
                 let from = |shut| tiles::reach([plan.anchor], |t| open[t] && t != shut);
                 let (all, held) = (from(Tile::of_index(tiles::COUNT)), from(seat));
@@ -622,8 +622,7 @@ mod tests {
                 let near = |r: &tiles::Table<u16>, e: Tile| {
                     tiles::within(1, e).into_iter().any(|n| at(r, n))
                 };
-                all[seat] == tiles::UNREACHED
-                    || tiles::all().any(|t| tiles::on_edge(t) && at(&all, t) && !at(&held, t))
+                tiles::all().any(|t| tiles::on_edge(t) && at(&all, t) && !at(&held, t))
                     || ends.iter().any(|e| near(&all, *e) && !near(&held, *e))
             };
             for rock in ground.sources.iter().chain(&ground.minerals) {
@@ -635,6 +634,14 @@ mod tests {
                 let unseated = held.is_empty();
                 let at = tiles::to_pos(ground.room, *rock);
                 assert!(!unseated && !held.iter().any(|p| alone(*p)), "{at:?}'s post {held:?}");
+            }
+            for c in plan.items.iter().filter(|i| i.kind == StructureType::Container) {
+                for level in c.level..=engine::CONTROLLER_MAX_LEVEL {
+                    let open = open_of(&ground, &plan, level);
+                    let walked = tiles::reach([plan.anchor], |t| open[t])[c.tile];
+                    let at = tiles::to_pos(ground.room, c.tile);
+                    assert!(walked != tiles::UNREACHED, "{at:?} unwalked at level {level}");
+                }
             }
         }
         assert!(posts > 1000 && plans >= 524, "{posts} {plans}");

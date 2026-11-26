@@ -397,11 +397,31 @@ impl Builder<'_> {
         }
     }
 
-    fn harvest_bays(&mut self) {
+    fn harvest_bays(&mut self, center: Tile) {
         for h in self.harvest.clone() {
-            for t in self.m.road(h, &self.entrances, false) {
+            let road = self.m.road(h, &self.entrances, false);
+            let tunnels = road.iter().any(|t| self.m.wall(xy(*t).0, xy(*t).1));
+            for t in road {
                 self.m.plan_at(t, "road", Some(ROAD));
                 self.m.plan_at(t, "road.source", None);
+            }
+            // A road through rock stands from level 4, the bay from 3: until
+            // then the post's way in is the walk, which the bay must not fill.
+            if tunnels {
+                let seats = self.seats(h, true);
+                let open =
+                    |n: Tile| !self.m.wall(xy(n).0, xy(n).1) && !self.m.blocked(xy(n).0, xy(n).1);
+                let walk = tiles::reach([center], open);
+                let past = tiles::reach([center], |n| open(n) && !seats.contains(&n));
+                let around = tiles::around(h).iter().copied();
+                if around.clone().all(|n| past[n] == tiles::UNREACHED) {
+                    let door =
+                        around.filter(|n| walk[*n] != tiles::UNREACHED).min_by_key(|n| walk[*n]);
+                    if let Some(t) = door {
+                        self.m.plan_at(t, "road", Some(ROAD));
+                        self.m.plan_at(t, "road.source", None);
+                    }
+                }
             }
             self.m.plan_at(h, "container.source", None);
             self.m.plan_at(h, "container", None);
@@ -894,7 +914,7 @@ pub fn build(rules: &Rules, ground: &Ground, dist: (&[u8], &[u8]), center: Tile)
     b.upgrader(controller)?;
     b.exits(&centers);
     b.core(center);
-    b.harvest_bays();
+    b.harvest_bays(center);
     b.parking(center);
     b.labs();
     b.bays(center);
