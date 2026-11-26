@@ -269,10 +269,10 @@ fn neighbour(room: Coords, side: i32) -> Coords {
 /// A room a search stops at, and the tile whose region it stops for.
 pub type Stop = (Coords, Option<Tile>);
 
-/// Grown from `root` (its target's seats, else any tile of it) out to
-/// `max_hops` crossings, until each of `stops` is settled or shown to have no
-/// way out: fewest blind keeper rooms first, since a guard may stand where a
-/// blind entry lands, then fewest ticks, equal ones in the order met.
+/// Grown from `root` (its target's seats, else any tile) to rooms `max_hops`
+/// crossings off at fewest (a cheaper way may cross more), until each stop is
+/// settled or has no way out: fewest blind keeper rooms first, since a guard
+/// may stand where a blind entry lands, then fewest ticks, ties as met.
 pub fn search(
     atlas: &Atlas,
     mover: Mover,
@@ -318,9 +318,9 @@ pub fn search(
     let mut exits: Vec<(Tile, Tile)> = Vec::new();
     let mut entries: Vec<i32> = Vec::new();
     let mut queue: BinaryHeap<Reverse<(i32, i32, usize)>> = BinaryHeap::default();
-    let mut settled = Some(0);
+    let mut settled = vec![0];
     loop {
-        if let Some(i) = settled.take() {
+        for i in std::mem::take(&mut settled) {
             let node = &ways.nodes[i];
             let near = grid_of(node.room);
             for side in Atlas::EXITS {
@@ -365,17 +365,27 @@ pub fn search(
         let Some(Reverse((_, _, r))) = queue.pop() else {
             break;
         };
-        let held = |(a, b): (Tile, Tile)| {
-            ways.regions(reached[r].room).any(|n| {
-                (ways.nodes[n].dist.as_ref())
+        let holder = |(a, b): (Tile, Tile)| {
+            ways.regions(reached[r].room).find(|n| {
+                (ways.nodes[*n].dist.as_ref())
                     .is_none_or(|d| Atlas::stretch(a, b).iter().any(|t| on(d, *t) != UNREACHED))
             })
         };
-        let free: Vec<usize> = reached[r]
-            .exit
-            .clone()
-            .filter(|e| !held(exits[*e]))
+        let held: Vec<_> = (reached[r].exit.clone())
+            .map(|e| (e, holder(exits[e])))
             .collect();
+        let mut free = Vec::new();
+        for (e, n) in held {
+            match n {
+                None => free.push(e),
+                // Settled by a cheaper way of more crossings: fewer spread it on.
+                Some(n) if ways.nodes[n].hops > reached[r].hops => {
+                    ways.nodes[n].hops = reached[r].hops;
+                    settled.push(n);
+                }
+                Some(_) => {}
+            }
+        }
         if free.is_empty() {
             continue;
         }
@@ -410,7 +420,7 @@ pub fn search(
                 ways.rooms.insert(r.room, ways.nodes.len());
             }
         }
-        settled = Some(ways.nodes.len());
+        settled.push(ways.nodes.len());
         ways.nodes.push(Node {
             room: r.room,
             exit: Rc::from(exit),

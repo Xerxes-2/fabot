@@ -266,6 +266,9 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   `❓` A home's first worker ranked ahead of its outposts' dig recovers a home
   whose dig builds its own containers, but delays outpost income at RCL2: no
   ranking yet passes both.
+  `❓` An outpost's haul may lag a dig that runs longer than its walk was priced
+  for (gen 49, 2026-11-27: E7S3 dug 18k and let 28% decay once the search
+  reached its north way): HYPOTHESIS, unmeasured.
 - **Spare (`economy::spare`):** home's own bodies at a steady pace, its floor a
   constant 2 workers whatever this tick's floor: home's repairs and sites move
   with the outposts' haul wear, so a floor read from them would flap the choice.
@@ -420,6 +423,9 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   `❓` The planner ranks a tunnel at path cost (wall 30), not its upkeep
   (×150, ×750 on swamp+wall): Hivemind's matrix is kept whole, so a centre
   whose roads tunnel can win (E3S9, gen 1141).
+  `❓` Outpost road sites compete with the ring for `SITES_IN_FLIGHT` (gen 173:
+  a newly reached outpost's roads held the ring back to t34000); trial pending:
+  outpost roads yield slots to a declared ring.
   A single-source room whose centre sits farther from its source ramps slower
   (E23S9 −3.6% to −4.9%): the owner accepted it as the port's cost, not a bug.
   `❓` The source container's seat (`build::harvest_spot`, Hivemind's most free

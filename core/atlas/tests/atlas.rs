@@ -850,6 +850,43 @@ fn a_route_goes_round_a_stronghold_where_another_way_stands() {
 }
 
 #[test]
+fn a_room_within_the_hops_is_reached_where_its_way_in_runs_cheaper_round_a_corner() {
+    let mut root = vec![0u8; tiles::COUNT];
+    for y in (0..50).filter(|y| *y != 1) {
+        root[tiles::index(49, y)] = terrain::WALL;
+    }
+    let (r, east, beyond) = (
+        RoomName::new(0, 0),
+        RoomName::new(1, 0),
+        RoomName::new(2, 0),
+    );
+    let mut rooms = vec![room_of(r, root, Vec::new())];
+    for name in [east, beyond, RoomName::new(0, 1), RoomName::new(1, 1)] {
+        rooms.push(room_of(name, vec![0; tiles::COUNT], Vec::new()));
+    }
+    let mut world = world_of_rooms(rooms);
+    let named: Vec<RoomName> = world.rooms.iter().map(|r| r.name).collect();
+    world.closed = (-1..=3)
+        .flat_map(|x| (-1..=2).map(move |y| RoomName::new(x, y)))
+        .filter(|c| !named.contains(c))
+        .collect();
+    let atlas = Atlas::of_world(&world);
+    let mover = Mover {
+        footprint: Footprint::One,
+        factor: empty_factor(&[Part::Move]),
+    };
+    let target = Target {
+        room: r,
+        tiles: vec![tiles::index(47, 47)],
+        range: 1,
+        avoid: BTreeSet::new(),
+        max_hops: 3,
+    };
+    let at = Pos::new(beyond, 25, 25);
+    assert!(atlas.travel_ticks(mover, &target, &at).is_some());
+}
+
+#[test]
 fn a_towered_room_is_never_crossed_but_still_reached() {
     let rooms: Vec<Room> = (0..3)
         .map(|x| room_of(RoomName::new(x, 0), vec![0; tiles::COUNT], Vec::new()))
