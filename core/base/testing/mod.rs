@@ -102,7 +102,8 @@ pub fn world(text: &str) -> World<'static> {
     };
     for r in map["rooms"].as_array().into_iter().flatten() {
         let name: RoomName = r["name"].as_str().and_then(|n| n.parse().ok()).expect("a room name");
-        let rows = r["terrain"].as_array().into_iter().flatten();
+        // One string, or a string a row.
+        let rows = r["terrain"].as_array().into_iter().flatten().chain([&r["terrain"]]);
         let bits = rows.flat_map(|row| row.as_str().unwrap_or_default().bytes());
         let terrain = terrain::leak(bits.map(|b| b - b'0').collect()).expect("2500 tiles");
         let objects = r["objects"].as_array().into_iter().flatten();

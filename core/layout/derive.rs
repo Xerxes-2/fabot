@@ -226,6 +226,56 @@ mod tests {
         assert!(buried > 0);
     }
 
+    /// An older plan's walls stand where the plan now leaves an exit's gap
+    /// (E9S9's 40,6 and 41,6): each wall off the plan is razed, none on it.
+    #[test]
+    fn every_wall_off_the_plan_is_astray_and_none_on_it() {
+        use fabot_base::testing;
+        let walled =
+            testing::world(include_str!("../../scripts/scenario/worlds/walled-exit-e9s9.json"));
+        let real: Vec<testing::RealRoom> = testing::real_rooms().step_by(200).collect();
+        let rooms = [walled.rooms[0].clone()].into_iter().chain(real.iter().map(|r| r.room()));
+        let (mut rng, mut razed) = (fx::Rng::new(19), 0);
+        for room in rooms {
+            let name = room.name;
+            let mut world = testing::world(r#"{"rooms":[]}"#);
+            world.rooms.push(room);
+            let terrain = world.rooms[0].terrain;
+            let open = |t: Tile| terrain.is_some_and(|g| g.get_bits()[t.index()] == 0);
+            let spawn =
+                tiles::all().find(|t| open(*t) && !tiles::on_edge(*t)).expect("open ground");
+            testing::colonize(&mut world, name, 8, spawn);
+            let standing = settled(&world, BTreeMap::new());
+            let Some(plan) = standing[&name].plan.clone() else {
+                continue;
+            };
+            let taken =
+                |t: Tile| t == spawn || plan.items.iter().chain(&plan.ring).any(|i| i.tile == t);
+            let random =
+                (0..20).map(|_| Tile::of_index(rng.choose(0, tiles::COUNT as i32 - 1) as usize));
+            let incident = [tiles::index(40, 6), tiles::index(41, 6)];
+            let off: BTreeSet<Tile> = (incident.into_iter().chain(random))
+                .filter(|t| open(*t) && !tiles::on_edge(*t) && !taken(*t))
+                .collect();
+            let on = plan.ring.iter().filter(|i| i.kind == StructureType::Wall).map(|i| i.tile);
+            for t in off.iter().copied().chain(on) {
+                let wall =
+                    testing::built(&format!("w{t}"), StructureType::Wall, tiles::to_pos(name, t));
+                let wall = Structure { owner: Owner::Nobody, ..wall };
+                world.rooms[0].structures.push(wall);
+            }
+            let owned = BTreeSet::from([name]);
+            let (found, _) = colonies(&world, &owned, &fx::exploited(&owned), standing);
+            let astray: BTreeSet<Tile> = (world.rooms[0].structures.iter())
+                .filter(|s| found[0].astray.contains(&s.id))
+                .map(|s| tiles::of_pos(&s.pos))
+                .collect();
+            assert_eq!(astray, off, "{name}");
+            razed += off.len();
+        }
+        assert!(razed > 0);
+    }
+
     fn settled(
         world: &World,
         standing: BTreeMap<RoomName, Standing>,

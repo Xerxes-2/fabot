@@ -642,9 +642,14 @@ mod tests {
     #[test]
     fn every_structure_and_exit_is_walked_to_from_the_core_and_the_ring_from_it_or_an_exit() {
         let rules = Rules::vanilla();
-        let pocketed = fx::pocketed();
-        let drawn = (of_ground(&rules, &pocketed).map(|p| (pocketed, p)))
-            .into_iter()
+        let walled = fabot_base::testing::world(include_str!(
+            "../../scripts/scenario/worlds/walled-exit-e9s9.json"
+        ));
+        let real = fabot_base::testing::real_rooms().step_by(50);
+        let grounds = [fx::pocketed()].into_iter().chain(ground::of_room(&walled.rooms[0]));
+        let grounds = grounds.chain(real.filter_map(|r| ground::of_room(&r.room())));
+        let drawn = (grounds.filter_map(|g| Some((of_ground(&rules, &g)?, g))))
+            .map(|(p, g)| (g, p))
             .chain(fx::samples(4).take(fx::MAX_TEST).filter_map(|c| fx::plan_of(&c)));
         for (ground, plan) in drawn {
             let exits: Vec<Tile> = (tiles::all())
