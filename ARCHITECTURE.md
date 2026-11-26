@@ -671,8 +671,8 @@ with one phase machine per kind under `core/fight/kinds/`.
   garrison, as WORK dismantles five times what RANGED strikes and a fight
   set ages out before its loot is free. In vanilla L1's loot (about 700 in
   its containers, 1000 drawn into its core) is under its recipe's cost, so
-  only a season's resource takes it. `❓` L4 (fortifier, ranged garrison
-  reaching every post) and L5.
+  only a season's resource takes it. L4 (fortifier, ranged garrison
+  reaching every post) and L5 wait until mid-season (owner, 2026-11-25).
 
 **Planned kinds:** `Claim` (claimer + Economy pioneers), `KeeperDuty` (lair
 rotation declaring room minable), `PowerBank` (break → declare `Pickup`).
@@ -728,11 +728,12 @@ and `cheapest_win` (adds only to already-standing `ours`).
   Defence outcomes move with any plan change that moves no rule (a reversed
   builder scan let a raid stand 1580 ticks): the owner waives such shifts, as
   main fails the same scenarios under harmless planner changes.
-  `❓` A `Close` set priced landing together reaches the raid apart where
-  the raid walks onto its nearer body (a pair 1 tick apart at landing met it
-  6 apart); option: price a non-together arm as if the raid closes on the
-  nearest body. Nor does a `Close` set walk as one: a body held back by home
-  traffic reaches the raid after its partner (12 ticks, healed-striker seed 1).
+  A `Close` set priced landing together reaches the raid apart where the
+  raid walks onto its nearer body (a pair 1 tick apart at landing met it 6
+  apart): the owner accepts it as rival behaviour, as pricing the raid onto
+  the nearest body did worse. `❓` Nor does a `Close` set walk as one: a body
+  held back by home traffic reaches the raid after its partner (12 ticks,
+  healed-striker seed 1).
   `❓` A raid spawned beside a forming blob scatters it
   (blob-defend-fights-within-its-heal seed 26: strayTicks 264).
 - **Focus:** the Exchange prices the kill our bodies strike: both rank the
@@ -847,8 +848,6 @@ expansion, and operation priorities.
   skipped. A towered room (Atlas never crosses it) stays
   in the radius one past its nearest neighbour, and a scout reaches it only as
   its goal once its row is stale, so a tower since gone clears.
-- `❓` A towered room is never crossed (Atlas), but an outpost or claim in
-  one, or reachable only through one, is not refused by name.
 
 ### 7.2 Expansion and declarations
 
@@ -980,7 +979,7 @@ Pure at module boundaries, systems Rust inside (measurements override defaults):
 - **Single-pass JS→WASM seam:** a per-field world read costs ~90% seam calls
   rather than work, so `src/app/read.js` packs the tick into one `Int32Array` +
   interned string buffer (interning saves 17% of `read.*` and `decode`), decoded by
-  `core/base/world/read`; never add per-field JS calls. `❓` Engine getters
+  `core/base/world/read`; never add per-field JS calls. Engine getters
   are ≈2/3 of `read.structures`; keeping roads, walls and ramparts across
   ticks would save ≈0.9 ms/tick official at t94k, but needs a §4 row and an
   exception to derive-once: deferred until CPU is tight (owner, 2026-11-26).
@@ -1040,8 +1039,8 @@ was not seen to die (the engine's word: its tombstone), offline one it outlived.
   - A world a soak left is checked in as a world JSON (its Memory, and its
     intel rows as segment 2, which `sim` stands), never replayed from a
     pinned bundle.
-  - `❓` Cut worlds lacking sector bus rooms throw in `genDeposits` (logged and
-    skipped as backend cron does).
+  - Cut worlds lacking sector bus rooms throw in `genDeposits`, logged and
+    skipped as the backend's cron does.
 - **Watching:** every scenario and soak is watched on `sim` (`npm run
   scenario -- <name> --watch`, `npm run watch:sim`, `sim/src/watch`): the run
   lazycreep shows is the one scenarios and soaks measure.
@@ -1111,8 +1110,8 @@ are built; `❓` remaining nodes (`E3`, `S1`, `S2`, `S4`).
 test seats an open-source bot (owner): a bot tuned against one says little
 about the players a season meets. Self-play: `sim --players` (`sim/src/seat/`)
 seats our bot several times in one world, each seat its own `Driver`, Memory
-and declarations; the samples follow the first. `❓` Each seat sampled, and a
-scenario that scores one seat against another.
+and declarations, each sampled apart. `❓` A scenario that scores one seat
+against another.
 
 ### 10.3 Unit tests, where the engine would obscure
 
