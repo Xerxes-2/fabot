@@ -32,9 +32,10 @@
             pkgs.nodejs_24
             (pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml)
             pkgs.wasm-pack
-            # node-gyp, for the official server's native modules (`scripts/official/`).
-            pkgs.python3
           ];
+          # node-gyp links the official server's native modules (`scripts/official/`)
+          # against the libraries nixpkgs' Node is built with.
+          inputsFrom = [ pkgs.nodejs-slim_24 ];
         };
       });
     };
