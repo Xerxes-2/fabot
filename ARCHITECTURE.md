@@ -374,9 +374,6 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   the worn outposts by it (a rank by wear moves as they mend, walking them
   between outposts), ahead of the far haul as Hivemind's are, since the haul's
   recasts otherwise hold every spawn.
-  `❓` Their size moves with the worn need, so a mender the pool outgrew idles
-  (224k body-ticks over t500-620k at gen 1121481): size from the largest
-  outpost's need so only their count varies.
 - **Outpost stand-down:** a player's armed hostile stands down an outpost
   while it reaches its sources/containers and no armed body of ours holds it
   (strikes as far and stands within its own reach of it: v1's guard), an armed
