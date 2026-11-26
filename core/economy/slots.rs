@@ -429,6 +429,7 @@ impl Plan<'_> {
         let mut local = Flows::default();
         let mut remote: Vec<(f64, Leg)> = Vec::new();
         let mut far: Vec<String> = Vec::new();
+        let mut worn: Vec<(i32, RoomName)> = Vec::new();
         let fed = fed(&colony.controller);
         let tower_level = derived.rules.level_of(StructureType::Tower, 0);
         let mut upgrade_capacity: i32 = (derived.bodies.iter().chain(derived.ovens.iter()))
@@ -464,12 +465,7 @@ impl Plan<'_> {
                 }
                 continue;
             }
-            // Hivemind's mine builder.
-            let paves = g.sites.iter().any(|s| s.kind == StructureType::Road);
-            if !own && (at_risk || paves) && colony.controller.level >= tower_level {
-                let mender = self.worker(ci, g.room, 0, (false, false), MENDER, MENDER_WORK);
-                fixed.add(mender, 0.0);
-            }
+            let mut upkeep_work = 0;
             for s in &g.sources {
                 let body = bodies::harvester(own, s.rate, capacity);
                 // An outpost out of sight shows no post: its harvester walks
@@ -550,12 +546,17 @@ impl Plan<'_> {
                 let Some(leg) = leg(atlas, derived, &post, &to) else {
                     continue;
                 };
+                upkeep_work += (0.7 + 0.03 * f64::from(leg.empty)).ceil() as i32;
                 if own {
                     local.push(f64::from(rate + backlog), f64::from(steady), leg);
                 } else {
                     remote.push((f64::from(rate + backlog), leg));
                     far.push(dig_id.clone());
                 }
+            }
+            let paves = g.sites.iter().any(|s| s.kind == StructureType::Road);
+            if !own && (at_risk || paves) && colony.controller.level >= tower_level {
+                worn.push((upkeep_work.max(1), g.room));
             }
             match &g.controller {
                 Some(c) if !own && g.reservable && !claimed(derived, c.id) => {
@@ -571,6 +572,18 @@ impl Plan<'_> {
                 }
                 _ => (),
             }
+        }
+
+        // Hivemind's mine builders, `estimateRequiredWorkPartsForMaintenance` WORK a source.
+        let wanted: i32 = worn.iter().map(|(w, _)| w).sum();
+        let most = bodies::sized(Pattern::Worker, wanted, capacity);
+        let most = most.map_or(1, |b| part_count_in(&b, Part::Work)).max(1);
+        let n = (wanted + most - 1) / most;
+        let size = (wanted + n - 1) / n.max(1);
+        worn.sort_by_key(|&(w, room)| (std::cmp::Reverse(w), room));
+        for k in 0..n as usize {
+            let room = worn[k % worn.len()].1;
+            fixed.add(self.worker(ci, room, k, (false, false), MENDER, size), 0.0);
         }
 
         for cj in (0..sponsors.len()).filter(|cj| sponsors[*cj] == Some(ci)) {
@@ -958,10 +971,10 @@ impl Plan<'_> {
             .and_then(|g| g.controller.as_ref().map(|c| c.pos))
             .unwrap_or_else(|| tiles::middle(room));
         let caster = self.derived.colonies[ci].room;
-        let key = if caster == room {
-            room.to_string()
-        } else {
-            format!("{room}<{caster}")
+        let key = match () {
+            _ if rank == MENDER => format!("mend<{caster}"),
+            _ if caster == room => room.to_string(),
+            _ => format!("{room}<{caster}"),
         };
         let slot = self.push(ci, Job::Work(builds), seat, &key, k, body);
         slot.rank = rank;
@@ -1120,8 +1133,6 @@ const STOCKED: i32 = 4;
 const MENDER: i32 = 5;
 const OUTPOST_HAUL: i32 = 6;
 const MOST: i32 = engine::MAX_BODY_PARTS as i32;
-/// A load mends two plain roads whole.
-const MENDER_WORK: i32 = 2;
 const FLOOR: i32 = 7;
 /// What `spare` charges for home's floor whatever it is this tick: a stock
 /// about its reserve and the outposts' sites and wear move the floor.
@@ -1306,7 +1317,8 @@ pub fn assign<'a>(
             laden && c.room == b.pos.room && !g.abandoned && g.deposit().is_some()
         });
         // A mender is a body of its own size: a home's loose worker taking it
-        // left that home's work, and a young one's.
+        // left that home's work, and a young one's; a small body in a full-size
+        // worker's slot holds off that worker's cast.
         let near = |open: bool, within: Option<usize>| {
             let ends = (slots.iter().enumerate())
                 .filter(|(_, s)| within.is_none_or(|c| s.colony == c))
@@ -1314,7 +1326,11 @@ pub fn assign<'a>(
                     s.job.pattern() == b.pattern
                         && (if open { !taken[*i] } else { !s.job.seated() })
                 })
-                .filter(|(_, s)| s.rank != MENDER || b.size == s.body.len() as i32)
+                .filter(|(_, s)| match (s.rank, &s.job) {
+                    (MENDER, _) => b.size == s.body.len() as i32,
+                    (_, Job::Work(_)) => 2 * b.cast_work >= part_count_in(&s.body, Part::Work),
+                    _ => true,
+                })
                 .filter(|(i, s)| !outgrown(derived, b, s) && (!far(s) || serves_far(b, trips[*i])))
                 .map(|(i, s)| ((s.body.is_empty(), s.rank != DEADLINE), s.seat, i));
             nearest(&b.pos, ends, |seat| distance(atlas, &b.pos, seat)).map(|(i, _)| i)

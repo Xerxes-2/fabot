@@ -366,11 +366,17 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   aside: one lost by the next tick, then by rampart decay periods, nearest
   within one. A held load is spent first: yielding it walked builders off their
   sites.
-- **Outpost mender:** a colony at the tower level (where its outposts' sites
-  are first owed) dispatches a dedicated 2-WORK outpost mender when an outpost
-  road is at risk or its walk lacks one (Hivemind's mine builder counts a
-  missing road as work, first paving or lost alike), cast ahead of the far haul
-  as Hivemind's is, since the haul's recasts otherwise hold every spawn.
+- **Outpost menders:** a colony at the tower level (where its outposts' sites
+  are first owed) keeps one pool of Hivemind's mine builders: an outpost owes
+  `⌈0.7 + 0.03 × tiles⌉` WORK a source while a road there is at risk or its
+  walk lacks one, cast as the fewest bodies that WORK fits (a 2-WORK body per
+  outpost crowded the home slots and paid 0.2 CPU an intent) and dealt round
+  the worn outposts by it (a rank by wear moves as they mend, walking them
+  between outposts), ahead of the far haul as Hivemind's are, since the haul's
+  recasts otherwise hold every spawn.
+  `❓` Their size moves with the worn need, so a mender the pool outgrew idles
+  (224k body-ticks over t500-620k at gen 1121481): size from the largest
+  outpost's need so only their count varies.
 - **Outpost stand-down:** a player's armed hostile stands down an outpost
   while it reaches its sources/containers and no armed body of ours holds it
   (strikes as far and stands within its own reach of it: v1's guard), an armed
