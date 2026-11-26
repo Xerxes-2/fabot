@@ -969,3 +969,104 @@ fn a_structure_of_a_kind_the_crate_does_not_name_only_blocks_its_tile() {
     assert!(fabot_layout::ground::obstacles(room).contains(&at));
     assert!(Atlas::of_world(&world).held_weights(ROOM).unwrap()[at].is_none());
 }
+
+/// Crossings a body walks to each tile of `rooms` from `from`, as the engine
+/// moves it: an exit tile carries it onto the next room's.
+fn crossings(rooms: &[Room], from: &Pos) -> Vec<Vec<i32>> {
+    let open =
+        |r: usize, t: Tile| !terrain::is_wall(rooms[r].terrain, tiles::x_of(t), tiles::y_of(t));
+    let index = |name: RoomName| rooms.iter().position(|r| r.name == name);
+    let mut dist = vec![vec![i32::MAX; tiles::COUNT]; rooms.len()];
+    let Some(start) = index(from.room).map(|r| (r, tiles::of_pos(from))) else {
+        return dist;
+    };
+    dist[start.0][start.1] = 0;
+    let mut queue = std::collections::VecDeque::from([start]);
+    while let Some((r, t)) = queue.pop_front() {
+        let d = dist[r][t];
+        let onto = |t: Tile| {
+            Some((
+                index(tiles::room_toward(rooms[r].name, tiles::exit_of(t))?)?,
+                tiles::landing(t)?,
+            ))
+        };
+        let across = tiles::on_edge(t).then(|| onto(t)).flatten();
+        let inward =
+            (tiles::around(t).iter()).filter(|n| !tiles::on_edge(t) || !tiles::on_edge(**n));
+        let steps = across.map(|a| (1, a)).into_iter().chain(inward.map(|n| (0, (r, *n))));
+        for (cost, (r, n)) in steps {
+            if open(r, n) && d + cost < dist[r][n] {
+                dist[r][n] = d + cost;
+                if cost == 0 {
+                    queue.push_front((r, n));
+                } else {
+                    queue.push_back((r, n));
+                }
+            }
+        }
+    }
+    dist
+}
+
+/// Real rooms round a sampled colony: a claim is sponsored, and an outpost
+/// served, exactly where a body walks to its controller within the hops.
+#[test]
+fn a_controller_is_sponsored_and_served_only_where_a_body_walks_to_it_within_the_hops() {
+    use fabot_atlas::{derive, server, sponsor};
+    use fabot_base::{
+        declarations::{ColonyPlan, REACH_HOPS, Stage},
+        testing,
+    };
+    let real: Vec<testing::RealRoom> = testing::real_rooms().collect();
+    let mut checked = 0;
+    for home in real.iter().filter(|r| r.controller.is_some()).step_by(30) {
+        let grid = |r: &testing::RealRoom| r.name.on_grid().expect("on the grid");
+        let (a, b) = grid(home);
+        let near = |r: &&testing::RealRoom, d: i32| {
+            let (x, y) = grid(r);
+            (a - x).abs().max((b - y).abs()) <= d
+        };
+        let rooms: Vec<&testing::RealRoom> = real.iter().filter(|r| near(r, 3)).collect();
+        let mut world = testing::world(r#"{"rooms":[]}"#);
+        world.rooms = rooms.iter().map(|r| r.room()).collect();
+        let named: Vec<RoomName> = rooms.iter().map(|r| r.name).collect();
+        world.closed = ((-5..=5).flat_map(|x| (-5..=5).map(move |y| (x, y))))
+            .filter_map(|(x, y)| home.name.offset(x, y))
+            .filter(|n| !named.contains(n))
+            .collect();
+        let wall = |t: Tile| terrain::is_wall(Some(&home.terrain), tiles::x_of(t), tiles::y_of(t));
+        let spawn = (tiles::all())
+            .filter(|t| !tiles::on_edge(*t) && !wall(*t))
+            .min_by_key(|t| tiles::range(*t, tiles::index(25, 25)))
+            .expect("an open tile");
+        testing::colonize(&mut world, home.name, 8, spawn);
+        let mut atlas = Atlas::of_world(&world);
+        let derived = derive(&world, &mut atlas);
+        let walked = crossings(&world.rooms, &tiles::to_pos(home.name, spawn));
+        let banked = ColonyPlan {
+            room: home.name,
+            stage: Stage::Exploit,
+            target: 8,
+            reserve: 0,
+            rampart_hits: 0,
+            ring: false,
+            owes: false,
+            fights: false,
+            pile: Some(tiles::to_pos(home.name, spawn)),
+            muster: None,
+        };
+        let planned = |room| (room == home.name).then_some(&banked);
+        for (r, room) in world.rooms.iter().enumerate().filter(|(_, r)| r.name != home.name) {
+            let Some(c) = &room.controller else {
+                continue;
+            };
+            let seats = tiles::within(1, tiles::of_pos(&c.pos)).into_iter();
+            let walks = seats.map(|t| walked[r][t]).min().expect("seats") <= REACH_HOPS;
+            let sponsored = sponsor(&atlas, &derived, &|_| false, &c.pos).is_some();
+            let served = server(&mut atlas, &derived, &planned, (&c.pos, false)).is_some();
+            assert_eq!((sponsored, served), (walks, walks), "{} from {}", room.name, home.name);
+            checked += usize::from(walks);
+        }
+    }
+    assert!(checked > 0);
+}
