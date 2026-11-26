@@ -588,8 +588,8 @@ mod tests {
         steps.iter().map(|s| *s != tiles::UNREACHED).collect()
     }
 
-    /// A digger holds its post while it works (`reached`'s `held`): a
-    /// source's post is walked to, and no exit or anything planned is
+    /// A digger holds its post while it works (`reached`'s `held`): every
+    /// rock's post is walked to, and no exit or anything planned is
     /// reached past a post alone.
     #[test]
     fn every_post_is_walked_to_and_never_the_only_way_on() {
@@ -605,11 +605,12 @@ mod tests {
             ground::of_room(world.rooms.iter().find(|r| r.name.to_string() == name)?)
         });
         let real = fabot_base::testing::real_rooms().step_by(5);
-        let mut posts = 0;
+        let (mut posts, mut plans) = (0, 0);
         for ground in crafted.chain(real.filter_map(|r| ground::of_room(&r.room()))) {
             let Some(plan) = of_ground(&rules, &ground) else {
                 continue;
             };
+            plans += 1;
             let rocks = (ground.sources.iter().chain(&ground.minerals)).chain(&ground.controller);
             let planned = plan.items.iter().chain(&plan.ring).map(|i| i.tile);
             let ends: Vec<Tile> = planned.chain(rocks.copied()).collect();
@@ -631,12 +632,12 @@ mod tests {
                 };
                 let held: Vec<Tile> = plan.items.iter().filter(beside).map(|i| i.tile).collect();
                 posts += held.len();
-                let unseated = held.is_empty() && ground.sources.contains(rock);
+                let unseated = held.is_empty();
                 let at = tiles::to_pos(ground.room, *rock);
                 assert!(!unseated && !held.iter().any(|p| alone(*p)), "{at:?}'s post {held:?}");
             }
         }
-        assert!(posts > 1000, "{posts}");
+        assert!(posts > 1000 && plans >= 524, "{posts} {plans}");
     }
 
     #[test]

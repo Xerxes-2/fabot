@@ -230,13 +230,32 @@ impl Builder<'_> {
         }
         for mineral in self.ground.minerals.clone() {
             self.m.place(mineral, "extractor");
-            let roads = self.m.road(mineral, &self.entrances, false);
+            // Our digger stands on a container beside the rock (Hivemind's
+            // may lie off it), by an exit too: the road starts on open ground.
+            let rock: Vec<Tile> = (tiles::around(mineral).iter().copied())
+                .filter(|t| self.m.wall(tiles::x_of(*t), tiles::y_of(*t)))
+                .collect();
+            let kept: Vec<u8> = rock
+                .iter()
+                .map(|t| std::mem::replace(&mut self.m.matrix[t.index()], BLOCKED))
+                .collect();
+            let open = self.m.road(mineral, &self.entrances, false);
+            rock.iter().zip(kept).for_each(|(t, c)| self.m.matrix[t.index()] = c);
+            // Every open seat taken already: Hivemind's road and container.
+            let shut = open.is_empty();
+            let roads = if shut { self.m.road(mineral, &self.entrances, false) } else { open };
             for t in &roads {
                 self.m.plan_at(*t, "road", Some(ROAD));
                 self.m.plan_at(*t, "road.mineral", None);
             }
-            self.container(&roads, "mineral");
-            self.m.block(*roads.first()?);
+            let post = *roads.first()?;
+            if shut {
+                self.container(&roads, "mineral");
+            } else {
+                self.m.plan_at(post, "container.mineral", None);
+                self.m.plan_at(post, "container", None);
+            }
+            self.m.block(post);
         }
         Some(())
     }
