@@ -640,14 +640,14 @@ impl Atlas {
     }
 
     /// A seat that parts its neighbours ranks last: a harvester there holds the room.
-    pub fn bare_post(&self, room: &Room, seats: Vec<Pos>) -> Option<Pos> {
+    pub fn bare_post(&self, room: &Room, seats: &[Pos]) -> Option<Pos> {
         let weights = self.grid(room.name).map(|g| &g.weights);
         let open = |t: Tile| weights.is_some_and(|w| w[t].is_some());
         let key = |p: &Pos| {
             let at = tiles::of_pos(p);
             (parts(at, open), -Atlas::from_controller(room, p), at)
         };
-        seats.into_iter().min_by_key(key)
+        seats.iter().copied().min_by_key(|p| key(p))
     }
 
     fn from_controller(room: &Room, p: &Pos) -> i32 {
@@ -826,12 +826,12 @@ impl Atlas {
         weights
     }
 
-    fn walled(weights: &mut Table<Weight>, strikes: Vec<Tile>) -> Option<Rc<TileSet>> {
+    fn walled(weights: &mut Table<Weight>, strikes: &[Tile]) -> Option<Rc<TileSet>> {
         let mut struck = TileSet::default();
         let mut any = false;
         for t in strikes {
-            if weights[t].take().is_some() {
-                any |= struck.insert(t);
+            if weights[*t].take().is_some() {
+                any |= struck.insert(*t);
             }
         }
         any.then(|| Rc::new(struck))
@@ -880,7 +880,7 @@ impl Atlas {
             }
 
             let standing = Rc::new(weights.clone());
-            let struck = Atlas::walled(&mut weights, Atlas::struck(room));
+            let struck = Atlas::walled(&mut weights, &Atlas::struck(room));
             let last = previous.rooms.remove(&c);
             let bare = Atlas::bare(last.as_ref(), terrain.get_bits());
             let weights = Atlas::reused(last.as_ref().map(|g| &g.weights), weights);
@@ -934,7 +934,7 @@ impl Atlas {
                 let mut weights = (**standing).clone();
                 let keeper_of = |&(lair, resource): &Post| (lair, resource, Atlas::keeper_reach());
                 let strikers: Vec<_> = placed.unwrap_or(&[]).iter().map(keeper_of).collect();
-                let struck = Atlas::walled(&mut weights, Atlas::strikes(terrain, &strikers));
+                let struck = Atlas::walled(&mut weights, &Atlas::strikes(terrain, &strikers));
                 (weights, struck)
             };
             let grid = match previous.rooms.remove(&c) {

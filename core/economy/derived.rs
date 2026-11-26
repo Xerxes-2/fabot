@@ -848,7 +848,7 @@ fn ground_of(
         // An owned room's source is dug from the first bank, before its container's site.
         let post = Atlas::post_of(room, &s.pos).or_else(|| {
             let seats = owned_room.then(|| atlas.seats(Footprint::One, 1, &s.pos))?;
-            atlas.bare_post(room, seats).map(|p| (p, None))
+            atlas.bare_post(room, &seats).map(|p| (p, None))
         });
         let seats = seats_at(atlas, 1, &s.pos);
         SourceFact {

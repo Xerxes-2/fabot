@@ -268,14 +268,10 @@ pub fn power_at<'a>(
         return Box::new(move |part| part_count_in(live, part));
     }
     let skip = body.len() - live.len();
-    let acting: Vec<(Part, Option<ResourceType>)> = live
-        .iter()
-        .copied()
-        .zip(boosts[skip..].iter().copied())
-        .collect();
+    let acting = live.iter().zip(boosts[skip..].iter());
     Box::new(move |part| {
-        (acting.iter().filter(|(p, _)| *p == part))
-            .map(|(p, boost)| multiple(*p, *boost))
+        (acting.clone())
+            .filter_map(|(p, boost)| (*p == part).then(|| multiple(*p, *boost)))
             .sum()
     })
 }
