@@ -158,8 +158,9 @@ pub fn colonies(
 #[cfg(test)]
 mod tests {
     use fabot_base::{
+        intents::{Action, RoomAct},
         tiles,
-        world::{Owner, StructureType, hostiles},
+        world::{Built, Owner, StructureType, hostiles},
     };
 
     use super::*;
@@ -171,6 +172,58 @@ mod tests {
             (None, None) => true,
             _ => false,
         }
+    }
+
+    /// Sampled real rooms built whole to their plan, a road laid under every
+    /// structure: the engine's constructed wall is nobody's.
+    #[test]
+    fn every_road_under_our_solid_structure_or_a_wall_is_buried_and_no_other() {
+        let rules = fabot_base::world::Rules::vanilla();
+        let mut buried = 0;
+        for real in fabot_base::testing::real_rooms().step_by(100) {
+            let Some(plan) =
+                ground::of_room(&real.room()).and_then(|g| plan::of_ground(&rules, &g))
+            else {
+                continue;
+            };
+            let mut world = fabot_base::testing::world(r#"{"rooms":[]}"#);
+            world.rooms.push(real.room());
+            let spawn = plan.items.iter().find(|i| i.kind == StructureType::Spawn);
+            let spawn = spawn.expect("a spawn").clone();
+            fabot_base::testing::colonize(&mut world, real.name, 8, spawn.tile);
+            let at = |t: Tile| tiles::to_pos(real.name, t);
+            let stand = |kind: StructureType, owner, t: Tile| Structure {
+                owner,
+                ..fabot_base::testing::built(&format!("{:.2}{t}", format!("{kind:?}")), kind, at(t))
+            };
+            let (mut laid, mut solid) = (BTreeSet::new(), BTreeSet::new());
+            for i in plan.items.iter().chain(&plan.ring) {
+                let owner = if i.kind == StructureType::Wall { Owner::Nobody } else { Owner::Ours };
+                if !i.kind.walkable() {
+                    solid.insert(i.tile);
+                }
+                if i.kind != StructureType::Road && *i != spawn {
+                    world.rooms[0].structures.push(stand(i.kind, owner, i.tile));
+                }
+                laid.insert(i.tile);
+            }
+            for t in laid {
+                world.rooms[0].structures.push(stand(StructureType::Road, Owner::Ours, t));
+            }
+            let owned = BTreeSet::from([real.name]);
+            let (found, _) = colonies(&world, &owned, &fx::exploited(&owned), BTreeMap::new());
+            let held: BTreeSet<Tile> = (world.rooms[0].structures.iter())
+                .filter(|s| found[0].buried.contains(&s.id))
+                .map(|s| tiles::of_pos(&s.pos))
+                .collect();
+            assert_eq!(held, solid, "{}", real.name);
+            let destroyed = (crate::run::decide_over(&rules, &found, 0).into_iter())
+                .filter(|a| matches!(a, Action::Room(_, RoomAct::Destroy(_))))
+                .count();
+            assert_eq!(destroyed, found[0].buried.len() + found[0].astray.len());
+            buried += solid.len();
+        }
+        assert!(buried > 0);
     }
 
     fn settled(
