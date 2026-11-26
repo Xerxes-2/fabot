@@ -50,7 +50,7 @@ pub fn exit_centers(terrain: &[u8]) -> Vec<Tile> {
     let sides: [&dyn Fn(i32) -> (i32, i32); 4] =
         [&|i| (i, 0), &|i| (i, 49), &|i| (0, i), &|i| (49, i)];
     for side in sides {
-        let coords: Vec<(i32, i32)> = (1..49).map(side).filter(|(x, y)| open(*x, *y)).collect();
+        let coords = (1..49).map(side).filter(|(x, y)| open(*x, *y));
         let mut start: Option<(i32, i32)> = None;
         let mut prev: Option<(i32, i32)> = None;
         let mid = |a: (i32, i32), b: (i32, i32)| {

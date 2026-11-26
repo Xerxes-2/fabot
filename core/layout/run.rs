@@ -67,10 +67,7 @@ pub fn decide(ctx: &mut Context, standing: &mut LayoutState) -> ModuleOutput {
         world,
         ctx.derived,
         (&home, &planned),
-        &colonies
-            .iter()
-            .filter_map(|c| c.plan.as_ref())
-            .collect::<Vec<_>>(),
+        colonies.iter().filter_map(|c| c.plan.as_ref()),
         budget - placed,
     );
 

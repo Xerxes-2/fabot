@@ -32,7 +32,7 @@ pub fn controller_link(
     controller: Tile,
     container: Tile,
 ) -> Option<Tile> {
-    let seated: Vec<(Tile, Vec<Tile>)> = tiles::within(engine::UPGRADE_RANGE, controller)
+    tiles::within(engine::UPGRADE_RANGE, controller)
         .into_iter()
         .filter(|t| tiles::range(*t, container) > 1 && linkable(*t))
         .map(|t| (t, Atlas::upgrader_seats(&walkable, controller, t)))
@@ -40,9 +40,6 @@ pub fn controller_link(
             seats.iter().any(|n| tiles::range(*n, container) <= 1)
                 && seats.iter().all(|n| standable(*n))
         })
-        .collect();
-
-    (seated.into_iter())
         .min_by_key(|(t, seats)| (-(seats.len() as i32), tiles::range(*t, container), *t))
         .map(|(t, _)| t)
 }
@@ -516,15 +513,14 @@ mod tests {
                 StructureType::Observer,
                 StructureType::Lab,
             ];
-            let core: Vec<(Tile, i32)> = (plan.items.iter())
+            let core = (plan.items.iter())
                 .filter(|i| !bay(i))
                 .filter_map(|i| match &i.kind {
                     StructureType::Link => Some((i.tile, 0)),
                     k if shot.contains(k) => Some((i.tile, engine::RANGED_RANGE)),
                     _ => None,
                 })
-                .chain(ground.controller.map(|c| (c, 1)))
-                .collect();
+                .chain(ground.controller.map(|c| (c, 1)));
 
             let mut reached = vec![false; tiles::COUNT];
             let mut queue: Vec<Tile> = (tiles::all())
@@ -541,8 +537,8 @@ mod tests {
                     }
                 }
             }
-            for (c, reach) in &core {
-                for t in tiles::within(*reach, *c) {
+            for (c, reach) in core {
+                for t in tiles::within(reach, c) {
                     assert!(
                         !reached[t] || beside_exit(t),
                         "{t} in reach of {c} outside the ring"

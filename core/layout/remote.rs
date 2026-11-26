@@ -114,7 +114,7 @@ pub fn sites<'p>(
     world: &World,
     derived: &atlas::Derived,
     (planned, plan_of): (&[Action], &dyn Fn(RoomName) -> Option<&'p ColonyPlan>),
-    plans: &[&Plan],
+    plans: impl IntoIterator<Item = &'p Plan>,
     mut budget: i32,
 ) -> Vec<Action> {
     let (colonies, outposts) = (&derived.colonies, &derived.worked);
