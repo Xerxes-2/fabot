@@ -77,8 +77,8 @@ export function engagements(write, bodyOf, offset, closes, killedAt) {
         const sighted = (fight.groups ?? []).some((g) => g.id === e.group && g.seen === t);
         rec.blind = rec.kind !== "defend" || ours.length || asked.has(e.id) || sighted || e.phase === "disengaging" ? 0 : rec.blind + 1;
         rec.idle = Math.max(rec.idle, rec.blind);
-        // `waited`: the most ticks on end a Defend stood answered on casts asked, none of its bodies standing.
-        rec.asking = rec.kind === "defend" && !e.unanswered && !ours.length && asked.has(e.id) ? rec.asking + 1 : 0;
+        // `waited`: the most ticks on end a Defend stood answered on casts asked.
+        rec.asking = rec.kind === "defend" && !e.unanswered && asked.has(e.id) ? rec.asking + 1 : 0;
         rec.waited = Math.max(rec.waited, rec.asking);
         // `budget`: the bodies its price let it lose when it last committed: Formed, or re-committed by a newcomer (§6.2).
         const recommitted = rec.committed !== undefined && e.budget !== rec.committed;

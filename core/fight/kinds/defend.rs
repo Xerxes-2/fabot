@@ -164,7 +164,7 @@ pub(crate) fn overdue(scene: &Scene, e: &Engagement) -> bool {
     let idle = spawns.iter().any(|s| s.spawning.is_none() && short(&s));
     let begun = |c: &&Cast| ovens.iter().any(|o| o.name == c.name);
 
-    let home = scene.homes.contains(&e.room) && !e.unanswered && e.ours.is_empty();
+    let home = scene.homes.contains(&e.room) && !e.unanswered;
 
     (home || e.objective == Objective::Sweep)
         && e.phase == Phase::Forming

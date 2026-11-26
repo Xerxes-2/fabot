@@ -1,0 +1,9 @@
+{
+  "why": "a towerless home's Defend that drafts a standing body but whose casts never begin goes unanswered past their landing and spends its safe mode, rather than forming while the raid kills the economy (gen 173 E8S3: 202 waited ticks on 985f9dc6). Bound: a landing plus a cast's spawning; bodies lost: 0 seen, so 1",
+  "modules": ["atlas", "economy", "exchange", "fight", "layout", "mv", "observe", "strategy", "tactics"],
+  "start": { "gen": 173, "seed": 1 },
+  "ticks": 21700,
+  "assert": [{ "each": "engagement", "where": { "kind": "defend", "home": true }, "assert": { "waited": { "max": 120 } } },
+    { "measure": "bodiesLost", "max": 1 }
+  ]
+}
