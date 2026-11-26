@@ -840,4 +840,81 @@ mod tests {
             );
         }
     }
+
+    /// Strategy prices outposts against `spare`; one that read the bodies
+    /// working them would price its own choice out the next tick.
+    #[test]
+    fn the_spawn_time_spare_is_the_same_whichever_outposts_are_worked() {
+        use fabot_base::{
+            declarations::{ColonyPlan, Declared, Outpost, Stage},
+            testing,
+            world::{Owner, Spawn, StructureType},
+        };
+        let plain = vec![format!("\"{}\"", "0".repeat(50)); 50].join(",");
+        let objects = r#"[{"type":"controller","x":25,"y":25},{"type":"source","x":10,"y":10},{"type":"source","x":40,"y":40}]"#;
+        let rooms = ["E1S1", "E0S1", "E2S1", "E1S0", "E1S2"]
+            .map(|name| format!(r#"{{"name":"{name}","terrain":[{plain}],"objects":{objects}}}"#));
+        let text = format!(r#"{{"rooms":[{}]}}"#, rooms.join(","));
+        for (level, capacity, stocked) in
+            [(2, 550, false), (3, 800, false), (4, 1300, true), (6, 2300, true)]
+        {
+            let mut world = testing::world(&text);
+            let home = &mut world.rooms[0];
+            let home_room = home.name;
+            let at = |x| Pos::new(home.name, x, 30);
+            home.controller.as_mut().unwrap().owner = Owner::Ours;
+            home.controller.as_mut().unwrap().level = level;
+            home.energy_capacity = capacity;
+            home.structures.push(testing::built("spawn", StructureType::Spawn, at(20)));
+            if stocked {
+                home.structures.push(testing::built("storage", StructureType::Storage, at(30)));
+            }
+            world.spawns.push(Spawn {
+                id: "spawn".into(),
+                name: "spawn".into(),
+                pos: at(20),
+                spawning: None,
+            });
+            let outposts: Vec<Outpost> = (world.rooms[1..].iter())
+                .map(|r| {
+                    let declared = |id, pos| Declared { id, pos };
+                    Outpost {
+                        reserved: true,
+                        room: r.name,
+                        controller: r.controller.as_ref().map(|c| declared(c.id, c.pos)).unwrap(),
+                        sources: r.sources.iter().map(|s| declared(s.id, s.pos)).collect(),
+                    }
+                })
+                .collect();
+            let plan = ColonyPlan {
+                room: home_room,
+                stage: Stage::Exploit,
+                target: 8,
+                reserve: 0,
+                rampart_hits: 0,
+                ring: false,
+                owes: false,
+                fights: false,
+                pile: Some(Pos::new(home_room, 30, 30)),
+                muster: None,
+            };
+            let spare_with = |outposts: &[Outpost]| {
+                let mut atlas = Atlas::of_world(&world);
+                let declarations = Declarations {
+                    outposts: outposts.to_vec(),
+                    colonies: vec![plan.clone()],
+                    ..Declarations::default()
+                };
+                let mut derived = atlas::derive(&world, &mut atlas);
+                derived.worked = atlas::worked(&world, &BTreeMap::new(), &declarations, &derived);
+                let mut state = EconomyState::default();
+                let of = (&derived, &declarations);
+                spare((&world, &mut atlas), of, &BTreeMap::new(), &mut state).0
+            };
+            let bare = spare_with(&[]);
+            for n in 1..=outposts.len() {
+                assert_eq!(spare_with(&outposts[..n]), bare, "level {level}, {n} outposts");
+            }
+        }
+    }
 }

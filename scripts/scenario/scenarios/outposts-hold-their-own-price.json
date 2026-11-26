@@ -1,7 +1,0 @@
-{
-  "why": "the spare spawn time an outpost is priced against reads no body that choosing it casts, so the choice is a fixed point (before it, W9N7 left and rejoined W9N8's outposts every other tick, each choice adding a home carrier for its upkeep that priced it out the next tick)",
-  "modules": ["economy", "strategy"],
-  "start": { "room": "W9N8", "seed": 1, "late": 7 },
-  "ticks": 30000,
-  "assert": [{ "measure": "outpostFlips", "max": 30 }]
-}
