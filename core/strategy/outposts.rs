@@ -23,6 +23,10 @@ const INTENT_CPU: f64 = 0.2;
 /// An outpost's containers serve its tenure: in soaks the mean outpost held 11-14k ticks.
 const TENURE: f64 = 9_000.0;
 
+/// A room surveyed or priced: room, home, `worked` or the first rule keeping
+/// it out, its priced net and spawn, and the spawn left before it.
+pub type Verdict = (RoomName, RoomName, &'static str, f64, f64, f64);
+
 pub struct Candidate {
     pub outpost: Outpost,
     pub home: RoomName,
@@ -153,6 +157,7 @@ pub fn chosen(
     candidates: Vec<Candidate>,
     (busy, spare): (&BTreeSet<RoomName>, &BTreeMap<RoomName, f64>),
     (tuning, engagements): (&Tuning, &[Engagement]),
+    verdicts: &mut Vec<Verdict>,
 ) -> Vec<Outpost> {
     // A young home opens every room that pays at once, as The International does.
     let stocked = |home: RoomName| stocked(world, home);
@@ -193,13 +198,22 @@ pub fn chosen(
     for (_, mut c) in priced {
         let left = spawn_left.entry(c.home).or_default();
         let p = priced_in(&c, *left);
-        let unpaid = p.net <= 0.0 || p.spawn > *left || p.cpu > cpu_left;
         // A busy home holds back a new room, not the spawn time it ranks for;
         // a room a Defend stands in is not new, or its owed casts would drop it.
         let defended = (engagements.iter())
             .any(|e| e.room == c.outpost.room && e.objective == Objective::Defend);
         let yields = busy.contains(&c.home) && !c.stands && !defended;
-        if !c.declared && (unpaid || rising.contains(&c.home)) {
+        let ruled = [
+            (c.declared, "declared"),
+            (p.net <= 0.0, "net"),
+            (p.spawn > *left, "spawn"),
+            (p.cpu > cpu_left, "cpu"),
+            (rising.contains(&c.home), "rising"),
+            (yields, "busy"),
+        ];
+        let why = ruled.into_iter().find_map(|(is, why)| is.then_some(why)).unwrap_or("worked");
+        verdicts.push((c.outpost.room, c.home, why, p.net, p.spawn, *left));
+        if matches!(why, "net" | "spawn" | "cpu" | "rising") {
             continue;
         }
         if !c.stands && stocked(c.home) {
@@ -220,6 +234,7 @@ pub fn survey(
     derived: &Derived,
     (declarations, plans, claimed): (&Declarations, &[ColonyPlan], Option<RoomName>),
     intel: &Intel,
+    mut verdicts: Option<&mut Vec<Verdict>>,
 ) -> Vec<Candidate> {
     let mut by_room: BTreeMap<RoomName, Vec<Candidate>> = BTreeMap::new();
     let taken = |room: &RoomName| {
@@ -269,7 +284,7 @@ pub fn survey(
                         declared: true,
                         stands: intel.get(&name).is_some_and(|r| r.contained),
                     },
-                    _ if taken(&name) || !banks => continue,
+                    _ if taken(&name) => continue,
                     (None, Some(row)) if row.sources.is_some() => {
                         let (Some(controller), Some(sources)) = (&row.controller, &row.sources)
                         else {
@@ -279,10 +294,12 @@ pub fn survey(
                         let ally = |u: &String| {
                             Owner::of_user(u.clone(), &world.me, declarations).is_ally()
                         };
-                        if sources.is_empty()
-                            || !row.unheld(&world.me, world.time)
-                            || worker.is_some_and(ally)
-                        {
+                        let held = !row.unheld(&world.me, world.time) || worker.is_some_and(ally);
+                        let why = if banks { "held" } else { "unbanked" };
+                        if sources.is_empty() || !banks || held {
+                            if let Some(v) = verdicts.as_mut().filter(|_| !sources.is_empty()) {
+                                v.push((name, *home, why, 0.0, 0.0, 0.0));
+                            }
                             continue;
                         }
                         let outpost = Outpost {
@@ -316,7 +333,11 @@ pub fn survey(
             let server = atlas::server(atlas, derived, &planned, (&at, false));
             let server = server.map(|ci| derived.colonies[ci]);
             let c = (homes.into_iter()).min_by_key(|c| (Some(c.home) != server, c.walk))?;
-            (Some(c.home) == server || c.declared).then_some(c)
+            let kept = Some(c.home) == server || c.declared;
+            if let Some(v) = verdicts.as_mut().filter(|_| !kept) {
+                v.push((c.outpost.room, c.home, "unserved", net(world, &c), 0.0, 0.0));
+            }
+            kept.then_some(c)
         })
         .collect()
 }
@@ -378,8 +399,13 @@ mod tests {
 
     fn worked_by(world: &World, candidates: Vec<Candidate>, spare: f64) -> Vec<String> {
         let spare = BTreeMap::from([(home_room(), spare)]);
-        let chosen =
-            chosen(world, candidates, (&BTreeSet::new(), &spare), (&Tuning::default(), &[]));
+        let chosen = chosen(
+            world,
+            candidates,
+            (&BTreeSet::new(), &spare),
+            (&Tuning::default(), &[]),
+            &mut vec![],
+        );
         chosen.iter().map(|o| o.room.to_string()).collect()
     }
 

@@ -57,22 +57,13 @@ pub struct StrategyState {
 }
 
 pub fn decide(context: &mut Context, state: &mut StrategyState) -> ModuleOutput {
-    let preyed: Vec<RoomName> = context.declarations.rooms(OpKind::Sweep).collect();
+    let Context { world, atlas, declarations, sightings, intel, derived, .. } = context;
+    let preyed: Vec<RoomName> = declarations.rooms(OpKind::Sweep).collect();
     // A scout only dies where armed bodies stand, and draws them off.
-    let unarmed = |room| sightings::unarmed(context.sightings, context.world.time, room);
-    let mut radius = intel::threat_radius(
-        (context.world, context.atlas),
-        (context.intel, context.declarations),
-        &context.derived.owned,
-    );
+    let unarmed = |room| sightings::unarmed(sightings, world.time, room);
+    let mut radius = intel::threat_radius((world, atlas), (intel, declarations), &derived.owned);
     radius.retain(|room, _| unarmed(*room));
-    let (actions, mut scouts) = intel::sight(
-        context.world,
-        context.atlas,
-        context.declarations,
-        context.intel,
-        (&preyed, &radius),
-    );
+    let (actions, mut scouts) = intel::sight(world, atlas, declarations, intel, (&preyed, &radius));
     scouts.retain(|s| unarmed(s.room));
     state.scouts = scouts;
     ModuleOutput { actions, ..ModuleOutput::default() }
@@ -154,14 +145,14 @@ pub fn rivals(world: &World, declarations: &Declarations, intel: &Intel) -> Vec<
 /// Switched off, the choices are the operator's alone, but each colony keeps
 /// its plan: Economy reads its reserve and Layout drops a room without one.
 pub fn plan<'t>(
-    (on, world, atlas): (bool, &World, &mut Atlas),
+    (on, sampled, world, atlas): (bool, bool, &World, &mut Atlas),
     derived: &Derived,
     declarations: &Declarations,
     intel: &Intel,
     (engagements, casts): (&[Engagement], &[Cast]),
     (layout, economy): (&BTreeMap<RoomName, Standing>, &mut EconomyState),
     (terrain, state): (&dyn Fn(RoomName) -> Option<&'t LocalRoomTerrain>, &mut StrategyState),
-) -> (Planned, Misfiled) {
+) -> (Planned, Misfiled, Vec<outposts::Verdict>) {
     let StrategyState { expansion, piles, .. } = state;
     let mut misfiled = Vec::new();
     let rivals = rivals(world, declarations, intel);
@@ -237,7 +228,7 @@ pub fn plan<'t>(
         let mut operations = operations(derived, declarations, (&[], None), &[]);
         let planned = (declarations, &plans[..]);
         operations.extend(crossed((atlas, derived), planned, (&[], None), &theirs));
-        return ((plans, Vec::new(), None, operations), misfiled);
+        return ((plans, Vec::new(), None, operations), misfiled, Vec::new());
     }
     // An expansion declared this tick holds the outposts from the next.
     let claiming = expand::claim(intel, derived, expansion.in_flight.as_ref());
@@ -246,13 +237,15 @@ pub fn plan<'t>(
     preyed.retain(|room| atlas.has_terrain(*room));
     let busy =
         outposts::busy(atlas, (&plans, derived), (declarations, claiming.as_ref()), engagements);
-    let candidates =
-        outposts::survey((world, atlas), derived, (declarations, &plans, claimed), intel);
+    let mut verdicts = Vec::new();
+    let planned = (declarations, &plans[..], claimed);
+    let sample = sampled.then_some(&mut verdicts);
+    let candidates = outposts::survey((world, atlas), derived, planned, intel, sample);
     let homes =
         (declarations.clone()).planned((plans.clone(), Vec::new(), claiming.clone(), Vec::new()));
     let (spare, stocks) = fabot_economy::spare((world, atlas), (derived, &homes), intel, economy);
-    let chosen =
-        outposts::chosen(world, candidates, (&busy, &spare), (&declarations.tuning, engagements));
+    let ranked = (&declarations.tuning, engagements);
+    let chosen = outposts::chosen(world, candidates, (&busy, &spare), ranked, &mut verdicts);
     let fought: BTreeSet<RoomName> = engagements.iter().map(|e| e.room).collect();
     let around = expand::Around {
         rivals: &rivals,
@@ -280,7 +273,7 @@ pub fn plan<'t>(
     let fights = (engagements, casts);
     let held = (derived, &declarations.avoid);
     operations.extend(stronghold::rows(world, intel, held, fights, atlas));
-    ((plans, chosen, claim, operations), misfiled)
+    ((plans, chosen, claim, operations), misfiled, verdicts)
 }
 
 /// A home's raid is answered before an outpost's; a sweep takes

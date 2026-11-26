@@ -80,18 +80,13 @@ fn declared(declarations: &Declarations) -> impl Iterator<Item = &RoomName> {
 }
 
 pub fn preyed(intel: &Intel, declarations: &Declarations, time: i32) -> Vec<RoomName> {
-    let enemy =
-        |user: &Option<String>| user.as_ref().is_some_and(|u| declarations.enemies.contains(u));
-    let mut rooms: Vec<(i32, &RoomName)> = intel
-        .iter()
+    let enemy = |user: Option<&String>| user.is_some_and(|u| declarations.enemies.contains(u));
+    let mut rooms: Vec<(i32, &RoomName)> = (intel.iter())
         .filter(|(room, _)| !declarations.avoid.contains(*room))
         .filter(|(_, r)| r.owner.is_none() || !r.towered)
         .filter(|(_, r)| {
-            enemy(&r.owner)
-                || enemy(&r.worker)
-                || r.reservation
-                    .as_ref()
-                    .is_some_and(|(u, lapse)| *lapse > time && declarations.enemies.contains(u))
+            let reserver = (r.reservation.iter()).find(|(_, lapse)| *lapse > time);
+            enemy(r.owner.as_ref()) || enemy(r.worker.as_ref()) || enemy(reserver.map(|(u, _)| u))
         })
         .map(|(room, r)| (r.seen, room))
         .collect();
@@ -156,14 +151,10 @@ pub fn sight(
     intel: &Intel,
     (preyed, radius): (&[RoomName], &BTreeMap<RoomName, i32>),
 ) -> (Vec<Action>, Vec<Scout>) {
-    let mut free: Vec<_> = world
-        .rooms
-        .iter()
-        .flat_map(|r| world.rules.working(r))
+    let mut free: Vec<_> = (world.rooms.iter().flat_map(|r| world.rules.working(r)))
         .filter(|s| s.kind == StructureType::Observer && s.owner.is_ours())
         .collect();
-    let mut stale: Vec<(i32, &RoomName)> = intel
-        .iter()
+    let mut stale: Vec<(i32, &RoomName)> = (intel.iter())
         .filter(|(_, r)| world.time - r.seen > STALE)
         .map(|(room, r)| (r.seen, room))
         .collect();
@@ -173,9 +164,7 @@ pub fn sight(
         if !atlas.has_terrain(*room) {
             return None;
         }
-        let (at, _) = free
-            .iter()
-            .enumerate()
+        let (at, _) = (free.iter().enumerate())
             .filter(|(_, o)| sees(o.pos.room, *room))
             .min_by_key(|(_, o)| (tiles::rooms_apart(o.pos.room, *room), o.id))?;
         Some(Action::Observe(free.remove(at).id, *room))
@@ -202,8 +191,7 @@ pub fn sight(
         }
     }
     // Never seen, beside a room seen: an unseen world has no row to go stale.
-    let mut frontier: Vec<RoomName> = intel
-        .keys()
+    let mut frontier: Vec<RoomName> = (intel.keys())
         .flat_map(|room| [(1, 0), (-1, 0), (0, 1), (0, -1)].map(|(dx, dy)| room.offset(dx, dy)))
         .flatten()
         .filter(|room| !intel.contains_key(room))
@@ -223,15 +211,13 @@ pub fn sight(
         .filter(|(room, hops)| intel.contains_key(*room) || Some(**hops) == ring)
         .filter(|(room, _)| !intel.get(*room).is_some_and(fresh))
         .map(|(room, _)| room);
-    let mut rooms: Vec<&RoomName> = declared(declarations)
-        .chain(near)
+    let mut rooms: Vec<&RoomName> = (declared(declarations).chain(near))
         .filter(|room| !covered(&observed, room))
         .filter(|room| !(atlas.has_terrain(**room) && eyes.iter().any(|e| sees(*e, **room))))
         .collect();
     rooms.sort_by_cached_key(|room| (seen(room), *room));
     rooms.dedup();
-    let scouts = rooms
-        .into_iter()
+    let scouts = (rooms.into_iter())
         .map(|room| Scout {
             room: *room,
             age: world.time - seen(room).unwrap_or(0),

@@ -134,10 +134,7 @@ pub fn arbitrate(context: &Context, wishes: &[(RoomName, Wish)]) -> (Vec<Action>
         out.extend(glued.iter().map(|w| {
             Action::Creep(w.creep.clone(), CreepAct::Move(tiles::direction(w.at, w.head)))
         }));
-        let mut held: Vec<Tile> = context
-            .world
-            .creeps
-            .iter()
+        let mut held: Vec<Tile> = (context.world.creeps.iter())
             .filter(|c| c.pos.room == room && !wished.contains(c.name.as_str()))
             .map(|c| tiles::of_pos(&c.pos))
             .collect();
@@ -306,8 +303,9 @@ pub fn decide<'t>(
     let fight: Vec<_> =
         fabot_fight::boosted(&state.fight.engagements).map(|b| (b.colony, &*b.name)).collect();
     fabot_economy::labs::derive(world, &declarations, &fight, &mut derived);
-    let (plans, misfiled) = strategy::plan(
-        (!state.off.contains(STRATEGY), world, &mut atlas),
+    let sampled = world.time % fabot_observe::metrics::WINDOW == 0;
+    let (plans, misfiled, verdicts) = strategy::plan(
+        (!state.off.contains(STRATEGY), sampled, world, &mut atlas),
         &derived,
         &declarations,
         intel,
@@ -327,7 +325,16 @@ pub fn decide<'t>(
         derived: &derived,
         trace,
     };
-    let result = run(clock, &MODULES, &mut context, state);
+    let mut result = run(clock, &MODULES, &mut context, state);
+    if sampled {
+        let line = |(room, home, why, net, spawn, left): strategy::outposts::Verdict| {
+            let f = |v: f64| format!("{v:.2}");
+            let (room, home, why) = (room.to_string(), home.to_string(), why.into());
+            let named = [("room", room), ("home", home), ("why", why), ("net", f(net))];
+            ("outpost", named.into_iter().chain([("spawn", f(spawn)), ("left", f(left))]).collect())
+        };
+        result.telemetry.decisions.extend(verdicts.into_iter().map(line));
+    }
     for report in &result.reports {
         phases.push((report.module.to_string(), report.cpu));
     }
