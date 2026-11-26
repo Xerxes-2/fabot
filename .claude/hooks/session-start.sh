@@ -42,4 +42,6 @@ cd "$CLAUDE_PROJECT_DIR"
     '["util", "exec", "--", "bash", "-c", "exec \"$JJ_WORKSPACE_ROOT/scripts/ship.sh\" \"$@\"", "ship"]'
 
   npm install --no-audit --no-fund
+  # `npm run format` takes rustfmt from this dated nightly (package.json).
+  rustup toolchain install nightly-2026-11-17 --profile minimal --component rustfmt
 } >&2

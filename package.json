@@ -3,8 +3,8 @@
   "private": true,
   "scripts": {
     "build": "node scripts/rust.mjs",
-    "format": "cargo fmt --all",
-    "format:check": "cargo fmt --all --check",
+    "format": "RUSTFMT=${RUSTFMT:-$(rustup which --toolchain nightly-2026-11-17 rustfmt)} cargo fmt --all",
+    "format:check": "npm run format --silent -- --check",
     "ceiling": "node scripts/ceiling.mjs",
     "test": "npm run format:check --silent && npm run ceiling --silent && cargo clippy --workspace --all-targets --features fabot/tools -- -D warnings && cargo clippy --workspace --exclude sim --target wasm32-unknown-unknown -- -D warnings && cargo test --workspace",
     "smoke": "node scripts/smoke.mjs",

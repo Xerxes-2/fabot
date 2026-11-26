@@ -11,7 +11,9 @@ rules. v1 lives on the `v1` bookmark (`git show v1:<path>`), a rollback only.
 With Nix (recommended — same toolchain as CI, pinned by `flake.lock`):
 `nix develop` gives Node.js 24, `wasm-pack` and the Rust toolchain
 `rust-toolchain.toml` pins (`.envrc` enables direnv). Without Nix: Node.js >= 24,
-rustup (it reads the same file) and `wasm-pack`. Then:
+rustup (it reads the same file) and `wasm-pack`. `npm run format` uses
+`nightly-2026-11-17`'s rustfmt (Nix: in the shell; rustup: `rustup toolchain
+install nightly-2026-11-17 --profile minimal --component rustfmt`). Then:
 
 - `npm install`
 - `cp .env.example .env` and fill in your Screeps token
@@ -20,7 +22,7 @@ rustup (it reads the same file) and `wasm-pack`. Then:
 ## Workflow
 
 ```sh
-npm test          # cargo fmt --check, line ceilings, clippy, cargo test
+npm test          # nightly rustfmt --check, line ceilings, clippy, cargo test
 npm run build     # wasm-pack → dist/main.js, dist/main.wasm
 npm run smoke     # bundle runs four ticks against a stub game
 npm run smoke:real # bundle on the official server (needs nix; the first run builds it)

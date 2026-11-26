@@ -36,6 +36,10 @@
           # node-gyp links the official server's native modules (`scripts/official/`)
           # against the libraries nixpkgs' Node is built with.
           inputsFrom = [ pkgs.nodejs-slim_24 ];
+          # `npm run format` runs this rustfmt (rustfmt.toml takes nightly options); builds stay on stable.
+          RUSTFMT = "${
+            pkgs.rust-bin.nightly."2026-11-17".minimal.override { extensions = [ "rustfmt" ]; }
+          }/bin/rustfmt";
         };
       });
     };
