@@ -5,7 +5,10 @@ use screeps::LocalRoomTerrain;
 use crate::{
     tiles::{self, Tile},
     vocabulary::{Part, ResourceType, takes},
-    world::{Controller, Id, Mineral, Owner, Pos, Room, RoomName, Rules, Source, World, terrain},
+    world::{
+        Controller, Id, Mineral, Owner, Pos, Room, RoomName, Rules, Source, Store, Structure,
+        StructureType, World, terrain,
+    },
 };
 
 pub fn boosted(part: Part, tier: usize) -> Option<ResourceType> {
@@ -115,6 +118,31 @@ pub fn world(text: &str) -> World<'static> {
         world.rooms.push(room(name, terrain, &sources, of("controller").next().map(pos), mineral));
     }
     world
+}
+
+/// Our room at `level`, its controller at the middle, nothing built.
+pub fn ours(name: RoomName, level: i32, terrain: &'static LocalRoomTerrain) -> Room<'static> {
+    let mut room = room(name, terrain, &[], Some(Pos::new(name, 25, 25)), None);
+    room.controller = room.controller.map(|c| Controller { owner: Owner::Ours, level, ..c });
+    room
+}
+
+pub fn built(id: &str, kind: StructureType, pos: Pos) -> Structure {
+    Structure {
+        id: id.into(),
+        kind,
+        pos,
+        owner: Owner::Ours,
+        hits: 1,
+        hits_max: 1,
+        store: Store::default(),
+        cooldown: 0,
+        collapse: 0,
+        deploy: 0,
+        level: 0,
+        spawn: None,
+        walkable: crate::world::walkable(kind, &Owner::Ours, false),
+    }
 }
 
 fn room<'a>(

@@ -1,7 +1,0 @@
-{
-  "why": "a room ranks at the spawn time its fit charges and its containers are amortised over an outpost's tenure, so a better unbuilt room is not priced under worse standing ones: young W9N8 (750 spawn ticks) beside two-source W8N8 unbuilt (net 15.1, 320 ticks) and standing W9N7 (14.6, 440) and one-source W9N9 (7.0, 196). With the setup over one creep life W8N8 ranked last at 0.026 and the two standing rooms left it 114 ticks, as gen 514 self-play left E4S8 unworked from t80750",
-  "modules": ["strategy"],
-  "start": { "world": "scripts/scenario/worlds/outpost-standing-worse.json", "room": "W9N8", "node": "N2", "seed": 1 },
-  "ticks": 4000,
-  "assert": [{ "measure": "dug", "room": "W8N8", "from": 3000, "to": 4000, "min": 10000 }]
-}

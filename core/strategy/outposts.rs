@@ -323,9 +323,106 @@ pub fn survey(
 
 #[cfg(test)]
 mod tests {
-    use fabot_base::{declarations::Declared, world::Id};
+    use fabot_base::{
+        declarations::Declared,
+        testing,
+        world::{Id, Spawn, StructureType, terrain},
+    };
 
     use super::*;
+
+    fn home_room() -> RoomName {
+        "W9N8".parse().unwrap()
+    }
+
+    fn home(spawns: i32, capacity: i32, stocked: bool) -> World<'static> {
+        let at = |x| Pos::new(home_room(), x, 1);
+        let mut world = testing::world(r#"{"rooms":[]}"#);
+        let mut room = testing::ours(home_room(), 8, terrain::leak(vec![0; 2500]).unwrap());
+        room.energy_capacity = capacity;
+        for x in 1..=spawns {
+            let id = format!("spawn{x}");
+            room.structures.push(testing::built(&id, StructureType::Spawn, at(x)));
+            world.spawns.push(Spawn {
+                id: id.as_str().into(),
+                name: id,
+                pos: at(x),
+                spawning: None,
+            });
+        }
+        if stocked {
+            room.structures.push(testing::built("storage", StructureType::Storage, at(9)));
+        }
+        world.rooms.push(room);
+        world
+    }
+
+    fn candidate(room: &str, sources: usize, walk: i32, stands: bool) -> Candidate {
+        let room: RoomName = room.parse().unwrap();
+        let at = Declared { id: Id::MISREAD, pos: Pos::new(room, 25, 25) };
+        Candidate {
+            outpost: Outpost {
+                reserved: true,
+                room,
+                controller: at.clone(),
+                sources: vec![at; sources],
+            },
+            home: home_room(),
+            walk,
+            walked: walk,
+            contested: false,
+            declared: false,
+            stands,
+        }
+    }
+
+    fn worked_by(world: &World, candidates: Vec<Candidate>, spare: f64) -> Vec<String> {
+        let spare = BTreeMap::from([(home_room(), spare)]);
+        let chosen =
+            chosen(world, candidates, (&BTreeSet::new(), &spare), (&Tuning::default(), &[]));
+        chosen.iter().map(|o| o.room.to_string()).collect()
+    }
+
+    /// Standing is no edge beyond the containers, which are spread over a
+    /// tenure: young or stocked, a home short of spawn time works the room
+    /// netting more a spawn tick, standing or not.
+    #[test]
+    fn an_unbuilt_room_that_pays_more_displaces_worse_standing_ones() {
+        let rooms = || {
+            vec![
+                candidate("W9N7", 2, 70, true),
+                candidate("W8N8", 2, 50, false),
+                candidate("W9N9", 1, 70, true),
+            ]
+        };
+        let young = worked_by(&home(1, 800, false), rooms(), 0.0);
+        assert_eq!(young, ["W8N8", "W9N7"], "the standing W9N9 gives way");
+        let rooms = vec![candidate("E6S2", 1, 60, true), candidate("E8S2", 2, 60, false)];
+        let stocked = worked_by(&home(1, 1300, true), rooms, 460.0);
+        assert_eq!(stocked, ["E8S2"]);
+    }
+
+    proptest::proptest! {
+        #![proptest_config(testing::config(256))]
+
+        /// Affording a reserver never by itself prices a room out: a room whose
+        /// bare work fits the spawn time left is priced in a mode that fits and
+        /// nets no less.
+        #[test]
+        fn a_room_that_fits_bare_is_kept_in_a_mode_that_fits(
+            sources in 1..=3usize,
+            walk in 0..250i32,
+            (stands, contested) in proptest::prelude::any::<(bool, bool)>(),
+            capacity in 300..=5_600i32,
+            left in 0.0..1_500.0f64,
+        ) {
+            let c = Candidate { contested, ..candidate("W8N8", sources, walk, stands) };
+            let bare = worked(&c, capacity, false, &|_| 0.0);
+            let kept = price(&c, capacity, left, &|_| 0.0);
+            proptest::prop_assume!(bare.spawn <= left);
+            proptest::prop_assert!(kept.spawn <= left && kept.net >= bare.net);
+        }
+    }
 
     /// A reserved source is dug by the harvester Economy casts, its spare WORK
     /// counted: 6W1C3M at 800 energy, not 5W.

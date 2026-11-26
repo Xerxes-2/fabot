@@ -1,7 +1,0 @@
-{
-  "why": "outposts rank by value alone, a room without its containers net of them over one creep life: on gen 22 E8S1's young budget dropped 2-source E8S2 at t6881 and its containers decayed, and once stocked the home kept 1-source E6S2 because it stood (main: E8S2 dug nothing after t6881, score 843k at t30000 against 930k)",
-  "modules": ["strategy"],
-  "start": { "gen": 22, "seed": 1 },
-  "ticks": 24000,
-  "assert": [{ "measure": "dug", "room": "E8S2", "from": 20000, "to": 24000, "min": 40000 }]
-}

@@ -1,7 +1,0 @@
-{
-  "why": "affording a reserver never by itself drops a kept outpost: an outpost is priced both bare and reserved and Strategy keeps the better that fits the spawn share; on gen 5 E7S9 was priced reserved the tick E9S9 reached 650 capacity (t8569), its spawn time 548 against 437 left, so it dropped and went undug (0 dug t9000-12000; 27,960 after the fix)",
-  "modules": ["strategy", "economy"],
-  "start": { "gen": 5, "seed": 1 },
-  "ticks": 12000,
-  "assert": [{ "measure": "outpostDug", "room": "E7S9", "from": 9000, "to": 12000, "min": 15000 }]
-}

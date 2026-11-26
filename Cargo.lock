@@ -274,6 +274,7 @@ dependencies = [
  "fabot-economy",
  "fabot-fight",
  "fabot-layout",
+ "proptest",
  "screeps-game-api",
  "serde",
 ]
