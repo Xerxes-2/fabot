@@ -696,9 +696,9 @@ and `cheapest_win` (adds only to already-standing `ours`).
 - `❓` Our set's hit-back on the raid scales with the swing all its living
   bodies keep, whatever their range, and a body worn down off the focus ends
   no pricing window.
-- `❓` Exchange counts a body lost only when it dies, but Defend drops a body
-  left without combat parts (a 2–3-part body after ~100 damage): a kiter that
-  strips parts beats a set priced to win (outpost-kited-by-1r2m).
+- `❓` Exchange counts a body lost at death, Defend at its last combat part; tried
+  `spent_at` on both sides: self-play gen7 s1–7 −4.1% mean (more lost in 5/7), and
+  outpost-kited-by-1r2m holds pastBudget 0 on seeds 1–8 at 5bed6fdb: deferred.
 - `❓` (after zone-control defence) Exchange's Kite arm prices a self-healing
   healer, or a raid our rangers could kite off a post, as Lose where kiting
   wins.
