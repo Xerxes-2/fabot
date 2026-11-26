@@ -270,8 +270,8 @@ pub fn power_at<'a>(
     let skip = body.len() - live.len();
     let acting = live.iter().zip(boosts[skip..].iter());
     Box::new(move |part| {
-        (acting.clone())
-            .filter_map(|(p, boost)| (*p == part).then(|| multiple(*p, *boost)))
+        (acting.clone().filter(|(p, _)| **p == part))
+            .map(|(p, boost)| multiple(*p, *boost))
             .sum()
     })
 }
