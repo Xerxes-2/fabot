@@ -1,17 +1,18 @@
 //! krebs's world as one tick's reader sees it: each room's objects by kind,
 //! its event log parsed once (empty unless the room ran last tick), and
 //! lookups by room name, object id and our creeps' names.
-use krebs::atom;
-use krebs::doc::{Atom, Obj, Val};
-use krebs::world::World as Krebs;
-use serde_json::Value;
-
-use crate::world::US;
-
 pub use krebs::constants::{
     EVENT_ATTACK, EVENT_BUILD, EVENT_HARVEST, EVENT_HEAL, EVENT_OBJECT_DESTROYED, EVENT_REPAIR,
     EVENT_TRANSFER, EVENT_UPGRADE_CONTROLLER,
 };
+use krebs::{
+    atom,
+    doc::{Atom, Obj, Val},
+    world::World as Krebs,
+};
+use serde_json::Value;
+
+use crate::world::US;
 
 pub fn num(o: &Obj, k: Atom) -> f64 {
     o.get(k).and_then(Val::as_f64).unwrap_or(0.0)
@@ -71,10 +72,7 @@ impl Room<'_> {
     }
 
     pub fn of(&self, kind: &str) -> impl Iterator<Item = &Obj> {
-        self.objects
-            .iter()
-            .filter(move |(k, _)| *k == kind)
-            .map(|(_, o)| *o)
+        self.objects.iter().filter(move |(k, _)| *k == kind).map(|(_, o)| *o)
     }
 }
 

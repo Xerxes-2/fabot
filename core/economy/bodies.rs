@@ -1,8 +1,9 @@
+use fabot_base::{
+    engine,
+    grid::{self, FatigueFactor},
+    vocabulary::{CLAIMER, Part, part_count_in},
+};
 use strum::{EnumString, IntoStaticStr};
-
-use fabot_base::engine;
-use fabot_base::grid::{self, FatigueFactor};
-use fabot_base::vocabulary::{CLAIMER, Part, part_count_in};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString, IntoStaticStr)]
 #[cfg_attr(test, derive(strum::EnumIter))]
@@ -82,19 +83,14 @@ fn worker_body(most: i32, capacity: i32) -> Vec<Part> {
     let block = block_of(Pattern::Worker);
     let dearest = engine::MAX_BODY_PARTS as i32;
 
-    let repeats = (capacity / engine::body_cost(block))
-        .min(dearest / 3)
-        .min(most);
+    let repeats = (capacity / engine::body_cost(block)).min(dearest / 3).min(most);
 
     let work = repeats;
     let mut carry = repeats;
     let mut moves = repeats;
 
-    let mut budget = if repeats >= most {
-        0
-    } else {
-        capacity - repeats * engine::body_cost(block)
-    };
+    let mut budget =
+        if repeats >= most { 0 } else { capacity - repeats * engine::body_cost(block) };
 
     let mut slots = dearest - 3 * repeats;
     let carry_cost = engine::part_cost(Part::Carry);
@@ -159,10 +155,7 @@ fn upgrader_body(roads: i32, plains: i32, most: i32, capacity: i32) -> Vec<Part>
         let work = ((capacity - carry_cost - moves * move_cost) / work_cost)
             .min(most)
             .min(dearest - 1 - moves);
-        let factor = FatigueFactor {
-            weight: work,
-            moves,
-        };
+        let factor = FatigueFactor { weight: work, moves };
         let step = |weight| grid::step_ticks(factor, weight);
         let (Some(road), Some(plain)) = (step(engine::ROAD_WEIGHT), step(engine::PLAIN_WEIGHT))
         else {
@@ -266,11 +259,7 @@ pub fn hauler(ratio: i32, carry: i32, capacity: i32) -> Option<Vec<Part>> {
 
 /// The energy a controller takes a tick: past it an upgrader drinks nothing.
 pub fn upgradable_at(level: i32) -> i32 {
-    if engine::topped_out(level) {
-        engine::MAX_UPGRADE_PER_TICK
-    } else {
-        i32::MAX
-    }
+    if engine::topped_out(level) { engine::MAX_UPGRADE_PER_TICK } else { i32::MAX }
 }
 
 /// So the dig finishes the source inside its regeneration window despite the
@@ -280,11 +269,7 @@ const HARVEST_SPARE_WORK: i32 = 1;
 /// `home`: a seat in the casting colony's own room, which it walks once.
 pub fn harvester(home: bool, rate: i32, capacity: i32) -> Option<Vec<Part>> {
     let work = engine::work_to_dig(rate) + HARVEST_SPARE_WORK;
-    if home {
-        home_harvester(work, capacity)
-    } else {
-        sized(Pattern::Harvester, work, capacity)
-    }
+    if home { home_harvester(work, capacity) } else { sized(Pattern::Harvester, work, capacity) }
 }
 
 /// Its legs never cost it a Work.
@@ -343,16 +328,8 @@ mod tests {
     #[test]
     fn a_hauler_on_road_carries_two_a_move_and_on_plain_one() {
         for d in 1..60 {
-            let road = Leg {
-                even: d,
-                roaded: d,
-                empty: d,
-            };
-            let plain = Leg {
-                even: d,
-                roaded: 2 * d,
-                empty: d,
-            };
+            let road = Leg { even: d, roaded: d, empty: d };
+            let plain = Leg { even: d, roaded: 2 * d, empty: d };
             assert_eq!(carry_per_move(road), 2);
             assert_eq!(carry_per_move(plain), 1);
         }
@@ -361,10 +338,7 @@ mod tests {
     #[test]
     fn an_upgrader_buys_move_only_as_its_walk_grows_and_leaves_its_road() {
         let moves = |roads: i32, plains: i32, most: i32, capacity: i32| {
-            part_count_in(
-                &upgrader(roads, plains, most, capacity).unwrap(),
-                Part::Move,
-            )
+            part_count_in(&upgrader(roads, plains, most, capacity).unwrap(), Part::Move)
         };
         for capacity in [550, 1300, 2300, 5600, 12900] {
             for most in [15, i32::MAX] {

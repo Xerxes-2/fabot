@@ -2,14 +2,17 @@
 use std::cmp::Reverse;
 use std::collections::BTreeSet;
 
-use fabot_atlas::Atlas;
-use fabot_atlas::Derived;
-use fabot_base::declarations::{FAR_HOPS, OpKind, Operation};
-use fabot_base::engine;
-use fabot_base::intel::Intel;
-use fabot_base::world::{RoomName, World};
-use fabot_fight::kinds::stronghold;
-use fabot_fight::shape::{Cast, Engagement, Objective};
+use fabot_atlas::{Atlas, Derived};
+use fabot_base::{
+    declarations::{FAR_HOPS, OpKind, Operation},
+    engine,
+    intel::Intel,
+    world::{RoomName, World},
+};
+use fabot_fight::{
+    kinds::stronghold,
+    shape::{Cast, Engagement, Objective},
+};
 
 /// L4's fortifier and its garrison's reach are not priced yet; L5 is out (owner).
 const MOST: i32 = 3;
@@ -30,10 +33,7 @@ pub fn rows(
     // Out of sight, the loot as last seen: a body there sees it taken.
     let unseen = (intel.iter()).filter(|(room, row)| {
         world.room(**room).is_none()
-            && row
-                .loot
-                .as_ref()
-                .is_some_and(|(c, l)| *c > world.time && !l.is_empty())
+            && row.loot.as_ref().is_some_and(|(c, l)| *c > world.time && !l.is_empty())
     });
     let fallen: Vec<RoomName> = (world.rooms.iter())
         .filter(|r| fabot_atlas::fallen_with_loot(r))
@@ -73,13 +73,7 @@ pub fn rows(
         reached = fallen.into_iter().filter(|r| near(*r).is_some()).collect();
     }
     let rooms: BTreeSet<RoomName> = committed.into_iter().chain(taken).chain(reached).collect();
-    let row = |kind| {
-        move |room: &RoomName| Operation {
-            kind,
-            room: *room,
-            priority: 0.0,
-        }
-    };
+    let row = |kind| move |room: &RoomName| Operation { kind, room: *room, priority: 0.0 };
     (rooms.iter().map(row(OpKind::Stronghold)))
         .chain(rooms.iter().map(row(OpKind::Pickup)))
         .collect()

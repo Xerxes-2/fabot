@@ -7,9 +7,7 @@ pub mod world;
 #[cfg(target_arch = "wasm32")]
 fn hook_panics() {
     std::panic::set_hook(Box::new(|info| {
-        let where_ = info
-            .location()
-            .map_or_default(|at| format!("{}:{}", at.file(), at.line()));
+        let where_ = info.location().map_or_default(|at| format!("{}:{}", at.file(), at.line()));
         let message = info
             .payload()
             .downcast_ref::<&str>()

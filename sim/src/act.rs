@@ -3,18 +3,23 @@
 //! order where they are cheap and decide the stored amount, refused with its code.
 use std::collections::BTreeMap;
 
-use fabot_base::HashMap;
-use fabot_base::intents::{
-    Action, ControllerAct, CreepAct, LabAct, LinkAct, Refusal, RoomAct, SpawnAct, TerminalAct,
-    TowerAct,
+use fabot_base::{
+    HashMap, engine,
+    intents::{
+        Action, ControllerAct, CreepAct, LabAct, LinkAct, Refusal, RoomAct, SpawnAct, TerminalAct,
+        TowerAct,
+    },
+    tiles,
+    vocabulary::{Part, ResourceType},
+    world,
 };
-use fabot_base::vocabulary::{Part, ResourceType};
-use fabot_base::{engine, tiles, world};
 use fabot_observe::metrics;
-use krebs::atom;
-use krebs::doc::{Atom, Id, Obj, Val};
-use krebs::intents::{RoomIntents, UserRoomIntents};
-use krebs::world::UserIdx;
+use krebs::{
+    atom,
+    doc::{Atom, Id, Obj, Val},
+    intents::{RoomIntents, UserRoomIntents},
+    world::UserIdx,
+};
 use krebs_util::json::Json;
 use screeps::ErrorCode::{self, *};
 use serde_json::{Value, json};
@@ -45,18 +50,13 @@ fn index<'a>(v: &'a View<'a>) -> Index<'a> {
         let creeps = v.rooms[r].of("creep").filter(|o| v.ours(o));
         creeps.map(move |o| (text(o, atom!("name")), (r, o)))
     });
-    Index {
-        v,
-        creeps: creeps.collect(),
-    }
+    Index { v, creeps: creeps.collect() }
 }
 
 /// `utils.capacityForResource`.
 fn capacity(o: &Obj, resource: &str) -> f64 {
     let by = obj(o, atom!("storeCapacityResource"));
-    let own = by
-        .and_then(|c| c.get(Atom::intern(resource)))
-        .and_then(Val::as_f64);
+    let own = by.and_then(|c| c.get(Atom::intern(resource))).and_then(Val::as_f64);
     let rest = || {
         let reserved: f64 = by.map_or(0.0, |c| c.iter().filter_map(|(_, v)| v.as_f64()).sum());
         (num(o, atom!("storeCapacity")) - reserved).max(0.0)
@@ -127,11 +127,7 @@ impl Stored {
                 let objects = (objects.into_iter())
                     .map(|(id, named)| (id.into_boxed_str(), sanitize(named)))
                     .collect();
-                let user = UserRoomIntents {
-                    user: us,
-                    objects,
-                    manual: Vec::new(),
-                };
+                let user = UserRoomIntents { user: us, objects, manual: Vec::new() };
                 (room, RoomIntents { users: vec![user] })
             })
             .collect()
@@ -154,10 +150,7 @@ impl Run<'_> {
 
     fn creep(&mut self, name: &str, act: &CreepAct) -> Result<(), ErrorCode> {
         let &creep = self.at.creeps.get(name).ok_or(NotFound)?;
-        check(
-            creep.1.get(atom!("spawning")) == Some(&Val::Bool(true)),
-            Busy,
-        )?;
+        check(creep.1.get(atom!("spawning")) == Some(&Val::Bool(true)), Busy)?;
         let id = text(creep.1, atom!("_id")).to_string();
         let near = |t: Found| check(range(creep, t) > 1.0, NotInRange);
         let energy = store(creep.1, atom!("energy"));
@@ -245,10 +238,7 @@ impl Run<'_> {
                 let t = self.target(*t)?;
                 near(t)?;
                 let (x, y) = (num(t.1, atom!("x")), num(t.1, atom!("y")));
-                (
-                    act.method(),
-                    json!({ "id": text(t.1, atom!("_id")), "x": x, "y": y }),
-                )
+                (act.method(), json!({ "id": text(t.1, atom!("_id")), "x": x, "y": y }))
             }
             CreepAct::Reserve(t)
             | CreepAct::Unreserve(t)
@@ -291,14 +281,8 @@ impl Run<'_> {
         let mut controllers = self.v.rooms[room].of("controller");
         let active = controllers.any(|c| self.v.ours(c) && num(c, atom!("level")) >= 8.0);
         check(!active, RclNotEnough)?;
-        let at = self.v.rooms[room]
-            .name
-            .parse::<world::RoomName>()
-            .map_err(|_| InvalidArgs)?;
-        check(
-            tiles::rooms_apart(at, target) > engine::OBSERVER_RANGE,
-            NotInRange,
-        )?;
+        let at = self.v.rooms[room].name.parse::<world::RoomName>().map_err(|_| InvalidArgs)?;
+        check(tiles::rooms_apart(at, target) > engine::OBSERVER_RANGE, NotInRange)?;
         let value = json!({ "roomName": target.to_string() });
         self.stored.put(room, &id.text(), "observeRoom", value);
         Ok(())
@@ -325,10 +309,7 @@ impl Run<'_> {
             let drawn = drawn.iter().filter_map(|d| self.at.get(*d));
             drawn.map(|(_, o)| store(o, atom!("energy"))).sum()
         };
-        check(
-            bank < f64::from(body.iter().map(|p| p.cost()).sum::<u32>()),
-            NotEnough,
-        )?;
+        check(bank < f64::from(body.iter().map(|p| p.cost()).sum::<u32>()), NotEnough)?;
         self.created.push(name.to_string());
         let mut value = json!({ "name": name, "body": body });
         if !drawn.is_empty() {
@@ -383,14 +364,7 @@ impl Run<'_> {
             Action::Lab(id, LabAct::BoostCreep(c)) => {
                 self.on(*id, &[*c], "boostCreep", json!({ "id": c }))
             }
-            Action::Terminal(
-                id,
-                TerminalAct::Send {
-                    resource,
-                    amount,
-                    to,
-                },
-            ) => {
+            Action::Terminal(id, TerminalAct::Send { resource, amount, to }) => {
                 let value = json!({ "resourceType": resource.to_string(), "amount": amount,
                     "targetRoomName": to.to_string(), "description": "" });
                 self.on(*id, &[], "send", value)

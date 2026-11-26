@@ -1,11 +1,13 @@
 /// The caller reads the creep's pace once (`Grid.factorOf`) and hands it in.
 use fabot_atlas::{Atlas, Mover, Target};
-use fabot_base::engine;
-use fabot_base::grid::{self, FatigueFactor, Footprint};
-use fabot_base::tiles::{self, Tile, TileSet};
-use fabot_base::vocabulary::Part;
-use fabot_base::wish::{Idle, Wish};
-use fabot_base::world::{Creep, RoomName};
+use fabot_base::{
+    engine,
+    grid::{self, FatigueFactor, Footprint},
+    tiles::{self, Tile, TileSet},
+    vocabulary::Part,
+    wish::{Idle, Wish},
+    world::{Creep, RoomName},
+};
 
 pub fn can_move(creep: &Creep, factor: FatigueFactor) -> bool {
     creep.fatigue == 0 && factor.moves > 0
@@ -60,11 +62,7 @@ pub fn stay(
     tail.retain(|tile| !tiles::on_edge(*tile));
     tail.sort_by_key(|tile| danger.is_some_and(|d| d.contains(*tile)));
     let moves = can_move(creep, factor);
-    let head = if moves && tiles::on_edge(at) && !tail.is_empty() {
-        tail.remove(0)
-    } else {
-        at
-    };
+    let head = if moves && tiles::on_edge(at) && !tail.is_empty() { tail.remove(0) } else { at };
     wish(creep, moves, head, None, tail, Vec::new(), weight)
 }
 
@@ -180,9 +178,7 @@ pub fn swung(atlas: &Atlas, creep: &Creep, hostiles: &[Creep]) -> Option<TileSet
     };
     let struck = |t: &Tile| {
         let soonest = soonest(room, hostiles, *t);
-        soonest
-            .zip(leaves(*t))
-            .is_some_and(|(s, by)| s <= by.max(1))
+        soonest.zip(leaves(*t)).is_some_and(|(s, by)| s <= by.max(1))
     };
     let near = tiles::within(2 * engine::RANGED_RANGE + 1, here);
     let reach: Vec<Tile> = near.into_iter().filter(struck).collect();
@@ -201,9 +197,5 @@ fn soonest(room: RoomName, hostiles: &[Creep], t: Tile) -> Option<i32> {
 fn arrives(creep: &Creep, n: i32) -> Option<i32> {
     let factor = grid::factor_of(creep);
     let step = grid::step_ticks(factor, engine::PLAIN_WEIGHT);
-    if n > 0 {
-        Some(grid::rest(factor, creep.fatigue)? + (n - 1) * step? + 1)
-    } else {
-        Some(0)
-    }
+    if n > 0 { Some(grid::rest(factor, creep.fatigue)? + (n - 1) * step? + 1) } else { Some(0) }
 }

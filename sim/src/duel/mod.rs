@@ -10,26 +10,32 @@
 mod pgs;
 mod real;
 
-use std::collections::BTreeMap;
-use std::io::Read;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::{
+    collections::BTreeMap,
+    io::Read,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 use fabot_base::engine;
 use fabot_tactics::Tactic;
-use krebs::atom;
-use krebs::cron::JOBS;
-use krebs::doc::{Id, Val};
-use krebs::hooks::ProcessorHooks;
-use krebs::intents::RoomIntents;
-use krebs::world::World;
+use krebs::{
+    atom,
+    cron::JOBS,
+    doc::{Id, Val},
+    hooks::ProcessorHooks,
+    intents::RoomIntents,
+    world::World,
+};
 use krebs_pathfinder::{Goal, PathFinder, Pos, RoomCost, SearchOpts};
 use screeps::{INVADER_USERNAME, Part};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use crate::act::Stored;
-use crate::view::{num, text, xy};
-use crate::world::{self, INVADER, RIVAL, US, USERNAME};
+use crate::{
+    act::Stored,
+    view::{num, text, xy},
+    world::{self, INVADER, RIVAL, US, USERNAME},
+};
 
 #[derive(Deserialize, Clone, Copy, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -112,29 +118,27 @@ impl Thing {
     fn has(&self, part: Part) -> bool {
         self.active.contains(&part)
     }
+
     fn hurt(&self) -> bool {
         self.hits < self.hits_max
     }
+
     fn range(&self, o: &Thing) -> i32 {
         (self.x - o.x).abs().max((self.y - o.y).abs())
     }
+
     fn closest<'a>(&self, xs: &[&'a Thing]) -> Option<&'a Thing> {
         xs.iter().copied().min_by_key(|o| self.range(o))
     }
+
     fn side(&self) -> Side {
-        if self.user == US {
-            Side::Ours
-        } else {
-            Side::Theirs
-        }
+        if self.user == US { Side::Ours } else { Side::Theirs }
     }
 }
 
 /// One side's creeps' hits by id.
 fn hits(all: &[Thing], side: Side) -> BTreeMap<String, f64> {
-    let creeps = all
-        .iter()
-        .filter(|c| c.kind == Kind::Creep && c.side() == side);
+    let creeps = all.iter().filter(|c| c.kind == Kind::Creep && c.side() == side);
     creeps.map(|c| (c.id.clone(), c.hits)).collect()
 }
 
@@ -187,17 +191,9 @@ impl Orders<'_> {
     }
 
     fn step(&mut self, c: &Thing, goals: &[(&Thing, u32)], flee: bool) {
-        let pos = |x: i32, y: i32| Pos {
-            room: self.room,
-            x: x as u8,
-            y: y as u8,
-        };
-        let goals: Vec<Goal> = (goals.iter())
-            .map(|(o, range)| Goal {
-                pos: pos(o.x, o.y),
-                range: *range,
-            })
-            .collect();
+        let pos = |x: i32, y: i32| Pos { room: self.room, x: x as u8, y: y as u8 };
+        let goals: Vec<Goal> =
+            (goals.iter()).map(|(o, range)| Goal { pos: pos(o.x, o.y), range: *range }).collect();
         let opts = SearchOpts::from_js(0, 0, None, 0, 0, 1, flee);
         let terrain = self.terrain;
         let found = (self.pf).search(
@@ -396,17 +392,13 @@ impl Duel {
         let all = things(&self.world);
         let creeps: Vec<&Thing> = all.iter().filter(|o| o.kind == Kind::Creep).collect();
         self.now = [hits(&all, Side::Ours), hits(&all, Side::Theirs)];
-        if (self.first.iter().zip(&self.now)).any(|(f, n)| {
-            f.iter()
-                .any(|(id, h)| n.get(id).copied().unwrap_or(0.0) < *h)
-        }) {
+        if (self.first.iter().zip(&self.now))
+            .any(|(f, n)| f.iter().any(|(id, h)| n.get(id).copied().unwrap_or(0.0) < *h))
+        {
             self.struck = self.struck.or(Some(self.t));
         }
-        let near = (creeps.iter().filter(|c| c.side() == Side::Ours)).any(|a| {
-            creeps
-                .iter()
-                .any(|b| b.side() == Side::Theirs && a.range(b) <= 3)
-        });
+        let near = (creeps.iter().filter(|c| c.side() == Side::Ours))
+            .any(|a| creeps.iter().any(|b| b.side() == Side::Theirs && a.range(b) <= 3));
         if near {
             self.contact = self.contact.or(Some(self.t));
         }
@@ -438,18 +430,9 @@ impl Duel {
                 orders.stored = real.orders(&self.world);
             }
             let (allies, foes) = creeps.iter().partition(|c| c.user == user);
-            let theirs = (all.iter())
-                .filter(|o| o.kind != Kind::Creep && o.user != user)
-                .collect();
-            let view = View {
-                allies,
-                foes,
-                theirs,
-            };
-            for tower in all
-                .iter()
-                .filter(|o| o.kind == Kind::Tower && o.user == user)
-            {
+            let theirs = (all.iter()).filter(|o| o.kind != Kind::Creep && o.user != user).collect();
+            let view = View { allies, foes, theirs };
+            for tower in all.iter().filter(|o| o.kind == Kind::Tower && o.user == user) {
                 if let Some(target) = tower.closest(&view.foes) {
                     orders.put(tower, "attack", json!({ "id": target.id }));
                 }
@@ -457,13 +440,7 @@ impl Duel {
             for c in view.allies.iter().filter(|_| !ours) {
                 act(&mut orders, c, &view);
             }
-            users.extend(
-                orders
-                    .stored
-                    .rooms(idx)
-                    .into_iter()
-                    .flat_map(|(_, r)| r.users),
-            );
+            users.extend(orders.stored.rooms(idx).into_iter().flat_map(|(_, r)| r.users));
         }
         engine.step(&mut self.world, vec![(0, RoomIntents { users })]);
         self.t += 1;
@@ -476,10 +453,7 @@ impl Duel {
             dead += u32::from(!self.now[0].contains_key(id));
             lost += h - self.now[0].get(id).copied().unwrap_or(0.0);
         }
-        let ticks = self
-            .end
-            .zip(self.contact.or(self.struck))
-            .map(|(e, s)| e - s);
+        let ticks = self.end.zip(self.contact.or(self.struck)).map(|(e, s)| e - s);
         json!({ "won": self.won, "ticks": ticks, "dead": dead, "hits": lost })
     }
 }
@@ -515,9 +489,7 @@ pub fn main() {
         None => duel(s, ticks, seed, real, pf),
     };
     let mut text = String::new();
-    std::io::stdin()
-        .read_to_string(&mut text)
-        .expect("samples on stdin");
+    std::io::stdin().read_to_string(&mut text).expect("samples on stdin");
     let samples: Vec<Sample> = serde_json::from_str(&text).expect("exchange's samples");
     let next = AtomicUsize::new(0);
     let workers = std::thread::available_parallelism().map_or(1, usize::from);
@@ -535,14 +507,10 @@ pub fn main() {
                 })
             })
             .collect();
-        handles
-            .into_iter()
-            .flat_map(|h| h.join().expect("a duel thread"))
-            .collect()
+        handles.into_iter().flat_map(|h| h.join().expect("a duel thread")).collect()
     });
     results.sort_by_key(|(i, _)| *i);
-    let results_by_id: Map<String, Value> = (results.into_iter())
-        .map(|(i, r)| (samples[i].id.clone(), r))
-        .collect();
+    let results_by_id: Map<String, Value> =
+        (results.into_iter()).map(|(i, r)| (samples[i].id.clone(), r)).collect();
     println!("{}", Value::Object(results_by_id));
 }

@@ -1,11 +1,13 @@
 use std::collections::BTreeMap;
 
-use crate::declarations::{Declarations, Declared, Outpost};
-use crate::engine;
-use crate::stronghold::Stronghold;
-use crate::tiles::{self, Post, Tile};
-use crate::vocabulary::ResourceType;
-use crate::world::{Controller, Id, Owner, Pos, Room, RoomName, Source, World, push_int};
+use crate::{
+    declarations::{Declarations, Declared, Outpost},
+    engine,
+    stronghold::Stronghold,
+    tiles::{self, Post, Tile},
+    vocabulary::ResourceType,
+    world::{Controller, Id, Owner, Pos, Room, RoomName, Source, World, push_int},
+};
 
 pub const WRITTEN_EVERY: i32 = 100;
 
@@ -69,9 +71,7 @@ pub fn blind(
         controller: Some(Controller {
             id: outpost.controller.id,
             pos: outpost.controller.pos,
-            owner: row
-                .and_then(|r| r.owner.as_ref())
-                .map_or(Owner::Nobody, owner),
+            owner: row.and_then(|r| r.owner.as_ref()).map_or(Owner::Nobody, owner),
             level: row.map_or(0, |r| r.level),
             progress: 0,
             progress_total: 0,
@@ -209,16 +209,11 @@ fn posts_of(text: &str) -> Option<Vec<Post>> {
 fn site_of(room: RoomName, text: &str) -> Option<Declared> {
     let (id, at) = text.split_once('@')?;
     let at = at.parse::<usize>().ok().filter(|i| *i < tiles::COUNT)? as i32;
-    Some(Declared {
-        id: Id::parse(id)?,
-        pos: Pos::new(room, at % 50, at / 50),
-    })
+    Some(Declared { id: Id::parse(id)?, pos: Pos::new(room, at % 50, at / 50) })
 }
 
 fn mineral_of(text: &str) -> Option<(ResourceType, Option<Tile>)> {
-    let (m, at) = text
-        .split_once('@')
-        .map_or((text, None), |(m, at)| (m, Some(at)));
+    let (m, at) = text.split_once('@').map_or((text, None), |(m, at)| (m, Some(at)));
     let tile = |at: &str| at.parse().ok().filter(|i| *i < tiles::COUNT);
     Some((m.parse().ok()?, at.and_then(tile).map(Tile::of_index)))
 }
@@ -247,11 +242,9 @@ pub fn of_text(text: &str) -> Intel {
             let sources = match f.get(9).copied() {
                 None | Some(NONE) => None,
                 Some(".") => Some(Vec::new()),
-                Some(list) => Some(
-                    (list.split(','))
-                        .map(|s| site_of(room, s))
-                        .collect::<Option<_>>()?,
-                ),
+                Some(list) => {
+                    Some((list.split(',')).map(|s| site_of(room, s)).collect::<Option<_>>()?)
+                }
             };
             let row = Row {
                 seen: f[1].parse().ok()?,
@@ -275,11 +268,9 @@ pub fn of_text(text: &str) -> Intel {
 
 #[cfg(test)]
 mod tests {
+    use proptest::{collection::vec, option, prelude::*, sample::select};
+
     use super::*;
-    use proptest::collection::vec;
-    use proptest::option;
-    use proptest::prelude::*;
-    use proptest::sample::select;
 
     #[test]
     fn push_int_writes_as_display() {
@@ -307,10 +298,7 @@ mod tests {
             option::of(site.clone()),
             option::of(vec(site, 0..3)),
             any::<bool>(),
-            option::of((
-                select(crate::boost::ORES.to_vec()),
-                option::of(tile.clone()),
-            )),
+            option::of((select(crate::boost::ORES.to_vec()), option::of(tile.clone()))),
             option::of((1..=5, 0..=9_999_999, 0..=9_999_999, 0..=9_999_999)),
             any::<bool>(),
         );
@@ -363,10 +351,7 @@ mod tests {
                     let loot = (loot.into_iter()).map(|(id, x, y, resource, amount, walled)| {
                         let id = format!("{id:x}").as_str().into();
                         (
-                            Declared {
-                                id,
-                                pos: Pos::new(RoomName::W1N1, x, y),
-                            },
+                            Declared { id, pos: Pos::new(RoomName::W1N1, x, y) },
                             resource,
                             amount,
                             walled,

@@ -1,11 +1,16 @@
+use std::{
+    borrow::Borrow,
+    cmp::Ordering,
+    collections::{BTreeMap, BTreeSet},
+};
+
 use screeps::LocalRoomTerrain;
 pub use screeps::StructureType;
-use std::borrow::Borrow;
-use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet};
 
-use super::engine;
-use super::vocabulary::{Part, ResourceType};
+use super::{
+    engine,
+    vocabulary::{Part, ResourceType},
+};
 use crate::declarations::Declarations;
 
 /// An object id in `screeps::RawObjectId`'s 128 bits, its digits left-aligned
@@ -18,6 +23,9 @@ use crate::declarations::Declarations;
 pub struct Id([u32; 4]);
 
 impl Id {
+    /// No text parses to it: `World::drop_misread` drops the object holding it.
+    pub const MISREAD: Id = Id([0; 4]);
+
     pub fn parse(text: &str) -> Option<Id> {
         let len = text.len();
         if len == 0 || len > 24 {
@@ -28,9 +36,7 @@ impl Id {
         // writes them: `A1` would equal `a1` and sort apart from its text.
         let hex = |digits: &[u8]| {
             (digits.iter()).try_fold(0u64, |v, b| {
-                let digit = char::from(*b)
-                    .to_digit(16)
-                    .filter(|_| !b.is_ascii_uppercase());
+                let digit = char::from(*b).to_digit(16).filter(|_| !b.is_ascii_uppercase());
                 Some(v << 4 | u64::from(digit?))
             })
         };
@@ -39,9 +45,6 @@ impl Id {
         let key = (value << (4 * (24 - len))) << 32 | len as u128;
         Some(Id([96, 64, 32, 0].map(|at| (key >> at) as u32)))
     }
-
-    /// No text parses to it: `World::drop_misread` drops the object holding it.
-    pub const MISREAD: Id = Id([0; 4]);
 
     pub fn of_engine(text: &str) -> Id {
         Id::parse(text).unwrap_or(Id::MISREAD)
@@ -52,11 +55,7 @@ impl Id {
         let (high, low, len) = (w0, w1 << 32 | w2, len as usize);
         let mut out = [0u8; 24];
         for (i, b) in out[..len].iter_mut().enumerate() {
-            let word = if i < 8 {
-                high >> (4 * (7 - i))
-            } else {
-                low >> (4 * (23 - i))
-            };
+            let word = if i < 8 { high >> (4 * (7 - i)) } else { low >> (4 * (23 - i)) };
             *b = b"0123456789abcdef"[(word & 15) as usize];
         }
         IdText(out, len)
@@ -114,7 +113,6 @@ pub struct RoomName(screeps::RoomName);
 
 impl RoomName {
     pub const SIM: RoomName = RoomName(screeps::RoomName::from_packed(0));
-
     #[cfg(any(test, feature = "test-support", feature = "tools"))]
     pub const W1N1: RoomName = RoomName::new(-2, -2);
 
@@ -328,9 +326,7 @@ pub struct Store {
 impl Store {
     #[inline]
     pub fn amount_of(&self, resource: ResourceType) -> i32 {
-        (self.held.iter())
-            .filter_map(|(r, n)| (*r == resource).then_some(n))
-            .sum()
+        (self.held.iter()).filter_map(|(r, n)| (*r == resource).then_some(n)).sum()
     }
 
     pub fn used(&self) -> i32 {
@@ -371,10 +367,7 @@ impl Built for StructureType {
 
     fn has_cooldown(self) -> bool {
         use StructureType::*;
-        matches!(
-            self,
-            Tower | Link | Lab | Extractor | Terminal | Factory | Nuker | PowerSpawn
-        )
+        matches!(self, Tower | Link | Lab | Extractor | Terminal | Factory | Nuker | PowerSpawn)
     }
 
     fn walkable(self) -> bool {
@@ -720,17 +713,12 @@ impl Rules {
     pub fn towers<'r>(&self, room: &'r Room) -> impl Iterator<Item = &'r Structure> + use<'r> {
         let core = room.invader_core().is_some();
         let fires = move |s: &&Structure| core || s.owner != Owner::Invader;
-        (self.working(room))
-            .filter(|s| s.kind == StructureType::Tower)
-            .filter(fires)
+        (self.working(room)).filter(|s| s.kind == StructureType::Tower).filter(fires)
     }
 
     /// Where `room`'s hostile towers stand that fire this tick.
     pub fn charged_towers(&self, room: &Room) -> Vec<Pos> {
-        (self.towers(room))
-            .filter(|s| s.owner.is_theirs() && charged(s))
-            .map(|s| s.pos)
-            .collect()
+        (self.towers(room)).filter(|s| s.owner.is_theirs() && charged(s)).map(|s| s.pos).collect()
     }
 
     #[cfg(any(test, feature = "test-support", feature = "tools"))]
@@ -773,9 +761,10 @@ pub fn charged(tower: &Structure) -> bool {
 }
 
 pub mod hostiles {
+    use std::collections::BTreeSet;
+
     use super::{BodyPart, Creep, Owner, Part, Room, RoomName};
     use crate::engine;
-    use std::collections::BTreeSet;
 
     pub fn works(creep: &Creep) -> bool {
         (creep.body.iter())
@@ -867,22 +856,20 @@ impl Glimpse {
 pub type Sightings = BTreeMap<RoomName, BTreeMap<Id, Seen>>;
 
 pub mod sightings {
-    use super::hostiles;
-    use super::{
-        Creep, Glimpse, Id, Owner, Pos, RoomName, Seen, Sightings, Store, StructureType, World,
-    };
     use std::collections::BTreeMap;
 
+    use super::{
+        Creep, Glimpse, Id, Owner, Pos, RoomName, Seen, Sightings, Store, StructureType, World,
+        hostiles,
+    };
+
     fn standing<'w>(world: &'w World) -> BTreeMap<Id, (RoomName, &'w Creep)> {
-        (world.rooms.iter())
-            .flat_map(|r| r.hostiles().map(move |h| (h.id, (r.name, h))))
-            .collect()
+        (world.rooms.iter()).flat_map(|r| r.hostiles().map(move |h| (h.id, (r.name, h)))).collect()
     }
 
     pub fn step(world: &World, previous: Sightings) -> Sightings {
         let mut next = previous;
-        next.iter_mut()
-            .for_each(|(_, seen)| seen.retain(|_, s| s.gone > world.time));
+        next.iter_mut().for_each(|(_, seen)| seen.retain(|_, s| s.gone > world.time));
         next.retain(|_, r| !r.is_empty());
 
         let owned = hostiles::owned(&world.rooms);
@@ -954,11 +941,7 @@ pub mod sightings {
                 Some(Creep {
                     id,
                     name: String::new(),
-                    owner: if g.invader {
-                        Owner::Invader
-                    } else {
-                        Owner::Nobody
-                    },
+                    owner: if g.invader { Owner::Invader } else { Owner::Nobody },
                     pos: g.pos,
                     body: g.body,
                     hits: g.hits,
@@ -989,17 +972,14 @@ pub mod sightings {
         });
         glimpsed
             && sightings.iter().all(|(room, seen)| {
-                seen.iter()
-                    .all(|(id, s)| match (&s.last, standing.get(id)) {
-                        (None, _) => s.gone > world.time,
-                        (Some(_), Some(_)) if blind(room) => false,
-                        (Some(_), None) => blind(room) && s.gone > world.time,
-                        (Some(g), Some((at, h))) => {
-                            at == room
-                                && *g == Glimpse::of(h)
-                                && s.gone == world.time + h.ticks_to_live
-                        }
-                    })
+                seen.iter().all(|(id, s)| match (&s.last, standing.get(id)) {
+                    (None, _) => s.gone > world.time,
+                    (Some(_), Some(_)) if blind(room) => false,
+                    (Some(_), None) => blind(room) && s.gone > world.time,
+                    (Some(g), Some((at, h))) => {
+                        at == room && *g == Glimpse::of(h) && s.gone == world.time + h.ticks_to_live
+                    }
+                })
             })
     }
 }
@@ -1035,18 +1015,14 @@ pub fn spent(body: &[BodyPart]) -> bool {
 
 #[inline]
 pub fn live(body: &[BodyPart], kind: Part) -> i32 {
-    (body.iter())
-        .filter(|p| p.hits > 0 && p.kind == kind)
-        .count() as i32
+    (body.iter()).filter(|p| p.hits > 0 && p.kind == kind).count() as i32
 }
 
 impl World<'_> {
     /// The engine's word of a death last tick: another's tombstone, or a structure destroyed.
     pub fn fallen(&self) -> BTreeSet<Id> {
         let tombs = (self.rooms.iter()).flat_map(|r| r.remains.iter().filter_map(|t| t.theirs));
-        tombs
-            .chain(self.destroyed.iter().map(|(_, id, _)| *id))
-            .collect()
+        tombs.chain(self.destroyed.iter().map(|(_, id, _)| *id)).collect()
     }
 
     #[inline]
@@ -1144,13 +1120,12 @@ impl Striker {
 
 #[cfg(test)]
 mod tests {
-    use super::{BodyPart, Creep, Id, Owner, Pos, Room, RoomName, Rules, Sightings, Store};
-    use super::{World, sightings};
+    use proptest::{array::uniform3, collection::vec, prelude::*, sample::Index};
+
+    use super::{
+        BodyPart, Creep, Id, Owner, Pos, Room, RoomName, Rules, Sightings, Store, World, sightings,
+    };
     use crate::vocabulary::Part;
-    use proptest::array::uniform3;
-    use proptest::collection::vec;
-    use proptest::prelude::*;
-    use proptest::sample::Index;
 
     /// An ally's structures are not theirs: no route avoids its towers.
     #[test]
@@ -1163,12 +1138,7 @@ mod tests {
     #[test]
     fn no_keeper_is_armed_nor_arms_a_healer() {
         let body = |parts: Vec<Part>| {
-            (parts.into_iter().map(|kind| BodyPart {
-                kind,
-                hits: 100,
-                boost: None,
-            }))
-            .collect()
+            (parts.into_iter().map(|kind| BodyPart { kind, hits: 100, boost: None })).collect()
         };
         let creep = |id: &str, owner: Owner, parts: Vec<Part>| Creep {
             id: Id::from(id),
@@ -1183,26 +1153,15 @@ mod tests {
             store: Store::default(),
         };
         let keeper = creep("k", Owner::Keeper, crate::engine::keeper_body());
-        let healer = creep(
-            "h",
-            Owner::Stranger("s".to_string()),
-            vec![Part::Heal, Part::Work],
-        );
+        let healer = creep("h", Owner::Stranger("s".to_string()), vec![Part::Heal, Part::Work]);
         let owned = [RoomName::W1N1].into_iter().collect();
         let all = [keeper.clone(), healer.clone()];
         assert!(!super::hostiles::armed(&owned, all.iter(), &keeper));
-        assert!(!super::hostiles::armed(
-            &Default::default(),
-            all.iter(),
-            &healer
-        ));
+        assert!(!super::hostiles::armed(&Default::default(), all.iter(), &healer));
     }
 
     fn seen_in(name: RoomName, others: Vec<Creep>) -> Room<'static> {
-        Room {
-            others,
-            ..Room::empty(name)
-        }
+        Room { others, ..Room::empty(name) }
     }
 
     proptest! {

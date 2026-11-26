@@ -1,12 +1,17 @@
 //! The engine's arithmetic, against values read off the engine and against
 //! its own inverses.
-use crate::engine;
-use crate::testing::boosted;
-use crate::vocabulary::{ALL_BODY_PARTS, Part, ResourceType};
-use proptest::collection::vec;
-use proptest::option;
-use proptest::prelude::*;
-use proptest::sample::{Index, select};
+use proptest::{
+    collection::vec,
+    option,
+    prelude::*,
+    sample::{Index, select},
+};
+
+use crate::{
+    engine,
+    testing::boosted,
+    vocabulary::{ALL_BODY_PARTS, Part, ResourceType},
+};
 
 const CASES: u32 = 256;
 
@@ -17,9 +22,7 @@ fn bodied() -> impl Strategy<Value = (Vec<Part>, Vec<Option<ResourceType>>, i32)
     (vec(part, 1..=engine::MAX_BODY_PARTS), hits).prop_map(|(parts, hits)| {
         let most = parts.len() * engine::PART_HITS as usize;
         let hits = hits.map_or(most, |at| 1 + at.index(most)) as i32;
-        let (body, boosts) = (parts.iter())
-            .map(|&(p, tier)| (p, boosted(p, tier)))
-            .unzip();
+        let (body, boosts) = (parts.iter()).map(|&(p, tier)| (p, boosted(p, tier))).unzip();
         (body, boosts, hits)
     })
 }
@@ -30,21 +33,9 @@ fn damage() -> impl Strategy<Value = i32> {
 
 #[test]
 fn a_towers_power_falls_from_range_5_to_range_20_and_stays() {
-    let table = [
-        (1, 600),
-        (5, 600),
-        (6, 570),
-        (10, 450),
-        (15, 300),
-        (20, 150),
-        (30, 150),
-    ];
+    let table = [(1, 600), (5, 600), (6, 570), (10, 450), (15, 300), (20, 150), (30, 150)];
     for (range, expected) in table {
-        assert_eq!(
-            engine::tower_attack_at(range),
-            expected,
-            "attack at {range}"
-        );
+        assert_eq!(engine::tower_attack_at(range), expected, "attack at {range}");
     }
 }
 
@@ -73,11 +64,7 @@ fn the_live_parts_are_the_tail_the_hits_cover() {
         vec![Tough, Attack, Move],
         "a part with a hit left counts"
     );
-    assert_eq!(
-        engine::live_parts(&body, 200),
-        vec![Attack, Move],
-        "two parts gone"
-    );
+    assert_eq!(engine::live_parts(&body, 200), vec![Attack, Move], "two parts gone");
 }
 
 proptest! {
@@ -104,22 +91,15 @@ proptest! {
 
 #[test]
 fn a_loaded_carry_weighs_and_a_boosted_one_holds_its_multiple() {
-    use crate::grid::factor;
     use ResourceType::CatalyzedKeaniumAcid as Carry;
+
+    use crate::grid::factor;
     let parts = |boost| [Part::Carry, Part::Carry, Part::Move].map(|p| (p, boost, true));
     assert_eq!(factor(parts(None).into_iter(), 0).weight, 0);
     assert_eq!(factor(parts(None).into_iter(), 51).weight, 2);
-    assert_eq!(
-        factor(parts(Some(Carry)).into_iter(), 51).weight,
-        1,
-        "a KH2O CARRY holds 200"
-    );
+    assert_eq!(factor(parts(Some(Carry)).into_iter(), 51).weight, 1, "a KH2O CARRY holds 200");
     let dead = [(Part::Carry, None, false), (Part::Carry, None, true)];
-    assert_eq!(
-        factor(dead.into_iter(), 100).weight,
-        1,
-        "a destroyed CARRY carries nothing"
-    );
+    assert_eq!(factor(dead.into_iter(), 100).weight, 1, "a destroyed CARRY carries nothing");
 }
 
 #[test]
@@ -131,14 +111,6 @@ fn a_volley_counts_a_creeps_whole_share_and_a_structures_hits_alone() {
         let marks = [(3, 100, creep), (1, 2, creep), (1, 2, creep)];
         engine::mass_pays(1, Some(marks[0]), marks.into_iter(), worth)
     };
-    assert_eq!(
-        pays(true),
-        Some(21),
-        "a creep's heal nets at the tick's end"
-    );
-    assert_eq!(
-        pays(false),
-        None,
-        "a structure of 2 hits takes 2 of a 10 share"
-    );
+    assert_eq!(pays(true), Some(21), "a creep's heal nets at the tick's end");
+    assert_eq!(pays(false), None, "a structure of 2 hits takes 2 of a 10 share");
 }

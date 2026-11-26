@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
-use krebs::doc::{Doc, Val};
-use krebs::world::World;
+use krebs::{
+    doc::{Doc, Val},
+    world::World,
+};
 use serde_json::{Value, json};
 
 use crate::npc;

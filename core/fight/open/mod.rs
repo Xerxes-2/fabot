@@ -1,8 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::shape::{Engagement, Group, Objective, Phase};
-use crate::tracker;
 use fabot_base::world::{Creep, Id, RoomName, hostiles};
+
+use crate::{
+    shape::{Engagement, Group, Objective, Phase},
+    tracker,
+};
 
 pub fn armed_and_opening(
     owned: &BTreeSet<RoomName>,

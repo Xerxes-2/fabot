@@ -3,21 +3,23 @@
 //! and `assign` ranks as ARCHITECTURE.md's labs paragraph says.
 use std::cmp::Reverse;
 
-use fabot_base::boost::ORES;
-use fabot_base::engine::LAB_REACTION_AMOUNT as BATCH;
-use fabot_base::vocabulary::{RESOURCES_ALL, ResourceType};
+use fabot_base::{
+    boost::ORES,
+    engine::LAB_REACTION_AMOUNT as BATCH,
+    vocabulary::{RESOURCES_ALL, ResourceType},
+};
 use fabot_economy::labs::{Bench, Reaction, assign, makeable, wanted};
-use proptest::prelude::*;
-use proptest::sample::{select, subsequence};
+use proptest::{
+    prelude::*,
+    sample::{select, subsequence},
+};
 
 const CASES: u32 = 256;
 
 type Stock = Vec<(ResourceType, i32)>;
 
 fn compounds() -> Vec<ResourceType> {
-    (RESOURCES_ALL.iter().copied())
-        .filter(|r| r.reaction_components().is_some())
-        .collect()
+    (RESOURCES_ALL.iter().copied()).filter(|r| r.reaction_components().is_some()).collect()
 }
 
 fn stock_of(stock: &[(ResourceType, i32)], r: ResourceType) -> i32 {
@@ -25,9 +27,8 @@ fn stock_of(stock: &[(ResourceType, i32)], r: ResourceType) -> i32 {
 }
 
 fn tree(c: ResourceType) -> Vec<ResourceType> {
-    let below = c
-        .reaction_components()
-        .map_or_else(Vec::new, |rs| rs.into_iter().flat_map(tree).collect());
+    let below =
+        c.reaction_components().map_or_else(Vec::new, |rs| rs.into_iter().flat_map(tree).collect());
     [vec![c], below].concat()
 }
 
@@ -38,12 +39,11 @@ fn ore_asked(c: ResourceType, total: i32, stock: &Stock, asked: &mut [i32; ORES.
     match c.reaction_components() {
         Some(rs) => {
             let make = ((total - stock_of(stock, c)).max(0) + BATCH - 1) / BATCH * BATCH;
-            rs.into_iter()
-                .for_each(|r| ore_asked(r, make, stock, asked));
+            rs.into_iter().for_each(|r| ore_asked(r, make, stock, asked));
         }
-        None => (asked.iter_mut().zip(ORES))
-            .filter(|(_, o)| *o == c)
-            .for_each(|(n, _)| *n += total),
+        None => {
+            (asked.iter_mut().zip(ORES)).filter(|(_, o)| *o == c).for_each(|(n, _)| *n += total)
+        }
     }
 }
 
@@ -63,11 +63,7 @@ fn ore_cap(c: ResourceType, target: i32, stock: &Stock) -> i32 {
 }
 
 fn react(stock: &mut Stock, (product, reagents): (ResourceType, [ResourceType; 2])) {
-    for (r, n) in reagents
-        .map(|r| (r, -BATCH))
-        .into_iter()
-        .chain([(product, BATCH)])
-    {
+    for (r, n) in reagents.map(|r| (r, -BATCH)).into_iter().chain([(product, BATCH)]) {
         match stock.iter_mut().find(|(s, _)| *s == r) {
             Some(at) => at.1 += n,
             None => stock.push((r, n)),
@@ -95,12 +91,7 @@ fn targets_with_stock() -> impl Strategy<Value = Case> {
     let ores = |n: i32| ORES.map(|o| (o, n)).to_vec();
     let short_t2 = |uh: i32| [ores(10_000), vec![(UtriumHydride, uh), (Hydroxide, BATCH)]].concat();
     let mut odd_t2: Stock = ORES[2..6].iter().map(|o| (*o, 413)).collect();
-    odd_t2.extend([
-        (Hydrogen, 827),
-        (Oxygen, 155),
-        (Ghodium, 4),
-        (GhodiumHydride, 4),
-    ]);
+    odd_t2.extend([(Hydrogen, 827), (Oxygen, 155), (Ghodium, 4), (GhodiumHydride, 4)]);
     prop_oneof![
         8 => generated(),
         1 => Just((vec![(Xgho2, 3000)], ores(10_000))),
@@ -149,10 +140,7 @@ fn generated() -> impl Strategy<Value = Case> {
             ]
         });
         let stock = (ores.to_vec(), made.collect::<Vec<_>>()).prop_map(|(ores, made)| {
-            let all = ORES
-                .into_iter()
-                .zip(ores)
-                .chain(compounds().into_iter().zip(made));
+            let all = ORES.into_iter().zip(ores).chain(compounds().into_iter().zip(made));
             all.filter(|(_, n)| *n > 0).collect()
         });
         (Just(targets), stock)
@@ -162,10 +150,7 @@ fn generated() -> impl Strategy<Value = Case> {
 /// Holding nothing but a pair's reagents, how many of them: the doc's "holds".
 fn holds(bench: &Bench, reagents: [ResourceType; 2]) -> usize {
     let clean = bench.reagents_held.iter().all(|m| reagents.contains(m));
-    let held = reagents
-        .iter()
-        .filter(|r| bench.reagents_held.contains(r))
-        .count();
+    let held = reagents.iter().filter(|r| bench.reagents_held.contains(r)).count();
     if clean { held } else { 0 }
 }
 
@@ -174,7 +159,7 @@ fn holds(bench: &Bench, reagents: [ResourceType; 2]) -> usize {
 fn runs(bench: &Bench, wanted: &[Reaction], fastest: usize) -> Option<ResourceType> {
     let fast = 2 * bench.outputs >= fastest;
     let first = wanted.iter().find(|(_, rs, _)| holds(bench, *rs) == 2);
-    first.filter(|_| fast).map(|(p, _, _)| *p)
+    first.filter(|_| fast).map(|(p, ..)| *p)
 }
 
 #[derive(Clone, Debug)]
@@ -187,10 +172,7 @@ struct Labs {
 
 impl Labs {
     fn bring(&self, i: usize, r: ResourceType) -> Option<i32> {
-        self.reach[i]
-            .iter()
-            .find(|(s, _)| *s == r)
-            .and_then(|(_, d)| *d)
+        self.reach[i].iter().find(|(s, _)| *s == r).and_then(|(_, d)| *d)
     }
 
     fn reached(&self, i: usize, (_, [a, b], _): &Reaction) -> Option<i32> {
@@ -202,13 +184,7 @@ impl Labs {
     fn claim(&self, i: usize, at: usize) -> Option<impl Ord> {
         let bench = self.benches[i].as_ref()?;
         let r = &self.wanted[at];
-        let fastest = self
-            .benches
-            .iter()
-            .flatten()
-            .map(|b| b.outputs)
-            .max()
-            .unwrap_or(0);
+        let fastest = self.benches.iter().flatten().map(|b| b.outputs).max().unwrap_or(0);
         let running = runs(bench, &self.wanted, fastest) == Some(r.0);
         let held = r.1.iter().filter(|m| self.bring(i, **m) == Some(0)).count();
         let reached = self.reached(i, r)?;
@@ -232,12 +208,8 @@ impl Labs {
 fn labs() -> impl Strategy<Value = Labs> {
     use ResourceType::{Hydrogen, Utrium, UtriumHydride};
     let pinned = |outputs: usize| {
-        let bench = |reagents_held: Vec<ResourceType>, outputs| {
-            Some(Bench {
-                reagents_held,
-                outputs,
-            })
-        };
+        let bench =
+            |reagents_held: Vec<ResourceType>, outputs| Some(Bench { reagents_held, outputs });
         let near = vec![(Utrium, Some(0)), (Hydrogen, Some(0))];
         Labs {
             wanted: vec![(UtriumHydride, [Utrium, Hydrogen], 1)],
@@ -249,13 +221,12 @@ fn labs() -> impl Strategy<Value = Labs> {
 }
 
 fn generated_labs() -> impl Strategy<Value = Labs> {
-    let reactions: Vec<Reaction> = (compounds().into_iter())
-        .filter_map(|p| Some((p, p.reaction_components()?, 1)))
-        .collect();
+    let reactions: Vec<Reaction> =
+        (compounds().into_iter()).filter_map(|p| Some((p, p.reaction_components()?, 1))).collect();
     let reaction = select(reactions);
     let wanted = prop::collection::vec(reaction, 0..=6).prop_map(|mut w| {
         let mut seen = Vec::new();
-        w.retain(|(p, _, _)| {
+        w.retain(|(p, ..)| {
             !seen.contains(p) && {
                 seen.push(*p);
                 true
@@ -276,16 +247,12 @@ fn generated_labs() -> impl Strategy<Value = Labs> {
             subsequence(reagents.clone(), 0..=one),
         ];
         let outputs = prop_oneof![1..=8usize, Just(4)];
-        let bench = (held, outputs).prop_map(|(reagents_held, outputs)| Bench {
-            reagents_held,
-            outputs,
-        });
+        let bench =
+            (held, outputs).prop_map(|(reagents_held, outputs)| Bench { reagents_held, outputs });
         let benches = prop::collection::vec(prop::option::weighted(0.8, bench), n);
         let rooms =
             prop_oneof![1 => Just(None), 2 => Just(Some(0)), 2 => (1..=3i32).prop_map(Some)];
-        let row = (reagents.iter().copied())
-            .map(|r| (Just(r), rooms.clone()))
-            .collect::<Vec<_>>();
+        let row = (reagents.iter().copied()).map(|r| (Just(r), rooms.clone())).collect::<Vec<_>>();
         let reach = prop::collection::vec(row, n);
         (Just(wanted), benches, reach).prop_map(|(wanted, benches, reach)| Labs {
             wanted,

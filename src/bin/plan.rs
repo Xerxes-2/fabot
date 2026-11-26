@@ -10,9 +10,9 @@
 
 use std::io::Read;
 
-use fabot_base::tiles::{self, Tile};
-use fabot_base::world::{
-    Built, Owner, Pos, Room, RoomName, Rules, Store, Structure, StructureType,
+use fabot_base::{
+    tiles::{self, Tile},
+    world::{Built, Owner, Pos, Room, RoomName, Rules, Store, Structure, StructureType},
 };
 use fabot_layout::{self as layout, sites};
 use serde_json::{Value, json};
@@ -23,26 +23,12 @@ fn main() {
     let input: Value = serde_json::from_str(&text).unwrap();
     let name = input["room"].as_str().unwrap().parse::<RoomName>().unwrap();
     let level = input["level"].as_i64().unwrap() as i32;
-    let pos = |e: &Value| {
-        Pos::new(
-            name,
-            e[0].as_i64().unwrap() as i32,
-            e[1].as_i64().unwrap() as i32,
-        )
-    };
+    let pos =
+        |e: &Value| Pos::new(name, e[0].as_i64().unwrap() as i32, e[1].as_i64().unwrap() as i32);
     let each = |key: &str| -> Vec<Pos> { input[key].as_array().unwrap().iter().map(pos).collect() };
 
-    let terrain = input["terrain"]
-        .as_str()
-        .unwrap()
-        .bytes()
-        .map(|c| c - b'0')
-        .collect();
-    let rocks = (
-        pos(&input["controller"]),
-        &each("sources")[..],
-        &each("minerals")[..],
-    );
+    let terrain = input["terrain"].as_str().unwrap().bytes().map(|c| c - b'0').collect();
+    let rocks = (pos(&input["controller"]), &each("sources")[..], &each("minerals")[..]);
     let room = layout::bare(name, terrain, rocks, level);
 
     let rules = Rules::vanilla();
@@ -69,13 +55,7 @@ fn main() {
     };
     build(&mut built, StructureType::Spawn, first_spawn);
     loop {
-        let census = sites::census_of(
-            &Room {
-                structures: built.clone(),
-                ..room.clone()
-            },
-            &[],
-        );
+        let census = sites::census_of(&Room { structures: built.clone(), ..room.clone() }, &[]);
         let placed = sites::place(&rules, &census, level, &plan, i32::MAX);
         if placed.is_empty() {
             break;
@@ -95,9 +75,7 @@ fn main() {
     for i in plan.ring.iter().filter(|i| ring && i.level <= level) {
         build(&mut built, i.kind, i.tile);
     }
-    let out: Vec<Value> = built
-        .iter()
-        .map(|s| json!({ "kind": s.kind, "x": s.pos.x, "y": s.pos.y }))
-        .collect();
+    let out: Vec<Value> =
+        built.iter().map(|s| json!({ "kind": s.kind, "x": s.pos.x, "y": s.pos.y })).collect();
     println!("{}", Value::Array(out));
 }

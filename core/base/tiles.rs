@@ -1,11 +1,15 @@
 //! A tile is `y * 50 + x`, the terrain raw buffer's index, so every per-room
 //! array in the Atlas reads the terrain's own order.
-use std::collections::VecDeque;
-use std::fmt;
-use std::ops::{Index, IndexMut};
+use std::{
+    collections::VecDeque,
+    fmt,
+    ops::{Index, IndexMut},
+};
 
-use crate::engine;
-use crate::world::{Pos, RoomName};
+use crate::{
+    engine,
+    world::{Pos, RoomName},
+};
 
 pub const SIDE: i32 = engine::ROOM_SIDE;
 pub const COUNT: usize = screeps::ROOM_AREA;
@@ -33,6 +37,7 @@ impl fmt::Display for Tile {
 
 impl<T> Index<Tile> for [T] {
     type Output = T;
+
     fn index(&self, tile: Tile) -> &T {
         &self[tile.index()]
     }
@@ -46,6 +51,7 @@ impl<T> IndexMut<Tile> for [T] {
 
 impl<T> Index<Tile> for Vec<T> {
     type Output = T;
+
     fn index(&self, tile: Tile) -> &T {
         &self[tile.index()]
     }
@@ -64,10 +70,7 @@ pub type Post = (Tile, Tile);
 
 /// Built on the heap: a `Box::new` of the array builds it on the stack first.
 pub fn table<T: Clone>(value: T) -> Table<T> {
-    vec![value; COUNT]
-        .into_boxed_slice()
-        .try_into()
-        .unwrap_or_else(|_| unreachable!())
+    vec![value; COUNT].into_boxed_slice().try_into().unwrap_or_else(|_| unreachable!())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -179,11 +182,7 @@ pub const fn dy(direction: i32) -> i32 {
 #[inline]
 pub const fn neighbour(tile: Tile, direction: i32) -> Option<Tile> {
     let (x, y) = (x_of(tile) + dx(direction), y_of(tile) + dy(direction));
-    if in_room(x, y) {
-        Some(index(x, y))
-    } else {
-        None
-    }
+    if in_room(x, y) { Some(index(x, y)) } else { None }
 }
 
 const AROUND: &[([Tile; 8], u8); COUNT] = &{

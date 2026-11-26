@@ -1,19 +1,21 @@
 /// What a fight body does this tick (`ARCHITECTURE.md` §6.4) and which tactic a kind picks (§6.3).
 use std::collections::{BTreeMap, BTreeSet};
 
+use fabot_atlas::{Atlas, Mover, Target};
+use fabot_base::{
+    declarations::{self, TacticRule},
+    engine,
+    grid::{self, Footprint},
+    intents::CreepAct,
+    tiles,
+    tiles::Tile,
+    vocabulary::Part,
+    wish::Wish,
+    world::{self, Creep, Id, Pos, RoomName, Rules, Striker, hostiles},
+};
+use fabot_mv::{blob, plan};
 use serde::{Deserialize, Serialize};
 use strum::{EnumString, IntoStaticStr};
-
-use fabot_atlas::{Atlas, Mover, Target};
-use fabot_base::declarations::{self, TacticRule};
-use fabot_base::grid::{self, Footprint};
-use fabot_base::intents::CreepAct;
-use fabot_base::tiles::Tile;
-use fabot_base::vocabulary::Part;
-use fabot_base::wish::Wish;
-use fabot_base::world::{self, Creep, Id, Pos, RoomName, Rules, Striker, hostiles};
-use fabot_base::{engine, tiles};
-use fabot_mv::{blob, plan};
 
 /// A phase's own tactic (pursue, retreat) is the phase's; this is what a kind
 /// commits to, a price per candidate (§6.3).
@@ -59,8 +61,7 @@ pub fn ruling(rules: &[TacticRule], room: RoomName, rivals: &BTreeSet<&str>) -> 
     let mut out = Ruling::default();
 
     for rule in rules.iter().filter(|r| applies(r)) {
-        out.forbid
-            .extend(rule.forbid.iter().filter_map(|n| n.parse::<Tactic>().ok()));
+        out.forbid.extend(rule.forbid.iter().filter_map(|n| n.parse::<Tactic>().ok()));
 
         out.pin = rule.pin.as_deref().and_then(|n| n.parse().ok()).or(out.pin);
     }
@@ -80,11 +81,8 @@ pub fn checked(rules: Vec<TacticRule>) -> (Vec<TacticRule>, Vec<String>) {
     let mut refused = Vec::new();
 
     for rule in &rules {
-        let unknown = rule
-            .pin
-            .iter()
-            .chain(&rule.forbid)
-            .find(|name| name.parse::<Tactic>().is_err());
+        let unknown =
+            rule.pin.iter().chain(&rule.forbid).find(|name| name.parse::<Tactic>().is_err());
 
         let pin = rule.pin.as_deref().and_then(|n| n.parse::<Tactic>().ok());
 
@@ -126,15 +124,12 @@ impl Offer {
 /// Ties go to the fewest bodies, then to the kind's declared candidate order.
 pub fn best(offers: &[Offer]) -> Option<&Offer> {
     let ranked = |o: &Offer| (o.net(), std::cmp::Reverse(o.bodies));
-    offers
-        .iter()
-        .reduce(|b, o| if ranked(o) > ranked(b) { o } else { b })
+    offers.iter().reduce(|b, o| if ranked(o) > ranked(b) { o } else { b })
 }
 
 /// A pinned tactic wins where it is still offered, else the best pays.
 pub fn select(offers: &[Offer], pin: Option<Tactic>) -> Option<&Offer> {
-    pin.and_then(|pinned| offers.iter().find(|o| o.tactic == pinned))
-        .or_else(|| best(offers))
+    pin.and_then(|pinned| offers.iter().find(|o| o.tactic == pinned)).or_else(|| best(offers))
 }
 
 pub struct Sight<'a> {
@@ -157,14 +152,10 @@ fn hostiles_in<'a>(sight: &Sight<'a>, room: RoomName) -> &'a [Creep] {
 }
 
 fn ranked<'a>(sight: &Sight<'a>, order: &[Id], creep: &Creep) -> Vec<&'a Creep> {
-    let near = hostiles_in(sight, creep.pos.room)
-        .iter()
-        .filter(|h| sight.struck.contains(&h.id));
+    let near = hostiles_in(sight, creep.pos.room).iter().filter(|h| sight.struck.contains(&h.id));
 
-    let mut first: Vec<&Creep> = order
-        .iter()
-        .filter_map(|id| near.clone().find(|h| &h.id == id))
-        .collect();
+    let mut first: Vec<&Creep> =
+        order.iter().filter_map(|id| near.clone().find(|h| &h.id == id)).collect();
 
     let mut rest: Vec<&Creep> = near.filter(|h| !order.contains(&h.id)).collect();
     rest.sort_by_key(|h| (!hostiles::strikes(h), &h.id));
@@ -185,10 +176,7 @@ pub fn strike(sight: &Sight, order: &[Id], creep: &Creep) -> Vec<CreepAct> {
 
     let guns = world::power(creep, Part::RangedAttack);
     let worth = |h: &&&Creep, hit: &dyn Fn(i32) -> i32| {
-        creep
-            .pos
-            .range(&h.pos)
-            .map_or(0, |r| i64::from(engine::landed(hit(r), h.hits, true)))
+        creep.pos.range(&h.pos).map_or(0, |r| i64::from(engine::landed(hit(r), h.hits, true)))
     };
     let pays = |head| engine::mass_pays(guns, Some(head), within(engine::RANGED_RANGE), worth);
     let spares = sight
@@ -220,13 +208,7 @@ fn target_at(sight: &Sight, at: &Pos, range: i32) -> Target {
 }
 
 pub fn toward(sight: &mut Sight, creep: &Creep, at: &Pos, range: i32) -> Wish {
-    plan::toward(
-        sight.atlas,
-        creep,
-        mover_of(creep),
-        &target_at(sight, at, range),
-        WEIGHT,
-    )
+    plan::toward(sight.atlas, creep, mover_of(creep), &target_at(sight, at, range), WEIGHT)
 }
 
 pub fn hold(sight: &Sight, creep: &Creep) -> Wish {
@@ -300,10 +282,7 @@ fn rescued(strikers: &[Striker], members: &[&Creep], creep: &Creep) -> bool {
 
 /// Only while a mate fights on: the gate never empties the line.
 pub fn exposed(sight: &Sight, raid_room: RoomName, members: &[&Creep], creep: &Creep) -> bool {
-    let raid: Vec<Striker> = hostiles_in(sight, raid_room)
-        .iter()
-        .map(Striker::of)
-        .collect();
+    let raid: Vec<Striker> = hostiles_in(sight, raid_room).iter().map(Striker::of).collect();
     rescued(&raid, members, creep)
         && (members.iter()).any(|m| m.name != creep.name && !rescued(&raid, members, m))
 }
@@ -339,9 +318,8 @@ impl Safety<'_> {
         mut seen: BTreeSet<Tile>,
         depth: i32,
     ) -> Option<Tile> {
-        if let Some(at) = (ring.iter())
-            .filter(|at| self.safe(**at))
-            .min_by_key(|at| (self.apart(at.0), at.0))
+        if let Some(at) =
+            (ring.iter()).filter(|at| self.safe(**at)).min_by_key(|at| (self.apart(at.0), at.0))
         {
             return at.1;
         }
@@ -378,19 +356,12 @@ pub fn step_back(
             atlas: &*sight.atlas,
             room,
             raid_room,
-            raid: hostiles_in(sight, raid_room)
-                .iter()
-                .map(Striker::of)
-                .collect(),
+            raid: hostiles_in(sight, raid_room).iter().map(Striker::of).collect(),
             members,
             creep,
         };
 
-        safety.search(
-            &[(here, None)],
-            BTreeSet::from([here]),
-            2 * engine::RANGED_RANGE,
-        )
+        safety.search(&[(here, None)], BTreeSet::from([here]), 2 * engine::RANGED_RANGE)
     };
 
     found.map_or_else(|| hold(sight, creep), |t| step_to(creep, t))
@@ -444,10 +415,7 @@ pub fn rampart(sight: &mut Sight, ours: &[&Creep], creep: &Creep) -> Wish {
 /// v1's guard outlived its raid where it stood, to meet the next one there.
 pub fn rest(sight: &mut Sight, creep: &Creep, outposts: &BTreeSet<RoomName>) -> Wish {
     let (room, at) = (creep.pos.room, tiles::of_pos(&creep.pos));
-    match outposts
-        .contains(&room)
-        .then(|| sight.atlas.idle(room, at, REST_RANGE))
-    {
+    match outposts.contains(&room).then(|| sight.atlas.idle(room, at, REST_RANGE)) {
         Some(Some(t)) if t == at => hold(sight, creep),
         Some(Some(t)) => toward(sight, creep, &tiles::to_pos(room, t), 0),
         _ => retreat(sight, creep),
@@ -485,30 +453,15 @@ pub fn allot<'p>(
     healers.sort_by(|a, b| a.0.name.cmp(&b.0.name));
     let mut out = Vec::new();
     for (healer, power) in healers {
-        let near = if shooting(&healer.name) {
-            engine::MELEE_RANGE
-        } else {
-            engine::RANGED_RANGE
-        };
+        let near = if shooting(&healer.name) { engine::MELEE_RANGE } else { engine::RANGED_RANGE };
         let patient = patients
             .iter()
             .copied()
             .filter(|p| owed.get(&p.name).copied().unwrap_or(0) > 0)
-            .filter_map(|p| {
-                healer
-                    .pos
-                    .range(&p.pos)
-                    .filter(|r| *r <= near)
-                    .map(|r| (p, r))
-            })
+            .filter_map(|p| healer.pos.range(&p.pos).filter(|r| *r <= near).map(|r| (p, r)))
             .min_by_key(|(p, r)| {
                 let left = p.hits_max - owed[&p.name];
-                (
-                    *r > engine::MELEE_RANGE,
-                    left,
-                    -owed[&p.name],
-                    p.name.clone(),
-                )
+                (*r > engine::MELEE_RANGE, left, -owed[&p.name], p.name.clone())
             });
         if let (true, Some((p, r))) = (power > 0, patient) {
             let heal = engine::heal_at(power, r);
@@ -528,34 +481,20 @@ pub fn nets(
     c: &Creep,
 ) -> Vec<(Tile, i32)> {
     let here = tiles::of_pos(&c.pos);
-    let healers: Vec<(&Creep, i32)> = (mates.iter().copied().chain([c]))
-        .map(|m| (m, world::power(m, Part::Heal)))
-        .collect();
+    let healers: Vec<(&Creep, i32)> =
+        (mates.iter().copied().chain([c])).map(|m| (m, world::power(m, Part::Heal))).collect();
     std::iter::once(here)
-        .chain(
-            tiles::around(here)
-                .iter()
-                .copied()
-                .filter(|t| atlas.passable(c.pos.room, *t)),
-        )
+        .chain(tiles::around(here).iter().copied().filter(|t| atlas.passable(c.pos.room, *t)))
         .map(|t| {
-            let moved = Creep {
-                pos: tiles::to_pos(c.pos.room, t),
-                ..c.clone()
-            };
+            let moved = Creep { pos: tiles::to_pos(c.pos.room, t), ..c.clone() };
             let patients: Vec<&Creep> = mates.iter().copied().chain([&moved]).collect();
             let mut owed: BTreeMap<String, i32> = patients
                 .iter()
-                .map(|p| {
-                    (
-                        p.name.clone(),
-                        p.hits_max - p.hits + threat[tiles::of_pos(&p.pos)],
-                    )
-                })
+                .map(|p| (p.name.clone(), p.hits_max - p.hits + threat[tiles::of_pos(&p.pos)]))
                 .collect();
             let heal: i32 = allot(healers.iter().copied(), &patients, &mut owed, &|_| true)
                 .iter()
-                .filter(|(_, p, _, _)| p.name == c.name)
+                .filter(|(_, p, ..)| p.name == c.name)
                 .map(|(_, _, _, heal)| heal)
                 .sum();
             (t, threat[t] - heal)
@@ -573,9 +512,7 @@ fn lethal(net: i32, hits: i32) -> bool {
 /// No tile a body may step to is one it would stand on safely: an event for
 /// its engagement, which a tactic cannot answer.
 pub fn cornered(atlas: &Atlas, threat: &tiles::Table<i32>, mates: &[&Creep], c: &Creep) -> bool {
-    nets(atlas, threat, mates, c)
-        .iter()
-        .all(|(t, net)| tiles::on_edge(*t) || lethal(*net, c.hits))
+    nets(atlas, threat, mates, c).iter().all(|(t, net)| tiles::on_edge(*t) || lethal(*net, c.hits))
 }
 
 pub fn heals(
@@ -599,11 +536,8 @@ pub fn heals(
     allot(healers, &patients, &mut owed, &|n| shooting.contains(n))
         .into_iter()
         .map(|(healer, p, beside, _)| {
-            let act = if beside {
-                CreepAct::HealCreep(p.id)
-            } else {
-                CreepAct::RangedHealCreep(p.id)
-            };
+            let act =
+                if beside { CreepAct::HealCreep(p.id) } else { CreepAct::RangedHealCreep(p.id) };
             (healer, act)
         })
         .collect()
@@ -656,10 +590,8 @@ pub fn hunt(
     };
     let shot = |r: i32| engine::strike_at(0, parts, r);
     let landed = |at: &Pos, next: bool| -> (i64, Option<CreepAct>) {
-        let single = (marks.iter())
-            .map(|m| (share(m, at, next, &shot), m.id))
-            .filter(|(w, _)| *w > 0)
-            .max();
+        let single =
+            (marks.iter()).map(|m| (share(m, at, next, &shot), m.id)).filter(|(w, _)| *w > 0).max();
         let head = single.and_then(|(_, id)| marks.iter().find(|m| m.id == id));
         let worth = |m: &&Mark, hit: &dyn Fn(i32) -> i32| share(m, at, next, hit);
         let massed = marks.iter().filter(|m| m.massed);
@@ -675,18 +607,11 @@ pub fn hunt(
     let attack = world::power(c, Part::Attack);
     let swung = |at: &Pos| -> i64 {
         let hit = |r: i32| engine::strike_at(attack, 0, r);
-        (marks.iter())
-            .map(|m| share(m, at, true, &hit))
-            .max()
-            .unwrap_or(0)
+        (marks.iter()).map(|m| share(m, at, true, &hit)).max().unwrap_or(0)
     };
     let strike = landed(&c.pos, false).1;
     // A swing lands from no shot's range: each body closes to its own reach.
-    let reach = if parts > 0 {
-        engine::RANGED_RANGE
-    } else {
-        engine::MELEE_RANGE
-    };
+    let reach = if parts > 0 { engine::RANGED_RANGE } else { engine::MELEE_RANGE };
     let mut goal = target_at(sight, centre, reach);
     let targets: Vec<Tile> = (marks.iter())
         .filter(|m| m.worth > 0 && !m.fleeting)
@@ -699,23 +624,12 @@ pub fn hunt(
         let on = plan::toward(sight.atlas, c, mover_of(c), &goal, WEIGHT);
         return (strike, on, Vec::new());
     }
-    let cost = i64::from(engine::body_cost(
-        &c.body.iter().map(|p| p.kind).collect::<Vec<_>>(),
-    ));
+    let cost = i64::from(engine::body_cost(&c.body.iter().map(|p| p.kind).collect::<Vec<_>>()));
     let field = sight.atlas.field(mover_of(c), &goal, &c.pos);
-    let approach = |t: Tile| {
-        -field
-            .as_ref()
-            .and_then(|f| f.ticks(t))
-            .unwrap_or(i32::MAX / 2)
-    };
+    let approach = |t: Tile| -field.as_ref().and_then(|f| f.ticks(t)).unwrap_or(i32::MAX / 2);
     let nets = nets(&*sight.atlas, threat, mates, c);
     let open = nets.iter().map(|(t, _)| *t);
-    let net = |t: Tile| {
-        nets.iter()
-            .find(|(o, _)| *o == t)
-            .map_or(i32::MAX, |(_, n)| *n)
-    };
+    let net = |t: Tile| nets.iter().find(|(o, _)| *o == t).map_or(i32::MAX, |(_, n)| *n);
     // Onto a mark beside it that may step: it follows the mark if it steps
     // and stays beside it if not.
     let glue = (marks.iter())
@@ -805,32 +719,18 @@ mod tests {
     }
 
     fn offer(tactic: Tactic, bodies: i32, value: i32, cost: i32) -> Offer {
-        Offer {
-            tactic,
-            bodies,
-            value,
-            cost,
-        }
+        Offer { tactic, bodies, value, cost }
     }
 
     #[test]
     fn the_best_offer_pays_most_then_fields_fewest_then_keeps_the_kinds_order() {
-        let rich = [
-            offer(Tactic::Close, 3, 900, 400),
-            offer(Tactic::Kite, 3, 200, 100),
-        ];
+        let rich = [offer(Tactic::Close, 3, 900, 400), offer(Tactic::Kite, 3, 200, 100)];
         assert_eq!(best(&rich).map(|o| o.tactic), Some(Tactic::Close));
 
-        let few = [
-            offer(Tactic::Close, 4, 500, 200),
-            offer(Tactic::Kite, 2, 500, 200),
-        ];
+        let few = [offer(Tactic::Close, 4, 500, 200), offer(Tactic::Kite, 2, 500, 200)];
         assert_eq!(best(&few).map(|o| o.tactic), Some(Tactic::Kite));
 
-        let first = [
-            offer(Tactic::Hold, 2, 500, 200),
-            offer(Tactic::Close, 2, 500, 200),
-        ];
+        let first = [offer(Tactic::Hold, 2, 500, 200), offer(Tactic::Close, 2, 500, 200)];
         assert_eq!(best(&first).map(|o| o.tactic), Some(Tactic::Hold));
         assert_eq!(best(&[]), None);
     }
@@ -846,27 +746,14 @@ mod tests {
 
     #[test]
     fn a_pin_wins_where_it_is_offered_and_falls_through_where_it_cannot_fight() {
-        let offers = [
-            offer(Tactic::Close, 3, 900, 400),
-            offer(Tactic::Kite, 3, 200, 100),
-        ];
-        assert_eq!(
-            select(&offers, Some(Tactic::Kite)).map(|o| o.tactic),
-            Some(Tactic::Kite)
-        );
-        assert_eq!(
-            select(&offers, Some(Tactic::Hold)).map(|o| o.tactic),
-            Some(Tactic::Close)
-        );
+        let offers = [offer(Tactic::Close, 3, 900, 400), offer(Tactic::Kite, 3, 200, 100)];
+        assert_eq!(select(&offers, Some(Tactic::Kite)).map(|o| o.tactic), Some(Tactic::Kite));
+        assert_eq!(select(&offers, Some(Tactic::Hold)).map(|o| o.tactic), Some(Tactic::Close));
         assert_eq!(select(&[], Some(Tactic::Kite)), None);
     }
 
     fn creep(id: &str, owner: fabot_base::world::Owner, at: (i32, i32), parts: &[Part]) -> Creep {
-        let part = |kind| fabot_base::world::BodyPart {
-            kind,
-            hits: 100,
-            boost: None,
-        };
+        let part = |kind| fabot_base::world::BodyPart { kind, hits: 100, boost: None };
         Creep {
             id: id.into(),
             name: id.into(),
@@ -886,10 +773,7 @@ mod tests {
         (&[Part::Attack, Part::Move], Some(1)),
         (&[Part::RangedAttack, Part::Move], Some(1)),
         (&[Part::Attack], None),
-        (
-            &[Part::Attack, Part::Attack, Part::Attack, Part::Move],
-            Some(3),
-        ),
+        (&[Part::Attack, Part::Attack, Part::Attack, Part::Move], Some(3)),
     ];
 
     /// What a ranger does at (25, 25), `heavy` with a second RANGED_ATTACK on its one MOVE,
@@ -916,10 +800,7 @@ mod tests {
         } else {
             &[Part::RangedAttack, Part::Move]
         };
-        let ranger = Creep {
-            fatigue: tired,
-            ..creep("r", Owner::Ours, (25, 25), legs)
-        };
+        let ranger = Creep { fatigue: tired, ..creep("r", Owner::Ours, (25, 25), legs) };
         let raiders: Vec<(Creep, Option<i32>)> = (raid.iter().enumerate())
             .filter(|(_, (dx, dy, _))| (*dx, *dy) != (0, 0))
             .map(|(i, (dx, dy, k))| {
@@ -934,10 +815,7 @@ mod tests {
             bits[tiles::index(25 + dx, 25 + dy).index()] = 2;
         }
         let world = World {
-            rooms: vec![Room {
-                terrain: terrain::leak(bits.clone()),
-                ..Room::empty(ROOM)
-            }],
+            rooms: vec![Room { terrain: terrain::leak(bits.clone()), ..Room::empty(ROOM) }],
             creeps: vec![ranger.clone()],
             time: 1,
             me: String::new(),
@@ -965,19 +843,10 @@ mod tests {
             rules: &world.rules,
         };
         let order: Vec<Id> = hostiles.iter().map(|h| h.id).collect();
-        let (on, at, set) = (
-            (tactic, &order[..]),
-            (&hostiles.first()?.pos, true),
-            &[&ranger][..],
-        );
+        let (on, at, set) = ((tactic, &order[..]), (&hostiles.first()?.pos, true), &[&ranger][..]);
         let walked = (tactic == Tactic::BlobClose)
             .then(|| {
-                blob(
-                    &mut sight,
-                    (at.0, engine::MELEE_RANGE),
-                    set,
-                    (&BTreeSet::new(), &hostiles),
-                )
+                blob(&mut sight, (at.0, engine::MELEE_RANGE), set, (&BTreeSet::new(), &hostiles))
             })
             .and_then(|mut w| w.pop());
         let wish = walked.unwrap_or_else(|| engage(&mut sight, on, at, (set, set), &ranger));

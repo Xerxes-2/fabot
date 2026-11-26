@@ -1,6 +1,8 @@
-use fabot_base::declarations::Declarations;
-use fabot_base::intents::{Action, CreepAct};
-use fabot_base::world::{Controller, Owner, RoomName, World};
+use fabot_base::{
+    declarations::Declarations,
+    intents::{Action, CreepAct},
+    world::{Controller, Owner, RoomName, World},
+};
 
 const OWNED: [&str; 15] = [
     "fabot: Rust -> WASM. Zero unsafe, moderate hubris.",
@@ -41,9 +43,8 @@ const PASSING: [&str; 3] = [
 
 /// FNV-1a of the name: `RoomName`'s order would put neighbours on neighbouring lines.
 fn pick(texts: &'static [&'static str], room: RoomName) -> &'static str {
-    let hash = (room.to_string().bytes()).fold(0x811c_9dc5_u32, |h, b| {
-        (h ^ u32::from(b)).wrapping_mul(0x0100_0193)
-    });
+    let hash = (room.to_string().bytes())
+        .fold(0x811c_9dc5_u32, |h, b| (h ^ u32::from(b)).wrapping_mul(0x0100_0193));
     texts[hash as usize % texts.len()]
 }
 
@@ -79,17 +80,15 @@ pub fn reflex<'a>(
         let outpost = declarations.outposts.iter().any(|o| o.room == r.name);
         let text = wanted(c, r.name, outpost)?;
         let body = (world.creeps.iter()).find(|b| b.pos.within(1, &c.pos))?;
-        Some(Action::Creep(
-            body.name.clone(),
-            CreepAct::Sign(c.id, text.to_string()),
-        ))
+        Some(Action::Creep(body.name.clone(), CreepAct::Sign(c.id, text.to_string())))
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{OWNED, PASSING, RESERVED, wanted};
     use fabot_base::world::{Controller, Owner, Pos, RoomName};
+
+    use super::{OWNED, PASSING, RESERVED, wanted};
 
     #[test]
     fn every_text_fits_the_engines_hundred_units() {
@@ -121,35 +120,21 @@ mod tests {
         let theirs = Some((them(), "theirs".to_string()));
         let ally = Some((Owner::Ally("a".into()), "ally".to_string()));
         let ours = |t: &str| Some((Owner::Ours, t.to_string()));
-        let system = Some((
-            Owner::Stranger(screeps::SYSTEM_USERNAME.into()),
-            "novice".to_string(),
-        ));
+        let system = Some((Owner::Stranger(screeps::SYSTEM_USERNAME.into()), "novice".to_string()));
         let held = Some((Owner::Ours, 1000));
         let table = [
             (controller(Owner::Ours, None, theirs.clone()), true),
-            (
-                controller(Owner::Nobody, held.clone(), theirs.clone()),
-                true,
-            ),
+            (controller(Owner::Nobody, held.clone(), theirs.clone()), true),
             (controller(Owner::Nobody, None, theirs.clone()), true),
             (controller(Owner::Nobody, None, ours("old")), true),
             (controller(them(), None, None), false),
-            (
-                controller(Owner::Nobody, Some((them(), 1000)), theirs),
-                false,
-            ),
-            (
-                controller(Owner::Nobody, Some((Owner::Invader, 1000)), None),
-                false,
-            ),
+            (controller(Owner::Nobody, Some((them(), 1000)), theirs), false),
+            (controller(Owner::Nobody, Some((Owner::Invader, 1000)), None), false),
             (controller(Owner::Nobody, None, ally.clone()), false),
             (controller(Owner::Ours, None, ally), false),
             (controller(Owner::Nobody, None, system), false),
         ];
-        for ((c, signs), outpost) in table
-            .into_iter()
-            .flat_map(|t| [(t.clone(), false), (t, true)])
+        for ((c, signs), outpost) in table.into_iter().flat_map(|t| [(t.clone(), false), (t, true)])
         {
             assert_eq!(wanted(&c, room, outpost).is_some(), signs, "{c:?}");
             if let Some(text) = wanted(&c, room, outpost) {

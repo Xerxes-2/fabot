@@ -1,20 +1,28 @@
 //! A scenario's Invaders, level-0 cores and strongholds as the official engine stands them; krebs plays them.
 use std::sync::Arc;
 
-use fabot_base::engine;
-use fabot_base::intel::Intel;
-use fabot_base::tiles::{self, Tile};
-use krebs::atom;
-use krebs::constants::{INVADER_CORE_HITS, OBSTACLE_OBJECT_TYPES};
-use krebs::cron::CronCtx;
-use krebs::cron::strongholds::{SpawnOpts, spawn_stronghold};
-use krebs::doc::{Doc, Obj, Val};
-use krebs::world::World;
+use fabot_base::{
+    engine,
+    intel::Intel,
+    tiles::{self, Tile},
+};
+use krebs::{
+    atom,
+    constants::{INVADER_CORE_HITS, OBSTACLE_OBJECT_TYPES},
+    cron::{
+        CronCtx,
+        strongholds::{SpawnOpts, spawn_stronghold},
+    },
+    doc::{Doc, Obj, Val},
+    world::World,
+};
 use krebs_util::json::Json;
 use serde_json::{Value, json};
 
-use crate::view::{View, num, store, text, used, xy};
-use crate::world::INVADER;
+use crate::{
+    view::{View, num, store, text, used, xy},
+    world::INVADER,
+};
 
 /// On a tick, in a room: a wave's bodies, a stronghold's [level, deploy], [resource, amount] to
 /// stock its containers with, or (null) a level-0 core.
@@ -76,17 +84,13 @@ pub fn wave(k: &mut World, room: &str, bodies: &[Vec<String>], mut random: impl 
         let Some((x, y)) = square else { break };
         exits.retain(|&e| e != (x, y));
         last = square;
-        let parts: Vec<Value> = body
-            .iter()
-            .map(|p| json!({ "type": p, "hits": engine::PART_HITS }))
-            .collect();
+        let parts: Vec<Value> =
+            body.iter().map(|p| json!({ "type": p, "hits": engine::PART_HITS })).collect();
         let name = format!("invader_{room}_{}", (random() * 1000.0) as u32);
         let hits = body.len() as i32 * engine::PART_HITS;
-        docs.push(
-            json!({ "type": "creep", "user": INVADER, "body": parts, "hits": hits,
+        docs.push(json!({ "type": "creep", "user": INVADER, "body": parts, "hits": hits,
             "hitsMax": hits, "ticksToLive": engine::CREEP_LIFETIME, "x": x, "y": y, "room": room,
-            "fatigue": 0, "store": {}, "storeCapacity": 0, "name": name }),
-        );
+            "fatigue": 0, "store": {}, "storeCapacity": 0, "name": name }));
     }
     insert(k, r, docs);
 }

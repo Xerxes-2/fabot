@@ -1,19 +1,26 @@
-use std::cmp::Reverse;
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    cmp::Reverse,
+    collections::{BTreeMap, BTreeSet},
+};
 
 mod account;
 pub mod casting;
-use crate::kinds::{defend, sweep};
-use crate::scene::{Asked, Hunting, Scene, fresh};
-use crate::shape::{Cast, Engagement, Group, Objective, Phase, Plan, enter};
 pub use account::{Actual, Closed, account, closed};
 use fabot_atlas::{self as atlas, Atlas};
-use fabot_base::declarations::Declarations;
-use fabot_base::engine;
-use fabot_base::vocabulary::Part::Attack;
-use fabot_base::world::{self, Creep, Room, RoomName, StructureType};
+use fabot_base::{
+    declarations::Declarations,
+    engine,
+    vocabulary::Part::Attack,
+    world::{self, Creep, Room, RoomName, StructureType},
+};
 use fabot_exchange::{self as exchange, Fighter, Losses, Outcome, Side, Stance, Terrain, fighter};
 use fabot_tactics::{self as tactics, Offer, Tactic};
+
+use crate::{
+    kinds::{defend, sweep},
+    scene::{Asked, Hunting, Scene, fresh},
+    shape::{Cast, Engagement, Group, Objective, Phase, Plan, enter},
+};
 
 type CopiesOf<'a> = Box<dyn Fn(&casting::Body) -> i32 + 'a>;
 
@@ -114,24 +121,22 @@ impl<'a> Scene<'a> {
         grounds: &BTreeMap<RoomName, Hunting>,
     ) -> Option<RoomName> {
         let ours = self.members_of(e);
-        let held = (candidates.iter())
-            .filter(|c| !claimed.contains(&c.0))
-            .filter_map(|&(room, worth, walk)| {
+        let held = (candidates.iter()).filter(|c| !claimed.contains(&c.0)).filter_map(
+            |&(room, worth, walk)| {
                 if ours.is_empty() {
                     return Some((room, worth, walk));
                 }
                 let walk = self.walk_of(atlas, e, room)?;
                 sweep::holds(self, e, (room, grounds)).then_some((room, worth, walk))
-            });
+            },
+        );
         atlas::onward(held)
     }
 
     fn fielding(&self, e: &Engagement, casts: &[Cast]) -> Vec<Fighter> {
         let members = (e.ours.keys()).filter_map(|n| self.ours.get(n.as_str()));
         let cast = (casts.iter()).filter(|c| c.engagement == e.id);
-        (members.map(|c| self.fighter(c)))
-            .chain(cast.map(|c| fighter::cast(&c.body)))
-            .collect()
+        (members.map(|c| self.fighter(c))).chain(cast.map(|c| fighter::cast(&c.body))).collect()
     }
 
     /// A free body a sweep takes in stands for the harasser it would cast, never beside one:
@@ -149,14 +154,10 @@ impl<'a> Scene<'a> {
             let set = self.hunt(ground, room, &fielding, self.capacity_of(atlas, e));
             set.is_some_and(|set| !set.is_empty())
         };
-        sweep::HARASSERS
-            .iter()
-            .any(|h| cost <= engine::body_cost(h))
+        sweep::HARASSERS.iter().any(|h| cost <= engine::body_cost(h))
             && self.hunt(ground, room, &[self.fighter(c)], 0).is_some()
             && casts_one()
-            && !self
-                .joining(atlas, e, std::slice::from_ref(&c.name))
-                .is_empty()
+            && !self.joining(atlas, e, std::slice::from_ref(&c.name)).is_empty()
     }
 
     /// Priced at open, on arrival and on an event in its room, and again as
@@ -176,11 +177,7 @@ impl<'a> Scene<'a> {
         let capacity = self.capacity_of(atlas, e);
         let Some(mut set) = self.hunt(ground, room, &fielding, capacity) else {
             if fielding.is_empty() {
-                return Some(Engagement {
-                    unanswered: true,
-                    capacity,
-                    ..e.clone()
-                });
+                return Some(Engagement { unanswered: true, capacity, ..e.clone() });
             }
             let onward = onward().filter(|_| !e.ours.is_empty());
             return onward.map(|r| sweep::onto(r, self.world.time, e));
@@ -213,12 +210,7 @@ impl<'a> Scene<'a> {
 
         let mut next = e.clone();
         next.join(joining, &asked.casts);
-        next.plan = Plan {
-            boosts,
-            tactic,
-            order: Vec::new(),
-            offers,
-        };
+        next.plan = Plan { boosts, tactic, order: Vec::new(), offers };
         next.unanswered = false;
         next.capacity = capacity;
         Some(next)
@@ -278,20 +270,14 @@ impl<'a> Scene<'a> {
                 .filter(|h| !self.cores.contains(&h.id))
                 .map(|h| {
                     let f = casting::fighter_of(h);
-                    if world::hostiles::outlives(h, safe_left) {
-                        f
-                    } else {
-                        fighter::harmless(f)
-                    }
+                    if world::hostiles::outlives(h, safe_left) { f } else { fighter::harmless(f) }
                 })
                 .collect(),
             ..Side::default()
         };
 
-        let asked_bodies: Vec<casting::Body> = (asked.casts.iter())
-            .filter(|c| c.engagement == e.id)
-            .map(|c| c.body.clone())
-            .collect();
+        let asked_bodies: Vec<casting::Body> =
+            (asked.casts.iter()).filter(|c| c.engagement == e.id).map(|c| c.body.clone()).collect();
         let asked_fighters = cast_all(&asked_bodies);
 
         // A forming set joins when its casts stand there, spawned one after
@@ -323,11 +309,8 @@ impl<'a> Scene<'a> {
 
         let bodies: Vec<Fighter> = fielding.iter().map(|c| self.fighter(c)).collect();
 
-        let core_hits: i32 = raid
-            .iter()
-            .filter(|h| self.cores.contains(&h.id))
-            .map(|h| h.hits)
-            .sum();
+        let core_hits: i32 =
+            raid.iter().filter(|h| self.cores.contains(&h.id)).map(|h| h.hits).sum();
 
         let capacity = self.capacity_of(atlas, e);
         let terrain = casting::terrain_at(atlas, room, &centre);
@@ -399,12 +382,7 @@ impl<'a> Scene<'a> {
                     spawns,
                     ..casting::side_in(&self.world.rules, room, ours_now.clone())
                 };
-                let casting::Pricing {
-                    mut set,
-                    outcome,
-                    landed,
-                    boosted,
-                } = casting::price(
+                let casting::Pricing { mut set, outcome, landed, boosted } = casting::price(
                     stance,
                     &side,
                     &theirs,
@@ -438,9 +416,8 @@ impl<'a> Scene<'a> {
             Some((tactic, price)) => {
                 // The set asked here holds the rest: priced again without a
                 // body that would not outlast it. Each pass drops one.
-                let after = wait.max(waiting(
-                    &[&asked_bodies[..], &price.set[..price.cast]].concat(),
-                ));
+                let after =
+                    wait.max(waiting(&[&asked_bodies[..], &price.set[..price.cast]].concat()));
                 let held = (Some(after), price.outcome.ticks());
                 if after > 0 && fielding.iter().any(|c| !outlives(c, after, held.1)) {
                     return self.priced_after(atlas, asked, e, free, declarations, held);
@@ -455,21 +432,13 @@ impl<'a> Scene<'a> {
                 let boosts = self.ask(
                     atlas,
                     e,
-                    casting::Asking {
-                        bodies: &price.set,
-                        boosted: price.boosted,
-                    },
+                    casting::Asking { bodies: &price.set, boosted: price.boosted },
                     asked,
                 );
 
                 let mut next = e.clone();
                 next.join(joining.iter().cloned(), &asked.casts);
-                next.plan = Plan {
-                    boosts,
-                    tactic,
-                    order: casting::kill_order(&kin),
-                    offers,
-                };
+                next.plan = Plan { boosts, tactic, order: casting::kill_order(&kin), offers };
                 if e.unanswered && first_answer {
                     let wounded_before = (joining.iter().filter_map(|n| self.ours.get(n.as_str())))
                         .filter(|c| c.hits < c.hits_max);
@@ -511,11 +480,7 @@ impl<'a> Scene<'a> {
                     next
                 }
             }
-            None if starved => Engagement {
-                unanswered: true,
-                capacity,
-                ..e.clone()
-            },
+            None if starved => Engagement { unanswered: true, capacity, ..e.clone() },
             None => defend::give_up(self.homes.contains(&e.room), self.world.time, e),
         }
     }
@@ -546,12 +511,7 @@ pub fn picked<'a>(
     pin: Option<Tactic>,
 ) -> (Vec<Offer>, Option<(Tactic, &'a Priced)>) {
     let offers: Vec<Offer> = arms.iter().flat_map(|p| p.offers(candidates)).collect();
-    let pick = |o: &Offer| {
-        Some((
-            o.tactic,
-            arms.iter().find(|p| p.offer(o.tactic) == Some(*o))?,
-        ))
-    };
+    let pick = |o: &Offer| Some((o.tactic, arms.iter().find(|p| p.offer(o.tactic) == Some(*o))?));
     let chosen = tactics::select(&offers, pin).and_then(pick);
     (offers, chosen)
 }
@@ -579,11 +539,7 @@ impl Priced {
         outcome: Outcome,
     ) -> Priced {
         Priced {
-            rival_spent: theirs
-                .bodies
-                .iter()
-                .map(|f| engine::body_cost(&f.body))
-                .sum(),
+            rival_spent: theirs.bodies.iter().map(|f| engine::body_cost(&f.body)).sum(),
             together: landed.together,
             ranged: landed.bodies.len() > 1 && landed.bodies.iter().all(|f| f.attack == 0),
             stance,
@@ -622,12 +578,7 @@ impl Priced {
 
 /// The bodies a candidate fields are the tie-break's input (§6.3).
 pub(super) fn offer(tactic: Tactic, set: &[casting::Body], value: i32, cost: i32) -> Offer {
-    Offer {
-        tactic,
-        bodies: set.len() as i32,
-        value,
-        cost,
-    }
+    Offer { tactic, bodies: set.len() as i32, value, cost }
 }
 
 pub(super) fn sweep_offers(

@@ -1,19 +1,26 @@
 /// What each committed body does this tick (§7): its walk, its strike and its heal.
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::kinds::defend::{self, Home};
-use super::kinds::stronghold;
-use super::scene::{Hunting, Scene};
-use super::shape::{Engagement, Objective, Phase};
-use super::tracker::REACH;
 use fabot_atlas::Atlas;
-use fabot_base::declarations;
-use fabot_base::intents::{self, Action, ControllerAct, CreepAct, ModuleOutput};
-use fabot_base::tiles::Tile;
-use fabot_base::wish::{Idle, Wish};
-use fabot_base::world::{self, Creep, Id, Owner, Pos, RoomName, Structure, StructureType};
-use fabot_base::{engine, tiles};
+use fabot_base::{
+    declarations, engine,
+    intents::{self, Action, ControllerAct, CreepAct, ModuleOutput},
+    tiles,
+    tiles::Tile,
+    wish::{Idle, Wish},
+    world::{self, Creep, Id, Owner, Pos, RoomName, Structure, StructureType},
+};
 use fabot_tactics::{self as tactics, Tactic};
+
+use super::{
+    kinds::{
+        defend::{self, Home},
+        stronghold,
+    },
+    scene::{Hunting, Scene},
+    shape::{Engagement, Objective, Phase},
+    tracker::REACH,
+};
 
 pub(super) fn act(
     scene: &Scene,
@@ -23,22 +30,13 @@ pub(super) fn act(
 ) -> ModuleOutput {
     let (world, (decided, _, grounds)) = (scene.world, fights);
     let rooms: BTreeSet<RoomName> = decided.iter().map(|e| e.room).collect();
-    let middle = |r: RoomName| {
-        grounds
-            .get(&r)
-            .map_or_else(|| atlas.reached_middle(r), |g| g.middle)
-    };
+    let middle =
+        |r: RoomName| grounds.get(&r).map_or_else(|| atlas.reached_middle(r), |g| g.middle);
     let middles: BTreeMap<RoomName, Pos> = rooms.into_iter().map(|r| (r, middle(r))).collect();
     let mut sight = tactics::Sight {
         atlas,
         hostiles: &scene.foes,
-        struck: scene
-            .foes
-            .values()
-            .flatten()
-            .filter(|h| scene.struck(h))
-            .map(|h| h.id)
-            .collect(),
+        struck: scene.foes.values().flatten().filter(|h| scene.struck(h)).map(|h| h.id).collect(),
         spared: world
             .rooms
             .iter()
@@ -65,25 +63,19 @@ pub(super) fn act(
         rules: &world.rules,
     };
 
-    let engaged_in: BTreeMap<&str, &Engagement> = decided
-        .iter()
-        .flat_map(|e| e.ours.keys().map(move |n| (n.as_str(), e)))
-        .collect();
+    let engaged_in: BTreeMap<&str, &Engagement> =
+        decided.iter().flat_map(|e| e.ours.keys().map(move |n| (n.as_str(), e))).collect();
 
-    let fighters: Vec<&Creep> = world
-        .creeps
-        .iter()
-        .filter(|c| declarations::fights(&c.name))
-        .collect();
+    let fighters: Vec<&Creep> =
+        world.creeps.iter().filter(|c| declarations::fights(&c.name)).collect();
 
     // A group lost from sight is sought in its room, which brings it back in sight.
     let centre_of = |e: &Engagement| -> (Pos, i32) {
         match (&e.objective, scene.by_id.get(&e.group)) {
             (Objective::Defend, Some(g)) => (g.centre, engine::RANGED_RANGE),
-            (Objective::Defend, None) => (
-                scene.raid_at(e, e.room).unwrap_or(middles[&e.room]),
-                engine::RANGED_RANGE,
-            ),
+            (Objective::Defend, None) => {
+                (scene.raid_at(e, e.room).unwrap_or(middles[&e.room]), engine::RANGED_RANGE)
+            }
             _ => (middles[&e.room], engine::RANGED_RANGE),
         }
     };
@@ -149,10 +141,7 @@ pub(super) fn act(
             Phase::Approaching | Phase::Fighting => {
                 // A transit room's hostiles are not the sweep's.
                 if e.objective == Objective::Sweep && c.pos.room != e.room {
-                    return (
-                        None,
-                        tactics::toward(sight, c, &centre, engine::RANGED_RANGE),
-                    );
+                    return (None, tactics::toward(sight, c, &centre, engine::RANGED_RANGE));
                 }
 
                 if let Some((ground, contact)) = hunts.get(&e.id) {
@@ -194,8 +183,7 @@ pub(super) fn act(
     let mut out = ModuleOutput::default();
 
     if let Some(id) = defend::safe_mode(defend::running(world), &homes_of(scene, decided)) {
-        out.actions
-            .push(Action::Controller(id, ControllerAct::ActivateSafeMode));
+        out.actions.push(Action::Controller(id, ControllerAct::ActivateSafeMode));
     }
 
     let incoming: BTreeMap<String, i32> = stronghold::incoming(scene, decided).collect();
@@ -220,8 +208,7 @@ pub(super) fn act(
     out.telemetry.counts.push(("threatLookups", lookups));
     let patients = (&fighters[..], &world.creeps[..]);
     out.actions.extend(reflexes(chosen, patients, &incoming));
-    out.actions
-        .extend(defend::recycles(scene, sight.atlas, fights));
+    out.actions.extend(defend::recycles(scene, sight.atlas, fights));
     out
 }
 
@@ -245,9 +232,7 @@ pub fn formation(
 ) -> Vec<Wish> {
     let foes = sight.hostiles;
     let marked = (order.iter()).find_map(|id| foes.values().flatten().find(|h| h.id == *id));
-    let mark = defends
-        .then(|| marked.or_else(|| foes.get(&centre.room)?.first()))
-        .flatten();
+    let mark = defends.then(|| marked.or_else(|| foes.get(&centre.room)?.first())).flatten();
     let walks = matches!(tactic, Tactic::BlobClose | Tactic::BlobKite)
         && !unanswered
         && (phase == Phase::Approaching || defends && phase == Phase::Fighting);
@@ -257,9 +242,8 @@ pub fn formation(
     };
     let (centre, range) = mark.map_or((centre, range), |h| (h.pos, reach));
     let present = |c: &&Creep| phase != Phase::Fighting || c.pos.room == centre.room;
-    let members: Vec<&Creep> = (members.into_iter())
-        .filter(|c| (defends || !c.swings()) && present(c))
-        .collect();
+    let members: Vec<&Creep> =
+        (members.into_iter()).filter(|c| (defends || !c.swings()) && present(c)).collect();
     if !walks || members.is_empty() {
         return Vec::new();
     }
@@ -274,9 +258,7 @@ pub fn reflexes(
     incoming: &BTreeMap<String, i32>,
 ) -> impl Iterator<Item = Action> {
     let busy = |slot: u8| -> BTreeSet<String> {
-        let taken = chosen
-            .iter()
-            .filter(|(_, a)| a.iter().any(|a| a.slots() & slot != 0));
+        let taken = chosen.iter().filter(|(_, a)| a.iter().any(|a| a.slots() & slot != 0));
         taken.map(|(n, _)| n.clone()).collect()
     };
     let (swinging, shooting) = (busy(intents::MELEE), busy(intents::RANGED));
@@ -285,8 +267,7 @@ pub fn reflexes(
     }
     chosen.into_iter().flat_map(|(name, wanted)| {
         let done = intents::performed(&wanted);
-        done.into_iter()
-            .map(move |a| Action::Creep(name.clone(), a))
+        done.into_iter().map(move |a| Action::Creep(name.clone(), a))
     })
 }
 
@@ -302,22 +283,16 @@ fn homes_of(scene: &Scene, decided: &[Engagement]) -> Vec<Home> {
             continue;
         };
 
-        let own: Vec<Structure> = room
-            .structures
-            .iter()
-            .filter(|s| s.owner.is_ours())
-            .cloned()
-            .collect();
+        let own: Vec<Structure> =
+            room.structures.iter().filter(|s| s.owner.is_ours()).cloned().collect();
 
         let raiding: Vec<&Engagement> = decided
             .iter()
             .filter(|e| e.unanswered && e.room == *name && scene.by_id.contains_key(&e.group))
             .collect();
 
-        let raid: BTreeSet<Id> = raiding
-            .iter()
-            .flat_map(|e| scene.by_id[&e.group].members.iter().copied())
-            .collect();
+        let raid: BTreeSet<Id> =
+            raiding.iter().flat_map(|e| scene.by_id[&e.group].members.iter().copied()).collect();
 
         if let Some(controller) = &room.controller {
             let opened = raiding
@@ -332,19 +307,10 @@ fn homes_of(scene: &Scene, decided: &[Engagement]) -> Vec<Home> {
             homes_lost.push(Home {
                 controller: controller.clone(),
                 towered: (scene.world.rules.towers(room)).any(|s| s.owner.is_ours()),
-                raid: room
-                    .hostiles()
-                    .filter(|h| raid.contains(&h.id))
-                    .cloned()
-                    .collect(),
+                raid: room.hostiles().filter(|h| raid.contains(&h.id)).cloned().collect(),
                 hostiles: room.hostiles().cloned().collect(),
                 ours: own,
-                bodies: world
-                    .creeps
-                    .iter()
-                    .filter(|c| c.pos.room == *name)
-                    .cloned()
-                    .collect(),
+                bodies: world.creeps.iter().filter(|c| c.pos.room == *name).cloned().collect(),
                 time: world.time,
                 opened,
                 fallen: room

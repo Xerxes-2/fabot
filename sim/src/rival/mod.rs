@@ -4,19 +4,22 @@
 //! its level-1 room holds no tower and never the 600 energy its repairer cost.
 use std::cell::Cell;
 
-use fabot_base::engine;
-use fabot_base::tiles;
-use krebs::atom;
-use krebs::constants::OBSTACLE_OBJECT_TYPES;
-use krebs::doc::{Id, Obj, Val};
-use krebs::intents::RoomIntents;
-use krebs::world::World as Krebs;
+use fabot_base::{engine, tiles};
+use krebs::{
+    atom,
+    constants::OBSTACLE_OBJECT_TYPES,
+    doc::{Id, Obj, Val},
+    intents::RoomIntents,
+    world::World as Krebs,
+};
 use krebs_pathfinder::{Goal, PathFinder, Pos, RoomCost, RoomXY, SearchOpts};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::act::{Stored, has_active};
-use crate::view::{View, num, obj, store, text, xy};
+use crate::{
+    act::{Stored, has_active},
+    view::{View, num, obj, store, text, xy},
+};
 
 /// A player beside ours: what its bodies do on the run's tick `t`, put through `o`.
 pub trait Player {
@@ -74,26 +77,28 @@ impl It<'_> {
     fn id(&self) -> &str {
         text(self.o, atom!("_id"))
     }
+
     fn user(&self) -> &str {
         text(self.o, atom!("user"))
     }
+
     fn at(&self) -> (i32, i32) {
         (xy(self.o).0 as i32, xy(self.o).1 as i32)
     }
+
     fn range(&self, b: &It) -> i32 {
         let (a, b, room) = (self.at(), b.at(), self.room == b.room);
-        if room {
-            (a.0 - b.0).abs().max((a.1 - b.1).abs())
-        } else {
-            i32::MAX
-        }
+        if room { (a.0 - b.0).abs().max((a.1 - b.1).abs()) } else { i32::MAX }
     }
+
     fn has(&self, part: &str) -> bool {
         has_active(self.o, part)
     }
+
     fn hurt(&self) -> bool {
         num(self.o, atom!("hits")) < num(self.o, atom!("hitsMax"))
     }
+
     fn armed(&self) -> bool {
         self.has("attack") || self.has("ranged_attack")
     }
@@ -112,33 +117,16 @@ fn closest<'a>(c: &It, xs: impl Iterator<Item = It<'a>>) -> Option<It<'a>> {
 }
 
 fn pos(v: &View, r: usize, (x, y): (i32, i32)) -> Pos {
-    let room = RoomXY {
-        x: v.k.meta.rooms[r].xy.x,
-        y: v.k.meta.rooms[r].xy.y,
-    };
+    let room = RoomXY { x: v.k.meta.rooms[r].xy.x, y: v.k.meta.rooms[r].xy.y };
     let (x, y) = (x as u8, y as u8);
     Pos { room, x, y }
 }
 
 /// `getDirectionTo` a tile beside `from`, across a border too.
 pub fn direction(from: Pos, to: Pos) -> Option<usize> {
-    let world = |p: Pos| {
-        (
-            p.room.x * 50 + i32::from(p.x),
-            p.room.y * 50 + i32::from(p.y),
-        )
-    };
+    let world = |p: Pos| (p.room.x * 50 + i32::from(p.x), p.room.y * 50 + i32::from(p.y));
     let d = (world(to).0 - world(from).0, world(to).1 - world(from).1);
-    let compass = [
-        (0, -1),
-        (1, -1),
-        (1, 0),
-        (1, 1),
-        (0, 1),
-        (-1, 1),
-        (-1, 0),
-        (-1, -1),
-    ];
+    let compass = [(0, -1), (1, -1), (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1)];
     compass.iter().position(|&x| x == d).map(|i| i + 1)
 }
 
@@ -194,10 +182,8 @@ impl Orders<'_> {
 
     /// Terrain only, as roles.js searched, within the room unless `edges` says otherwise.
     fn step(&mut self, v: &View, c: &It, goals: &[(It, i32)], flee: bool, edges: Edges) {
-        let goal = |(o, range): &(It, i32)| Goal {
-            pos: pos(v, o.room, o.at()),
-            range: *range as u32,
-        };
+        let goal =
+            |(o, range): &(It, i32)| Goal { pos: pos(v, o.room, o.at()), range: *range as u32 };
         let goals: Vec<Goal> = goals.iter().map(goal).collect();
         let rooms = if edges == Edges::Crossed { 2 } else { 1 };
         let mut costs = Costs::new();
@@ -236,13 +222,9 @@ impl Orders<'_> {
     fn toward(&mut self, v: &View, c: &It, room: &str) {
         let Some(to) = v.index(room) else { return };
         let seen = (0..v.rooms.len()).filter(|&r| all(v, r).any(|o| o.user() == self.me));
-        let costs: Costs = seen
-            .map(|r| (pos(v, r, (0, 0)).room, self.blocked(v, r, true)))
-            .collect();
-        let goal = Goal {
-            pos: pos(v, to, (25, 25)),
-            range: 0,
-        };
+        let costs: Costs =
+            seen.map(|r| (pos(v, r, (0, 0)).room, self.blocked(v, r, true))).collect();
+        let goal = Goal { pos: pos(v, to, (25, 25)), range: 0 };
         let opts = SearchOpts::from_js(2, 10, None, 0, 0, 16, false);
         self.walk(v, c, &[goal], (opts, &costs));
     }
@@ -250,20 +232,10 @@ impl Orders<'_> {
 
 /// The nearest foe, else the nearest hostile spawn, else any hostile structure but a controller.
 fn target_of<'a>(v: &View<'a>, c: &It, foes: &[It<'a>], me: &str) -> Option<It<'a>> {
-    let unbuilt = [
-        "creep",
-        "constructionSite",
-        "tombstone",
-        "ruin",
-        "controller",
-        "powerCreep",
-    ];
+    let unbuilt = ["creep", "constructionSite", "tombstone", "ruin", "controller", "powerCreep"];
     let theirs = |spawn: bool| {
         let owned = all(v, c.room).filter(|s| theirs(s, me));
-        closest(
-            c,
-            owned.filter(|s| !unbuilt.contains(&s.kind) && (!spawn || s.kind == "spawn")),
-        )
+        closest(c, owned.filter(|s| !unbuilt.contains(&s.kind) && (!spawn || s.kind == "spawn")))
     };
     (closest(c, foes.iter().copied()).or_else(|| theirs(true))).or_else(|| theirs(false))
 }
@@ -281,9 +253,8 @@ fn gun(v: &View, o: &mut Orders, c: &It, foes: &[It], target: Option<It>) {
     } else if range <= 3 {
         o.put(c, "rangedAttack", json!({ "id": target.id() }));
     }
-    let swings: Vec<_> = (foes.iter().filter(|f| f.has("attack") && c.range(f) <= 2))
-        .map(|f| (*f, 3))
-        .collect();
+    let swings: Vec<_> =
+        (foes.iter().filter(|f| f.has("attack") && c.range(f) <= 2)).map(|f| (*f, 3)).collect();
     if !swings.is_empty() {
         o.step(v, c, &swings, true, Edges::Open);
     } else if range > 3 {
@@ -307,10 +278,7 @@ fn healer(v: &View, o: &mut Orders, c: &It, allies: &[It]) {
         Some(r) if r <= 3 => o.put(c, "rangedHeal", json!({ "id": patient.unwrap().id() })),
         _ => {}
     }
-    let armed = allies
-        .iter()
-        .copied()
-        .filter(|a| a.id() != c.id() && a.armed());
+    let armed = allies.iter().copied().filter(|a| a.id() != c.id() && a.armed());
     let lead = (patient.copied().filter(|p| p.id() != c.id())).or_else(|| closest(c, armed));
     if let Some(lead) = lead.filter(|l| c.range(l) > 1) {
         o.step(v, c, &[(lead, 1)], false, Edges::Open);
@@ -354,9 +322,7 @@ impl Rival {
     /// `count` bodies of `body` cast from `first` on and recast as they die.
     fn harass(&self, v: &View, t: u64, o: &mut Orders) {
         let rooms = || (0..v.rooms.len()).flat_map(|r| all(v, r));
-        let mine: Vec<It> = rooms()
-            .filter(|c| c.kind == "creep" && c.user() == o.me)
-            .collect();
+        let mine: Vec<It> = rooms().filter(|c| c.kind == "creep" && c.user() == o.me).collect();
         let idle =
             |s: &It| s.kind == "spawn" && s.user() == o.me && obj(s.o, atom!("spawning")).is_none();
         let body = (self.body.clone()).unwrap_or_else(|| vec!["attack".into(), "move".into()]);
@@ -398,11 +364,7 @@ impl Rival {
             .map(|f| (*f, reach(f) + 1))
             .collect();
         if !near.is_empty() {
-            let edges = if self.cross {
-                Edges::Crossed
-            } else {
-                Edges::Closed
-            };
+            let edges = if self.cross { Edges::Crossed } else { Edges::Closed };
             return o.step(v, c, &near, true, edges);
         }
         let Some(target) = &self.target else { return };
@@ -416,11 +378,9 @@ impl Rival {
         let Some(&source) = sources.first() else {
             return;
         };
-        let unarmed: Vec<_> = (foes
-            .iter()
-            .filter(|f| !f.armed() && f.range(&source) <= HOVER + 1))
-        .map(|f| (*f, 1))
-        .collect();
+        let unarmed: Vec<_> = (foes.iter().filter(|f| !f.armed() && f.range(&source) <= HOVER + 1))
+            .map(|f| (*f, 1))
+            .collect();
         if !unarmed.is_empty() {
             o.step(v, c, &unarmed, false, Edges::Open);
         } else if c.range(&source) > HOVER {
@@ -455,16 +415,9 @@ impl Rivals {
         let mut rooms = Vec::new();
         for p in &self.players {
             let (me, pf) = (p.id.as_str(), &mut self.pf);
-            let mut o = Orders {
-                me,
-                pf,
-                stored: Stored::default(),
-            };
+            let mut o = Orders { me, pf, stored: Stored::default() };
             p.play(v, t, &mut o);
-            rooms.extend(
-                o.stored
-                    .rooms(v.k.user_ids[&Id::new(me).expect("a user id")]),
-            );
+            rooms.extend(o.stored.rooms(v.k.user_ids[&Id::new(me).expect("a user id")]));
         }
         rooms
     }
@@ -474,19 +427,13 @@ impl Rivals {
     /// the next nearest it; one tile in when `inside`, as a body on an exit crosses.
     pub fn stand(&self, k: &mut Krebs, t: u64, home: &str, mut random: impl FnMut() -> f64) {
         let due = |r: &&Raid| {
-            t == r.first
-                || r.every
-                    .is_some_and(|e| t > r.first && (t - r.first).is_multiple_of(e))
+            t == r.first || r.every.is_some_and(|e| t > r.first && (t - r.first).is_multiple_of(e))
         };
         for p in &self.players {
             let Some(raid) = p.raid.as_ref().filter(due) else {
                 continue;
             };
-            let at = |name: &str| {
-                (k.meta.rooms.iter())
-                    .position(|m| &*m.name == name)
-                    .expect(name)
-            };
+            let at = |name: &str| (k.meta.rooms.iter()).position(|m| &*m.name == name).expect(name);
             let (r, theirs) = (at(raid.room.as_deref().unwrap_or(home)), at(&p.room));
             let (a, b) = (k.meta.rooms[r].xy, k.meta.rooms[theirs].xy);
             let open = |(x, y): (i32, i32)| k.terrain.raw(r as u32)[(y * 50 + x) as usize] & 1 == 0;
@@ -498,11 +445,8 @@ impl Rivals {
                 .filter(|e| (a.x + tiles::dx(*e), a.y + tiles::dy(*e)) == (b.x, b.y))
                 .collect();
             let sides = if led.is_empty() { EXITS.to_vec() } else { led };
-            let mut tiles: Vec<(i32, i32)> = sides
-                .into_iter()
-                .flat_map(edge)
-                .filter(|&p| open(p))
-                .collect();
+            let mut tiles: Vec<(i32, i32)> =
+                sides.into_iter().flat_map(edge).filter(|&p| open(p)).collect();
             let Some(&(ox, oy)) = tiles.get((random() * tiles.len() as f64) as usize) else {
                 continue;
             };

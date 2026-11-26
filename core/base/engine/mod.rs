@@ -1,6 +1,9 @@
-use super::tiles::Tile;
-use super::vocabulary::{Part, ResourceType, damage_ratio, multiple, part_count_in};
 use screeps::{StructureType, Terrain};
+
+use super::{
+    tiles::Tile,
+    vocabulary::{Part, ResourceType, damage_ratio, multiple, part_count_in},
+};
 
 pub const MAX_BODY_PARTS: usize = screeps::MAX_CREEP_SIZE as usize;
 pub const HARVEST_PER_WORK: i32 = screeps::HARVEST_POWER as i32;
@@ -154,10 +157,7 @@ pub fn body_cost(body: &[Part]) -> i32 {
 }
 
 pub fn controller_downgrade(level: i32) -> i32 {
-    u8::try_from(level)
-        .ok()
-        .and_then(screeps::controller_downgrade)
-        .unwrap_or(0) as i32
+    u8::try_from(level).ok().and_then(screeps::controller_downgrade).unwrap_or(0) as i32
 }
 
 /// The downgrade timer below which `activateSafeMode` is ERR_TIRED.
@@ -270,9 +270,7 @@ pub fn power_at<'a>(
     let skip = body.len() - live.len();
     let acting = live.iter().zip(boosts[skip..].iter());
     Box::new(move |part| {
-        (acting.clone().filter(|(p, _)| **p == part))
-            .map(|(p, boost)| multiple(*p, *boost))
-            .sum()
+        (acting.clone().filter(|(p, _)| **p == part)).map(|(p, boost)| multiple(*p, *boost)).sum()
     })
 }
 

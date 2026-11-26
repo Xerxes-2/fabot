@@ -3,21 +3,19 @@
 use std::collections::BTreeMap;
 
 use fabot_atlas::{self as atlas, Atlas, Mover};
-use fabot_base::declarations::{self, ColonyPlan};
-use fabot_base::grid::Footprint;
-use fabot_base::intents::{Action, RoomAct};
-use fabot_base::tiles::{self, Tile, TileSet};
-use fabot_base::world::{Controller, Pos, Room, RoomName, StructureType, World, terrain};
+use fabot_base::{
+    declarations::{self, ColonyPlan},
+    grid::Footprint,
+    intents::{Action, RoomAct},
+    tiles::{self, Tile, TileSet},
+    world::{Controller, Pos, Room, RoomName, StructureType, World, terrain},
+};
 
-use super::shape::Plan;
-use super::sites::SITES_IN_FLIGHT;
+use super::{shape::Plan, sites::SITES_IN_FLIGHT};
 
 const HAULER: Mover = Mover {
     footprint: Footprint::One,
-    factor: fabot_base::grid::FatigueFactor {
-        weight: 2,
-        moves: 1,
-    },
+    factor: fabot_base::grid::FatigueFactor { weight: 2, moves: 1 },
 };
 
 /// Bounds a walk that never arrives.
@@ -82,10 +80,7 @@ fn place(
     if *now < SITES_IN_FLIGHT && open.insert(tiles::of_pos(pos)) {
         *now += 1;
         *budget -= 1;
-        intents.push(Action::Room(
-            room.name,
-            RoomAct::CreateSite(pos.x, pos.y, kind),
-        ));
+        intents.push(Action::Room(room.name, RoomAct::CreateSite(pos.x, pos.y, kind)));
     }
 }
 
@@ -96,15 +91,10 @@ fn sink_for<'p>(
     planned: &dyn Fn(RoomName) -> Option<&'p ColonyPlan>,
     room: &Room,
 ) -> Option<Pos> {
-    let anchors = (
-        room.controller.as_ref(),
-        room.sources.first().map(|s| s.pos),
-    );
+    let anchors = (room.controller.as_ref(), room.sources.first().map(|s| s.pos));
     let home = derived.colonies[atlas::server_of(atlas, derived, planned, anchors)?];
 
-    (world.room(home)?.storage())
-        .map(|s| s.pos)
-        .or_else(|| planned(home)?.pile)
+    (world.room(home)?.storage()).map(|s| s.pos).or_else(|| planned(home)?.pile)
 }
 
 /// v1's seat: the shortest walk out toward home. The owner's rule: the walk

@@ -3,29 +3,29 @@
 use std::borrow::Borrow;
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::super::scene::{Asked, Hunting, Scene};
-use super::super::shape::{Cast, Engagement, Group, Objective, Phase, Slot, enter};
 use fabot_atlas::Atlas;
-use fabot_base::intents::{Action, SpawnAct};
-use fabot_base::tiles::{self};
-use fabot_base::vocabulary::{Part, part_count_in};
-use fabot_base::wish::{Idle, Wish};
-use fabot_base::world::{
-    Controller, Creep, Fallen, Id, Oven, Owner, Pos, RoomName, Spawn, Structure, StructureType,
-    World, spent,
+use fabot_base::{
+    declarations, engine,
+    intents::{Action, SpawnAct},
+    tiles::{self},
+    vocabulary::{Part, part_count_in},
+    wish::{Idle, Wish},
+    world::{
+        Controller, Creep, Fallen, Id, Oven, Owner, Pos, RoomName, Spawn, Structure, StructureType,
+        World, spent,
+    },
 };
-use fabot_base::{declarations, engine};
 use fabot_exchange::{self as exchange, Outcome};
 use fabot_tactics::{self as tactics, Tactic};
 
+use super::super::{
+    scene::{Asked, Hunting, Scene},
+    shape::{Cast, Engagement, Group, Objective, Phase, Slot, enter},
+};
+
 /// What a `Defend` may fight as, in the order its ties fall to (§6.3).
-pub const CANDIDATES: &[Tactic] = &[
-    Tactic::Hold,
-    Tactic::Close,
-    Tactic::Kite,
-    Tactic::BlobKite,
-    Tactic::BlobClose,
-];
+pub const CANDIDATES: &[Tactic] =
+    &[Tactic::Hold, Tactic::Close, Tactic::Kite, Tactic::BlobKite, Tactic::BlobClose];
 
 pub struct Facts {
     pub time: i32,
@@ -48,15 +48,9 @@ pub struct Facts {
 /// Neither arm is priced, so the offers behind the last price go with it.
 pub fn give_up(held: bool, time: i32, e: &Engagement) -> Engagement {
     let mut next = if held {
-        Engagement {
-            unanswered: true,
-            ..e.clone()
-        }
+        Engagement { unanswered: true, ..e.clone() }
     } else {
-        Engagement {
-            ours: BTreeMap::new(),
-            ..enter(Phase::Disengaging, time, e)
-        }
+        Engagement { ours: BTreeMap::new(), ..enter(Phase::Disengaging, time, e) }
     };
     next.plan.offers.clear();
     next
@@ -91,11 +85,7 @@ fn released((scene, atlas): (&Scene, &Atlas), fights: Fights, c: &Creep) -> bool
 }
 
 /// The engagements decided, their casts and the sweeps' grounds.
-pub(crate) type Fights<'a> = (
-    &'a [Engagement],
-    &'a [Cast],
-    &'a BTreeMap<RoomName, Hunting>,
-);
+pub(crate) type Fights<'a> = (&'a [Engagement], &'a [Cast], &'a BTreeMap<RoomName, Hunting>);
 
 /// A released body walks home to a spawn and is recycled there; any other rests.
 pub(crate) fn idle(sight: &mut tactics::Sight, scene: &Scene, fights: Fights, c: &Creep) -> Wish {
@@ -128,14 +118,8 @@ pub fn stands_alone(time: i32, e: &Engagement) -> Engagement {
 /// their spawns began another body since the ask and the landing priced passed:
 /// a home's, as a raid there strikes as it stands, and a sweep's.
 pub(crate) fn overdue(scene: &Scene, e: &Engagement) -> bool {
-    let casts: Vec<&Cast> = (scene.spawning.iter())
-        .filter(|c| c.engagement == e.id)
-        .collect();
-    let asked = casts
-        .iter()
-        .filter_map(|c| cast_of(&c.name))
-        .map(|(t, _)| t)
-        .max();
+    let casts: Vec<&Cast> = (scene.spawning.iter()).filter(|c| c.engagement == e.id).collect();
+    let asked = casts.iter().filter_map(|c| cast_of(&c.name)).map(|(t, _)| t).max();
     let spawns: Vec<&Spawn> = (scene.world.working_spawns())
         .filter(|s| casts.iter().any(|c| c.room == s.pos.room))
         .collect();
@@ -143,10 +127,7 @@ pub(crate) fn overdue(scene: &Scene, e: &Engagement) -> bool {
     let landing = lands.into_iter().max().unwrap_or(0);
     let ovens: Vec<&Oven> = spawns.iter().filter_map(|s| s.spawning.as_ref()).collect();
     let short = |s: &&&Spawn| {
-        let bank = scene
-            .world
-            .room(s.pos.room)
-            .map_or(0, |r| r.energy_available);
+        let bank = scene.world.room(s.pos.room).map_or(0, |r| r.energy_available);
         (casts.iter()).any(|c| c.room == s.pos.room && engine::body_cost(&c.body) > bank)
     };
     let idle = spawns.iter().any(|s| s.spawning.is_none() && short(&s));
@@ -269,9 +250,7 @@ pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
     // Forming has already re-priced it and found nothing to cast.
     if facts.group.is_none() && e.ours.is_empty() && !facts.asked {
         let again = facts.remembered && e.phase != Phase::Forming && e.lost < OUTPOST_LOSSES;
-        return again
-            .then(|| enter(Phase::Forming, facts.time, e))
-            .or_else(quit);
+        return again.then(|| enter(Phase::Forming, facts.time, e)).or_else(quit);
     }
 
     if facts.group.is_some() && spent {
@@ -353,18 +332,10 @@ fn hand(body: &[impl Borrow<Part>], pos: &Pos) -> bool {
 }
 
 fn razed(home: &Home) -> bool {
-    let raid: Vec<&Creep> = home
-        .raid
-        .iter()
-        .filter(|h| h.owner != Owner::Invader)
-        .collect();
+    let raid: Vec<&Creep> = home.raid.iter().filter(|h| h.owner != Owner::Invader).collect();
 
-    let covered: BTreeSet<Pos> = home
-        .ours
-        .iter()
-        .filter(|s| s.kind == StructureType::Rampart)
-        .map(|s| s.pos)
-        .collect();
+    let covered: BTreeSet<Pos> =
+        home.ours.iter().filter(|s| s.kind == StructureType::Rampart).map(|s| s.pos).collect();
 
     let share = |kind: StructureType| -> (i32, i32) {
         let all: Vec<&Structure> = home.ours.iter().filter(|s| s.kind == kind).collect();
@@ -377,9 +348,7 @@ fn razed(home: &Home) -> bool {
         (lost as i32, all.len() as i32)
     };
 
-    let hands: Vec<&Creep> = (home.bodies.iter())
-        .filter(|c| hand(&c.body, &c.pos))
-        .collect();
+    let hands: Vec<&Creep> = (home.bodies.iter()).filter(|c| hand(&c.body, &c.pos)).collect();
 
     let struck = |c: &Creep| {
         c.hits < c.hits_max && !covered.contains(&c.pos) && reaches(false, 0, &raid, &c.pos)
@@ -402,16 +371,10 @@ fn razed(home: &Home) -> bool {
         .map(|(_, f)| part_count_in(&f.body, Part::Carry))
         .sum();
 
-    let left: i32 = hands
-        .iter()
-        .filter(|c| !struck(c))
-        .map(|c| part_count_in(&c.body, Part::Carry))
-        .sum();
-    let whole: i32 = hands
-        .iter()
-        .map(|c| part_count_in(&c.body, Part::Carry))
-        .sum::<i32>()
-        + killed;
+    let left: i32 =
+        hands.iter().filter(|c| !struck(c)).map(|c| part_count_in(&c.body, Part::Carry)).sum();
+    let whole: i32 =
+        hands.iter().map(|c| part_count_in(&c.body, Part::Carry)).sum::<i32>() + killed;
     let (spawn_lost, spawn_all) = share(StructureType::Spawn);
     let (bank_lost, bank_all) = share(StructureType::Extension);
 
@@ -442,10 +405,7 @@ fn last_resort(home: &Home) -> bool {
 }
 
 pub(crate) fn running(world: &World) -> bool {
-    world
-        .rooms
-        .iter()
-        .any(|r| r.controller.as_ref().is_some_and(|c| c.our_safe_mode() > 0))
+    world.rooms.iter().any(|r| r.controller.as_ref().is_some_and(|c| c.our_safe_mode() > 0))
 }
 
 pub fn safe_mode(running: bool, homes: &[Home]) -> Option<Id> {
@@ -501,27 +461,21 @@ pub fn opens(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
+    use fabot_base::world::{BodyPart, Store};
+    use proptest::{collection::vec, prelude::*, sample::select};
+
     use super::*;
     use crate::shape::Objective;
-    use fabot_base::world::{BodyPart, Store};
-    use proptest::collection::vec;
-    use proptest::prelude::*;
-    use proptest::sample::select;
-    use std::collections::BTreeMap;
 
     fn at(x: i32, y: i32) -> Pos {
         Pos::new(RoomName::W1N1, x, y)
     }
 
     fn creep(owner: Owner, kinds: &[Part], pos: Pos, hurt: bool) -> Creep {
-        let body: Vec<BodyPart> = kinds
-            .iter()
-            .map(|k| BodyPart {
-                kind: *k,
-                hits: 100,
-                boost: None,
-            })
-            .collect();
+        let body: Vec<BodyPart> =
+            kinds.iter().map(|k| BodyPart { kind: *k, hits: 100, boost: None }).collect();
         Creep {
             id: format!("{},{}", pos.x, pos.y).as_str().into(),
             name: format!("{},{}", pos.x, pos.y),
@@ -546,11 +500,7 @@ mod tests {
     const OPENED: i32 = NOW - 10;
 
     fn slain(carry: i32) -> Dead {
-        Dead {
-            carry,
-            ticks_left: 1000,
-            died: NOW - 1,
-        }
+        Dead { carry, ticks_left: 1000, died: NOW - 1 }
     }
 
     fn home(raider: Owner, haulers: &[(i32, i32, bool)], fallen: &[Dead]) -> Home {
@@ -573,11 +523,7 @@ mod tests {
             .map(|(i, dead)| {
                 let mut body = vec![Part::Carry; dead.carry as usize];
                 body.push(Part::Move);
-                let fell = Fallen {
-                    body,
-                    ticks_to_live: dead.ticks_left,
-                    died: dead.died,
-                };
+                let fell = Fallen { body, ticks_to_live: dead.ticks_left, died: dead.died };
                 (at(26, 23 + i as i32), fell)
             })
             .collect();
@@ -615,10 +561,7 @@ mod tests {
 
     /// Up to four haulers in a column across the raider's reach: CARRY 1–25 each, a step off it.
     fn haulers(spec: &[(i32, i32, bool)]) -> Vec<(i32, i32, bool)> {
-        spec.iter()
-            .take(4)
-            .map(|(c, dx, hurt)| (1 + c.abs() % 25, dx.abs() % 7, *hurt))
-            .collect()
+        spec.iter().take(4).map(|(c, dx, hurt)| (1 + c.abs() % 25, dx.abs() % 7, *hurt)).collect()
     }
 
     /// Arms at what `haulers` folds to the least and most carry and step.
@@ -629,13 +572,8 @@ mod tests {
     }
 
     const CASES: u32 = 256;
-    const PHASES: [Phase; 5] = [
-        Phase::Forming,
-        Phase::Approaching,
-        Phase::Fighting,
-        Phase::Pursuing,
-        Phase::Disengaging,
-    ];
+    const PHASES: [Phase; 5] =
+        [Phase::Forming, Phase::Approaching, Phase::Fighting, Phase::Pursuing, Phase::Disengaging];
 
     /// The last prefix sum under the floor, and so how many haulers it takes.
     fn under(carry: &[i32]) -> usize {
@@ -651,16 +589,8 @@ mod tests {
     }
 
     fn oven(parts: usize, remaining: i32) -> Oven {
-        let part = BodyPart {
-            kind: Part::Move,
-            hits: 100,
-            boost: None,
-        };
-        Oven {
-            name: "economy".into(),
-            remaining,
-            body: vec![part; parts],
-        }
+        let part = BodyPart { kind: Part::Move, hits: 100, boost: None };
+        Oven { name: "economy".into(), remaining, body: vec![part; parts] }
     }
 
     #[test]
@@ -675,10 +605,7 @@ mod tests {
             !passed_over(121, since, 108, (&[], false)),
             "a spawn come free waits on the queue"
         );
-        assert!(
-            !passed_over(100, since, 108, (&[&oven(10, 29)], false)),
-            "inside the landing"
-        );
+        assert!(!passed_over(100, since, 108, (&[&oven(10, 29)], false)), "inside the landing");
         assert!(
             passed_over(122, since, 108, (&[&oven(10, 29)], false)),
             "begun after it, past the landing"
@@ -701,10 +628,7 @@ mod tests {
         assert!(answers(&forming, 10, false), "the tick it began forming");
         assert!(!answers(&forming, 11, false), "a re-price while it forms");
         assert!(answers(&forming, 11, true), "its first answer");
-        let starved = Engagement {
-            unanswered: true,
-            ..forming
-        };
+        let starved = Engagement { unanswered: true, ..forming };
         assert!(answers(&starved, 11, false), "one it stood unanswered on");
     }
 

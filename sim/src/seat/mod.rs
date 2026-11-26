@@ -1,14 +1,19 @@
 //! The players our bot plays in one world (`--players`): each its own user,
 //! `Driver` and outputs.
-use std::fs::{self, File};
-use std::io::{BufWriter, Write};
+use std::{
+    fs::{self, File},
+    io::{BufWriter, Write},
+};
 
 use serde_json::{Value, json};
 
-use crate::driver::{Driver, Maps};
-use crate::sample::Sampler;
-use crate::view::View;
-use crate::{engaged, reset, world};
+use crate::{
+    driver::{Driver, Maps},
+    engaged, reset,
+    sample::Sampler,
+    view::View,
+    world,
+};
 
 /// A player our bot plays: its user, first room, and Memory's text at the start.
 pub struct Seat {
@@ -85,9 +90,7 @@ pub fn players(
         driver.kept = kept();
         let memory: Value = serde_json::from_str(&seat.memory).unwrap_or_default();
         let declared = |key: &str| -> Vec<String> {
-            let sites = (memory["v2"]["declarations"][key].as_array())
-                .into_iter()
-                .flatten();
+            let sites = (memory["v2"]["declarations"][key].as_array()).into_iter().flatten();
             (sites.filter_map(|c| Some(c["room"].as_str()?.into()))).collect()
         };
         let followed = [declared("outposts"), follow.to_vec()].concat();

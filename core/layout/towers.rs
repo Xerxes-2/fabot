@@ -1,9 +1,11 @@
 //! Repair is economy work, but for a rampart about to decay away: a colony
 //! may hold no worker for a life.
-use fabot_base::engine;
-use fabot_base::intents::{Action, TowerAct};
-use fabot_base::vocabulary::{Part, ResourceType};
-use fabot_base::world::{self, Creep, Pos, Striker, Structure, power};
+use fabot_base::{
+    engine,
+    intents::{Action, TowerAct},
+    vocabulary::{Part, ResourceType},
+    world::{self, Creep, Pos, Striker, Structure, power},
+};
 
 fn range(a: &Creep, b: &Creep) -> i32 {
     a.pos.range(&b.pos).unwrap_or(i32::MAX)
@@ -11,10 +13,7 @@ fn range(a: &Creep, b: &Creep) -> i32 {
 
 /// The worst case: every healer in reach pre-heals this one target.
 fn heal_on(target: &Creep, hostiles: &[Creep]) -> i32 {
-    hostiles
-        .iter()
-        .map(|h| engine::heal_at(power(h, Part::Heal), range(h, target)))
-        .sum()
+    hostiles.iter().map(|h| engine::heal_at(power(h, Part::Heal), range(h, target))).sum()
 }
 
 fn strikes(hostile: &Creep, struck: &[Pos]) -> bool {
@@ -83,15 +82,10 @@ pub fn fire(
         free.drain(..committed);
     }
 
-    if let Some(wounded) = ours
-        .iter()
-        .filter(|c| c.hits < c.hits_max)
-        .min_by_key(|c| (c.hits - c.hits_max, &c.name))
+    if let Some(wounded) =
+        ours.iter().filter(|c| c.hits < c.hits_max).min_by_key(|c| (c.hits - c.hits_max, &c.name))
     {
-        acts.extend(
-            free.iter()
-                .map(|t| Action::Tower(t.id, TowerAct::Heal(wounded.id))),
-        );
+        acts.extend(free.iter().map(|t| Action::Tower(t.id, TowerAct::Heal(wounded.id))));
     } else if let Some(dying) = (ramparts.iter())
         .filter(|r| r.hits <= 2 * engine::RAMPART_DECAY_AMOUNT)
         .min_by_key(|r| (r.hits, &r.id))
@@ -106,14 +100,16 @@ pub fn fire(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::derive;
-    use crate::fixtures as fx;
-    use crate::run;
-    use fabot_base::intents::Action;
-    use fabot_base::tiles::{self};
-    use fabot_base::world::{Id, Owner};
     use std::collections::BTreeMap;
+
+    use fabot_base::{
+        intents::Action,
+        tiles::{self},
+        world::{Id, Owner},
+    };
+
+    use super::*;
+    use crate::{derive, fixtures as fx, run};
 
     #[test]
     fn a_tower_acts_once_shooting_a_hostile_in_its_room_or_healing_ours() {
@@ -138,12 +134,7 @@ mod tests {
                 .collect();
             let ours: Vec<world::Creep> = (1..=i32::from(wounded % 3))
                 .map(|i| {
-                    fx::creep(
-                        &format!("o{i}"),
-                        Owner::Ours,
-                        50 + i,
-                        tiles::index(25, i % 40 + 5),
-                    )
+                    fx::creep(&format!("o{i}"), Owner::Ours, 50 + i, tiles::index(25, i % 40 + 5))
                 })
                 .collect();
 
@@ -168,10 +159,7 @@ mod tests {
             let (colonies, _) = derive::colonies(&world, &owned, &plans, BTreeMap::new());
             let acts = run::decide_over(&world.rules, &colonies, 0);
 
-            let ids: Vec<String> = acts
-                .iter()
-                .map(fabot_base::intents::Action::actor)
-                .collect();
+            let ids: Vec<String> = acts.iter().map(fabot_base::intents::Action::actor).collect();
             let mut distinct: Vec<String> = Vec::new();
             for id in &ids {
                 if !distinct.contains(id) {

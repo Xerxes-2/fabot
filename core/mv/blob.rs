@@ -1,15 +1,17 @@
 //! A set that walks as one: one field priced at its slowest body, each member
 //! kept near the median member along the walk.
-use std::cmp::Reverse;
-use std::collections::BTreeSet;
+use std::{cmp::Reverse, collections::BTreeSet};
+
+use fabot_atlas::{Atlas, Field, Mover, Target};
+use fabot_base::{
+    engine,
+    grid::{self, FatigueFactor, factor_of, step_ticks},
+    tiles::{self, Tile, TileSet},
+    wish::Wish,
+    world::{Creep, RoomName},
+};
 
 use crate::plan;
-use fabot_atlas::{Atlas, Field, Mover, Target};
-use fabot_base::engine;
-use fabot_base::grid::{self, FatigueFactor, factor_of, step_ticks};
-use fabot_base::tiles::{self, Tile, TileSet};
-use fabot_base::wish::Wish;
-use fabot_base::world::{Creep, RoomName};
 
 /// ⌈(n−1)/2⌉: less, and a file of n deadlocks in a corridor.
 pub fn radius(n: usize) -> i32 {
@@ -19,16 +21,9 @@ pub fn radius(n: usize) -> i32 {
 /// The gait a set walks at: its slowest mover's on plain, then swamp, then road.
 pub fn slowest(factors: impl IntoIterator<Item = FatigueFactor>) -> Option<FatigueFactor> {
     let pace = |f: &FatigueFactor| {
-        [
-            engine::PLAIN_WEIGHT,
-            engine::SWAMP_WEIGHT,
-            engine::ROAD_WEIGHT,
-        ]
-        .map(|w| step_ticks(*f, w))
+        [engine::PLAIN_WEIGHT, engine::SWAMP_WEIGHT, engine::ROAD_WEIGHT].map(|w| step_ticks(*f, w))
     };
-    (factors.into_iter())
-        .filter(|f| f.moves > 0)
-        .min_by_key(|f| Reverse(pace(f)))
+    (factors.into_iter()).filter(|f| f.moves > 0).min_by_key(|f| Reverse(pace(f)))
 }
 
 fn mover(members: &[&Creep]) -> Mover {
@@ -50,27 +45,16 @@ pub fn wishes(
     let mover = mover(members);
     // A set that does not swing closes on whichever of the raid its lead reaches round the
     // swings, its mark guarded or not.
-    let shot = Target {
-        tiles: raid.iter().map(|h| tiles::of_pos(&h.pos)).collect(),
-        ..target.clone()
-    };
+    let shot =
+        Target { tiles: raid.iter().map(|h| tiles::of_pos(&h.pos)).collect(), ..target.clone() };
     let swings = members.iter().any(|c| c.swings());
-    let target = if raid.is_empty() || swings {
-        target
-    } else {
-        &shot
-    };
+    let target = if raid.is_empty() || swings { target } else { &shot };
     let reach: Vec<Option<TileSet>> = (members.iter())
-        .map(|c| {
-            (!c.swings() && !raid.is_empty())
-                .then(|| plan::swung(atlas, c, raid))
-                .flatten()
-        })
+        .map(|c| (!c.swings() && !raid.is_empty()).then(|| plan::swung(atlas, c, raid)).flatten())
         .collect();
     let swung = |i: usize, t: Tile| reach[i].as_ref().is_some_and(|d| d.contains(t));
-    let struck: Vec<bool> = (0..members.len())
-        .map(|i| swung(i, tiles::of_pos(&members[i].pos)))
-        .collect();
+    let struck: Vec<bool> =
+        (0..members.len()).map(|i| swung(i, tiles::of_pos(&members[i].pos))).collect();
 
     fn left(
         atlas: &mut Atlas,
@@ -99,17 +83,11 @@ pub fn wishes(
                     Some(_) if hops == 0 => grid::UNREACHED,
                     Some(ticks) => {
                         let edge = exit(&field, tile);
-                        match (
-                            tiles::room_toward(room, tiles::exit_of(edge)),
-                            tiles::landing(edge),
-                        ) {
+                        match (tiles::room_toward(room, tiles::exit_of(edge)), tiles::landing(edge))
+                        {
                             (Some(next), Some(landing)) => {
                                 let rest = left(atlas, mover, target, hops - 1, next, landing);
-                                if rest == grid::UNREACHED {
-                                    grid::UNREACHED
-                                } else {
-                                    ticks + rest
-                                }
+                                if rest == grid::UNREACHED { grid::UNREACHED } else { ticks + rest }
                             }
                             _ => grid::UNREACHED,
                         }
@@ -122,14 +100,8 @@ pub fn wishes(
     let lags: Vec<i32> = members
         .iter()
         .map(|c| {
-            let ticks = left(
-                atlas,
-                mover,
-                target,
-                target.max_hops,
-                c.pos.room,
-                tiles::of_pos(&c.pos),
-            );
+            let ticks =
+                left(atlas, mover, target, target.max_hops, c.pos.room, tiles::of_pos(&c.pos));
             match (ticks, fatigue_ticks(c)) {
                 (t, Some(resting)) if t != grid::UNREACHED => t + resting,
                 _ => grid::UNREACHED,
@@ -170,20 +142,11 @@ pub fn wishes(
                     .is_none_or(|range| range > r + 1)
         });
 
-    let head_tile = if lagging {
-        anchor_wish.at
-    } else {
-        anchor_wish.head
-    };
+    let head_tile = if lagging { anchor_wish.at } else { anchor_wish.head };
     let head = tiles::to_pos(anchor.pos.room, head_tile);
 
     // Closing on the raid, one the anchor waits for walks to it, not its own way round.
-    let formed = Target {
-        room: head.room,
-        tiles: vec![head_tile],
-        range: r,
-        ..target.clone()
-    };
+    let formed = Target { room: head.room, tiles: vec![head_tile], range: r, ..target.clone() };
     let walks: Vec<Wish> = (members.iter().enumerate())
         .map(|(i, c)| match tiles::seam_range(&c.pos, &head) {
             _ if i == a => anchor_wish.clone(),

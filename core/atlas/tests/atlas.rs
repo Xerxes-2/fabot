@@ -3,20 +3,22 @@
 use std::collections::BTreeSet;
 
 use fabot_atlas::{Atlas, Mover, Target};
-use fabot_base::engine;
-use fabot_base::grid::{
-    FatigueFactor, Footprint, empty_factor, factor_of, loaded_factor, on_edge, step_ticks,
+use fabot_base::{
+    engine,
+    grid::{FatigueFactor, Footprint, empty_factor, factor_of, loaded_factor, on_edge, step_ticks},
+    tiles::{self, Tile, TileSet},
+    vocabulary::{ALL_BODY_PARTS, Part, ResourceType},
+    world::{
+        BodyPart, Creep, Mineral, Owner, Pos, Room, RoomName, Source, Store, Structure,
+        StructureType, World, read, terrain,
+    },
 };
-use fabot_base::tiles::{self, Tile, TileSet};
-use fabot_base::vocabulary::{ALL_BODY_PARTS, Part, ResourceType};
-use fabot_base::world::{
-    BodyPart, Creep, Mineral, Owner, Pos, Room, RoomName, Source, Store, Structure, StructureType,
-    World, read, terrain,
+use proptest::{
+    bool::weighted,
+    collection::vec,
+    prelude::*,
+    sample::{Index, select},
 };
-use proptest::bool::weighted;
-use proptest::collection::vec;
-use proptest::prelude::*;
-use proptest::sample::{Index, select};
 
 const ROOM: RoomName = RoomName::W1N1;
 const CASES: u32 = 256;
@@ -59,11 +61,7 @@ impl Ground {
 }
 
 fn room_of(name: RoomName, terrain: Vec<u8>, structures: Vec<Structure>) -> Room<'static> {
-    Room {
-        terrain: terrain::leak(terrain),
-        structures,
-        ..Room::empty(name)
-    }
+    Room { terrain: terrain::leak(terrain), structures, ..Room::empty(name) }
 }
 
 fn world_of_rooms(rooms: Vec<Room>) -> World {
@@ -89,12 +87,7 @@ fn world_of(ground: &Ground) -> World<'static> {
         .roads
         .iter()
         .map(|&(x, y)| structure(StructureType::Road, true, x, y))
-        .chain(
-            ground
-                .walls
-                .iter()
-                .map(|&(x, y)| structure(StructureType::Wall, false, x, y)),
-        )
+        .chain(ground.walls.iter().map(|&(x, y)| structure(StructureType::Wall, false, x, y)))
         .collect();
     world_of_rooms(vec![room_of(ROOM, ground.terrain.clone(), structures)])
 }
@@ -142,11 +135,7 @@ fn mover() -> impl Strategy<Value = Mover> {
     let footprint = select(vec![Footprint::One, Footprint::Quad]);
     (parts(engine::MAX_BODY_PARTS), any::<bool>(), footprint).prop_map(
         |(body, loaded, footprint)| Mover {
-            factor: if loaded {
-                loaded_factor(&body)
-            } else {
-                empty_factor(&body)
-            },
+            factor: if loaded { loaded_factor(&body) } else { empty_factor(&body) },
             footprint,
         },
     )
@@ -172,25 +161,12 @@ fn creep(owner: Owner, pos: Pos) -> Creep {
 }
 
 fn walk() -> impl Strategy<Value = Walk> {
-    (ground(), mover(), tile(), 0..=3, tile()).prop_map(|(ground, mover, goal, range, start)| {
-        Walk {
-            ground,
-            mover,
-            goal,
-            range,
-            start,
-        }
-    })
+    (ground(), mover(), tile(), 0..=3, tile())
+        .prop_map(|(ground, mover, goal, range, start)| Walk { ground, mover, goal, range, start })
 }
 
 fn target_of(room: RoomName, walk: &Walk) -> Target {
-    Target {
-        room,
-        tiles: vec![walk.goal],
-        range: walk.range,
-        avoid: BTreeSet::new(),
-        max_hops: 4,
-    }
+    Target { room, tiles: vec![walk.goal], range: walk.range, avoid: BTreeSet::new(), max_hops: 4 }
 }
 
 /// Chebyshev range from what a footprint anchored at `anchor` covers to `tile`.
@@ -219,10 +195,7 @@ fn followed(atlas: &Atlas, walk: &Walk, target: &Target) -> Vec<(Tile, i32)> {
             break;
         };
         out.push((tile, ticks));
-        match atlas
-            .first_step(walk.mover, target, &pos)
-            .and_then(|d| tiles::neighbour(tile, d))
-        {
+        match atlas.first_step(walk.mover, target, &pos).and_then(|d| tiles::neighbour(tile, d)) {
             Some(next) if seen < 2 * tiles::COUNT => tile = next,
             _ => break,
         }
@@ -233,11 +206,7 @@ fn followed(atlas: &Atlas, walk: &Walk, target: &Target) -> Vec<(Tile, i32)> {
 #[test]
 fn a_tiles_index_round_trips_through_its_column_and_row_in_terrain_order() {
     for tile in tiles::all() {
-        assert_eq!(
-            tiles::index(tiles::x_of(tile), tiles::y_of(tile)),
-            tile,
-            "tile {tile}"
-        );
+        assert_eq!(tiles::index(tiles::x_of(tile), tiles::y_of(tile)), tile, "tile {tile}");
     }
     assert_eq!(tiles::index(3, 1).index(), 50 + 3, "y * 50 + x");
 }
@@ -247,21 +216,14 @@ fn a_room_name_round_trips_through_world_coordinates() {
     for x in -127..128 {
         for y in (-128..128).step_by(7) {
             let name = RoomName::new(x, y).to_string();
-            assert_eq!(
-                name.parse().ok().map(RoomName::coords),
-                Some((x, y)),
-                "{name}"
-            );
+            assert_eq!(name.parse().ok().map(RoomName::coords), Some((x, y)), "{name}");
         }
     }
 }
 
 #[test]
 fn names_read_as_the_engine_spells_them() {
-    assert_eq!(
-        "W12S28".parse::<RoomName>().ok(),
-        Some(RoomName::new(-13, 28))
-    );
+    assert_eq!("W12S28".parse::<RoomName>().ok(), Some(RoomName::new(-13, 28)));
     assert_eq!("E0N0".parse::<RoomName>().ok(), Some(RoomName::new(0, -1)));
     assert_eq!("W1".parse::<RoomName>().ok(), None, "half a name");
     let sim = "sim".parse::<RoomName>().expect("the simulator's room");
@@ -335,11 +297,7 @@ fn a_steps_ticks_are_the_ceiling_of_its_fatigue_over_the_moves_pay() {
     for weight in 0..50 {
         for moves in 1..=50 {
             let factor = FatigueFactor { weight, moves };
-            for ground in [
-                engine::ROAD_WEIGHT,
-                engine::PLAIN_WEIGHT,
-                engine::SWAMP_WEIGHT,
-            ] {
+            for ground in [engine::ROAD_WEIGHT, engine::PLAIN_WEIGHT, engine::SWAMP_WEIGHT] {
                 let fatigue = ground * weight;
                 assert_eq!(
                     step_ticks(factor, ground),
@@ -832,11 +790,7 @@ fn a_route_goes_round_a_stronghold_where_another_way_stands() {
         .map(|name| room_of(name, vec![0; tiles::COUNT], Vec::new()))
         .collect();
     let world = world_of_rooms(rooms);
-    let (from, core, onto) = (
-        RoomName::new(0, 0),
-        RoomName::new(1, 0),
-        RoomName::new(2, 0),
-    );
+    let (from, core, onto) = (RoomName::new(0, 0), RoomName::new(1, 0), RoomName::new(2, 0));
     let route = |stronghold: bool| {
         let atlas = Atlas::following(Atlas::default(), &world, [(core, None, stronghold)], []);
         atlas.route(&BTreeSet::new(), 4, from, onto).unwrap()
@@ -851,11 +805,7 @@ fn a_room_within_the_hops_is_reached_where_its_way_in_runs_cheaper_round_a_corne
     for y in (0..50).filter(|y| *y != 1) {
         root[tiles::index(49, y)] = terrain::WALL;
     }
-    let (r, east, beyond) = (
-        RoomName::new(0, 0),
-        RoomName::new(1, 0),
-        RoomName::new(2, 0),
-    );
+    let (r, east, beyond) = (RoomName::new(0, 0), RoomName::new(1, 0), RoomName::new(2, 0));
     let mut rooms = vec![room_of(r, root, Vec::new())];
     for name in [east, beyond, RoomName::new(0, 1), RoomName::new(1, 1)] {
         rooms.push(room_of(name, vec![0; tiles::COUNT], Vec::new()));
@@ -867,10 +817,7 @@ fn a_room_within_the_hops_is_reached_where_its_way_in_runs_cheaper_round_a_corne
         .filter(|c| !named.contains(c))
         .collect();
     let atlas = Atlas::of_world(&world);
-    let mover = Mover {
-        footprint: Footprint::One,
-        factor: empty_factor(&[Part::Move]),
-    };
+    let mover = Mover { footprint: Footprint::One, factor: empty_factor(&[Part::Move]) };
     let target = Target {
         room: r,
         tiles: vec![tiles::index(47, 47)],
@@ -884,34 +831,19 @@ fn a_room_within_the_hops_is_reached_where_its_way_in_runs_cheaper_round_a_corne
 
 #[test]
 fn a_towered_room_is_never_crossed_but_still_reached() {
-    let rooms: Vec<Room> = (0..3)
-        .map(|x| room_of(RoomName::new(x, 0), vec![0; tiles::COUNT], Vec::new()))
-        .collect();
+    let rooms: Vec<Room> =
+        (0..3).map(|x| room_of(RoomName::new(x, 0), vec![0; tiles::COUNT], Vec::new())).collect();
     let world = world_of_rooms(rooms);
-    let (from, core, beyond) = (
-        RoomName::new(0, 0),
-        RoomName::new(1, 0),
-        RoomName::new(2, 0),
-    );
+    let (from, core, beyond) = (RoomName::new(0, 0), RoomName::new(1, 0), RoomName::new(2, 0));
     let atlas = Atlas::following(Atlas::default(), &world, [(core, None, true)], []);
     assert_eq!(atlas.route(&BTreeSet::new(), 2, from, beyond), None);
-    assert_eq!(
-        atlas.route(&BTreeSet::new(), 4, from, core),
-        Some(vec![from, core])
-    );
-    assert_eq!(
-        atlas.route(&BTreeSet::new(), 4, core, from),
-        Some(vec![core, from])
-    );
+    assert_eq!(atlas.route(&BTreeSet::new(), 4, from, core), Some(vec![from, core]));
+    assert_eq!(atlas.route(&BTreeSet::new(), 4, core, from), Some(vec![core, from]));
 }
 
 #[test]
 fn an_unseen_keeper_room_reads_as_its_intel_once_intel_arrives() {
-    let (from, keeper, onto) = (
-        RoomName::new(3, 4),
-        RoomName::new(4, 4),
-        RoomName::new(5, 4),
-    );
+    let (from, keeper, onto) = (RoomName::new(3, 4), RoomName::new(4, 4), RoomName::new(5, 4));
     let rooms: Vec<Room> = (3..=5)
         .flat_map(|x| (3..=4).map(move |y| RoomName::new(x, y)))
         .filter(|name| *name != keeper)
@@ -950,12 +882,8 @@ fn each_stretch_into_a_room_split_by_walls_is_a_way_into_its_own_region() {
     for x in 0..50 {
         split[tiles::index(x, 25)] = terrain::WALL;
     }
-    let (r, north, round, east) = (
-        RoomName::new(0, 0),
-        RoomName::new(0, -1),
-        RoomName::new(1, -1),
-        RoomName::new(1, 0),
-    );
+    let (r, north, round, east) =
+        (RoomName::new(0, 0), RoomName::new(0, -1), RoomName::new(1, -1), RoomName::new(1, 0));
     let mut world = world_of_rooms(vec![
         room_of(r, root, Vec::new()),
         room_of(north, open(), Vec::new()),
@@ -967,10 +895,7 @@ fn each_stretch_into_a_room_split_by_walls_is_a_way_into_its_own_region() {
         .filter(|c| ![r, north, round, east].contains(c))
         .collect();
     let atlas = Atlas::of_world(&world);
-    let mover = Mover {
-        footprint: Footprint::One,
-        factor: empty_factor(&[Part::Move]),
-    };
+    let mover = Mover { footprint: Footprint::One, factor: empty_factor(&[Part::Move]) };
     let target = Target {
         room: r,
         tiles: vec![tiles::index(2, 2)],
@@ -988,11 +913,7 @@ fn each_stretch_into_a_room_split_by_walls_is_a_way_into_its_own_region() {
 fn a_walk_toward_a_tile_follows_each_regions_way_on_where_split_rooms_lead_into_each_other() {
     // R and S are each cut in two: R's north half leaves through S's, round
     // by W, X and U; S's south half leaves through R's.
-    let (r, s, t) = (
-        RoomName::new(0, 0),
-        RoomName::new(1, 0),
-        RoomName::new(0, 1),
-    );
+    let (r, s, t) = (RoomName::new(0, 0), RoomName::new(1, 0), RoomName::new(0, 1));
     let rooms: Vec<Room> = [(0, 0), (1, 0), (2, 0), (0, 1), (1, 1), (2, 1)]
         .into_iter()
         .map(|(x, y)| {
@@ -1043,11 +964,7 @@ fn a_structure_of_a_kind_the_crate_does_not_name_only_blocks_its_tile() {
     let room = &mut world.rooms[0];
     room.terrain = terrain::leak(vec![0; tiles::COUNT]);
     assert_eq!(room.blocked, [Pos::new(ROOM, 10, 10)]);
-    assert!(
-        room.structures
-            .iter()
-            .all(|s| s.kind == StructureType::Road)
-    );
+    assert!(room.structures.iter().all(|s| s.kind == StructureType::Road));
     let at = tiles::index(10, 10);
     assert!(fabot_layout::ground::obstacles(room).contains(&at));
     assert!(Atlas::of_world(&world).held_weights(ROOM).unwrap()[at].is_none());

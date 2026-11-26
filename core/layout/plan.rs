@@ -2,14 +2,18 @@
 //! centre that fits one, each structure given the level its room manager
 //! builds it at.
 use fabot_atlas::Atlas;
-use fabot_base::engine;
-use fabot_base::tiles::{self, Tile};
-use fabot_base::world::{Built as _, Rules, StructureType};
+use fabot_base::{
+    engine,
+    tiles::{self, Tile},
+    world::{Built as _, Rules, StructureType},
+};
 
-use super::build::{self, Built};
-use super::ground::Ground;
-use super::place::{self, Labels, SWAMP};
-use super::shape::{self, Item, Plan};
+use super::{
+    build::{self, Built},
+    ground::Ground,
+    place::{self, Labels, SWAMP},
+    shape::{self, Item, Plan},
+};
 
 /// Below it a room's energy goes to its controller alone.
 pub fn haul_level(rules: &Rules) -> i32 {
@@ -19,9 +23,7 @@ pub fn haul_level(rules: &Rules) -> i32 {
 /// Not links, containers or roads: they are seated by what they serve.
 pub fn sized() -> Vec<StructureType> {
     use StructureType::*;
-    vec![
-        Spawn, Extension, Tower, Storage, Terminal, Factory, PowerSpawn, Nuker, Observer, Lab,
-    ]
+    vec![Spawn, Extension, Tower, Storage, Terminal, Factory, PowerSpawn, Nuker, Observer, Lab]
 }
 
 /// Sharing one of the container's seats, so a body there draws from either.
@@ -56,23 +58,16 @@ fn order(
     controller: Option<Tile>,
 ) -> Vec<Tile> {
     let both = |a: &str, b: &str| -> Vec<Tile> {
-        (plan.of(a).into_iter())
-            .filter(|t| plan.has(b, *t))
-            .collect()
+        (plan.of(a).into_iter()).filter(|t| plan.has(b, *t)).collect()
     };
     let numbered = |prefix: &str| -> Vec<Tile> {
-        (0..10)
-            .flat_map(|i| plan.of(&format!("{prefix}.{i}")))
-            .collect()
+        (0..10).flat_map(|i| plan.of(&format!("{prefix}.{i}"))).collect()
     };
     let mut out: Vec<Tile> = match kind {
         "spawn" | "tower" => numbered(kind),
         "extension" => {
-            let mut v = if level >= 3 {
-                both("extension.harvester", "extension")
-            } else {
-                Vec::new()
-            };
+            let mut v =
+                if level >= 3 { both("extension.harvester", "extension") } else { Vec::new() };
             for i in 0..10 {
                 v.extend(both(&format!("extension.bay.{i}"), "extension"));
             }
@@ -169,9 +164,7 @@ fn drawn(rules: &Rules, ground: &Ground, built: &Built) -> (Plan, Vec<Item>) {
     let mut keyed: Vec<(i32, i32, usize, Item)> = Vec::new();
     let mined = rules.level_of(Extractor, 0);
     let mut push = |kind: StructureType, tile: Tile, level: i32| {
-        let filled = keyed
-            .iter()
-            .any(|k| k.3.tile == tile && !k.3.kind.walkable());
+        let filled = keyed.iter().any(|k| k.3.tile == tile && !k.3.kind.walkable());
         if (!fixed.contains(&tile) || kind == Extractor) && !(kind == Road && filled) {
             let seq = keyed.len();
             let rock = |r: &Tile| tiles::range(*r, tile) == 1;
@@ -207,11 +200,7 @@ fn drawn(rules: &Rules, ground: &Ground, built: &Built) -> (Plan, Vec<Item>) {
     }
     // Our sites stack nothing on a container; Hivemind paves the controller's.
     // `push` lays none under a structure already keyed, whose build razes it.
-    for t in plan
-        .of("road")
-        .into_iter()
-        .filter(|t| !plan.has("container", *t))
-    {
+    for t in plan.of("road").into_iter().filter(|t| !plan.has("container", *t)) {
         push(Road, t, if early.contains(&t) { 2 } else { 4 });
     }
     keyed.sort_by_key(|(p, l, s, _)| (*p, *l, *s));
@@ -231,11 +220,7 @@ fn drawn(rules: &Rules, ground: &Ground, built: &Built) -> (Plan, Vec<Item>) {
     let (main, ramps): (Vec<Tile>, Vec<Tile>) =
         plan.of("rampart").into_iter().partition(|t| !ramp(t));
     let item = |kind: StructureType, level: i32| move |tile: Tile| Item { kind, tile, level };
-    let mut ring: Vec<Item> = main
-        .into_iter()
-        .chain(ramps)
-        .map(item(Rampart, 3))
-        .collect();
+    let mut ring: Vec<Item> = main.into_iter().chain(ramps).map(item(Rampart, 3)).collect();
     for (label, level) in [("wall.deco", 4), ("wall.quad", 6)] {
         ring.extend(plan.of(label).into_iter().map(item(Wall, level)));
     }
@@ -244,14 +229,7 @@ fn drawn(rules: &Rules, ground: &Ground, built: &Built) -> (Plan, Vec<Item>) {
     // An outpost or another colony may lie only beyond an exit.
     let free = reached(ground, built.center, (false, true), items.iter());
     let seen = loop {
-        let walk = |held| {
-            reached(
-                ground,
-                built.center,
-                (false, held),
-                items.iter().chain(&ring),
-            )
-        };
+        let walk = |held| reached(ground, built.center, (false, held), items.iter().chain(&ring));
         let (seen, through) = (walk(true), walk(false));
         let beside = |t: Tile| tiles::within(1, t).into_iter().any(|n| seen[n]);
         let pocket = (items.iter())
@@ -260,14 +238,11 @@ fn drawn(rules: &Rules, ground: &Ground, built: &Built) -> (Plan, Vec<Item>) {
             .chain(tiles::all().filter(|t| through[*t] && !seen[*t]))
             .chain(tiles::all().filter(|t| free[*t] && tiles::on_edge(*t) && !seen[*t]));
         let wall = |t: Tile| ring.iter().any(|r| r.tile == t && r.kind == Wall);
-        let inside = tiles::reach(pocket, |n| {
-            !seen[n] && ground.terrain[n] != place::WALL && !wall(n)
-        });
+        let inside =
+            tiles::reach(pocket, |n| !seen[n] && ground.terrain[n] != place::WALL && !wall(n));
         let near =
             |t: Tile| (tiles::within(1, t).into_iter()).any(|n| inside[n] != tiles::UNREACHED);
-        let given: Vec<Item> = ring
-            .extract_if(.., |r| r.kind == Wall && near(r.tile))
-            .collect();
+        let given: Vec<Item> = ring.extract_if(.., |r| r.kind == Wall && near(r.tile)).collect();
         if given.is_empty() {
             break through;
         }
@@ -291,14 +266,7 @@ fn drawn(rules: &Rules, ground: &Ground, built: &Built) -> (Plan, Vec<Item>) {
     let planned: Vec<&Item> = items.iter().chain(&ring).collect();
     let open = |t: Tile| ground.terrain[t] != place::WALL;
     let muster = shape::muster(ground.room, built.center, &planned, open);
-    let plan = Plan {
-        room: ground.room,
-        anchor: built.center,
-        items,
-        ring,
-        unfit,
-        muster,
-    };
+    let plan = Plan { room: ground.room, anchor: built.center, items, ring, unfit, muster };
     (plan, dropped)
 }
 
@@ -324,9 +292,8 @@ fn reached<'a>(
             && (ground.minerals.iter()).any(|m| tiles::range(*m, i.tile) == 1);
         blocked[i.tile] = !i.kind.walkable() || (blocked[i.tile] && i.kind != StructureType::Road);
     }
-    let seeds = (tiles::all())
-        .filter(|t| exits && tiles::on_edge(*t) && !blocked[*t])
-        .chain([core]);
+    let seeds =
+        (tiles::all()).filter(|t| exits && tiles::on_edge(*t) && !blocked[*t]).chain([core]);
     let walked = tiles::reach(seeds, |t| !blocked[t] && !post[t]);
     let walked = |t: Tile| walked[t] != tiles::UNREACHED;
     (tiles::all())
@@ -358,12 +325,7 @@ pub enum Drawn {
 impl Drawing {
     pub fn of(ground: &Ground) -> Drawing {
         let (walls, exits) = place::distances(&ground.terrain);
-        Drawing {
-            walls,
-            exits,
-            next: 0,
-            held: None,
-        }
+        Drawing { walls, exits, next: 0, held: None }
     }
 
     /// Builds the centres in rank order while `budget` lasts, taking the
@@ -409,8 +371,7 @@ pub fn first_of(rules: &Rules, ground: &Ground) -> Option<Plan> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fixtures as fx;
-    use crate::ground;
+    use crate::{fixtures as fx, ground};
 
     #[test]
     fn the_allowance_never_falls_as_the_level_rises() {
@@ -431,9 +392,8 @@ mod tests {
                 .copied()
                 .collect();
             for level in 0..=engine::CONTROLLER_MAX_LEVEL {
-                for kind in sized()
-                    .into_iter()
-                    .chain([StructureType::Link, StructureType::Container])
+                for kind in
+                    sized().into_iter().chain([StructureType::Link, StructureType::Container])
                 {
                     let seated = (plan.items.iter())
                         .filter(|i| i.kind == kind && i.level <= level)
@@ -523,9 +483,8 @@ mod tests {
                 .chain(ground.controller.map(|c| (c, 1)));
 
             let mut reached = vec![false; tiles::COUNT];
-            let mut queue: Vec<Tile> = (tiles::all())
-                .filter(|t| tiles::on_edge(*t) && open(*t))
-                .collect();
+            let mut queue: Vec<Tile> =
+                (tiles::all()).filter(|t| tiles::on_edge(*t) && open(*t)).collect();
             for t in &queue {
                 reached[*t] = true;
             }
@@ -539,10 +498,7 @@ mod tests {
             }
             for (c, reach) in core {
                 for t in tiles::within(reach, c) {
-                    assert!(
-                        !reached[t] || beside_exit(t),
-                        "{t} in reach of {c} outside the ring"
-                    );
+                    assert!(!reached[t] || beside_exit(t), "{t} in reach of {c} outside the ring");
                 }
             }
         }
@@ -609,10 +565,7 @@ mod tests {
                     .collect();
                 let roads = (tiles::around(c.tile).iter())
                     .filter(|t| at(**t).any(|i| i.kind == StructureType::Road));
-                assert!(
-                    bare.is_empty() && roads.count() >= 1,
-                    "{bare:?} bare beside {c:?}"
-                );
+                assert!(bare.is_empty() && roads.count() >= 1, "{bare:?} bare beside {c:?}");
             }
         }
     }
@@ -641,11 +594,7 @@ mod tests {
         let pocketed = fx::pocketed();
         let drawn = (of_ground(&rules, &pocketed).map(|p| (pocketed, p)))
             .into_iter()
-            .chain(
-                fx::samples(4)
-                    .take(fx::MAX_TEST)
-                    .filter_map(|c| fx::plan_of(&c)),
-            );
+            .chain(fx::samples(4).take(fx::MAX_TEST).filter_map(|c| fx::plan_of(&c)));
         for (ground, plan) in drawn {
             let exits: Vec<Tile> = (tiles::all())
                 .filter(|t| tiles::on_edge(*t) && ground.terrain[*t] != place::WALL)
@@ -657,10 +606,7 @@ mod tests {
             for i in &plan.items {
                 assert!(beside(&from_core, i), "{i:?} unreached from the core");
             }
-            let unwalled = Plan {
-                ring: Vec::new(),
-                ..plan.clone()
-            };
+            let unwalled = Plan { ring: Vec::new(), ..plan.clone() };
             let bare = walked(&ground, &unwalled, &[plan.anchor]);
             for t in exits.iter().filter(|t| bare[**t]) {
                 assert!(from_core[*t], "exit {t:?} walled off");
@@ -700,10 +646,9 @@ mod tests {
             let colony = fx::colony(&mut rng);
             let seed = rng.choose(1, 1_000_000) as u64;
             let shuffled = fx::shuffled(&colony, seed);
-            let (Some(a), Some(b)) = (
-                ground::of_room(&colony.room),
-                ground::of_room(&shuffled.room),
-            ) else {
+            let (Some(a), Some(b)) =
+                (ground::of_room(&colony.room), ground::of_room(&shuffled.room))
+            else {
                 continue;
             };
             let whole = of_ground(&rules, &a);

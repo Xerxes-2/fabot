@@ -45,9 +45,7 @@ impl Labels {
     }
 
     pub fn of(&self, label: &str) -> Vec<Tile> {
-        self.sets
-            .get(label)
-            .map_or_else(Vec::new, |s| s.iter().copied().collect())
+        self.sets.get(label).map_or_else(Vec::new, |s| s.iter().copied().collect())
     }
 
     pub fn count(&self, label: &str) -> usize {
@@ -222,12 +220,7 @@ impl<'a> Manager<'a> {
         self.open.fill(None);
         self.closed.fill(false);
         self.nodes.push((self.origin, usize::MAX));
-        self.spots.push(Spot {
-            tile: self.origin,
-            range: 0,
-            node: 0,
-            alive: true,
-        });
+        self.spots.push(Spot { tile: self.origin, range: 0, node: 0, alive: true });
         self.open[self.origin.index()] = Some(0);
     }
 
@@ -331,24 +324,13 @@ impl<'a> Manager<'a> {
     }
 
     fn paved<'b>(terrain: &'b [u8], matrix: &'b [u8]) -> Search<'b> {
-        Search {
-            terrain,
-            matrix,
-            plain: 2,
-            swamp: 2,
-        }
+        Search { terrain, matrix, plain: 2, swamp: 2 }
     }
 
     pub fn accessible(&self, from: Tile) -> bool {
-        let goals: Vec<Goal> = (self.entrances.iter())
-            .map(|t| Goal { tile: *t, range: 0 })
-            .collect();
-        let search = Search {
-            terrain: self.terrain,
-            matrix: &self.matrix,
-            plain: 1,
-            swamp: 1,
-        };
+        let goals: Vec<Goal> =
+            (self.entrances.iter()).map(|t| Goal { tile: *t, range: 0 }).collect();
+        let search = Search { terrain: self.terrain, matrix: &self.matrix, plain: 1, swamp: 1 };
         let found = search.run(from, &goals);
         !found.incomplete
             && (found.path.iter())

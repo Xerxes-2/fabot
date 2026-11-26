@@ -2,15 +2,16 @@
 /// side's kill of the other, at the ranges the faster side picks.
 pub mod fighter;
 
-pub use fighter::Fighter;
-
 use std::collections::BTreeMap;
 
-use fabot_base::grid::{FatigueFactor, step_ticks};
-use fabot_base::tiles::{self, Table};
-use fabot_base::vocabulary::Part;
-use fabot_base::world::{Pos, RoomName};
-use fabot_base::{boost, engine};
+use fabot_base::{
+    boost, engine,
+    grid::{FatigueFactor, step_ticks},
+    tiles::{self, Table},
+    vocabulary::Part,
+    world::{Pos, RoomName},
+};
+pub use fighter::Fighter;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Tower {
@@ -78,14 +79,9 @@ enum Stored {
 impl From<Stored> for Outcome {
     fn from(s: Stored) -> Outcome {
         match s {
-            Stored::Win { ticks, dead, hits } => Outcome::Win(
-                ticks,
-                Losses {
-                    dead,
-                    hits,
-                    ..Losses::default()
-                },
-            ),
+            Stored::Win { ticks, dead, hits } => {
+                Outcome::Win(ticks, Losses { dead, hits, ..Losses::default() })
+            }
             Stored::Kite { ticks } => Outcome::Kite(ticks),
             Stored::Lose => Outcome::Lose,
         }
@@ -156,11 +152,7 @@ fn range_to(tile: &Pos, f: &Fighter) -> Option<i32> {
 }
 
 fn between(a: &Foe, b: &Foe) -> Option<i32> {
-    if a.at == b.at {
-        Some(0)
-    } else {
-        a.f.pos.as_ref().and_then(|p| range_to(p, &b.f))
-    }
+    if a.at == b.at { Some(0) } else { a.f.pos.as_ref().and_then(|p| range_to(p, &b.f)) }
 }
 
 #[derive(Clone)]
@@ -198,25 +190,16 @@ fn heal_onto(weight: i32, horizon: i32, healer: &Healer, target: &Foe) -> i32 {
 fn healers_of(raid: &[Foe]) -> Vec<Healer> {
     raid.iter()
         .filter(|h| h.f.heal > 0)
-        .map(|h| Healer {
-            mender: h.clone(),
-            casts_heal: true,
-            casts_ranged_heal: true,
-        })
+        .map(|h| Healer { mender: h.clone(), casts_heal: true, casts_ranged_heal: true })
         .collect()
 }
 
 fn heal_from(weight: i32, horizon: i32, healers: &[Healer], target: &Foe) -> i32 {
-    healers
-        .iter()
-        .map(|healer| heal_onto(weight, horizon, healer, target))
-        .sum()
+    healers.iter().map(|healer| heal_onto(weight, horizon, healer, target)).sum()
 }
 
 fn rampart_over(side: &Side, f: &Fighter) -> i32 {
-    (f.pos.as_ref())
-        .and_then(|at| side.ramparts.get(at).copied())
-        .unwrap_or(0)
+    (f.pos.as_ref()).and_then(|at| side.ramparts.get(at).copied()).unwrap_or(0)
 }
 
 /// A raid's price at a horizon: its striking bodies' hits in three phases (the
@@ -253,11 +236,7 @@ fn price_as(
     (heals, swings): (bool, bool),
     range_of: &dyn Fn(&Foe) -> i32,
 ) -> Price {
-    let striking: Vec<Foe> = raid
-        .iter()
-        .filter(|h| fighter::strikes(&h.f))
-        .cloned()
-        .collect();
+    let striking: Vec<Foe> = raid.iter().filter(|h| fighter::strikes(&h.f)).cloned().collect();
 
     let weapons = |h: &Foe| -> (i32, i32) {
         let range = range_of(h);
@@ -282,15 +261,10 @@ fn price_as(
         .collect();
 
     let heal_on = |target: &Foe| heal_from(terrain.weight, horizon, &healers, target);
-    let breachers: Vec<Foe> = (raid.iter())
-        .filter(|h| h.f.work > 0 || h.f.harmless)
-        .cloned()
-        .collect();
+    let breachers: Vec<Foe> =
+        (raid.iter()).filter(|h| h.f.work > 0 || h.f.harmless).cloned().collect();
 
-    let focus: Option<Foe> = raid
-        .iter()
-        .min_by_key(|h| fighter::kill_rank(&h.f))
-        .cloned();
+    let focus: Option<Foe> = raid.iter().min_by_key(|h| fighter::kill_rank(&h.f)).cloned();
 
     let dropped: i32 = match &focus {
         None => 0,
@@ -302,10 +276,7 @@ fn price_as(
                 if heal_onto(
                     terrain.weight,
                     horizon,
-                    &Healer {
-                        casts_ranged_heal: false,
-                        ..healer.clone()
-                    },
+                    &Healer { casts_ranged_heal: false, ..healer.clone() },
                     focus,
                 ) > 0
                 {
@@ -320,11 +291,8 @@ fn price_as(
     };
 
     let healed = focus.as_ref().map_or(0, &heal_on);
-    let tough: Vec<Foe> = striking
-        .iter()
-        .filter(|h| fighter::tough_hits(&h.f) > 0)
-        .cloned()
-        .collect();
+    let tough: Vec<Foe> =
+        striking.iter().filter(|h| fighter::tough_hits(&h.f) > 0).cloned().collect();
 
     Price {
         breaches: !breachers.is_empty(),
@@ -342,14 +310,8 @@ fn price_as(
             .max()
             .unwrap_or(healed),
         shield: striking.iter().map(|h| rampart_over(theirs, &h.f)).sum(),
-        tough: tough
-            .iter()
-            .map(|h| fighter::damage_for(&h.f, fighter::tough_hits(&h.f)))
-            .sum(),
-        hits: striking
-            .iter()
-            .map(|h| h.f.hits - fighter::tough_hits(&h.f))
-            .sum(),
+        tough: tough.iter().map(|h| fighter::damage_for(&h.f, fighter::tough_hits(&h.f))).sum(),
+        hits: striking.iter().map(|h| h.f.hits - fighter::tough_hits(&h.f)).sum(),
         whole: (striking.iter())
             .map(|h| {
                 let full = engine::PART_HITS * h.f.body.len() as i32;
@@ -427,9 +389,7 @@ impl Focused<'_> {
 
     fn weakens(&self, left: f64) -> f64 {
         let now = self.live(left);
-        let weaker = self.by_live[..now]
-            .iter()
-            .rposition(|a| *a != self.by_live[now]);
+        let weaker = self.by_live[..now].iter().rposition(|a| *a != self.by_live[now]);
         weaker.map_or(0.0, |k| f64::from(engine::PART_HITS * k as i32))
     }
 
@@ -538,14 +498,10 @@ fn focused_against(
             if alive.is_empty() && !whole.is_empty() {
                 return ends(false, Some(elapsed), dead, &[]);
             }
-            let landed: Vec<(Focused, f64)> = (alive.iter())
-                .filter(|(b, _)| b.lands <= elapsed)
-                .copied()
-                .collect();
-            let acting: Vec<(Focused, f64)> = (landed.iter())
-                .filter(|(b, _)| b.acts <= elapsed)
-                .copied()
-                .collect();
+            let landed: Vec<(Focused, f64)> =
+                (alive.iter()).filter(|(b, _)| b.lands <= elapsed).copied().collect();
+            let acting: Vec<(Focused, f64)> =
+                (landed.iter()).filter(|(b, _)| b.acts <= elapsed).copied().collect();
             let next = (alive.iter().flat_map(|(b, _)| [b.lands, b.acts]))
                 .filter(|lands| *lands > elapsed)
                 .reduce(f64::min);
@@ -562,18 +518,11 @@ fn focused_against(
                 }
                 Some(at) => {
                     let heals = sum(&acting, |a| a.heals) as i32;
-                    (
-                        f64::from(price.damage + alive[at].0.taken(alive[at].1) - heals),
-                        alive[at].1,
-                    )
+                    (f64::from(price.damage + alive[at].0.taken(alive[at].1) - heals), alive[at].1)
                 }
                 None => (0.0, 0.0),
             };
-            let span = if rate <= 0.0 {
-                f64::INFINITY
-            } else {
-                layer / rate
-            };
+            let span = if rate <= 0.0 { f64::INFINITY } else { layer / rate };
             let weakens = match focus {
                 Some(at) if rate > 0.0 => (alive[at].1 - alive[at].0.weakens(alive[at].1)) / rate,
                 _ => f64::INFINITY,
@@ -618,21 +567,14 @@ fn focused_against(
         &price,
         towers,
         approach,
-        &[
-            f64::from(price.shield),
-            f64::from(price.tough),
-            f64::from(price.hits),
-        ],
+        &[f64::from(price.shield), f64::from(price.tough), f64::from(price.hits)],
     ) {
         Ok(t) => ends(true, Some(t), 0, &whole),
         Err(layers) => fight(layers),
     };
 
     if total == 0 {
-        Fight {
-            won: !price.breaches || out_heals(&price, dealt(&whole, &whole)),
-            ..fight
-        }
+        Fight { won: !price.breaches || out_heals(&price, dealt(&whole, &whole)), ..fight }
     } else {
         fight
     }
@@ -801,10 +743,7 @@ fn ranges_between(terrain: Terrain, raid: &[Foe], fighters: &[Fighter]) -> (Stan
         .iter()
         .filter(|h| fighter::strikes(&h.f))
         .map(|h| {
-            let ranges = fighters
-                .iter()
-                .map(|f| standoff(terrain, raid, f, h))
-                .collect();
+            let ranges = fighters.iter().map(|f| standoff(terrain, raid, f, h)).collect();
 
             (h.clone(), ranges)
         })
@@ -836,9 +775,7 @@ fn range_of(
 ) -> i32 {
     match rows.iter().find(|(h, _)| h.at == hostile.at) {
         Some((_, ranges)) => ranges.iter().copied().min(),
-        None => (fighters.iter())
-            .map(|f| standoff(terrain, raid, f, hostile))
-            .min(),
+        None => (fighters.iter()).map(|f| standoff(terrain, raid, f, hostile)).min(),
     }
     .unwrap_or(engine::MELEE_RANGE)
 }
@@ -864,11 +801,7 @@ fn hit_back(
         .iter()
         .filter(|(h, _)| rampart_over(theirs, &h.f) == 0)
         .map(|(h, ranges)| {
-            (
-                h.f.clone(),
-                engine::strike_at(h.f.attack, 0, engine::MELEE_RANGE),
-                ranges.clone(),
-            )
+            (h.f.clone(), engine::strike_at(h.f.attack, 0, engine::MELEE_RANGE), ranges.clone())
         })
         .filter(|(_, swing, _)| *swing > 0)
         .collect();
@@ -887,11 +820,7 @@ fn hit_back(
                 0
             } else {
                 swings.iter().fold(0, |most, (_, swing, ranges)| {
-                    if ranges[i] <= engine::MELEE_RANGE {
-                        most.max(*swing)
-                    } else {
-                        most
-                    }
+                    if ranges[i] <= engine::MELEE_RANGE { most.max(*swing) } else { most }
                 })
             }
         })
@@ -905,7 +834,7 @@ fn hit_back(
                 .zip(ranges.iter())
                 .any(|(swings_here, range)| *swings_here && *range <= engine::MELEE_RANGE)
         })
-        .map(|(h, _, _)| fighter::effective_hits(h))
+        .map(|(h, ..)| fighter::effective_hits(h))
         .sum();
 
     let struck: Vec<(Fighter, i32)> = swings
@@ -983,17 +912,11 @@ fn on_ramparts(
         .bodies
         .iter()
         .map(|fighter| {
-            match fighter
-                .pos
-                .as_ref()
-                .and_then(|at| ours.ramparts.get(at).map(|hits| (*at, *hits)))
+            match fighter.pos.as_ref().and_then(|at| ours.ramparts.get(at).map(|hits| (*at, *hits)))
             {
                 Some((tile, hits)) if stays_on(terrain, stance, raid, fighter, &tile) => {
                     held.insert(0, (tile, hits));
-                    Fighter {
-                        strikes_back: 0,
-                        ..fighter.clone()
-                    }
+                    Fighter { strikes_back: 0, ..fighter.clone() }
                 }
                 _ => fighter.clone(),
             }
@@ -1015,11 +938,7 @@ fn broken_by(terrain: Terrain, horizon: i32, price: &Price, ramparts: &[(Pos, i3
                 })
             };
 
-            if ramparts.iter().any(|(tile, _)| reaches(tile)) {
-                *rate
-            } else {
-                0
-            }
+            if ramparts.iter().any(|(tile, _)| reaches(tile)) { *rate } else { 0 }
         })
         .sum()
 }
@@ -1031,11 +950,7 @@ pub fn spawned(parts: impl IntoIterator<Item = usize>, spawns: i32) -> Vec<i32> 
 /// The tick each body of `parts` parts stands spawned, in ask order, the
 /// first spawn free making the next, each spawn free at its `free` (none read as one free now).
 pub fn spawned_after(free: &[i32], parts: impl IntoIterator<Item = usize>) -> Vec<i32> {
-    let mut free = if free.is_empty() {
-        vec![0]
-    } else {
-        free.to_vec()
-    };
+    let mut free = if free.is_empty() { vec![0] } else { free.to_vec() };
     (parts.into_iter())
         .map(|n| {
             free.iter_mut().min().map_or(0, |next| {
@@ -1060,10 +975,7 @@ fn walks_in(terrain: Terrain, side: &Side, bodies: &[Fighter], raid: &[Fighter])
             }
         })
         .collect();
-    let gathered = (bodies.iter().zip(&walks))
-        .filter(|(f, _)| cast(f))
-        .map(|(_, w)| *w)
-        .max();
+    let gathered = (bodies.iter().zip(&walks)).filter(|(f, _)| cast(f)).map(|(_, w)| *w).max();
     (bodies.iter().zip(walks))
         .map(|(f, w)| match gathered {
             Some(last) if side.lands_as_one() && cast(f) => last,
@@ -1083,9 +995,7 @@ fn walk_in(terrain: Terrain, cast_walk: Option<i32>, f: &Fighter, raid: &[Fighte
             (Some(at), _) => (raid.iter())
                 .filter_map(|h| Some(at.crow_flies(h.pos.as_ref()?)))
                 .min()
-                .map_or(0, |nearest| {
-                    (nearest - f.reach).max(0) * step(terrain.weight)
-                }),
+                .map_or(0, |nearest| (nearest - f.reach).max(0) * step(terrain.weight)),
         }
 }
 
@@ -1099,11 +1009,8 @@ fn approach_of(terrain: Terrain, stance: Stance, fighters: &[Fighter], raid: &[F
             (Some(_), Some(range)) => {
                 let gap = f64::from((range - f.reach.max(h.reach)).max(0));
 
-                let walks = if stance == Stance::Hold {
-                    None
-                } else {
-                    step_ticks(f.gait, terrain.weight)
-                };
+                let walks =
+                    if stance == Stance::Hold { None } else { step_ticks(f.gait, terrain.weight) };
 
                 match (walks, step_ticks(h.gait, terrain.weight)) {
                     (Some(ours), Some(theirs)) => {
@@ -1129,10 +1036,7 @@ fn towers_on(
     strikes_from: &dyn Fn(&Foe) -> Vec<(Fighter, i32)>,
     raid: &[Foe],
 ) -> i32 {
-    let loaded: Vec<&Tower> = towers
-        .iter()
-        .filter(|t| engine::tower_shots(t.energy) > 0)
-        .collect();
+    let loaded: Vec<&Tower> = towers.iter().filter(|t| engine::tower_shots(t.energy) > 0).collect();
 
     let on = |h: &Foe| -> i32 {
         loaded
@@ -1188,21 +1092,12 @@ fn razes(ours: &Side, theirs: &Side, terrain: Terrain, price: &Price, ticks: i32
 
 /// Each loaded tower spends its energy a shot a tick; no hauler refill is counted.
 fn towers_last(towers: &[Tower], ticks: i32) -> bool {
-    (towers.iter())
-        .map(|t| engine::tower_shots(t.energy))
-        .all(|shots| shots == 0 || ticks <= shots)
+    (towers.iter()).map(|t| engine::tower_shots(t.energy)).all(|shots| shots == 0 || ticks <= shots)
 }
 
 fn exchange(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> Outcome {
-    let raid: Vec<Foe> = theirs
-        .bodies
-        .iter()
-        .enumerate()
-        .map(|(i, f)| Foe {
-            at: i as i32,
-            f: f.clone(),
-        })
-        .collect();
+    let raid: Vec<Foe> =
+        theirs.bodies.iter().enumerate().map(|(i, f)| Foe { at: i as i32, f: f.clone() }).collect();
 
     let (fighters, ramparts) = on_ramparts(terrain, stance, ours, &raid);
 
@@ -1229,21 +1124,11 @@ fn exchange(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> Out
         }
     };
 
-    let back = hit_back(
-        theirs,
-        &fighters,
-        mine.iter().map(|(range, _)| *range),
-        &rows,
-    );
+    let back = hit_back(theirs, &fighters, mine.iter().map(|(range, _)| *range), &rows);
 
     let kited: Vec<Fighter> = match stance {
         Stance::Hold => Vec::new(),
-        Stance::Standoff => theirs
-            .bodies
-            .iter()
-            .filter(|f| fighter::strikes(f))
-            .cloned()
-            .collect(),
+        Stance::Standoff => theirs.bodies.iter().filter(|f| fighter::strikes(f)).cloned().collect(),
     };
 
     let pairs: Vec<(&Fighter, (i32, i32))> = fighters.iter().zip(mine.iter().copied()).collect();
@@ -1252,11 +1137,9 @@ fn exchange(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> Out
         match (stance, rows.iter().find(|(r, _)| r.at == h.at)) {
             (_, Some(_)) if fighter::stationary(&h.f) => Vec::new(),
             (Stance::Hold, Some(_)) => fighters.iter().map(|f| (f.clone(), h.f.reach)).collect(),
-            (Stance::Standoff, Some((_, ranges))) => fighters
-                .iter()
-                .cloned()
-                .zip(ranges.iter().copied())
-                .collect(),
+            (Stance::Standoff, Some((_, ranges))) => {
+                fighters.iter().cloned().zip(ranges.iter().copied()).collect()
+            }
             (_, None) => Vec::new(),
         }
     };
@@ -1277,11 +1160,7 @@ fn exchange(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> Out
         .collect();
     // A body in the raid's reach is struck from now, though it reaches its own range later.
     let in_reach = struck.contains(&true);
-    let waits = if ours.lands_as_one() && !in_reach {
-        last - first
-    } else {
-        0
-    };
+    let waits = if ours.lands_as_one() && !in_reach { last - first } else { 0 };
     let since = if in_reach { 0 } else { first };
     let joins = if in_reach { last } else { 0 };
     let lands = |walk: i32, struck: bool| match (struck, ours.lands_as_one()) {
@@ -1325,11 +1204,8 @@ fn exchange(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> Out
     let approach = approach_of(terrain, stance, &fighters, &theirs.bodies);
 
     let settle = |horizon: i32, price: &Price| -> (Outcome, i32) {
-        let struck = if price.swings {
-            struck_back(price, dealt, back.struck, back.swingers)
-        } else {
-            0
-        };
+        let struck =
+            if price.swings { struck_back(price, dealt, back.struck, back.swingers) } else { 0 };
         let damage = dealt + struck;
 
         let bodies: Vec<Focused> = bodies
@@ -1351,28 +1227,16 @@ fn exchange(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> Out
             broken_by(terrain, horizon, price, &ramparts),
         );
 
-        let fight = focused_against(
-            price,
-            (towers, struck),
-            &bodies,
-            shield,
-            (walking_in, approach),
-        );
+        let fight =
+            focused_against(price, (towers, struck), &bodies, shield, (walking_in, approach));
 
         let ticks = waits + fight.ticks.map_or(LONGEST, |t| t.ceil() as i32);
 
         let outcome = if priced.damage == 0 && !kited.is_empty() {
-            let least = kited
-                .iter()
-                .map(|h| fighter::damage_for(h, priced.healing))
-                .min()
-                .unwrap_or(0);
+            let least =
+                kited.iter().map(|h| fighter::damage_for(h, priced.healing)).min().unwrap_or(0);
 
-            if damage > least {
-                Outcome::Kite(ticks)
-            } else {
-                Outcome::Lose
-            }
+            if damage > least { Outcome::Kite(ticks) } else { Outcome::Lose }
         } else if fight.won
             && (!fighters.is_empty()
                 || towers_last(&ours.towers, ticks) && !razes(ours, theirs, terrain, price, ticks))
@@ -1424,16 +1288,8 @@ pub fn stance_against(stance: Stance, ours: &Side, theirs: &Side, terrain: Terra
 
     if stance == Stance::Hold
         && theirs.bodies.iter().any(|h| h.reach > reach)
-        && !exchange(
-            Stance::Hold,
-            &Side {
-                bodies: Vec::new(),
-                ..ours.clone()
-            },
-            theirs,
-            terrain,
-        )
-        .is_win()
+        && !exchange(Stance::Hold, &Side { bodies: Vec::new(), ..ours.clone() }, theirs, terrain)
+            .is_win()
     {
         Stance::Standoff
     } else {
@@ -1449,21 +1305,13 @@ pub fn outcome(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> 
     } else if !theirs.towers.is_empty() {
         Outcome::Lose
     } else {
-        exchange(
-            stance_against(stance, ours, theirs, terrain),
-            ours,
-            theirs,
-            terrain,
-        )
+        exchange(stance_against(stance, ours, theirs, terrain), ours, theirs, terrain)
     }
 }
 
 /// What towers deal a body at `at`.
 pub fn tower_strike(towers: &[Pos], at: &Pos) -> i32 {
-    towers
-        .iter()
-        .map(|p| p.range(at).map_or(0, engine::tower_attack_at))
-        .sum()
+    towers.iter().map(|p| p.range(at).map_or(0, engine::tower_attack_at)).sum()
 }
 
 /// The cheapest cast can be a marginal win that loses its bodies, so lost hits
@@ -1500,9 +1348,8 @@ pub fn cheapest_win(
 
         // An outcome's ticks run from the first landing; the objective is lost
         // the ticks before it too, a boosted set's lab wait among them.
-        let lands = (walks_in(terrain, &side, &side.bodies, &theirs.bodies).into_iter())
-            .min()
-            .unwrap_or(0);
+        let lands =
+            (walks_in(terrain, &side, &side.bodies, &theirs.bodies).into_iter()).min().unwrap_or(0);
         match outcome(stance, &side, theirs, terrain) {
             Outcome::Win(ticks, losses) => {
                 Some(engine::body_cost(body) * n + losses.energy + tick_worth * (lands + ticks))
@@ -1563,20 +1410,13 @@ pub fn cheapest_win(
     };
 
     let bare = boost::Stock::default();
-    let priced = [(&bare, false), (boosts, true)]
-        .into_iter()
-        .flat_map(|(stock, boosted)| {
-            (bodies.iter()).filter_map(move |body| Some((cheapest(body, stock)?, boosted)))
-        });
+    let priced = [(&bare, false), (boosts, true)].into_iter().flat_map(|(stock, boosted)| {
+        (bodies.iter()).filter_map(move |body| Some((cheapest(body, stock)?, boosted)))
+    });
 
     priced
         .min_by_key(|((set, spent), boosted)| {
-            (
-                *spent,
-                set.iter().map(Vec::len).sum::<usize>(),
-                set.len(),
-                *boosted,
-            )
+            (*spent, set.iter().map(Vec::len).sum::<usize>(), set.len(), *boosted)
         })
         .map(|((set, _), boosted)| (set, boosted))
 }
@@ -1604,16 +1444,10 @@ mod tests {
     #[test]
     fn a_cast_lands_on_the_first_spawn_free() {
         assert_eq!(spawned_after(&[0, 15], [10, 10, 10]), vec![30, 45, 60]);
-        assert_eq!(
-            spawned_after(&[], [10, 10]),
-            vec![30, 60],
-            "no spawn reads as one free"
-        );
+        assert_eq!(spawned_after(&[], [10, 10]), vec![30, 60], "no spawn reads as one free");
         assert_eq!(spawned([10, 10, 10], 3), vec![30, 30, 30]);
     }
-    use proptest::collection::vec;
-    use proptest::prelude::*;
-    use proptest::sample::select;
+    use proptest::{collection::vec, prelude::*, sample::select};
 
     const ROOM: RoomName = RoomName::W1N1;
 
@@ -1624,9 +1458,8 @@ mod tests {
         let part = select(vec![Attack, RangedAttack, Heal, Move, Tough, Work]);
         let at = (1..=48, 1..=48).prop_map(|(x, y)| Some(Pos::new(ROOM, x, y)));
         (vec(part, 1..=20), 0..=3usize, at).prop_map(|(body, tier, pos)| {
-            let boosts: Vec<_> = (body.iter())
-                .map(|p| fabot_base::testing::boosted(*p, tier))
-                .collect();
+            let boosts: Vec<_> =
+                (body.iter()).map(|p| fabot_base::testing::boosted(*p, tier)).collect();
             fighter::of_parts(&body, &boosts, 100 * body.len() as i32, pos, 0)
         })
     }
@@ -1636,10 +1469,7 @@ mod tests {
             bodies,
             ramparts: BTreeMap::new(),
             towers: (0..towers)
-                .map(|k| Tower {
-                    pos: Pos::new(ROOM, 10 + k, 10),
-                    energy: 1000,
-                })
+                .map(|k| Tower { pos: Pos::new(ROOM, 10 + k, 10), energy: 1000 })
                 .collect(),
             ..Side::default()
         })
@@ -1650,10 +1480,7 @@ mod tests {
     }
 
     fn bare(s: &Side) -> Side {
-        Side {
-            towers: Vec::new(),
-            ..s.clone()
-        }
+        Side { towers: Vec::new(), ..s.clone() }
     }
 
     fn healing(healing: i32, whole: i32) -> Price {
@@ -1757,26 +1584,11 @@ mod tests {
         let hits = |near: &dyn Fn(i32) -> Fighter, x: i32, raider: &Fighter| {
             let mut bodies = vec![near(x), near(x)];
             bodies.extend((0..4).map(|_| ranger(12)));
-            bodies.push(body(
-                &[Attack, Attack, Attack, Heal, Move, Move, Move, Move],
-                5,
-            ));
-            let ours = Side {
-                bodies,
-                together: true,
-                ..Side::default()
-            };
-            let theirs = Side {
-                bodies: vec![raider.clone()],
-                ..Side::default()
-            };
-            let ground = Terrain {
-                weight: 2,
-                run_off: 40,
-            };
-            outcome(Stance::Standoff, &ours, &theirs, ground)
-                .losses()
-                .hits
+            bodies.push(body(&[Attack, Attack, Attack, Heal, Move, Move, Move, Move], 5));
+            let ours = Side { bodies, together: true, ..Side::default() };
+            let theirs = Side { bodies: vec![raider.clone()], ..Side::default() };
+            let ground = Terrain { weight: 2, run_off: 40 };
+            outcome(Stance::Standoff, &ours, &theirs, ground).losses().hits
         };
 
         assert!(hits(&ranger, 17, &gunner) > hits(&ranger, 12, &gunner));
@@ -1795,10 +1607,7 @@ mod tests {
             parts,
             in_labs: 0,
         });
-        let stock = boost::Stock {
-            held: held.to_vec(),
-            energy: 40,
-        };
+        let stock = boost::Stock { held: held.to_vec(), energy: 40 };
         let cast = fighter::cast_boosted([&body[..], &body[..]], &stock);
         assert_eq!((cast[0].attack, cast[0].gait.moves), (40, 20));
         assert_eq!((cast[1].attack, cast[1].gait.moves), (20, 10));

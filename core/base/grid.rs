@@ -3,9 +3,11 @@
 use std::num::NonZeroU8;
 
 use super::tiles::{self, Tile};
-use crate::engine;
-use crate::vocabulary::{Boost, Part, ResourceType, multiple};
-use crate::world::Creep;
+use crate::{
+    engine,
+    vocabulary::{Boost, Part, ResourceType, multiple},
+    world::Creep,
+};
 
 pub const UNREACHED: i32 = i32::MAX;
 
@@ -52,10 +54,7 @@ pub fn factor(
 }
 
 pub fn factor_of(creep: &Creep) -> FatigueFactor {
-    factor(
-        creep.body.iter().map(|p| (p.kind, p.boost, p.hits > 0)),
-        creep.store.used(),
-    )
+    factor(creep.body.iter().map(|p| (p.kind, p.boost, p.hits > 0)), creep.store.used())
 }
 
 pub fn empty_factor(body: &[Part]) -> FatigueFactor {
@@ -93,9 +92,7 @@ pub fn step_ticks(factor: FatigueFactor, weight: i32) -> Option<i32> {
 
 /// The flood reads a table, not a closure.
 pub fn step_table(factor: FatigueFactor) -> Vec<Option<u16>> {
-    (0..=SEAT_WEIGHT)
-        .map(|w| step_ticks(factor, w).map(|t| t as u16))
-        .collect()
+    (0..=SEAT_WEIGHT).map(|w| step_ticks(factor, w).map(|t| t as u16)).collect()
 }
 
 /// A tile's step weight; None where nothing may stand.
@@ -119,12 +116,8 @@ pub fn weight_of(footprint: Footprint, weights: &[Weight; tiles::COUNT], tile: T
             } else {
                 let i = tile.index();
                 let side = tiles::SIDE as usize;
-                let (a, b, c, d) = (
-                    weights[i]?,
-                    weights[i + 1]?,
-                    weights[i + side]?,
-                    weights[i + side + 1]?,
-                );
+                let (a, b, c, d) =
+                    (weights[i]?, weights[i + 1]?, weights[i + side]?, weights[i + side + 1]?);
                 Some(a.max(b).max(c.max(d)))
             }
         }

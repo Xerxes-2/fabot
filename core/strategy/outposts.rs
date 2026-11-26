@@ -1,18 +1,22 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::expand;
 use fabot_atlas::{self as atlas, Atlas, Derived, Home};
-use fabot_base::declarations::{ColonyPlan, Declarations, FAR_HOPS, Outpost, REACH_HOPS, Stage};
-use fabot_base::engine;
-use fabot_base::intel::Intel;
-use fabot_base::tiles;
-use fabot_base::tuning::Tuning;
-use fabot_base::vocabulary::{CLAIMER, Part};
-use fabot_base::world::{Owner, Pos, RoomName, World};
-use fabot_economy::bodies;
-use fabot_economy::slots;
-use fabot_fight::casting;
-use fabot_fight::shape::{Engagement, Objective};
+use fabot_base::{
+    declarations::{ColonyPlan, Declarations, FAR_HOPS, Outpost, REACH_HOPS, Stage},
+    engine,
+    intel::Intel,
+    tiles,
+    tuning::Tuning,
+    vocabulary::{CLAIMER, Part},
+    world::{Owner, Pos, RoomName, World},
+};
+use fabot_economy::{bodies, slots};
+use fabot_fight::{
+    casting,
+    shape::{Engagement, Objective},
+};
+
+use crate::expand;
 
 /// What one intent costs the engine; a body acts about once a tick.
 const INTENT_CPU: f64 = 0.2;
@@ -63,11 +67,8 @@ pub fn net(world: &World, c: &Candidate) -> f64 {
 
 fn worked(c: &Candidate, capacity: i32, reserved: bool, spend: &dyn Fn(f64) -> f64) -> Price {
     use Part::{Carry, Move};
-    let rate = if reserved {
-        engine::HELD_OUTPUT_PER_TICK
-    } else {
-        engine::NEUTRAL_OUTPUT_PER_TICK
-    };
+    let rate =
+        if reserved { engine::HELD_OUTPUT_PER_TICK } else { engine::NEUTRAL_OUTPUT_PER_TICK };
     let n = c.outpost.sources.len() as f64;
     let dig = bodies::harvester(false, rate, capacity).unwrap_or_default();
     // A new remote has no road: its haulers are 1:1.
@@ -123,10 +124,7 @@ pub fn busy(
     for room in fights {
         serving.extend(casters(atlas, derived, &declarations.avoid, room));
     }
-    (plans.iter())
-        .filter(|p| serving.contains(&p.room) || p.owes)
-        .map(|p| p.room)
-        .collect()
+    (plans.iter()).filter(|p| serving.contains(&p.room) || p.owes).map(|p| p.room).collect()
 }
 
 /// The colonies Fight casts a fight in `room` from at rest; a home's own
@@ -140,9 +138,8 @@ pub fn casters(
     if derived.colonies.contains(&room) {
         return vec![room];
     }
-    let colonies: Vec<(RoomName, i32)> = (derived.colonies.iter().zip(&derived.homes))
-        .map(|(r, h)| (*r, h.capacity))
-        .collect();
+    let colonies: Vec<(RoomName, i32)> =
+        (derived.colonies.iter().zip(&derived.homes)).map(|(r, h)| (*r, h.capacity)).collect();
     let tree = atlas.tree(avoid, FAR_HOPS, room);
     casting::homes(&colonies, |from| tree.crossings(from, room))
 }
@@ -167,10 +164,7 @@ pub fn chosen(
     };
     let mut spawn_left: BTreeMap<RoomName, f64> = BTreeMap::new();
     for room in world.spawns.iter().map(|s| s.pos.room) {
-        let spawns = world
-            .working_spawns()
-            .filter(|s| s.pos.room == room)
-            .count() as f64;
+        let spawns = world.working_spawns().filter(|s| s.pos.room == room).count() as f64;
         let share = f64::from(engine::CREEP_LIFETIME) * spawns * tuning.outpost_spawn_share;
         let dug = world.room(room).map_or(0, |r| r.sources.len() as i32);
         let left = match spare.get(&room) {
@@ -186,12 +180,7 @@ pub fn chosen(
     let priced_in =
         |c: &Candidate, left: f64| price(c, capacity(c.home), left, &|net| spend(c.home, net));
     let mut priced: Vec<(Price, Candidate)> = (candidates.into_iter())
-        .map(|c| {
-            (
-                priced_in(&c, spawn_left.get(&c.home).copied().unwrap_or(0.0)),
-                c,
-            )
-        })
+        .map(|c| (priced_in(&c, spawn_left.get(&c.home).copied().unwrap_or(0.0)), c))
         .collect();
     let value = |p: &Price| (p.net - p.unbuilt) / p.spawn.max(1.0);
     priced.sort_by(|(pa, a), (pb, b)| {
@@ -247,9 +236,7 @@ pub fn survey(
         let banks = plans.iter().any(|p| p.room == *home && h.banks(p));
         let young = !stocked(world, *home);
         let mean_of = |hops: i32, outpost: &Outpost, along: &dyn Fn(&Pos) -> Option<i32>| {
-            let ranges: Vec<i32> = (outpost.sources.iter())
-                .filter_map(|s| along(&s.pos))
-                .collect();
+            let ranges: Vec<i32> = (outpost.sources.iter()).filter_map(|s| along(&s.pos)).collect();
             let mean = ranges.iter().sum::<i32>() / (ranges.len() as i32).max(1);
             mean.max(hops * engine::ROOM_SIDE)
         };
@@ -336,26 +323,18 @@ pub fn survey(
 
 #[cfg(test)]
 mod tests {
+    use fabot_base::{declarations::Declared, world::Id};
+
     use super::*;
-    use fabot_base::declarations::Declared;
-    use fabot_base::world::Id;
 
     /// A reserved source is dug by the harvester Economy casts, its spare WORK
     /// counted: 6W1C3M at 800 energy, not 5W.
     #[test]
     fn a_reserved_dig_is_priced_at_the_harvester_economy_casts() {
         let room: RoomName = "W1N1".parse().unwrap();
-        let at = Declared {
-            id: Id::MISREAD,
-            pos: Pos::new(room, 25, 25),
-        };
+        let at = Declared { id: Id::MISREAD, pos: Pos::new(room, 25, 25) };
         let c = Candidate {
-            outpost: Outpost {
-                reserved: true,
-                room,
-                controller: at.clone(),
-                sources: vec![at],
-            },
+            outpost: Outpost { reserved: true, room, controller: at.clone(), sources: vec![at] },
             home: room,
             walk: 0,
             walked: 0,

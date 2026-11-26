@@ -2,13 +2,11 @@
 //! it closed, a JSON row a line, as `scripts/sim/prediction.mjs` reads one.
 use std::collections::{BTreeSet, VecDeque};
 
-use serde::Serialize;
-
-use fabot_base::engine;
-use fabot_base::world::RoomName;
+use fabot_base::{engine, world::RoomName};
 use fabot_exchange::Outcome;
 use fabot_fight::shape::{Closed, Phase};
 use fabot_tactics::Tactic;
+use serde::Serialize;
 
 const ROWS: usize = 200;
 const BYTES: usize = engine::SEGMENT_BYTES;
@@ -109,9 +107,6 @@ mod tests {
             _ => format!(r#"{{"id":{i},"predicted":{{}}}}"#),
         };
         let text = Log::default().push((0..ROWS + 2).map(row).collect());
-        assert_eq!(
-            text.lines().take(3).collect::<Vec<_>>(),
-            [row(0), row(2), row(4)]
-        );
+        assert_eq!(text.lines().take(3).collect::<Vec<_>>(), [row(0), row(2), row(4)]);
     }
 }

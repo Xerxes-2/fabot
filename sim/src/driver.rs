@@ -1,28 +1,33 @@
 //! `src/app/driver.rs` without the wasm seam: Memory as text, segments as
 //! values, the heap (`ARCHITECTURE.md` §4) kept across ticks until `reset`.
-use std::collections::{BTreeMap, BTreeSet};
-use std::io::Write;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    io::Write,
+};
 
-use fabot_base::declarations::Declarations;
-use fabot_base::intel::Intel;
-use fabot_base::intents::Action;
-use fabot_base::tiles;
-use fabot_base::world::{RoomName, World};
-use fabot_core::drive::{self, Terrains};
-use fabot_core::memory::Memory;
+use fabot_base::{
+    declarations::Declarations,
+    intel::Intel,
+    intents::Action,
+    tiles,
+    world::{RoomName, World},
+};
+use fabot_core::{
+    drive::{self, Terrains},
+    memory::Memory,
+};
 use fabot_observe::metrics::{self, Metrics};
 use krebs::intents::RoomIntents;
 use screeps::LocalRoomTerrain;
 use serde_json::{Value, json};
 
-use crate::view::{View, now};
-use crate::{act, read, reset};
+use crate::{
+    act, read, reset,
+    view::{View, now},
+};
 
 /// Every room's terrain, read once: the world never changes it.
-pub struct Maps(
-    pub Vec<(RoomName, LocalRoomTerrain)>,
-    pub BTreeSet<RoomName>,
-);
+pub struct Maps(pub Vec<(RoomName, LocalRoomTerrain)>, pub BTreeSet<RoomName>);
 
 impl Terrains for Maps {
     fn terrain(&self, room: RoomName) -> Option<&LocalRoomTerrain> {
@@ -92,12 +97,7 @@ impl<W: Write> Driver<W> {
         };
         let mut phases = Vec::new();
         let (heap, intel, metrics) = self.kept.decide(t);
-        let ran = drive::run(
-            heap,
-            (&mut memory, intel, metrics),
-            (&now, &mut phases, false),
-            seam,
-        );
+        let ran = drive::run(heap, (&mut memory, intel, metrics), (&now, &mut phases, false), seam);
         self.memory = written.unwrap_or(memory.text);
         let idle = ran.telemetry.idle.into_iter();
         self.idle = idle.map(|(n, w)| (n, w.into())).collect();
@@ -168,18 +168,11 @@ mod tests {
             BTreeMap::from([(room, values)])
         };
         let ring = VecDeque::from([
-            Window {
-                start: 0,
-                ticks: 100,
-                rows: row(None, &[("held", 100), ("exposure", 0)]),
-            },
+            Window { start: 0, ticks: 100, rows: row(None, &[("held", 100), ("exposure", 0)]) },
             Window {
                 start: 100,
                 ticks: 100,
-                rows: row(
-                    "W1N1".parse::<RoomName>().ok(),
-                    &[("held", 100), ("exposure", 3)],
-                ),
+                rows: row("W1N1".parse::<RoomName>().ok(), &[("held", 100), ("exposure", 3)]),
             },
         ]);
         let mut m = Metrics::default();
@@ -193,9 +186,6 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0]["values"], json!({ "held": 100.0 }));
         assert_eq!(rows[1]["values"], json!({ "held": 100.0, "exposure": 3.0 }));
-        assert_eq!(
-            (rows[0].get("ledger"), &rows[1]["ledger"]),
-            (None, &json!({ "dug": 1 }))
-        );
+        assert_eq!((rows[0].get("ledger"), &rows[1]["ledger"]), (None, &json!({ "dug": 1 })));
     }
 }

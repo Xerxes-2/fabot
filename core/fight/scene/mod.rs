@@ -1,21 +1,29 @@
 /// What the fight reads of a tick's world, once, before any engagement moves.
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::casting;
-use super::kinds::defend::{self, Facts as DefendFacts};
-use super::kinds::sweep;
-use super::shape::{Boosted, Cast, Engagement, Group, Objective, Phase, Plan, Slot};
 use fabot_atlas::{Atlas, Tree};
-use fabot_base::declarations::{self, TacticRule};
-use fabot_base::tiles::Tile;
-use fabot_base::vocabulary::Part;
-use fabot_base::world::{
-    Creep, Id, Owner, Pos, Room, RoomName, Sightings, Structure, StructureType, World, hostiles,
-    sightings,
+use fabot_base::{
+    boost,
+    declarations::{self, TacticRule},
+    engine, tiles,
+    tiles::Tile,
+    vocabulary::Part,
+    world::{
+        Creep, Id, Owner, Pos, Room, RoomName, Sightings, Structure, StructureType, World,
+        hostiles, sightings,
+    },
 };
-use fabot_base::{boost, engine, tiles};
 use fabot_exchange::{self as exchange, Fighter};
 use fabot_tactics::{self as tactics, Tactic};
+
+use super::{
+    casting,
+    kinds::{
+        defend::{self, Facts as DefendFacts},
+        sweep,
+    },
+    shape::{Boosted, Cast, Engagement, Group, Objective, Phase, Plan, Slot},
+};
 
 #[derive(Default)]
 pub(super) struct Asked {
@@ -74,9 +82,7 @@ pub(super) struct Scene<'a> {
 
 /// A set fighting never stands at a lab.
 pub fn boosted(engagements: &[Engagement]) -> impl Iterator<Item = &Boosted> {
-    (engagements.iter())
-        .filter(|e| e.phase == Phase::Forming)
-        .flat_map(|e| &e.plan.boosts)
+    (engagements.iter()).filter(|e| e.phase == Phase::Forming).flat_map(|e| &e.plan.boosts)
 }
 
 /// A body to cast in `slot`, and the colony its price boosts it at.
@@ -111,10 +117,7 @@ impl<'a> Scene<'a> {
 
     /// A body still at its labs walks once the wait its price allowed is out.
     pub(super) fn fighter(&self, c: &Creep) -> Fighter {
-        Fighter {
-            lab_wait: self.at_labs(c).map_or(0, |w| w.left),
-            ..casting::fighter_of(c)
-        }
+        Fighter { lab_wait: self.at_labs(c).map_or(0, |w| w.left), ..casting::fighter_of(c) }
     }
 
     /// The reflex's stance (§7.2): a stranger where it threatens or works our room.
@@ -130,9 +133,7 @@ impl<'a> Scene<'a> {
     }
 
     pub(super) fn safe(room: &Room) -> bool {
-        room.controller
-            .as_ref()
-            .is_some_and(|c| c.owner.is_theirs() && c.safe_mode > 0)
+        room.controller.as_ref().is_some_and(|c| c.owner.is_theirs() && c.safe_mode > 0)
     }
 
     pub(super) fn in_sight(&self, room: RoomName) -> Option<&'a Room<'a>> {
@@ -162,11 +163,7 @@ impl<'a> Scene<'a> {
     ) -> (Vec<Tactic>, Option<Tactic>) {
         let ruling = tactics::ruling(self.rules, e.room, &self.rivals_of(e.room));
 
-        let left = candidates
-            .iter()
-            .copied()
-            .filter(|t| !ruling.forbid.contains(t))
-            .collect();
+        let left = candidates.iter().copied().filter(|t| !ruling.forbid.contains(t)).collect();
 
         (left, ruling.pin)
     }
@@ -183,11 +180,8 @@ impl<'a> Scene<'a> {
         let spawn = engine::spawn_ticks(parts);
         let held = walk.map_or(0, |w| engine::CREEP_LIFETIME - spawn - w);
         let all = sweep::prey(room);
-        let prey: Vec<&Creep> = all
-            .iter()
-            .copied()
-            .filter(|c| sweep::beside(&reached, &c.pos))
-            .collect();
+        let prey: Vec<&Creep> =
+            all.iter().copied().filter(|c| sweep::beside(&reached, &c.pos)).collect();
         let exposed = sweep::exposed_in(&reached, room);
         let escort: Vec<Creep> = (room.hostiles())
             .filter(|h| {
@@ -228,9 +222,7 @@ impl<'a> Scene<'a> {
             let around = tiles::around(here).iter().copied().filter(|t| open(t));
             // The engine carries a body that ends its step on the edge across.
             let step = |t: Tile| shot(t).filter(|_| !tiles::on_edge(t));
-            let left = before(&c.id)
-                .filter(|p| p.room == c.pos.room)
-                .map(tiles::of_pos);
+            let left = before(&c.id).filter(|p| p.room == c.pos.room).map(tiles::of_pos);
             let onward: Vec<Tile> = (around.clone())
                 .filter(|t| left.is_some_and(|l| tiles::range(*t, l) == 2))
                 .collect();
@@ -238,9 +230,7 @@ impl<'a> Scene<'a> {
                 _ if c.fatigue > 0 => vec![shot(here)],
                 Some(l) if l == here => vec![shot(here)],
                 Some(_) if !onward.is_empty() => onward.into_iter().map(step).collect(),
-                _ => std::iter::once(shot(here))
-                    .chain(around.map(step))
-                    .collect(),
+                _ => std::iter::once(shot(here)).chain(around.map(step)).collect(),
             }
         };
         // A body on the gate, standing there or back on it, is carried across
@@ -290,11 +280,7 @@ impl<'a> Scene<'a> {
             worth: sweep::room_worth(room, &prey, &exposed, held)
                 * sweep::kept(room, held, walk.unwrap_or(0))
                 / held.max(1),
-            at: exposed
-                .first()
-                .or(prey.first().map(|c| &c.pos))
-                .copied()
-                .unwrap_or(middle),
+            at: exposed.first().or(prey.first().map(|c| &c.pos)).copied().unwrap_or(middle),
             middle,
             escort,
             marks,
@@ -303,15 +289,11 @@ impl<'a> Scene<'a> {
     }
 
     pub(super) fn towers_in(&self, room: &'a Room<'a>) -> Vec<&'a Structure> {
-        (self.world.rules.towers(room))
-            .filter(|s| s.owner.is_theirs())
-            .collect()
+        (self.world.rules.towers(room)).filter(|s| s.owner.is_theirs()).collect()
     }
 
     pub(super) fn members_of(&self, e: &Engagement) -> Vec<&'a Creep> {
-        (e.ours.keys())
-            .filter_map(|n| self.ours.get(n.as_str()).copied())
-            .collect()
+        (e.ours.keys()).filter_map(|n| self.ours.get(n.as_str()).copied()).collect()
     }
 
     pub(super) fn hops(e: &Engagement) -> i32 {
@@ -335,13 +317,10 @@ impl<'a> Scene<'a> {
         e: &Engagement,
         left: &casting::Boosts,
     ) -> boost::Stock {
-        (self
-            .nearest(atlas, e)
-            .map(|(_, home)| home)
-            .filter(|_| e.phase == Phase::Forming))
-        .and_then(|home| left.get(&home))
-        .cloned()
-        .unwrap_or_default()
+        (self.nearest(atlas, e).map(|(_, home)| home).filter(|_| e.phase == Phase::Forming))
+            .and_then(|home| left.get(&home))
+            .cloned()
+            .unwrap_or_default()
     }
 
     pub(super) fn walk_to(&self, atlas: &Atlas, e: &Engagement, from: RoomName) -> Option<i32> {
@@ -355,9 +334,7 @@ impl<'a> Scene<'a> {
 
     pub(super) fn raid_at(&self, e: &Engagement, room: RoomName) -> Option<Pos> {
         let ours = self.members_of(e).into_iter().map(|c| c.pos);
-        let from: Vec<Pos> = ours
-            .chain(self.homes.iter().map(|&r| tiles::middle(r)))
-            .collect();
+        let from: Vec<Pos> = ours.chain(self.homes.iter().map(|&r| tiles::middle(r))).collect();
         sightings::raid_at(self.remembered.get(&room)?, &from)
     }
 
@@ -384,9 +361,7 @@ impl<'a> Scene<'a> {
     }
 
     pub(super) fn capacity_of(&self, atlas: &Atlas, e: &Engagement) -> i32 {
-        self.colonies_of(atlas, e)
-            .iter()
-            .fold(0, |most, r| most.max(r.energy_capacity))
+        self.colonies_of(atlas, e).iter().fold(0, |most, r| most.max(r.energy_capacity))
     }
 
     pub(super) fn spent(&self, e: &Engagement) -> bool {
@@ -394,11 +369,8 @@ impl<'a> Scene<'a> {
     }
 
     pub(super) fn asked(&self) -> Asked {
-        let mut asked = Asked {
-            casts: self.spawning.clone(),
-            boosts: self.boosts.clone(),
-            ..Asked::default()
-        };
+        let mut asked =
+            Asked { casts: self.spawning.clone(), boosts: self.boosts.clone(), ..Asked::default() };
         for c in &self.spawning {
             asked.queue(c.room, &c.body);
         }
@@ -417,20 +389,12 @@ impl<'a> Scene<'a> {
         let boost_at = (self.nearest(atlas, e).map(|(_, home)| home))
             .filter(|_| set.boosted && e.phase == Phase::Forming);
         let asks: Vec<Wanted> = (e.free(&asked.casts).zip(set.bodies))
-            .map(|(slot, body)| Wanted {
-                slot,
-                body: body.clone(),
-                boost_at,
-            })
+            .map(|(slot, body)| Wanted { slot, body: body.clone(), boost_at })
             .collect();
         let cast = self.ask_slots(atlas, e, asks, asked);
         let held =
             |name: &str| e.ours.contains_key(name) || asked.casts.iter().any(|c| c.name == name);
-        (e.plan.boosts.iter())
-            .filter(|b| held(&b.name))
-            .cloned()
-            .chain(cast)
-            .collect()
+        (e.plan.boosts.iter()).filter(|b| held(&b.name)).cloned().chain(cast).collect()
     }
 
     pub(super) fn ask_slots(
@@ -443,12 +407,7 @@ impl<'a> Scene<'a> {
         let colonies = self.colonies_of(atlas, e);
         let mut boosts = Vec::new();
 
-        for Wanted {
-            slot,
-            body,
-            boost_at: at,
-        } in set
-        {
+        for Wanted { slot, body, boost_at: at } in set {
             let pick = |from: &[&Room]| {
                 casting::colony_for(
                     from,
@@ -459,11 +418,8 @@ impl<'a> Scene<'a> {
                     &body,
                 )
             };
-            let home: Vec<&Room> = colonies
-                .iter()
-                .copied()
-                .filter(|r| Some(r.name) == at)
-                .collect();
+            let home: Vec<&Room> =
+                colonies.iter().copied().filter(|r| Some(r.name) == at).collect();
             let colony = at.and_then(|_| pick(&home)).or_else(|| pick(&colonies));
 
             if let Some(colony) = colony {
@@ -472,19 +428,10 @@ impl<'a> Scene<'a> {
                 // A body priced boosted and cast elsewhere walks straight out.
                 let stock = asked.boosts.get_mut(&colony).filter(|_| Some(colony) == at);
                 if stock.is_some_and(|s| !boost::boosted_by(&body, s).compounds.is_empty()) {
-                    boosts.push(Boosted {
-                        name: name.clone(),
-                        colony,
-                    });
+                    boosts.push(Boosted { name: name.clone(), colony });
                 }
 
-                asked.casts.push(Cast {
-                    engagement: e.id,
-                    name,
-                    slot,
-                    room: colony,
-                    body,
-                });
+                asked.casts.push(Cast { engagement: e.id, name, slot, room: colony, body });
             }
         }
         boosts
@@ -512,9 +459,7 @@ impl<'a> Scene<'a> {
         was: &[Group],
     ) -> DefendFacts {
         let group = self.by_id.get(&e.group).cloned();
-        let on_our_ground = group
-            .as_ref()
-            .is_some_and(|g| defend::on_ground(self, &g.centre));
+        let on_our_ground = group.as_ref().is_some_and(|g| defend::on_ground(self, &g.centre));
 
         DefendFacts {
             time: self.world.time,
@@ -556,12 +501,7 @@ pub(super) fn fresh(
         group: 0,
         room,
         ours: BTreeMap::new(),
-        plan: Plan {
-            boosts: Vec::new(),
-            tactic,
-            order: Vec::new(),
-            offers: Vec::new(),
-        },
+        plan: Plan { boosts: Vec::new(), tactic, order: Vec::new(), offers: Vec::new() },
         phase: Phase::Forming,
         opened: time,
         since: time,

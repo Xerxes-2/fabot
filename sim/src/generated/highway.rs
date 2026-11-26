@@ -1,9 +1,11 @@
 //! A highway room's terrain, ported from xxscreeps's `room-gen.js` (ISC, Marcel Laverdet), whose
 //! constants it fitted to the live world: an open lane, wall masses grown from world-space noise on
 //! the sector-facing borders, stamped clutter, and a mild swamp on half the rooms.
-use krebs::mapgen::{BOTTOM, LEFT, RIGHT, TOP};
-use krebs::room_name::RoomXY;
-use krebs::terrain::RoomTerrain;
+use krebs::{
+    mapgen::{BOTTOM, LEFT, RIGHT, TOP},
+    room_name::RoomXY,
+    terrain::RoomTerrain,
+};
 use krebs_util::rng::Rng;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -39,16 +41,8 @@ struct Mass {
     expo: f64,
 }
 
-const LANE_MASS: Mass = Mass {
-    base: 0.5,
-    amp: 27.5,
-    expo: 2.9,
-};
-const CORNER_MASS: Mass = Mass {
-    base: 0.2,
-    amp: 19.0,
-    expo: 2.5,
-};
+const LANE_MASS: Mass = Mass { base: 0.5, amp: 27.5, expo: 2.9 };
+const CORNER_MASS: Mass = Mass { base: 0.2, amp: 19.0, expo: 2.5 };
 const SEAL_FLOOR: f64 = 3.0;
 const CLIP_SLOPE: f64 = 3.0;
 const BLOB_CELL: i32 = 8;
@@ -95,19 +89,11 @@ impl Field {
 
     /// The opening a lane end gets: 21 to 43 tiles, unbroken, centred between its flanking masses.
     pub fn lane_exit(&self, xy: RoomXY, lane: Lane, side: usize) -> Vec<u8> {
-        let mass = if lane == Lane::Crossing {
-            &CORNER_MASS
-        } else {
-            &LANE_MASS
-        };
+        let mass = if lane == Lane::Crossing { &CORNER_MASS } else { &LANE_MASS };
         let along = side == LEFT || side == RIGHT;
         let inboard = if side == TOP || side == LEFT { 2 } else { 47 };
         let at = |end: i32| {
-            let (bx, by) = if along {
-                (inboard, end)
-            } else {
-                (end, inboard)
-            };
+            let (bx, by) = if along { (inboard, end) } else { (end, inboard) };
             let depth = self.depth(xy.x * 50 + bx, xy.y * 50 + by, mass);
             (depth * taper(inboard)).round() as i32
         };
@@ -146,11 +132,7 @@ impl Field {
     pub fn terrain(&self, xy: RoomXY, exits: &[Vec<u8>; 4], rng: &mut Rng) -> RoomTerrain {
         let lane = Lane::of(xy);
         let (wox, woy) = (xy.x * 50, xy.y * 50);
-        let mass = if lane == Lane::Crossing {
-            &CORNER_MASS
-        } else {
-            &LANE_MASS
-        };
+        let mass = if lane == Lane::Crossing { &CORNER_MASS } else { &LANE_MASS };
         let tile = |side: usize, i: usize| [(i, 0), (49, i), (i, 49), (0, i)][side];
         let mut open = [false; 2500];
         let mut points = Vec::new();
@@ -191,10 +173,7 @@ impl Field {
         let clip = |d: Vec<f64>, low: f64, high: f64| -> Vec<f64> {
             let away = |n: i32| f64::from(n.max(0)) * CLIP_SLOPE;
             (d.into_iter().enumerate())
-                .map(|(i, t)| {
-                    t.min(low + away(i as i32 - 2))
-                        .min(high + away(47 - i as i32))
-                })
+                .map(|(i, t)| t.min(low + away(i as i32 - 2)).min(high + away(47 - i as i32)))
                 .collect()
         };
         let left = clip(depth(LEFT), bound(TOP, true), bound(BOTTOM, true));
@@ -251,12 +230,8 @@ fn taper(along: i32) -> f64 {
 
 /// Recedes a mass within 3 tiles of an exit, so a throat opens as a mouth.
 fn clearance(bx: i32, by: i32, points: &[(i32, i32)]) -> f64 {
-    let near = points
-        .iter()
-        .map(|&(x, y)| (bx - x).abs().max((by - y).abs()))
-        .min();
-    near.filter(|&n| n < 3)
-        .map_or(1.0, |n| (f64::from(n) / 3.0).sqrt())
+    let near = points.iter().map(|&(x, y)| (bx - x).abs().max((by - y).abs())).min();
+    near.filter(|&n| n < 3).map_or(1.0, |n| (f64::from(n) / 3.0).sqrt())
 }
 
 fn smooth(grid: &[bool; 2500], factor: u32, wall: bool, open: &[bool; 2500]) -> [bool; 2500] {
@@ -266,11 +241,7 @@ fn smooth(grid: &[bool; 2500], factor: u32, wall: bool, open: &[bool; 2500]) -> 
         let mut count = 0;
         for (nx, ny) in (-1..=1).flat_map(|dy| (-1..=1).map(move |dx| (x + dx, y + dy))) {
             let inside = (0..50).contains(&nx) && (0..50).contains(&ny);
-            count += u32::from(if inside {
-                grid[(ny * 50 + nx) as usize]
-            } else {
-                wall
-            });
+            count += u32::from(if inside { grid[(ny * 50 + nx) as usize] } else { wall });
         }
         *cell = count >= factor;
         if wall {
@@ -360,9 +331,7 @@ fn connect(wall: &mut [bool; 2500], exits: &[Vec<u8>; 4]) {
 /// Walls the open ground no border reaches (8-connected): no reroll exists to discard it.
 fn fill_unreachable(wall: &mut [bool; 2500]) {
     let mut reached = [false; 2500];
-    let mut stack: Vec<usize> = (0..2500)
-        .filter(|&i| border(i % 50, i / 50) && !wall[i])
-        .collect();
+    let mut stack: Vec<usize> = (0..2500).filter(|&i| border(i % 50, i / 50) && !wall[i]).collect();
     if stack.is_empty() {
         return;
     }

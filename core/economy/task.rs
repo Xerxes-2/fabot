@@ -1,9 +1,11 @@
 /// What a body is hired to do; Memory holds it as its `task_id`.
 use std::fmt::Write;
 
-use fabot_base::engine;
-use fabot_base::vocabulary::ResourceType;
-use fabot_base::world::{Id, RoomName};
+use fabot_base::{
+    engine,
+    vocabulary::ResourceType,
+    world::{Id, RoomName},
+};
 
 /// What a task acts on: an object, or a colony's spawn ring or bank pile,
 /// which `run` resolves to the object it serves when the body arrives.
@@ -151,19 +153,16 @@ const RANGE_SCOUT: i32 = 23;
 
 impl Task {
     pub fn is_intake(&self) -> bool {
-        matches!(
-            self,
-            Task::Harvest(_) | Task::Withdraw(_, _) | Task::Pickup(_, _)
-        )
+        matches!(self, Task::Harvest(_) | Task::Withdraw(_, _) | Task::Pickup(_, _))
     }
 
     pub fn range_of(&self) -> i32 {
         match self {
             Task::Build(_) | Task::Repair(_) | Task::Upgrade(_) => engine::UPGRADE_RANGE,
             Task::Harvest(_)
-            | Task::Withdraw(_, _)
-            | Task::Pickup(_, _)
-            | Task::Refill(_, _)
+            | Task::Withdraw(..)
+            | Task::Pickup(..)
+            | Task::Refill(..)
             | Task::Reserve(_)
             | Task::Claim(_)
             | Task::Dismantle(_)
@@ -175,9 +174,10 @@ impl Task {
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
+
     use super::*;
     use crate::arb;
-    use proptest::prelude::*;
 
     fn shared() -> impl Strategy<Value = Task> {
         arb::task_on(prop_oneof![8 => Just(Target::Ring(arb::at().room)), 1 => arb::target()])

@@ -5,11 +5,7 @@ pub fn boosted(part: Part, tier: usize) -> Option<ResourceType> {
     const LINES: [[ResourceType; 3]; 6] = [
         [UtriumHydride, UtriumAcid, CatalyzedUtriumAcid],
         [KeaniumOxide, KeaniumAlkalide, CatalyzedKeaniumAlkalide],
-        [
-            LemergiumOxide,
-            LemergiumAlkalide,
-            CatalyzedLemergiumAlkalide,
-        ],
+        [LemergiumOxide, LemergiumAlkalide, CatalyzedLemergiumAlkalide],
         [GhodiumOxide, GhodiumAlkalide, CatalyzedGhodiumAlkalide],
         [ZynthiumOxide, ZynthiumAlkalide, CatalyzedZynthiumAlkalide],
         [ZynthiumHydride, ZynthiumAcid, CatalyzedZynthiumAcid],
@@ -23,8 +19,5 @@ pub fn boosted(part: Part, tier: usize) -> Option<ResourceType> {
 pub fn config(cases: u32) -> proptest::test_runner::Config {
     use proptest::test_runner::{Config, FileFailurePersistence};
     let beside = FileFailurePersistence::WithSource("proptest-regressions");
-    Config {
-        failure_persistence: Some(Box::new(beside)),
-        ..Config::with_cases(cases)
-    }
+    Config { failure_persistence: Some(Box::new(beside)), ..Config::with_cases(cases) }
 }

@@ -1,24 +1,20 @@
 //! The owner's terminal bands, held by `balance` over generated colonies.
 use std::collections::BTreeMap;
 
-use fabot_base::engine::{self, LAB_REACTION_AMOUNT};
-use fabot_base::tiles;
-use fabot_base::vocabulary::ResourceType::{self, *};
-use fabot_base::world::RoomName;
+use fabot_base::{
+    engine::{self, LAB_REACTION_AMOUNT},
+    tiles,
+    vocabulary::ResourceType::{self, *},
+    world::RoomName,
+};
 use fabot_economy::balance::{
     BATCH, BOOST, Holding, LEAST_SEND, Level, REAGENT, Shipment, balance, want,
 };
-use proptest::prelude::*;
-use proptest::sample::subsequence;
+use proptest::{prelude::*, sample::subsequence};
 
 const CASES: u32 = 256;
-const KINDS: [ResourceType; 5] = [
-    Oxygen,
-    Hydrogen,
-    UtriumHydride,
-    CatalyzedGhodiumAlkalide,
-    CatalyzedUtriumAcid,
-];
+const KINDS: [ResourceType; 5] =
+    [Oxygen, Hydrogen, UtriumHydride, CatalyzedGhodiumAlkalide, CatalyzedUtriumAcid];
 const TERMINAL: i32 = 300_000;
 
 #[derive(Clone, Debug)]
@@ -46,11 +42,7 @@ impl Colony {
 
 /// The owner's band, stated apart from `Level::spare` so it is an independent oracle.
 fn keep(l: &Level) -> i32 {
-    if l.want > 0 || l.boost {
-        l.want + BATCH
-    } else {
-        0
-    }
+    if l.want > 0 || l.boost { l.want + BATCH } else { 0 }
 }
 
 fn rooms(n: usize) -> impl Strategy<Value = Vec<RoomName>> {
@@ -88,27 +80,19 @@ fn stock(want: i32) -> impl Strategy<Value = (i32, i32)> {
     held.prop_flat_map(|held| {
         let least = near(LEAST_SEND).prop_map(move |n| n.min(held));
         let reaction = near(LAB_REACTION_AMOUNT).prop_map(move |n| n.min(held));
-        (
-            Just(held),
-            prop_oneof![Just(held), 0..=held, least, reaction],
-        )
+        (Just(held), prop_oneof![Just(held), 0..=held, least, reaction])
     })
 }
 
 /// Levels read as `Stocks::level` reads them: a want per the cluster's
 /// reagents and the fight, every target boost marked a boost.
 fn colony(room: RoomName, boosts: Vec<ResourceType>) -> impl Strategy<Value = Colony> {
-    (
-        prop::collection::vec(any::<bool>(), KINDS.len()),
-        any::<bool>(),
-    )
+    (prop::collection::vec(any::<bool>(), KINDS.len()), any::<bool>())
         .prop_flat_map(move |(spends, fights)| {
-            let reagents: Vec<ResourceType> = (KINDS.iter().zip(&spends))
-                .filter_map(|(r, s)| s.then_some(*r))
-                .collect();
-            let wants: Vec<i32> = (KINDS.iter())
-                .map(|r| want(*r, &reagents, &boosts, fights))
-                .collect();
+            let reagents: Vec<ResourceType> =
+                (KINDS.iter().zip(&spends)).filter_map(|(r, s)| s.then_some(*r)).collect();
+            let wants: Vec<i32> =
+                (KINDS.iter()).map(|r| want(*r, &reagents, &boosts, fights)).collect();
             let boosted: Vec<bool> = KINDS.iter().map(|r| boosts.contains(r)).collect();
             (
                 Just((wants.clone(), boosted)),
@@ -120,39 +104,22 @@ fn colony(room: RoomName, boosts: Vec<ResourceType>) -> impl Strategy<Value = Co
         .prop_map(move |((wants, boosted), stocks, energy, free)| {
             let levels = (KINDS.iter().zip(wants).zip(boosted).zip(stocks))
                 .map(|(((r, want), boost), (held, shippable))| {
-                    let level = Level {
-                        want,
-                        held,
-                        shippable,
-                        boost,
-                    };
+                    let level = Level { want, held, shippable, boost };
                     (*r, level)
                 })
                 .collect();
-            Colony {
-                room,
-                levels,
-                energy,
-                free,
-            }
+            Colony { room, levels, energy, free }
         })
 }
 
 fn colonies() -> impl Strategy<Value = Vec<Colony>> {
-    (
-        2..=5usize,
-        prop::collection::vec(any::<bool>(), KINDS.len()),
-    )
-        .prop_flat_map(|(n, boosted)| {
-            let boosts: Vec<ResourceType> = (KINDS.iter().zip(&boosted))
-                .filter_map(|(r, b)| b.then_some(*r))
-                .collect();
-            rooms(n).prop_flat_map(move |rooms| {
-                (rooms.into_iter())
-                    .map(|room| colony(room, boosts.clone()))
-                    .collect::<Vec<_>>()
-            })
+    (2..=5usize, prop::collection::vec(any::<bool>(), KINDS.len())).prop_flat_map(|(n, boosted)| {
+        let boosts: Vec<ResourceType> =
+            (KINDS.iter().zip(&boosted)).filter_map(|(r, b)| b.then_some(*r)).collect();
+        rooms(n).prop_flat_map(move |rooms| {
+            (rooms.into_iter()).map(|room| colony(room, boosts.clone())).collect::<Vec<_>>()
         })
+    })
 }
 
 fn shipped(colonies: &[Colony]) -> Vec<Shipment> {
@@ -171,22 +138,12 @@ fn hold_bands(colonies: &[Colony], ships: &[Shipment]) -> Result<(), TestCaseErr
         prop_assert!(!sent.contains(&s.from), "two sends a tick from {}", s.from);
         sent.push(s.from);
         let (Some(giver), Some(taker)) = (ledger.get(&s.from), ledger.get(&s.to)) else {
-            return Err(TestCaseError::fail(format!(
-                "a send off our terminals: {s:?}"
-            )));
+            return Err(TestCaseError::fail(format!("a send off our terminals: {s:?}")));
         };
         let total: i32 = s.load.iter().map(|(_, n)| n).sum();
-        prop_assert!(
-            total <= taker.free,
-            "{s:?} past the taker's room {}",
-            taker.free
-        );
+        prop_assert!(total <= taker.free, "{s:?} past the taker's room {}", taker.free);
         let apart = tiles::rooms_apart(s.from, s.to);
-        let fee: i32 = s
-            .load
-            .iter()
-            .map(|(_, n)| engine::send_cost(*n, apart))
-            .sum();
+        let fee: i32 = s.load.iter().map(|(_, n)| engine::send_cost(*n, apart)).sum();
         prop_assert!(fee <= giver.energy, "{s:?} costs {fee} of {}", giver.energy);
         for (r, n) in &s.load {
             let (g, t) = (giver.level(*r), taker.level(*r));
@@ -194,10 +151,7 @@ fn hold_bands(colonies: &[Colony], ships: &[Shipment]) -> Result<(), TestCaseErr
             prop_assert!(*n >= LEAST_SEND.min(spare), "{s:?} below the least send");
             prop_assert!(*n >= LAB_REACTION_AMOUNT, "{s:?} under a reaction's worth");
             prop_assert!(*n <= g.shippable, "{s:?}: {r:?} past sendable {g:?}");
-            prop_assert!(
-                g.held - n >= keep(&g),
-                "{s:?}: {r:?} giver below keep {g:?}"
-            );
+            prop_assert!(g.held - n >= keep(&g), "{s:?}: {r:?} giver below keep {g:?}");
             prop_assert!(t.held < t.want, "{s:?}: {r:?} to a taker not short {t:?}");
             prop_assert!(t.held + n <= t.want + BATCH, "{s:?}: {r:?} lifts {t:?}");
         }

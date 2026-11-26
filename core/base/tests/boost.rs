@@ -1,21 +1,22 @@
 //! `boosted_by`: each part type's strongest covering compound, spent in visit
 //! order; its stock held over generated bodies.
-use crate::boost::{BOOSTS, Held, Stock, Visits, boosted_by, ores_in};
-use crate::vocabulary::ResourceType::{
-    self, CatalyzedGhodiumAlkalide as Tough3, CatalyzedUtriumAcid as T3, GhodiumOxide as Tough1,
-    UtriumAcid as T2, UtriumHydride as T1, ZynthiumOxide as Move1,
+use proptest::{prelude::*, sample::subsequence};
+
+use crate::{
+    boost::{BOOSTS, Held, Stock, Visits, boosted_by, ores_in},
+    vocabulary::{
+        ALL_BODY_PARTS, Part, RESOURCES_ALL,
+        ResourceType::{
+            self, CatalyzedGhodiumAlkalide as Tough3, CatalyzedUtriumAcid as T3,
+            GhodiumOxide as Tough1, UtriumAcid as T2, UtriumHydride as T1, ZynthiumOxide as Move1,
+        },
+        part_count_in, takes,
+    },
 };
-use crate::vocabulary::{ALL_BODY_PARTS, Part, RESOURCES_ALL, part_count_in, takes};
-use proptest::prelude::*;
-use proptest::sample::subsequence;
 
 fn stock(held: &[(ResourceType, i32)], energy: i32) -> Stock {
     let held = (held.iter())
-        .map(|(compound, parts)| Held {
-            compound: *compound,
-            parts: *parts,
-            in_labs: 0,
-        })
+        .map(|(compound, parts)| Held { compound: *compound, parts: *parts, in_labs: 0 })
         .collect();
     Stock { held, energy }
 }
@@ -52,9 +53,7 @@ fn compounds() -> Vec<ResourceType> {
 
 /// The one part type a compound boosts: nothing but its own visit spends it.
 fn part_of(c: ResourceType) -> Part {
-    let parts: Vec<Part> = (ALL_BODY_PARTS.into_iter())
-        .filter(|p| takes(*p, c))
-        .collect();
+    let parts: Vec<Part> = (ALL_BODY_PARTS.into_iter()).filter(|p| takes(*p, c)).collect();
     assert_eq!(parts.len(), 1, "{c:?} boosts {parts:?}");
     parts[0]
 }
@@ -91,17 +90,9 @@ fn body() -> impl Strategy<Value = Vec<Part>> {
 fn holding(compound: ResourceType, n: i32) -> impl Strategy<Value = Held> {
     let parts = prop_oneof![near(n), 0..=60i32, Just(1_000)].prop_map(|p| p.max(1));
     parts.prop_flat_map(move |parts| {
-        let in_labs = prop_oneof![
-            Just(0),
-            Just(parts),
-            0..=parts,
-            near(n).prop_map(move |l| l.min(parts)),
-        ];
-        in_labs.prop_map(move |in_labs| Held {
-            compound,
-            parts,
-            in_labs,
-        })
+        let in_labs =
+            prop_oneof![Just(0), Just(parts), 0..=parts, near(n).prop_map(move |l| l.min(parts)),];
+        in_labs.prop_map(move |in_labs| Held { compound, parts, in_labs })
     })
 }
 
@@ -109,12 +100,9 @@ fn case() -> impl Strategy<Value = (Vec<Part>, Stock)> {
     let all = compounds();
     let held = subsequence(all.clone(), 0..=all.len()).prop_shuffle();
     (body(), held).prop_flat_map(|(body, held)| {
-        let total = (body.iter())
-            .filter(|p| held.iter().any(|c| takes(**p, *c)))
-            .count() as i32;
-        let held: Vec<_> = (held.into_iter())
-            .map(|c| holding(c, part_count_in(&body, part_of(c))))
-            .collect();
+        let total = (body.iter()).filter(|p| held.iter().any(|c| takes(**p, *c))).count() as i32;
+        let held: Vec<_> =
+            (held.into_iter()).map(|c| holding(c, part_count_in(&body, part_of(c)))).collect();
         let energy = prop_oneof![Just(0), near(total), 0..=60i32, Just(1_000)];
         (Just(body), held, energy).prop_map(|(body, held, energy)| (body, Stock { held, energy }))
     })

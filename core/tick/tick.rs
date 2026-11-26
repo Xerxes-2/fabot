@@ -1,29 +1,25 @@
 /// The clock is passed in to keep `decide` deterministic.
 use std::collections::BTreeSet;
 
-use fabot_base::HashMap;
-
-use screeps::LocalRoomTerrain;
-
-use super::state::State;
 use fabot_atlas::{Atlas, Context, Derived, Mover, derive, target_at, worked};
-use fabot_base::boost;
-use fabot_base::declarations::{Declarations, Refused};
-use fabot_base::engine;
-use fabot_base::grid::{self, Footprint};
-use fabot_base::intel::Intel;
-use fabot_base::intents::{
-    Action, Ask, CreepAct, LabAct, ModuleOutput, Rank, Settled, SpawnAct, Telemetry,
-};
-use fabot_base::tiles::{self, Tile};
-use fabot_base::wish::Wish;
-use fabot_base::world::{
-    self, Id, Pos, Room, RoomName, Rules, Sightings, Structure, StructureType, World,
+use fabot_base::{
+    HashMap, boost,
+    declarations::{Declarations, Refused},
+    engine,
+    grid::{self, Footprint},
+    intel::Intel,
+    intents::{Action, Ask, CreepAct, LabAct, ModuleOutput, Rank, Settled, SpawnAct, Telemetry},
+    tiles::{self, Tile},
+    wish::Wish,
+    world::{self, Id, Pos, Room, RoomName, Rules, Sightings, Structure, StructureType, World},
 };
 use fabot_layout::shape::LayoutState;
 use fabot_mv as mv;
 use fabot_strategy::{self as strategy, intel};
 use fabot_tactics as tactics;
+use screeps::LocalRoomTerrain;
+
+use super::state::State;
 
 pub type ModuleRun = fn(&mut Context, &mut State) -> ModuleOutput;
 
@@ -86,9 +82,8 @@ fn queue(context: &Context, layout: &LayoutState, asks: &[(RoomName, Ask)]) -> V
             continue;
         };
         let open = |t| context.atlas.ground_at(room, t).is_some();
-        let mut idle = world
-            .working_spawns()
-            .filter(|s| s.pos.room == room && s.spawning.is_none());
+        let mut idle =
+            world.working_spawns().filter(|s| s.pos.room == room && s.spawning.is_none());
         let mut bank = r.energy_available;
         for a in &asks {
             let cost = engine::body_cost(&a.body);
@@ -122,9 +117,8 @@ fn queue(context: &Context, layout: &LayoutState, asks: &[(RoomName, Ask)]) -> V
 /// of ours that wishes nothing holds its tile.
 pub fn arbitrate(context: &Context, wishes: &[(RoomName, Wish)]) -> (Vec<Action>, Vec<String>) {
     let groups = by_room(wishes);
-    let wished: BTreeSet<&str> = (groups.iter())
-        .flat_map(|(_, ws)| ws.iter().map(|w| w.creep.as_str()))
-        .collect();
+    let wished: BTreeSet<&str> =
+        (groups.iter()).flat_map(|(_, ws)| ws.iter().map(|w| w.creep.as_str())).collect();
     let mut scratch = mv::arbitrate::scratch();
     let mut out = Vec::new();
     let mut stood = Vec::new();
@@ -138,10 +132,7 @@ pub fn arbitrate(context: &Context, wishes: &[(RoomName, Wish)]) -> (Vec<Action>
         let (glued, ws): (Vec<&Wish>, Vec<&Wish>) =
             (ws.into_iter()).partition(|w| w.head != w.at && theirs.contains(&w.head));
         out.extend(glued.iter().map(|w| {
-            Action::Creep(
-                w.creep.clone(),
-                CreepAct::Move(tiles::direction(w.at, w.head)),
-            )
+            Action::Creep(w.creep.clone(), CreepAct::Move(tiles::direction(w.at, w.head)))
         }));
         let mut held: Vec<Tile> = context
             .world
@@ -192,10 +183,8 @@ fn boost_stop(
 
     let stalling: BTreeSet<&str> = stalls.iter().map(|(c, _)| c.name.as_str()).collect();
     actions.retain(|a| !matches!(a, Action::Creep(name, _) if stalling.contains(name.as_str())));
-    let mut walks: Vec<(RoomName, Wish)> = (wishes.iter())
-        .filter(|(_, w)| !stalling.contains(w.creep.as_str()))
-        .cloned()
-        .collect();
+    let mut walks: Vec<(RoomName, Wish)> =
+        (wishes.iter()).filter(|(_, w)| !stalling.contains(w.creep.as_str())).cloned().collect();
 
     let mut seated: Vec<Pos> = Vec::new();
     for (creep, w) in &stalls {
@@ -208,9 +197,7 @@ fn boost_stop(
             .min_by_key(|p| (feeds(p), p.range(&creep.pos), tiles::of_pos(p)))
             .unwrap_or(*at);
         seated.push(seat);
-        let lab = (world.rooms.iter())
-            .flat_map(|r| &r.structures)
-            .find(|s| s.id == w.lab);
+        let lab = (world.rooms.iter()).flat_map(|r| &r.structures).find(|s| s.id == w.lab);
         if creep.pos.within(1, at) && lab.is_some_and(|l| boost::can_boost(l, w.load.compound)) {
             actions.push(Action::Lab(w.lab, LabAct::BoostCreep(creep.id)));
         }
@@ -218,11 +205,7 @@ fn boost_stop(
         // Beside its lab it gives way to the carrier filling it; out of reach
         // it shoves through, or a carrier parked on the lab's one free side
         // holds it off until its wait runs out and it leaves short.
-        let weight = if creep.pos.within(1, at) {
-            1
-        } else {
-            tactics::WEIGHT
-        };
+        let weight = if creep.pos.within(1, at) { 1 } else { tactics::WEIGHT };
         let goal = target_at(&seat, i32::from(seat == *at));
         let wish = mv::plan::toward(context.atlas, creep, mover, &goal, weight);
         walks.push((creep.pos.room, wish));
@@ -264,34 +247,20 @@ pub fn run(
 
     for m in modules {
         if state.off.contains(m.name) {
-            reports.push(Report {
-                module: m.name,
-                cpu: 0.0,
-            });
+            reports.push(Report { module: m.name, cpu: 0.0 });
             continue;
         }
         let start = clock();
         let produced = (m.run)(context, &mut state);
-        reports.push(Report {
-            module: m.name,
-            cpu: clock() - start,
-        });
+        reports.push(Report { module: m.name, cpu: clock() - start });
         asked.extend(produced);
     }
 
     let start = clock();
     let settled = settle(context, &state.layout, &asked);
-    reports.push(Report {
-        module: "settle",
-        cpu: clock() - start,
-    });
+    reports.push(Report { module: "settle", cpu: clock() - start });
 
-    TickResult {
-        settled,
-        telemetry: asked.telemetry,
-        state,
-        reports,
-    }
+    TickResult { settled, telemetry: asked.telemetry, state, reports }
 }
 
 /// A tick decided: what the driver executes and writes, and what it keeps.
@@ -346,10 +315,8 @@ pub fn decide<'t>(
     let boosted: Vec<_> = fabot_fight::boosted(&state.fight.engagements).collect();
     derived.boosts = (boost::clusters(world, &declarations).into_iter())
         .map(|r| {
-            let here: Vec<&str> = (boosted.iter())
-                .filter(|b| b.colony == r)
-                .map(|b| b.name.as_str())
-                .collect();
+            let here: Vec<&str> =
+                (boosted.iter()).filter(|b| b.colony == r).map(|b| b.name.as_str()).collect();
             (r, boost::boosting(world, r, &here))
         })
         .collect();
@@ -378,35 +345,18 @@ pub fn decide<'t>(
     for report in &result.reports {
         phases.push((report.module.to_string(), report.cpu));
     }
-    Decided {
-        result,
-        declarations,
-        derived,
-        refused,
-        sightings,
-        atlas,
-        misfiled,
-    }
+    Decided { result, declarations, derived, refused, sightings, atlas, misfiled }
 }
 
 const STRATEGY: &str = "strategy";
 
 /// The modules `Main` runs, in this order.
 pub const MODULES: [Module; 4] = [
-    Module {
-        name: STRATEGY,
-        run: |c, s| fabot_strategy::decide(c, &mut s.strategy),
-    },
-    Module {
-        name: "fight",
-        run: |c, s| fabot_fight::decide(c, &mut s.fight),
-    },
+    Module { name: STRATEGY, run: |c, s| fabot_strategy::decide(c, &mut s.strategy) },
+    Module { name: "fight", run: |c, s| fabot_fight::decide(c, &mut s.fight) },
     Module {
         name: "economy",
         run: |c, s| fabot_economy::decide(c, &mut s.economy, &s.strategy.scouts),
     },
-    Module {
-        name: "layout",
-        run: |c, s| fabot_layout::decide(c, &mut s.layout),
-    },
+    Module { name: "layout", run: |c, s| fabot_layout::decide(c, &mut s.layout) },
 ];

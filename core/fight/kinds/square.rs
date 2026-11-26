@@ -3,11 +3,13 @@
 use std::collections::BTreeSet;
 
 use fabot_atlas::{Atlas, Field, Mover, Target};
-use fabot_base::engine;
-use fabot_base::grid::{self, Footprint};
-use fabot_base::tiles::{self, TileSet};
-use fabot_base::vocabulary::Part;
-use fabot_base::world::{Creep, Pos, Room, RoomName};
+use fabot_base::{
+    engine,
+    grid::{self, Footprint},
+    tiles::{self, TileSet},
+    vocabulary::Part,
+    world::{Creep, Pos, Room, RoomName},
+};
 
 pub(crate) const BLOCK: usize = 4;
 
@@ -57,18 +59,9 @@ fn walk(set: &[&Creep], room: RoomName, tiles: Vec<tiles::Tile>, range: i32) -> 
     let factor = fabot_mv::blob::slowest(set.iter().map(|m| grid::factor_of(m)));
     let mover = Mover {
         footprint: Footprint::One,
-        factor: factor.unwrap_or(grid::FatigueFactor {
-            weight: 1,
-            moves: 1,
-        }),
+        factor: factor.unwrap_or(grid::FatigueFactor { weight: 1, moves: 1 }),
     };
-    let target = Target {
-        room,
-        tiles,
-        range,
-        avoid: BTreeSet::new(),
-        max_hops: 0,
-    };
+    let target = Target { room, tiles, range, avoid: BTreeSet::new(), max_hops: 0 };
     (mover, target)
 }
 

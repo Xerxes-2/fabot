@@ -1,27 +1,32 @@
 //! What the bot measures of itself (`ARCHITECTURE.md` §10.5), one definition
 //! for live and the soak. Write-only: no decision reads it.
-use std::borrow::Cow;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::fmt::Write;
-
-use strum::IntoStaticStr;
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, BTreeSet, VecDeque},
+    fmt::Write,
+};
 
 use fabot_atlas::{Atlas, Derived};
-use fabot_base::HashMap;
-use fabot_base::declarations::{self, Declarations, Refused};
-use fabot_base::engine;
-use fabot_base::intents::{
-    Action, ControllerAct, CreepAct, LabAct, Refusal, RoomAct, SpawnAct, Telemetry, TowerAct,
+use fabot_base::{
+    HashMap,
+    declarations::{self, Declarations, Refused},
+    engine,
+    intents::{
+        Action, ControllerAct, CreepAct, LabAct, Refusal, RoomAct, SpawnAct, Telemetry, TowerAct,
+    },
+    vocabulary::{Part, ResourceType::Energy},
+    world::{
+        Controller, Creep, Id, Owner, Pos, Room, RoomName, Rules, StructureType, World, hostiles,
+    },
 };
-use fabot_base::vocabulary::{Part, ResourceType::Energy};
-use fabot_base::world::{
-    Controller, Creep, Id, Owner, Pos, Room, RoomName, Rules, StructureType, World, hostiles,
+use fabot_economy::{
+    abandon,
+    bodies::{self, Pattern},
+    derived::{drawn_for, stores_of},
+    task::{Assignment, Task},
 };
-use fabot_economy::bodies::{self, Pattern};
-use fabot_economy::derived::stores_of;
-use fabot_economy::task::{Assignment, Task};
-use fabot_economy::{abandon, derived::drawn_for};
 use fabot_fight::shape::{Cast, Engagement, Phase};
+use strum::IntoStaticStr;
 
 pub const WINDOW: i32 = 100;
 const RING: usize = 150;
@@ -119,42 +124,26 @@ const METRICS: &[Metric] = &[
     ),
     metric(SPAWN, Fold::Sum, "accepted spawn intents: the body's cost"),
     metric(TOWER, Fold::Sum, "accepted tower intents: 10 each"),
-    metric(
-        PROGRESS,
-        Fold::Sum,
-        "controller progress gained between window ends; none at RCL8",
-    ),
+    metric(PROGRESS, Fold::Sum, "controller progress gained between window ends; none at RCL8"),
     metric(
         STALE,
         Fold::Last,
         "ticks since the colony's freshest paying or rampart site, its outposts' too, was first seen, last progressed, or another became its structure; one out of sight keeps its wait; read at window ends",
     ),
     metric(SPAWN_TICKS, Fold::Sum, "spawn-ticks"),
-    metric(
-        SPAWNING,
-        Fold::Share(SPAWN_TICKS),
-        "% of spawn-ticks spawning",
-    ),
+    metric(SPAWNING, Fold::Share(SPAWN_TICKS), "% of spawn-ticks spawning"),
     metric(
         IDLE_WANT,
         Fold::Sum,
         "spawn-ticks with no spawn of its room casting, the bank full and the colony owed a body: the bank is read before the tick's casts",
     ),
-    metric(
-        SHORT,
-        Fold::Mean,
-        "the colony's open slots of the pattern left uncast",
-    ),
+    metric(SHORT, Fold::Mean, "the colony's open slots of the pattern left uncast"),
     metric(
         BLOCKED,
         Fold::Sum,
         "ticks the colony left an open slot uncast, by why: bank (its first waiting body costs more), spawns (none idle), fight (a spend body while it owes a fight cast)",
     ),
-    metric(
-        FLIPS,
-        Fold::Sum,
-        "engagements opened in a room within a window of one closing there",
-    ),
+    metric(FLIPS, Fold::Sum, "engagements opened in a room within a window of one closing there"),
     metric(
         DEATH,
         Fold::Sum,
@@ -175,22 +164,14 @@ const METRICS: &[Metric] = &[
         Fold::Sum,
         "colony-ticks with an armed creep, neither an ally's nor a keeper, in the colony or in a declared outpost no other colony is nearer, while the colony is below RCL3, has no tower holding a shot's energy, or has no safe mode on or able to fire",
     ),
-    metric(
-        ROOMS_HELD,
-        Fold::Sum,
-        "ticks a room is a colony of ours or an outpost we work",
-    ),
+    metric(ROOMS_HELD, Fold::Sum, "ticks a room is a colony of ours or an outpost we work"),
     metric(
         LOSS,
         Fold::Sum,
         "energy lost: the body cost of the deaths death.* counts, by the same cause, and the build cost of the structures lost.structure counts (structure)",
     ),
     metric(BODIES, Fold::Mean, "economy bodies"),
-    metric(
-        BODIES_OF,
-        Fold::Mean,
-        "economy bodies of the pattern its name casts",
-    ),
+    metric(BODIES_OF, Fold::Mean, "economy bodies of the pattern its name casts"),
     metric(
         IDLE_OF,
         Fold::Share(BODIES_OF),
@@ -216,16 +197,8 @@ const METRICS: &[Metric] = &[
         Fold::Sum,
         "energy a body transferred into the store it last withdrew energy from, no transfer, build, repair or upgrade between: at most what it drew",
     ),
-    metric(
-        RING_FED,
-        Fold::Sum,
-        "energy carriers transferred into a spawn or an extension",
-    ),
-    metric(
-        HELD,
-        Fold::Share(BODIES),
-        "% of economy body-ticks whose step the arbitration denied",
-    ),
+    metric(RING_FED, Fold::Sum, "energy carriers transferred into a spawn or an extension"),
+    metric(HELD, Fold::Share(BODIES), "% of economy body-ticks whose step the arbitration denied"),
     metric(
         WEDGED,
         Fold::Sum,
@@ -251,11 +224,7 @@ const METRICS: &[Metric] = &[
         Fold::Share(IN_RANGE),
         "% of those with no attack, ranged attack or mass attack asked",
     ),
-    metric(
-        REFUSED,
-        Fold::Sum,
-        "the executor's refusals, by act and code",
-    ),
+    metric(REFUSED, Fold::Sum, "the executor's refusals, by act and code"),
     metric(CPU, Fold::Mean, "a phase's CPU per tick, in hundredths"),
     metric(COUNT, Fold::Mean, "what a read section walked per tick"),
     metric(BUCKET, Fold::Last, "the CPU bucket"),
@@ -561,12 +530,7 @@ fn returned(
             && !refused.contains(&(name, "transfer"))
             && bodies::pattern_of_name(name) == Some(Pattern::Hauler)
         {
-            add(
-                sums,
-                None,
-                RING_FED,
-                f64::from(energy(c).min(s.store.free())),
-            );
+            add(sums, None, RING_FED, f64::from(energy(c).min(s.store.free())));
         }
         match act {
             CreepAct::Withdraw(id, Energy) if !refused.contains(&(name, "withdraw")) => {
@@ -658,17 +622,9 @@ fn cause_of(room: Option<&Room>, by: &Id) -> Cause {
         return Cause::Unknown;
     };
     if let Some(c) = room.others.iter().find(|c| c.id == *by) {
-        return if npc(&c.owner) {
-            Cause::Npc
-        } else {
-            Cause::Player
-        };
+        return if npc(&c.owner) { Cause::Npc } else { Cause::Player };
     }
-    match room
-        .structures
-        .iter()
-        .find(|s| s.id == *by && s.kind == StructureType::Tower)
-    {
+    match room.structures.iter().find(|s| s.id == *by && s.kind == StructureType::Tower) {
         Some(s) if npc(&s.owner) => Cause::Npc,
         Some(_) => Cause::Tower,
         None => Cause::Unknown,
@@ -708,11 +664,7 @@ fn shots(sums: &mut Sums, world: &World, asked: &HashMap<&str, Asked>, struck: &
             continue;
         }
         let foe = |h: &Creep| struck.contains(&h.id) && c.pos.within(reach, &h.pos);
-        if !a.heal
-            && world
-                .room(c.pos.room)
-                .is_some_and(|r| r.hostiles().any(foe))
-        {
+        if !a.heal && world.room(c.pos.room).is_some_and(|r| r.hostiles().any(foe)) {
             add(sums, None, IN_RANGE, 1.0);
             if !a.strike {
                 add(sums, None, MISSED, 1.0);
@@ -726,9 +678,8 @@ fn shots(sums: &mut Sums, world: &World, asked: &HashMap<&str, Asked>, struck: &
 fn deaths(sums: &mut Sums, tracks: &mut HashMap<String, Track>, world: &World) {
     let time = world.time;
     if !world.attacks.is_empty() {
-        let ids: HashMap<Id, (&str, RoomName)> = (tracks.iter())
-            .map(|(name, t)| (t.id, (name.as_str(), t.at.room)))
-            .collect();
+        let ids: HashMap<Id, (&str, RoomName)> =
+            (tracks.iter()).map(|(name, t)| (t.id, (name.as_str(), t.at.room))).collect();
         let struck: Vec<(String, Cause)> = (world.attacks.iter())
             .filter_map(|(by, at)| {
                 let (name, room) = ids.get(at)?;
@@ -773,10 +724,7 @@ fn ring_starved(r: &Room) -> bool {
     let short = r.energy_capacity - r.energy_available;
     let stores = stores_of(r, false, &|_| false, &|_| 0);
     let piled = (r.piles.iter()).filter(|p| p.resource == Energy);
-    let held = stores
-        .iter()
-        .map(|s| s.energy)
-        .chain(piled.map(|p| p.amount));
+    let held = stores.iter().map(|s| s.energy).chain(piled.map(|p| p.amount));
     short > 0 && held.sum::<i32>() >= short
 }
 
@@ -860,12 +808,10 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
     m.ticks += 1;
     let sums = &mut m.sums;
 
-    let refused: BTreeSet<(&str, &str)> = (seen.refusals.iter())
-        .map(|r| (r.actor.as_str(), r.act.as_str()))
-        .collect();
-    let creeps: HashMap<&str, &Creep> = (world.creeps.iter())
-        .map(|c| (c.name.as_str(), c))
-        .collect();
+    let refused: BTreeSet<(&str, &str)> =
+        (seen.refusals.iter()).map(|r| (r.actor.as_str(), r.act.as_str())).collect();
+    let creeps: HashMap<&str, &Creep> =
+        (world.creeps.iter()).map(|c| (c.name.as_str(), c)).collect();
     let fed = fed(&creeps, seen.intents);
     let mut undone = HashMap::default();
     let mut asked: HashMap<&str, Asked> = HashMap::default();
@@ -890,11 +836,7 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
             Action::Spawn(id, SpawnAct::SpawnCreep(..))
                 if !refused.contains(&(&*id.text(), "spawn")) =>
             {
-                let rooms = world
-                    .spawns
-                    .iter()
-                    .filter(|s| s.id == *id)
-                    .map(|s| s.pos.room);
+                let rooms = world.spawns.iter().filter(|s| s.id == *id).map(|s| s.pos.room);
                 spawned.extend(rooms);
             }
             _ => (),
@@ -910,12 +852,7 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
         asked.entry(name.as_str()).or_default().held = true;
     }
     for (room, pattern, n) in &seen.telemetry.short {
-        add(
-            sums,
-            Some(*room),
-            &format!("{SHORT}{pattern}"),
-            f64::from(*n),
-        );
+        add(sums, Some(*room), &format!("{SHORT}{pattern}"), f64::from(*n));
         owed.insert(*room);
     }
     for (name, why) in &seen.telemetry.idle {
@@ -931,11 +868,7 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
         }
     }
 
-    for c in world
-        .creeps
-        .iter()
-        .filter(|c| !declarations::fights(&c.name))
-    {
+    for c in world.creeps.iter().filter(|c| !declarations::fights(&c.name)) {
         let Some(p) = bodies::pattern_of_name(&c.name) else {
             continue;
         };
@@ -963,28 +896,20 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
                 (held.load, held.at) = (load, c.pos);
             }
             (Some(now), None) => {
-                let held = Held {
-                    task: now.clone(),
-                    load,
-                    at: c.pos,
-                    still: 0,
-                };
+                let held = Held { task: now.clone(), load, at: c.pos, still: 0 };
                 m.tasks.insert(c.name.clone(), held);
             }
             _ => (),
         }
     }
-    m.tasks
-        .retain(|name, _| task_of(seen.assignments, name).is_some());
+    m.tasks.retain(|name, _| task_of(seen.assignments, name).is_some());
     returned(sums, &mut m.drawn, &creeps, (seen.intents, world), &refused);
 
     for s in world.working_spawns() {
         let row = Some(s.pos.room);
         add(sums, row, SPAWN_TICKS, 1.0);
         // Below a full bank the spawn waits on energy, which the casts wait for.
-        let full = world
-            .room(s.pos.room)
-            .is_some_and(|r| r.energy_available >= r.energy_capacity);
+        let full = world.room(s.pos.room).is_some_and(|r| r.energy_available >= r.energy_capacity);
         if s.spawning.is_some() {
             add(sums, row, SPAWNING, 1.0);
         } else if full && owed.contains(&s.pos.room) && !spawned.contains(&s.pos.room) {
@@ -1019,14 +944,8 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
     for r in seen.refusals {
         add(sums, None, &format!("{REFUSED}{}.{}", r.act, r.code), 1.0);
     }
-    accrue(
-        &mut m.cpu,
-        seen.phases.iter().map(|(p, ms)| (p, 100.0 * ms)),
-    );
-    accrue(
-        &mut m.walked,
-        (seen.walked.iter()).map(|(name, n)| (name, f64::from(*n))),
-    );
+    accrue(&mut m.cpu, seen.phases.iter().map(|(p, ms)| (p, 100.0 * ms)));
+    accrue(&mut m.walked, (seen.walked.iter()).map(|(name, n)| (name, f64::from(*n))));
     m
 }
 
@@ -1069,9 +988,7 @@ impl Metrics {
                 .room(room)
                 .and_then(|r| r.controller.as_ref())
                 .is_some_and(|c| c.owner.is_ours());
-            (served.iter().find(|(o, _)| *o == room))
-                .map(|(_, c)| *c)
-                .or(owned.then_some(room))
+            (served.iter().find(|(o, _)| *o == room)).map(|(_, c)| *c).or(owned.then_some(room))
         };
         // A site that became its structure is its colony's build progressing.
         let mut built = BTreeSet::new();
@@ -1093,12 +1010,7 @@ impl Metrics {
                 continue;
             };
             for s in (r.sites.iter()).filter(|s| s.owner.is_ours() && drawn_for(s.kind)) {
-                let fresh = Stale {
-                    progress: s.progress,
-                    since: time,
-                    at: s.pos,
-                    kind: s.kind,
-                };
+                let fresh = Stale { progress: s.progress, since: time, at: s.pos, kind: s.kind };
                 let stale = self.sites.entry(s.id).or_insert(fresh);
                 if stale.progress != s.progress || built.contains(&colony) {
                     *stale = fresh;
@@ -1113,11 +1025,8 @@ impl Metrics {
         for r in &world.rooms {
             let row = Some(r.name);
             if let Some(c) = r.controller.as_ref().filter(|c| c.owner.is_ours()) {
-                let now = Upgraded {
-                    level: c.level,
-                    progress: c.progress,
-                    total: c.progress_total,
-                };
+                let now =
+                    Upgraded { level: c.level, progress: c.progress, total: c.progress_total };
                 if let Some(was) = self.controllers.insert(r.name, now) {
                     let gained = if was.level == c.level {
                         c.progress - was.progress
@@ -1138,9 +1047,7 @@ impl Metrics {
                     )
                 })
                 .map(|s| s.store.amount_of(Energy));
-            let carried = (world.creeps.iter())
-                .filter(|c| c.pos.room == r.name)
-                .map(energy);
+            let carried = (world.creeps.iter()).filter(|c| c.pos.room == r.name).map(energy);
             let stock: i32 = stored.chain(carried).sum();
             add(&mut sums, row, STOCK, f64::from(stock));
             let piles = r.piles.iter().map(|p| p.amount);
@@ -1241,10 +1148,7 @@ impl Metrics {
                 w.rows.insert(head.parse().ok(), values);
             }
         }
-        Metrics {
-            ring,
-            ..Metrics::default()
-        }
+        Metrics { ring, ..Metrics::default() }
     }
 }
 
@@ -1307,11 +1211,14 @@ pub fn counts(
 
 #[cfg(test)]
 mod tests {
+    use proptest::{
+        array::{uniform3, uniform5},
+        collection::vec,
+        option,
+        prelude::*,
+    };
+
     use super::*;
-    use proptest::array::{uniform3, uniform5};
-    use proptest::collection::vec;
-    use proptest::option;
-    use proptest::prelude::*;
 
     proptest! {
         #![proptest_config(fabot_base::testing::config(256))]

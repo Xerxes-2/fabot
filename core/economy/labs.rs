@@ -4,11 +4,12 @@
 /// tick or a reset loses nothing.
 use std::cmp::Reverse;
 
-use fabot_base::boost::Roles;
-use fabot_base::boost::{BOOSTS, ores_in};
-use fabot_base::engine;
-use fabot_base::vocabulary::{Boost, ResourceType};
-use fabot_base::world::Id;
+use fabot_base::{
+    boost::{BOOSTS, Roles, ores_in},
+    engine,
+    vocabulary::{Boost, ResourceType},
+    world::Id,
+};
 
 /// Hivemind's "high": past it the first-ranked boost leaves the ore to the next.
 const BOOST_STOCK: i32 = 7_500;
@@ -58,7 +59,7 @@ pub fn wanted(
         }
         if stock(first) >= engine::LAB_REACTION_AMOUNT
             && stock(second) >= engine::LAB_REACTION_AMOUNT
-            && out.iter().all(|(c, _, _)| *c != compound)
+            && out.iter().all(|(c, ..)| *c != compound)
         {
             out.push((compound, [first, second], want));
         }
@@ -68,10 +69,7 @@ pub fn wanted(
     let capped = makeable(targets, stock);
     for (i, (compound, target)) in capped.iter().enumerate() {
         let free = |r| {
-            let kept: i32 = (capped[..i].iter())
-                .filter(|(c, _)| *c == r)
-                .map(|(_, n)| n)
-                .sum();
+            let kept: i32 = (capped[..i].iter()).filter(|(c, _)| *c == r).map(|(_, n)| n).sum();
             (stock(r) - kept).max(0)
         };
         let short = target - free(*compound);
@@ -114,14 +112,8 @@ pub fn running<'w>(
     wanted: &'w [Reaction],
 ) -> Vec<Option<&'w Reaction>> {
     let keeps = keeps(benches);
-    let runs = |b: &Bench| {
-        wanted
-            .iter()
-            .find(|(_, reagents, _)| b.holds(reagents) == 2)
-    };
-    (benches.iter())
-        .map(|b| b.filter(|b| keeps(b)).and_then(runs))
-        .collect()
+    let runs = |b: &Bench| wanted.iter().find(|(_, reagents, _)| b.holds(reagents) == 2);
+    (benches.iter()).map(|b| b.filter(|b| keeps(b)).and_then(runs)).collect()
 }
 
 /// No two clusters run one reaction, nor one whose reagents cannot reach it;
@@ -273,11 +265,8 @@ pub fn plan_for(
 
     let (one, other) = roles.reagents;
     let holds = |lab: Id, mineral: ResourceType| held(lab).is_some_and(|(m, _)| m == mineral);
-    let (first_lab, second_lab) = if holds(one, second) || holds(other, first) {
-        (other, one)
-    } else {
-        (one, other)
-    };
+    let (first_lab, second_lab) =
+        if holds(one, second) || holds(other, first) { (other, one) } else { (one, other) };
 
     let mut plan = Plan::default();
     for (lab, reagent) in [(first_lab, first), (second_lab, second)] {
@@ -286,8 +275,7 @@ pub fn plan_for(
             Some((_, amount)) if amount >= half => (),
             h => {
                 let amount = h.map_or(0, |(_, amount)| amount);
-                plan.fills
-                    .push((lab, reagent, engine::LAB_MINERAL_CAPACITY - amount));
+                plan.fills.push((lab, reagent, engine::LAB_MINERAL_CAPACITY - amount));
             }
         }
     }
@@ -303,10 +291,7 @@ pub fn plan_for(
     plan.reaction = Some((
         compound,
         [first, second],
-        Roles {
-            reagents: (first_lab, second_lab),
-            outputs: roles.outputs.clone(),
-        },
+        Roles { reagents: (first_lab, second_lab), outputs: roles.outputs.clone() },
     ));
     plan
 }
@@ -346,13 +331,14 @@ pub fn ready_runs(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use ResourceType::*;
-    use fabot_base::boost::ORES;
-    use fabot_base::boost::roles_of;
-    use fabot_base::vocabulary::RESOURCES_ALL;
-    use fabot_base::world::Pos;
-    use fabot_base::world::RoomName;
+    use fabot_base::{
+        boost::{ORES, roles_of},
+        vocabulary::RESOURCES_ALL,
+        world::{Pos, RoomName},
+    };
+
+    use super::*;
 
     fn stocked(pairs: &[(ResourceType, i32)]) -> impl Fn(ResourceType) -> i32 + '_ {
         move |r| pairs.iter().find(|(p, _)| *p == r).map_or(0, |(_, n)| *n)
@@ -369,10 +355,7 @@ mod tests {
     }
 
     fn benches(held: &[Option<Vec<ResourceType>>]) -> Vec<Option<Bench>> {
-        let bench = |h: &Vec<ResourceType>| Bench {
-            reagents_held: h.clone(),
-            outputs: 1,
-        };
+        let bench = |h: &Vec<ResourceType>| Bench { reagents_held: h.clone(), outputs: 1 };
         held.iter().map(|h| h.as_ref().map(bench)).collect()
     }
 
@@ -389,10 +372,7 @@ mod tests {
         let held = [Some(vec![Oxygen]), Some(vec![Oxygen, Hydrogen]), None];
         let now = assign(
             &wanted(&[(UtriumAcid, 3000)], &stocked(&stock)),
-            &benches(&held)
-                .iter()
-                .map(Option::as_ref)
-                .collect::<Vec<_>>(),
+            &benches(&held).iter().map(Option::as_ref).collect::<Vec<_>>(),
             &|i, r| placed(&stock, &held, i, r),
         );
         let made: Vec<_> = now.iter().map(|r| r.map(|r| r.0)).collect();
@@ -409,10 +389,7 @@ mod tests {
             let wanted = wanted(&targets, &stocked(&stock));
             let now = assign(
                 &wanted,
-                &benches(&held)
-                    .iter()
-                    .map(Option::as_ref)
-                    .collect::<Vec<_>>(),
+                &benches(&held).iter().map(Option::as_ref).collect::<Vec<_>>(),
                 &|i, r| placed(&stock, &held, i, r),
             );
             let running: Vec<Reaction> = now.iter().flatten().copied().collect();
@@ -425,10 +402,7 @@ mod tests {
             }
             for (labs, reaction) in held.iter_mut().flatten().zip(&now) {
                 let was = wanted.iter().find(|r| r.1.iter().all(|m| labs.contains(m)));
-                assert!(
-                    was.is_none_or(|w| reaction.is_some_and(|r| r.0 == w.0)),
-                    "{was:?} left"
-                );
+                assert!(was.is_none_or(|w| reaction.is_some_and(|r| r.0 == w.0)), "{was:?} left");
                 *labs = reaction.map_or_else(Vec::new, |r| r.1.to_vec());
             }
             for (next, reagents, _) in running {
@@ -451,16 +425,10 @@ mod tests {
     fn a_short_compound_makes_its_short_reagent_first() {
         let targets = [(UtriumAcid, 3000)];
         let stock = [(Hydrogen, 10_000), (Oxygen, 10_000), (Utrium, 10_000)];
-        assert_eq!(
-            next_reaction(&targets, &stocked(&stock)).map(|r| r.0),
-            Some(UtriumHydride)
-        );
+        assert_eq!(next_reaction(&targets, &stocked(&stock)).map(|r| r.0), Some(UtriumHydride));
         let mut more = stock.to_vec();
         more.extend([(Hydroxide, 3000), (UtriumHydride, 3000)]);
-        assert_eq!(
-            next_reaction(&targets, &stocked(&more)).map(|r| r.0),
-            Some(UtriumAcid)
-        );
+        assert_eq!(next_reaction(&targets, &stocked(&more)).map(|r| r.0), Some(UtriumAcid));
         more.push((UtriumAcid, 3000));
         assert_eq!(next_reaction(&targets, &stocked(&more)), None);
     }
@@ -470,21 +438,11 @@ mod tests {
         let carries =
             |stock: &[(ResourceType, i32)], n| carries(&[(UtriumAcid, n)], &stocked(stock));
         // OH: 2000 to make, of H and O; UH: 3000, of U and H.
-        let stock = [
-            (Hydroxide, 1000),
-            (Hydrogen, 5000),
-            (Oxygen, 2000),
-            (Utrium, 3000),
-        ];
+        let stock = [(Hydroxide, 1000), (Hydrogen, 5000), (Oxygen, 2000), (Utrium, 3000)];
         assert!(carries(&stock, 3000));
         assert!(!carries(&stock[..3], 3000));
         // UH 6 and H 4 make one reaction's worth of UH, not two.
-        let odd = [
-            (UtriumHydride, 6),
-            (Hydrogen, 4),
-            (Utrium, 10),
-            (Hydroxide, 10),
-        ];
+        let odd = [(UtriumHydride, 6), (Hydrogen, 4), (Utrium, 10), (Hydroxide, 10)];
         assert!(carries(&odd, 5) && !carries(&odd, 6));
     }
 
@@ -494,9 +452,8 @@ mod tests {
             ORES.contains(&r)
                 || (r.reaction_components()).is_some_and(|rs| rs.into_iter().all(bottoms_out))
         }
-        let all: Vec<ResourceType> = (RESOURCES_ALL.iter().copied())
-            .filter(|r| r.reaction_components().is_some())
-            .collect();
+        let all: Vec<ResourceType> =
+            (RESOURCES_ALL.iter().copied()).filter(|r| r.reaction_components().is_some()).collect();
         assert!(!all.is_empty());
         for c in all {
             assert!(bottoms_out(c), "{c:?}");
@@ -532,10 +489,7 @@ mod tests {
             let first = (makeable(&targets, &stocked(&stock)).into_iter())
                 .find(|(c, n)| *n > stocked(&stock)(*c))
                 .map(|(c, _)| c);
-            assert!(
-                first.is_some_and(|c| within(next.0, c)),
-                "{next:?} for {first:?}"
-            );
+            assert!(first.is_some_and(|c| within(next.0, c)), "{next:?} for {first:?}");
             react(&mut stock, next);
         }
         panic!("the reactions never end");

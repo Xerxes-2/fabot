@@ -10,9 +10,11 @@
 
 use std::io::Read;
 
-use fabot_base::engine;
-use fabot_base::vocabulary::Part;
-use fabot_base::world::{BodyPart, Creep, Owner, Pos, RoomName, Store};
+use fabot_base::{
+    engine,
+    vocabulary::Part,
+    world::{BodyPart, Creep, Owner, Pos, RoomName, Store},
+};
 use fabot_exchange::{self as exchange, Outcome, Side, Terrain, Tower};
 use fabot_fight::{Priced, kinds::defend};
 use serde_json::{Value, json};
@@ -26,11 +28,7 @@ fn each<'a>(e: &'a Value, key: &str) -> &'a Vec<Value> {
 }
 
 fn predict(sample: &Value) -> Value {
-    let room = sample["room"]
-        .as_str()
-        .unwrap()
-        .parse::<RoomName>()
-        .unwrap();
+    let room = sample["room"].as_str().unwrap().parse::<RoomName>().unwrap();
     let pos = |e: &Value| Pos::new(room, int(e, "x"), int(e, "y"));
     let side = |e: &Value| Side {
         bodies: each(e, "bodies")
@@ -40,10 +38,8 @@ fn predict(sample: &Value) -> Value {
                     .iter()
                     .map(|p| p.as_str().unwrap().parse::<Part>().unwrap())
                     .collect();
-                let boosts: Vec<_> = each(b, "boosts")
-                    .iter()
-                    .map(|c| c.as_str().unwrap().parse().ok())
-                    .collect();
+                let boosts: Vec<_> =
+                    each(b, "boosts").iter().map(|c| c.as_str().unwrap().parse().ok()).collect();
                 // Priced as the bot prices a hostile it sees.
                 let creep = Creep {
                     id: "h".into(),
@@ -70,40 +66,24 @@ fn predict(sample: &Value) -> Value {
                 fabot_fight::casting::fighter_of(&creep)
             })
             .collect(),
-        ramparts: each(e, "ramparts")
-            .iter()
-            .map(|r| (pos(r), int(r, "hits")))
-            .collect(),
+        ramparts: each(e, "ramparts").iter().map(|r| (pos(r), int(r, "hits"))).collect(),
         towers: each(e, "towers")
             .iter()
-            .map(|t| Tower {
-                pos: pos(t),
-                energy: int(t, "energy"),
-            })
+            .map(|t| Tower { pos: pos(t), energy: int(t, "energy") })
             .collect(),
         ..Side::default()
     };
     let terrain = &sample["terrain"];
-    let terrain = Terrain {
-        weight: int(terrain, "weight"),
-        run_off: int(terrain, "runOff"),
-    };
+    let terrain = Terrain { weight: int(terrain, "weight"), run_off: int(terrain, "runOff") };
     let (ours, theirs) = (side(&sample["ours"]), side(&sample["theirs"]));
     let posted = !ours.ramparts.is_empty();
     let set: Vec<Vec<Part>> = ours.bodies.iter().map(|f| f.body.clone()).collect();
     let arms: Vec<Priced> = fabot_fight::arms(posted, &theirs)
         .map(|(stance, together)| {
-            let ours = Side {
-                together,
-                ..ours.clone()
-            };
+            let ours = Side { together, ..ours.clone() };
             let outcome = exchange::outcome(stance, &ours, &theirs, terrain);
             let arm = Priced::arm(stance, (&ours, &theirs), terrain, outcome);
-            Priced {
-                set: set.clone(),
-                cast: set.len(),
-                ..arm
-            }
+            Priced { set: set.clone(), cast: set.len(), ..arm }
         })
         .collect();
     let (_, chosen) = fabot_fight::picked(&arms, defend::CANDIDATES, None);

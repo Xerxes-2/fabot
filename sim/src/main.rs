@@ -23,17 +23,20 @@ mod view;
 mod watch;
 mod world;
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
-use std::io::Write;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    io::Write,
+};
 
-use krebs::cron::{CronCtx, JOBS};
-use krebs::hooks::ProcessorHooks;
-use krebs::intents::RoomIntents;
-use krebs::processor::{self, TickCtx, global::GlobalCtx};
-use krebs::world::World as Krebs;
+use krebs::{
+    cron::{CronCtx, JOBS},
+    hooks::ProcessorHooks,
+    intents::RoomIntents,
+    processor::{self, TickCtx, global::GlobalCtx},
+    world::World as Krebs,
+};
 use serde_json::{Value, json};
-
 use view::View;
 
 #[global_allocator]
@@ -139,11 +142,8 @@ impl Engine {
 
     /// The active rooms this call lands inside the pass of, taken out of the set until it returns.
     fn hide(&mut self, k: &mut Krebs) -> Vec<u32> {
-        let (hidden, kept): (Vec<u32>, Vec<u32>) = k
-            .active
-            .take()
-            .into_iter()
-            .partition(|_| self.next() < INSIDE_PASS);
+        let (hidden, kept): (Vec<u32>, Vec<u32>) =
+            k.active.take().into_iter().partition(|_| self.next() < INSIDE_PASS);
         kept.into_iter().for_each(|r| k.active.insert(r));
         hidden
     }
@@ -154,9 +154,7 @@ impl Engine {
         for (room, i) in intents {
             k.active.insert(room as u32);
             let at = by_room.entry(room as u32);
-            (at.or_insert_with(|| RoomIntents { users: Vec::new() })
-                .users)
-                .extend(i.users);
+            (at.or_insert_with(|| RoomIntents { users: Vec::new() }).users).extend(i.users);
         }
         let mut active = k.active.take();
         active.sort_unstable();
@@ -189,12 +187,8 @@ impl Engine {
             panic!("{room} crashed at {t}: {:?}", r.crashed);
         }
         processor::install(k, results);
-        let global = GlobalCtx {
-            time: t,
-            vnow: k.clock.at(t),
-            hooks: &self.hooks,
-            order_override: None,
-        };
+        let global =
+            GlobalCtx { time: t, vnow: k.clock.at(t), hooks: &self.hooks, order_override: None };
         processor::global::run(k, &global);
         k.time = t + 1;
         let now = k.clock.at(k.time);
@@ -202,11 +196,7 @@ impl Engine {
         for (i, &(name, period, job)) in JOBS.iter().enumerate() {
             if now - self.cron_last[i] > i64::from(period) * 1000 {
                 self.cron_last[i] = now;
-                let hidden = if name == "genInvaders" {
-                    self.hide(k)
-                } else {
-                    Vec::new()
-                };
+                let hidden = if name == "genInvaders" { self.hide(k) } else { Vec::new() };
                 // The backend logs a job that throws and runs the next (ARCHITECTURE.md §10.2's genDeposits).
                 if let Err(e) = job(k, &mut CronCtx::new(k.seed, k.time, now, name)) {
                     eprintln!("{name}: {e}");

@@ -1,8 +1,5 @@
 //! Our own terminals' minerals, Hivemind's trade-route-manager over its cutoffs.
-use fabot_base::engine;
-use fabot_base::tiles;
-use fabot_base::vocabulary::ResourceType;
-use fabot_base::world::RoomName;
+use fabot_base::{engine, tiles, vocabulary::ResourceType, world::RoomName};
 
 /// Hivemind's "low" cutoff for a reaction's reagents.
 pub const REAGENT: i32 = 10_000;
@@ -48,11 +45,7 @@ pub struct Level {
 impl Level {
     /// Hivemind's "high": what a colony wants none of is spare whole.
     pub fn spare(&self) -> i32 {
-        let kept = if self.want > 0 || self.boost {
-            self.want + BATCH
-        } else {
-            0
-        };
+        let kept = if self.want > 0 || self.boost { self.want + BATCH } else { 0 };
         (self.held - kept).min(self.shippable)
     }
 
@@ -83,9 +76,7 @@ pub struct Holding {
 
 impl Holding {
     pub fn level(&self, r: ResourceType) -> Level {
-        (self.levels.iter())
-            .find_map(|(l, level)| (*l == r).then_some(*level))
-            .unwrap_or_default()
+        (self.levels.iter()).find_map(|(l, level)| (*l == r).then_some(*level)).unwrap_or_default()
     }
 
     fn book(&mut self, r: ResourceType, n: i32) {
@@ -117,13 +108,7 @@ pub fn fees(holdings: &[Holding]) -> Vec<(RoomName, i32)> {
     unbound.iter_mut().for_each(|h| h.energy = i32::MAX);
     (balance(&mut unbound).iter())
         .map(|s| {
-            (
-                s.from,
-                send_fee(
-                    s.load.iter().map(|(_, n)| *n),
-                    tiles::rooms_apart(s.from, s.to),
-                ),
-            )
+            (s.from, send_fee(s.load.iter().map(|(_, n)| *n), tiles::rooms_apart(s.from, s.to)))
         })
         .collect()
 }
@@ -163,12 +148,7 @@ pub fn balance(holdings: &mut [Holding]) -> Vec<Shipment> {
         if !load.is_empty() {
             let (from, to, taker_free) = (holdings[gi].room, holdings[ti].room, holdings[ti].free);
             holdings[ti].free -= load.iter().map(|(_, n)| n).sum::<i32>();
-            out.push(Shipment {
-                from,
-                to,
-                taker_free,
-                load,
-            });
+            out.push(Shipment { from, to, taker_free, load });
         }
     }
     out
@@ -176,8 +156,9 @@ pub fn balance(holdings: &mut [Holding]) -> Vec<Shipment> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use ResourceType::*;
+
+    use super::*;
 
     fn holding(room: &str, levels: &[(ResourceType, i32, i32)]) -> Holding {
         Holding {
@@ -186,12 +167,7 @@ mod tests {
                 .map(|(r, want, held)| {
                     let boost = *r == CatalyzedGhodiumAlkalide;
                     let (want, held, shippable) = (*want, *held, *held);
-                    let level = Level {
-                        want,
-                        held,
-                        shippable,
-                        boost,
-                    };
+                    let level = Level { want, held, shippable, boost };
                     (*r, level)
                 })
                 .collect(),
@@ -203,12 +179,7 @@ mod tests {
     fn one(from: &str, to: &str, r: ResourceType, n: i32) -> Vec<Shipment> {
         let (from, to) = (from.parse().unwrap(), to.parse().unwrap());
         let (taker_free, load) = (100_000, vec![(r, n)]);
-        vec![Shipment {
-            from,
-            to,
-            taker_free,
-            load,
-        }]
+        vec![Shipment { from, to, taker_free, load }]
     }
 
     #[test]
@@ -230,11 +201,7 @@ mod tests {
                 holding("W3N1", &[(ghodium, want, 0)]),
                 holding("W2N1", &[(ghodium, 0, 4_000)]),
             ];
-            let made = if fights {
-                one("W1N1", "W3N1", ghodium, 2_000)
-            } else {
-                vec![]
-            };
+            let made = if fights { one("W1N1", "W3N1", ghodium, 2_000) } else { vec![] };
             assert_eq!(balance(&mut holdings), made);
         }
     }
@@ -262,10 +229,8 @@ mod tests {
 
     #[test]
     fn a_giver_never_sends_what_it_cannot_pay_the_fee_of() {
-        let mut holdings = [
-            holding("W1N1", &[(Oxygen, 0, 20_000)]),
-            holding("W9N1", &[(Oxygen, REAGENT, 0)]),
-        ];
+        let mut holdings =
+            [holding("W1N1", &[(Oxygen, 0, 20_000)]), holding("W9N1", &[(Oxygen, REAGENT, 0)])];
         holdings[0].energy = engine::send_cost(BATCH, 8) - 1;
         assert_eq!(balance(&mut holdings), vec![]);
     }

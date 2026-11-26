@@ -4,18 +4,19 @@ mod highway;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use krebs::constants::POWER_BANK_RESPAWN_TIME;
-use krebs::doc::Val;
-use krebs::hooks::EngineHooks;
-use krebs::mapgen::{self, BOTTOM, GeneratedRoom, LEFT, RIGHT, RoomKind, TOP, WorldSpec};
-use krebs::policy;
-use krebs::room_name::RoomXY;
-use krebs_util::pool::Pool;
-use krebs_util::rng::Rng;
+use highway::{Field, Lane};
+use krebs::{
+    constants::POWER_BANK_RESPAWN_TIME,
+    doc::Val,
+    hooks::EngineHooks,
+    mapgen::{self, BOTTOM, GeneratedRoom, LEFT, RIGHT, RoomKind, TOP, WorldSpec},
+    policy,
+    room_name::RoomXY,
+};
+use krebs_util::{pool::Pool, rng::Rng};
 use serde_json::{Value, json};
 
 use crate::world::Map;
-use highway::{Field, Lane};
 
 /// `--gen <seed>` and `--sectors WxH`: whole sectors from E0S0, one by default.
 pub struct Spec {
@@ -48,8 +49,7 @@ impl Spec {
         let mut map = Map::default();
         map.banks = Some(self.seed);
         for room in rooms {
-            map.rooms
-                .push((room.xy.to_string(), room.terrain.to_db_string()));
+            map.rooms.push((room.xy.to_string(), room.terrain.to_db_string()));
             for o in room.objects {
                 let mut o: Value =
                     serde_json::from_str(&Val::Obj(o).to_json().stringify()).expect("a doc");
@@ -64,18 +64,12 @@ impl Spec {
     pub fn homes(&self, map: &Map, wanted: &[Option<String>]) -> Vec<String> {
         let free = |r: &str| {
             let controller = |o: &&Value| o["room"] == r && o["type"] == "controller";
-            map.objects
-                .iter()
-                .filter(controller)
-                .any(|o| o["user"].is_null())
+            map.objects.iter().filter(controller).any(|o| o["user"].is_null())
         };
         let mut taken: Vec<&str> = wanted.iter().flatten().map(String::as_str).collect();
         for (i, r) in taken.iter().enumerate() {
             let fit = free(r) && !taken[..i].contains(r) && map.seat(r).is_some();
-            assert!(
-                fit,
-                "{r}: no free controller and first spawn's tile, or another seat's home"
-            );
+            assert!(fit, "{r}: no free controller and first spawn's tile, or another seat's home");
         }
         let xy = |r: &str| r.parse::<RoomXY>().expect("a room");
         let apart = |a: &str, b: &str| {
@@ -87,10 +81,8 @@ impl Spec {
         for w in wanted {
             let home = w.as_deref().unwrap_or_else(|| {
                 let far = |r: &&&str| taken.iter().all(|t| apart(r, t)) && map.seat(r).is_some();
-                let home = order
-                    .iter()
-                    .find(far)
-                    .expect("no plannable room APART from the other homes");
+                let home =
+                    order.iter().find(far).expect("no plannable room APART from the other homes");
                 taken.push(home);
                 home
             });
@@ -153,11 +145,7 @@ fn bank_due(seed: u64, xy: RoomXY, t: i64) -> i64 {
     let name = policy::fnv1a64(xy.to_string().as_bytes());
     let u = (policy::seed(seed, "bank-due", &[name]) >> 11) as f64 / (1u64 << 53) as f64;
     let mean = f64::from(POWER_BANK_RESPAWN_TIME);
-    let left = if u < 0.75 {
-        mean * u
-    } else {
-        1.25 * mean - mean * (1.0 - u).sqrt()
-    };
+    let left = if u < 0.75 { mean * u } else { 1.25 * mean - mean * (1.0 - u).sqrt() };
     // `genPowerBanks` reads a due tick of 0 as none set.
     t + 1 + left as i64
 }
@@ -168,15 +156,10 @@ const APART: i32 = 3;
 /// As `npm run soak` picks its default room, from where `seed` falls among them by name.
 fn order(map: &Map, seed: u64) -> Vec<&str> {
     let sources = |room: &str| {
-        map.objects
-            .iter()
-            .filter(|o| o["room"] == room && o["type"] == "source")
-            .count()
+        map.objects.iter().filter(|o| o["room"] == room && o["type"] == "source").count()
     };
-    let normal = |room: &str| {
-        room.parse()
-            .is_ok_and(|xy| mapgen::room_kind(xy) == RoomKind::Normal)
-    };
+    let normal =
+        |room: &str| room.parse().is_ok_and(|xy| mapgen::room_kind(xy) == RoomKind::Normal);
     let mut fit: Vec<&str> = (map.rooms.iter().map(|(n, _)| n.as_str()))
         .filter(|r| normal(r) && sources(r) == 2)
         .collect();
@@ -195,9 +178,8 @@ mod tests {
         let flags = BTreeMap::from([("--gen".to_string(), "16".to_string())]);
         let map = Spec::of(&flags).expect("a spec").world();
         assert_eq!(map.rooms, Spec::of(&flags).expect("a spec").world().rooms);
-        let terrain: BTreeMap<RoomXY, &[u8]> = (map.rooms.iter())
-            .map(|(n, t)| (n.parse().expect("a room"), t.as_bytes()))
-            .collect();
+        let terrain: BTreeMap<RoomXY, &[u8]> =
+            (map.rooms.iter()).map(|(n, t)| (n.parse().expect("a room"), t.as_bytes())).collect();
         let open = |t: &[u8], x: usize, y: usize| t[y * 50 + x] & 1 == 0;
         for (&xy, t) in &terrain {
             type Edge = fn(usize) -> (usize, usize);

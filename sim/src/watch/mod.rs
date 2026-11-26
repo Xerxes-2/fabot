@@ -3,28 +3,39 @@
 //! krebs's backend answers what it can off the published view; what it holds
 //! that lazycreep cannot pass (token expiry, same-origin sockets, the unsharded
 //! tile paths) is answered here instead.
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::io::{self, BufRead, BufReader, Read, Write};
-use std::net::{Shutdown, TcpListener, TcpStream, UdpSocket};
-use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
-use std::sync::mpsc::{self, SyncSender};
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    io::{self, BufRead, BufReader, Read, Write},
+    net::{Shutdown, TcpListener, TcpStream, UdpSocket},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering::SeqCst},
+        mpsc::{self, SyncSender},
+    },
+    thread,
+    time::{Duration, Instant},
+};
 
-use krebs::atom;
-use krebs::common::calc_world_size;
-use krebs::doc::DocRef;
-use krebs::room_name::RoomXY;
-use krebs::world::{World as Krebs, WorldView};
-use krebs_backend::http::{Request, Response, obj, url_decode};
-use krebs_backend::{ApiCtx, Published, api, field, png, server, socket, str_field, ws};
+use krebs::{
+    atom,
+    common::calc_world_size,
+    doc::DocRef,
+    room_name::RoomXY,
+    world::{World as Krebs, WorldView},
+};
+use krebs_backend::{
+    ApiCtx, Published, api, field,
+    http::{Request, Response, obj, url_decode},
+    png, server, socket, str_field, ws,
+};
 use krebs_util::json::Json;
 use serde_json::{Map, Value, json};
 
-use crate::seat::Player;
-use crate::view::text;
-use crate::world::{US, USERNAME};
+use crate::{
+    seat::Player,
+    view::text,
+    world::{US, USERNAME},
+};
 
 /// The socket binds every interface: what a LAN client can make it hold is bounded.
 const SERVING: usize = 16;
@@ -106,9 +117,7 @@ impl Watch {
         let driver = &players[0].driver;
         let cpu = json!({ "cpu": driver.decide_ms - self.decided, "memory": driver.memory.len() });
         self.decided = driver.decide_ms;
-        let faults = players
-            .iter()
-            .flat_map(|p| p.driver.faults.iter().map(move |f| (p, f)));
+        let faults = players.iter().flat_map(|p| p.driver.faults.iter().map(move |f| (p, f)));
         let fresh: Vec<String> = (faults
             .map(|(p, (at, why))| format!("{} fault {at}: {why}", p.seat.name)))
         .filter(|f| self.told.insert(f.clone()))
@@ -257,10 +266,7 @@ impl Conn {
                 let Some(r) = room_idx(view, room) else {
                     continue;
                 };
-                let same = prev
-                    .rooms
-                    .get(r)
-                    .is_some_and(|p| Arc::ptr_eq(p, &view.rooms[r]));
+                let same = prev.rooms.get(r).is_some_and(|p| Arc::ptr_eq(p, &view.rooms[r]));
                 (!same).then(|| map_view(view, room).to_string())
             } else if channel.ends_with("/cpu") {
                 Some(cpu.to_string())
@@ -322,10 +328,8 @@ fn diff(old: &Value, new: &Value) -> Option<Value> {
     let (Value::Object(o), Value::Object(n)) = (old, new) else {
         return (old != new).then(|| new.clone());
     };
-    let mut d: Map<String, Value> = (o.keys())
-        .filter(|k| !n.contains_key(*k))
-        .map(|k| (k.clone(), Value::Null))
-        .collect();
+    let mut d: Map<String, Value> =
+        (o.keys()).filter(|k| !n.contains_key(*k)).map(|k| (k.clone(), Value::Null)).collect();
     for (k, v) in n {
         let changed = o.get(k).map_or(Some(v.clone()), |was| diff(was, v));
         d.extend(changed.map(|c| (k.clone(), c)));
@@ -364,10 +368,7 @@ fn head_line(r: &mut impl BufRead) -> Result<String, u16> {
 fn read_request(r: &mut impl BufRead) -> Result<Request, u16> {
     let line = head_line(r)?;
     let mut parts = line.split_whitespace();
-    let (method, target) = (
-        parts.next().ok_or(400u16)?.to_string(),
-        parts.next().ok_or(400u16)?,
-    );
+    let (method, target) = (parts.next().ok_or(400u16)?.to_string(), parts.next().ok_or(400u16)?);
     let (path, qs) = target.split_once('?').unwrap_or((target, ""));
     let pair = |p: &str| {
         let (k, v) = p.split_once('=').unwrap_or((p, ""));
@@ -389,13 +390,7 @@ fn read_request(r: &mut impl BufRead) -> Result<Request, u16> {
     }
     let mut body = vec![0; length];
     r.read_exact(&mut body).map_err(|_| 0u16)?;
-    Ok(Request {
-        method,
-        path,
-        query,
-        headers,
-        body,
-    })
+    Ok(Request { method, path, query, headers, body })
 }
 
 /// Every response says any origin may read it: the client's page is served from the gateway's port.
@@ -422,11 +417,8 @@ fn write_response(w: &mut impl Write, res: &Response) -> io::Result<()> {
 
 fn route(req: &Request, sh: &Shared) -> Response {
     let view = sh.published.get();
-    let ctx = ApiCtx {
-        published: sh.published.clone(),
-        commands: mpsc::channel().0,
-        user: us(&view),
-    };
+    let ctx =
+        ApiCtx { published: sh.published.clone(), commands: mpsc::channel().0, user: us(&view) };
     let ok = |pairs| Response::ok(obj(pairs));
     match (req.method.as_str(), req.path.as_str()) {
         ("OPTIONS", _) => Response::text(204, "text/plain", ""),
@@ -455,24 +447,17 @@ fn route(req: &Request, sh: &Shared) -> Response {
 }
 
 fn owned(view: &WorldView) -> Vec<Json> {
-    let controllers = view
-        .rooms
-        .iter()
-        .flat_map(|r| r.objects.iter())
-        .filter(|d| d.kind() == "controller");
+    let controllers =
+        view.rooms.iter().flat_map(|r| r.objects.iter()).filter(|d| d.kind() == "controller");
     (controllers.filter(|d| str_field(&d.obj, "user") == Some(US)))
         .map(|d| Json::Str(str_field(&d.obj, "room").unwrap_or("").to_string()))
         .collect()
 }
 
 fn room_objects(room: &str, view: &WorldView) -> Response {
-    let objects = room_idx(view, room).map_or(Vec::new(), |r| {
-        view.rooms[r].objects.iter().map(|d| d.json()).collect()
-    });
-    let body = format!(
-        r#"{{"ok":1,"objects":[{}],"users":{{}}}}"#,
-        objects.join(",")
-    );
+    let objects = room_idx(view, room)
+        .map_or(Vec::new(), |r| view.rooms[r].objects.iter().map(|d| d.json()).collect());
+    let body = format!(r#"{{"ok":1,"objects":[{}],"users":{{}}}}"#, objects.join(","));
     Response {
         status: 200,
         headers: vec![("Content-Type".into(), "application/json".into())],
@@ -482,14 +467,9 @@ fn room_objects(room: &str, view: &WorldView) -> Response {
 
 /// `/assets/map/<shard>/…` with the shard empty (`//`) or `shard0`; krebs draws all but zoom1.
 fn tile(path: &str, ctx: &ApiCtx) -> Response {
-    let rest = path
-        .trim_start_matches("/assets/map/")
-        .trim_start_matches('/');
+    let rest = path.trim_start_matches("/assets/map/").trim_start_matches('/');
     let rest = rest.strip_prefix("shard0/").unwrap_or(rest);
-    if let Some(corner) = rest
-        .strip_prefix("zoom1/")
-        .and_then(|f| f.strip_suffix(".png"))
-    {
+    if let Some(corner) = rest.strip_prefix("zoom1/").and_then(|f| f.strip_suffix(".png")) {
         return zoom1(corner, &ctx.published.get())
             .unwrap_or_else(|| Response::not_found("GET", path));
     }
@@ -508,13 +488,7 @@ fn zoom1(corner: &str, view: &WorldView) -> Option<Response> {
     let at: RoomXY = corner.parse().ok()?;
     let mut px = vec![0u8; 200 * 200 * 4];
     let mut any = false;
-    for (r, m) in view
-        .meta
-        .rooms
-        .iter()
-        .enumerate()
-        .filter(|(_, m)| !m.removed)
-    {
+    for (r, m) in view.meta.rooms.iter().enumerate().filter(|(_, m)| !m.removed) {
         let (dx, dy) = (m.xy.x - at.x, m.xy.y - at.y);
         if !(0..10).contains(&dx) || !(0..10).contains(&dy) {
             continue;
@@ -528,11 +502,7 @@ fn zoom1(corner: &str, view: &WorldView) -> Option<Response> {
         }
     }
     let body = any.then(|| png::encode_png(200, 200, &px))?;
-    Some(Response {
-        status: 200,
-        headers: vec![("Content-Type".into(), "image/png".into())],
-        body,
-    })
+    Some(Response { status: 200, headers: vec![("Content-Type".into(), "image/png".into())], body })
 }
 
 fn websocket(req: &Request, r: BufReader<TcpStream>, mut w: TcpStream, sh: &Shared) {

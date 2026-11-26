@@ -1,14 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use fabot_atlas::Atlas;
-use fabot_base::declarations::{self, Declarations, Declared};
-use fabot_base::engine;
-use fabot_base::intel::{Intel, Row, STALE, Scout};
-use fabot_base::intents::Action;
-use fabot_base::stronghold::{Stronghold, raw};
-use fabot_base::tiles;
-use fabot_base::vocabulary::Part;
-use fabot_base::world::{Owner, Room, RoomName, Rules, Structure, StructureType, World};
+use fabot_base::{
+    declarations::{self, Declarations, Declared},
+    engine,
+    intel::{Intel, Row, STALE, Scout},
+    intents::Action,
+    stronghold::{Stronghold, raw},
+    tiles,
+    vocabulary::Part,
+    world::{Owner, Room, RoomName, Rules, Structure, StructureType, World},
+};
 
 pub fn step(world: &World, atlas: &Atlas, intel: &mut Intel) {
     for room in &world.rooms {
@@ -27,17 +29,9 @@ pub fn step(world: &World, atlas: &Atlas, intel: &mut Intel) {
                 .find(|h| h.body.iter().any(|p| p.kind == Part::Work))
                 .and_then(|h| h.owner.username(&world.me)),
             lairs: Some(Atlas::posts(room)),
-            controller: c.map(|c| Declared {
-                id: c.id,
-                pos: c.pos,
-            }),
+            controller: c.map(|c| Declared { id: c.id, pos: c.pos }),
             sources: Some(
-                (room.sources.iter())
-                    .map(|s| Declared {
-                        id: s.id,
-                        pos: s.pos,
-                    })
-                    .collect(),
+                (room.sources.iter()).map(|s| Declared { id: s.id, pos: s.pos }).collect(),
             ),
             contained: (room.sources.iter()).all(|s| {
                 (room.structures.iter())
@@ -83,18 +77,12 @@ fn worth(rules: &Rules, room: &Room, atlas: &Atlas, level: i32) -> i32 {
 }
 
 fn declared(declarations: &Declarations) -> impl Iterator<Item = &RoomName> {
-    declarations
-        .claims
-        .iter()
-        .chain(&declarations.outposts)
-        .map(|o| &o.room)
+    declarations.claims.iter().chain(&declarations.outposts).map(|o| &o.room)
 }
 
 pub fn preyed(intel: &Intel, declarations: &Declarations, time: i32) -> Vec<RoomName> {
-    let enemy = |user: &Option<String>| {
-        user.as_ref()
-            .is_some_and(|u| declarations.enemies.contains(u))
-    };
+    let enemy =
+        |user: &Option<String>| user.as_ref().is_some_and(|u| declarations.enemies.contains(u));
     let mut rooms: Vec<(i32, &RoomName)> = intel
         .iter()
         .filter(|(room, _)| !declarations.avoid.contains(*room))
@@ -201,10 +189,7 @@ pub fn sight(
         .any(|c| declarations::fights(&c.name) && preyed.contains(&c.pos.room));
     let eyes: Vec<RoomName> = free.iter().map(|o| o.pos.room).collect();
     let sweep = preyed.first().filter(|_| !hunting && !looked);
-    let mut observed: Vec<Action> = sweep
-        .and_then(|r| observe(&mut free, r))
-        .into_iter()
-        .collect();
+    let mut observed: Vec<Action> = sweep.and_then(|r| observe(&mut free, r)).into_iter().collect();
     let covered = |observed: &[Action], room: &RoomName| {
         (observed.iter()).any(|i| matches!(i, Action::Observe(_, r) if r == room))
     };
@@ -232,10 +217,8 @@ pub fn sight(
 
     let seen = |room: &RoomName| intel.get(room).map(|r| r.seen);
     // Rings nearest first: a nearer rival raids sooner, and age alone strays.
-    let ring = (radius.iter())
-        .filter(|(room, _)| !intel.contains_key(*room))
-        .map(|(_, hops)| *hops)
-        .min();
+    let ring =
+        (radius.iter()).filter(|(room, _)| !intel.contains_key(*room)).map(|(_, hops)| *hops).min();
     let fresh = |row: &Row| row.guarded(&world.me, declarations) && world.time - row.seen <= STALE;
     let near = (radius.iter())
         .filter(|(room, hops)| intel.contains_key(*room) || Some(**hops) == ring)

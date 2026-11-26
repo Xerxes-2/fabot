@@ -76,10 +76,6 @@ pub fn first_spawn(
     room: &fabot_base::world::Room,
 ) -> Option<(Plan, fabot_base::tiles::Tile)> {
     let plan = plan::of_ground(rules, &ground::of_room(room)?)?;
-    let tile = plan
-        .items
-        .iter()
-        .find(|i| i.kind == fabot_base::world::StructureType::Spawn)?
-        .tile;
+    let tile = plan.items.iter().find(|i| i.kind == fabot_base::world::StructureType::Spawn)?.tile;
     Some((plan, tile))
 }

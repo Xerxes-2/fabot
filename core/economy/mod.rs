@@ -12,16 +12,20 @@ pub use run::{EconomyState, decide, spare};
 
 #[cfg(test)]
 pub(crate) mod arb {
-    use fabot_base::declarations::{Declared, Outpost};
-    use fabot_base::engine;
-    use fabot_base::vocabulary::{Part, ResourceType};
-    use fabot_base::world::{
-        BodyPart, Built, Controller, Creep, Id, Owner, Pile, Pos, Room, RoomName, Site, Source,
-        Spawn, Store, Structure, StructureType, World,
+    use fabot_base::{
+        declarations::{Declared, Outpost},
+        engine,
+        vocabulary::{Part, ResourceType},
+        world::{
+            BodyPart, Built, Controller, Creep, Id, Owner, Pile, Pos, Room, RoomName, Site, Source,
+            Spawn, Store, Structure, StructureType, World,
+        },
     };
-    use proptest::collection::vec;
-    use proptest::prelude::*;
-    use proptest::sample::{Index, select};
+    use proptest::{
+        collection::vec,
+        prelude::*,
+        sample::{Index, select},
+    };
 
     use super::task::{Target, Task};
 
@@ -91,13 +95,7 @@ pub(crate) mod arb {
         } else {
             vec![StructureType::Container, StructureType::Road]
         };
-        let draws = (
-            select(kinds),
-            pos(room),
-            0..=2000,
-            1..=250_000,
-            any::<Index>(),
-        );
+        let draws = (select(kinds), pos(room), 0..=2000, 1..=250_000, any::<Index>());
         draws.prop_map(move |(kind, at, energy, hits_max, hits)| {
             let capacity = if kind == StructureType::Road { 0 } else { 2000 };
             Structure {
@@ -111,10 +109,7 @@ pub(crate) mod arb {
                 pos: at,
                 hits: 1 + hits.index(hits_max as usize) as i32,
                 hits_max,
-                store: store(
-                    vec![(ResourceType::Energy, i32::min(energy, capacity))],
-                    capacity,
-                ),
+                store: store(vec![(ResourceType::Energy, i32::min(energy, capacity))], capacity),
                 cooldown: 0,
                 collapse: 0,
                 deploy: 0,
@@ -131,11 +126,7 @@ pub(crate) mod arb {
             remaining: 5,
             body: parts
                 .iter()
-                .map(|p| BodyPart {
-                    kind: *p,
-                    hits: engine::PART_HITS,
-                    boost: None,
-                })
+                .map(|p| BodyPart { kind: *p, hits: engine::PART_HITS, boost: None })
                 .collect(),
         }
     }
@@ -179,11 +170,7 @@ pub(crate) mod arb {
                 progress: 0,
                 progress_total: 0,
                 ticks_to_downgrade: if owned { downgrade } else { 0 },
-                reservation: if !owned && reserved {
-                    Some((holder, 1200))
-                } else {
-                    None
-                },
+                reservation: if !owned && reserved { Some((holder, 1200)) } else { None },
                 sign: None,
                 safe_mode: 0,
                 safe_mode_available: 0,
@@ -202,10 +189,7 @@ pub(crate) mod arb {
                 .collect();
 
             let mut structures: Vec<Structure> = (structures.into_iter().enumerate())
-                .map(|(k, s)| Structure {
-                    id: format!("{name}s{k}").as_str().into(),
-                    ..s
-                })
+                .map(|(k, s)| Structure { id: format!("{name}s{k}").as_str().into(), ..s })
                 .collect();
 
             let mut spawns: Vec<Spawn> = Vec::new();
@@ -292,17 +276,8 @@ pub(crate) mod arb {
     pub fn creep(rooms: Vec<RoomName>) -> impl Strategy<Value = Creep> {
         let at = select(rooms).prop_flat_map(pos);
         let prefix = select(vec!["worker", "harvester", "hauler", "claimer", "x"]);
-        let parts = vec(
-            select(vec![Part::Work, Part::Carry, Part::Move, Part::Claim]),
-            1..=12,
-        );
-        let draws = (
-            at,
-            prefix,
-            parts,
-            1..=engine::CREEP_LIFETIME,
-            any::<Index>(),
-        );
+        let parts = vec(select(vec![Part::Work, Part::Carry, Part::Move, Part::Claim]), 1..=12);
+        let draws = (at, prefix, parts, 1..=engine::CREEP_LIFETIME, any::<Index>());
         draws.prop_map(|(at, prefix, parts, life, energy)| {
             let n = parts.len() as i32;
             let carry = engine::carry_capacity(&parts);
@@ -315,11 +290,7 @@ pub(crate) mod arb {
                 pos: at,
                 body: parts
                     .iter()
-                    .map(|p| BodyPart {
-                        kind: *p,
-                        hits: engine::PART_HITS,
-                        boost: None,
-                    })
+                    .map(|p| BodyPart { kind: *p, hits: engine::PART_HITS, boost: None })
                     .collect(),
                 hits: n * engine::PART_HITS,
                 hits_max: n * engine::PART_HITS,
@@ -342,12 +313,7 @@ pub(crate) mod arb {
         let draws = (1..=4).prop_flat_map(|nr| {
             let names: Vec<RoomName> = (0..nr).map(|i| RoomName::new(i, 0)).collect();
             let rooms: Vec<_> = names.iter().map(|&name| room(name)).collect();
-            (
-                rooms,
-                vec(creep(names), 0..=12),
-                1..=1_000_000,
-                any::<bool>(),
-            )
+            (rooms, vec(creep(names), 0..=12), 1..=1_000_000, any::<bool>())
         });
         draws.prop_map(|(rooms, creeps, time, split)| {
             let creeps: Vec<Creep> = (creeps.into_iter().enumerate())
@@ -361,28 +327,15 @@ pub(crate) mod arb {
             let unowned: Vec<(&Room, &Controller)> = rooms
                 .iter()
                 .filter_map(|(r, _)| {
-                    r.controller
-                        .as_ref()
-                        .filter(|c| c.owner == Owner::Nobody)
-                        .map(|c| (r, c))
+                    r.controller.as_ref().filter(|c| c.owner == Owner::Nobody).map(|c| (r, c))
                 })
                 .collect();
 
             let declared = |(r, c): &(&Room, &Controller)| Outpost {
                 reserved: true,
                 room: r.name,
-                controller: Declared {
-                    id: c.id,
-                    pos: c.pos,
-                },
-                sources: r
-                    .sources
-                    .iter()
-                    .map(|s| Declared {
-                        id: s.id,
-                        pos: s.pos,
-                    })
-                    .collect(),
+                controller: Declared { id: c.id, pos: c.pos },
+                sources: r.sources.iter().map(|s| Declared { id: s.id, pos: s.pos }).collect(),
             };
 
             let world = World {
@@ -403,16 +356,8 @@ pub(crate) mod arb {
 
             Generated {
                 world,
-                worked: if split {
-                    unowned.iter().map(declared).collect()
-                } else {
-                    Vec::new()
-                },
-                claims: if split {
-                    Vec::new()
-                } else {
-                    unowned.iter().map(declared).collect()
-                },
+                worked: if split { unowned.iter().map(declared).collect() } else { Vec::new() },
+                claims: if split { Vec::new() } else { unowned.iter().map(declared).collect() },
             }
         })
     }

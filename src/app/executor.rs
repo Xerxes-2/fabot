@@ -2,14 +2,15 @@
 //! each its API call (`ARCHITECTURE.md` §1).
 use std::fmt::{Display, Write};
 
-use wasm_bindgen::prelude::wasm_bindgen;
-
-use fabot_base::intents::{
-    Action, ControllerAct, CreepAct, LabAct, LinkAct, Refusal, RoomAct, SpawnAct, TerminalAct,
-    TowerAct,
+use fabot_base::{
+    intents::{
+        Action, ControllerAct, CreepAct, LabAct, LinkAct, Refusal, RoomAct, SpawnAct, TerminalAct,
+        TowerAct,
+    },
+    world::Id,
 };
-use fabot_base::world::Id;
 use fabot_observe::metrics;
+use wasm_bindgen::prelude::wasm_bindgen;
 
 #[wasm_bindgen]
 extern "C" {
@@ -131,11 +132,9 @@ impl Pack {
                     | CreepAct::Dismantle(id) => call.by_id(id),
                 }
             }
-            Action::Room(name, RoomAct::CreateSite(x, y, kind)) => (self
-                .call(ROOM, name, "createConstructionSite")
-                .int(*x)
-                .int(*y))
-            .text(kind),
+            Action::Room(name, RoomAct::CreateSite(x, y, kind)) => {
+                (self.call(ROOM, name, "createConstructionSite").int(*x).int(*y)).text(kind)
+            }
             Action::Room(_, RoomAct::Destroy(id)) => self.call(OBJECT, id, "destroy"),
             Action::Tower(id, TowerAct::Attack(t)) => self.call(OBJECT, id, "attack").by_id(t),
             Action::Tower(id, TowerAct::Heal(t)) => self.call(OBJECT, id, "heal").by_id(t),
@@ -153,16 +152,9 @@ impl Pack {
             Action::Lab(id, LabAct::BoostCreep(creep)) => {
                 self.call(OBJECT, id, "boostCreep").by_id(creep)
             }
-            Action::Terminal(
-                id,
-                TerminalAct::Send {
-                    resource,
-                    amount,
-                    to,
-                },
-            ) => (self.call(OBJECT, id, "send").text(resource))
-                .int(*amount)
-                .text(to),
+            Action::Terminal(id, TerminalAct::Send { resource, amount, to }) => {
+                (self.call(OBJECT, id, "send").text(resource)).int(*amount).text(to)
+            }
             Action::Observe(id, room) => self.call(OBJECT, id, "observeRoom").text(room),
             Action::Spawn(id, SpawnAct::RecycleCreep(creep)) => {
                 self.call(OBJECT, id, "recycleCreep").by_id(creep)

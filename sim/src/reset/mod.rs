@@ -15,10 +15,7 @@ pub struct Twin {
 
 impl Twin {
     pub fn new(every: u64, check: bool) -> Twin {
-        let mut kept = Twin {
-            every,
-            ..Twin::default()
-        };
+        let mut kept = Twin { every, ..Twin::default() };
         kept.heap.atlas.check = check;
         kept
     }

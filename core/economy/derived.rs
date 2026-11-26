@@ -3,23 +3,30 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
 use fabot_atlas::{self as atlas, Atlas, Tree};
-use fabot_base::HashMap;
-use fabot_base::boost::{self, Boosting, Load};
-use fabot_base::declarations::{self, Declarations, OpKind, Outpost};
-use fabot_base::engine;
-use fabot_base::grid::Footprint;
-use fabot_base::intel::{self, Intel, Scout};
-use fabot_base::tiles::{self, Tile};
-use fabot_base::vocabulary::ResourceType::{self, Energy};
-use fabot_base::vocabulary::{Part, part_count_in};
-use fabot_base::world::{
-    self, BodyPart, Built, Controller, Creep, Id, Owner, Pos, Room, RoomName, Rules, Source, Spawn,
-    Store, Structure, StructureType, World,
+use fabot_base::{
+    HashMap,
+    boost::{self, Boosting, Load},
+    declarations::{self, Declarations, OpKind, Outpost},
+    engine,
+    grid::Footprint,
+    intel::{self, Intel, Scout},
+    tiles::{self, Tile},
+    vocabulary::{
+        Part,
+        ResourceType::{self, Energy},
+        part_count_in,
+    },
+    world::{
+        self, BodyPart, Built, Controller, Creep, Id, Owner, Pos, Room, RoomName, Rules, Source,
+        Spawn, Store, Structure, StructureType, World,
+    },
 };
 
-use super::balance::{Holding, Level, Shipment, balance, gives, sends, want};
-use super::bodies::{self, Pattern};
-use super::task::Target;
+use super::{
+    balance::{Holding, Level, Shipment, balance, gives, sends, want},
+    bodies::{self, Pattern},
+    task::Target,
+};
 
 #[derive(Clone, Debug)]
 pub struct Body {
@@ -112,9 +119,11 @@ impl StoreKind {
     pub fn is_buffer(self) -> bool {
         self == StoreKind::Buffer
     }
+
     pub fn is_remains(self) -> bool {
         self == StoreKind::Remains
     }
+
     pub fn is_pile(self) -> bool {
         self == StoreKind::Pile
     }
@@ -142,9 +151,11 @@ impl LinkRole {
     pub fn is_source(self) -> bool {
         self == LinkRole::Source
     }
+
     pub fn is_controller(self) -> bool {
         self == LinkRole::Controller
     }
+
     pub fn is_hub(self) -> bool {
         self == LinkRole::Hub
     }
@@ -311,20 +322,13 @@ impl Ground {
             return 0;
         };
         let apart = tiles::rooms_apart(self.room, *home);
-        let sent: i32 = (self.shipment.iter())
-            .filter(|(r, _)| *r == Energy)
-            .map(|(_, n)| n)
-            .sum();
+        let sent: i32 = (self.shipment.iter()).filter(|(r, _)| *r == Energy).map(|(_, n)| n).sum();
         sent + super::balance::send_fee(self.shipment.iter().map(|(_, n)| *n), apart)
     }
 
     /// What of `s` is the stock: a terminal's past what its sends take.
     fn own(&self, s: &StoreFact) -> i32 {
-        if self.is_terminal(s) {
-            0.max(s.energy - self.shipped().max(self.fees))
-        } else {
-            s.energy
-        }
+        if self.is_terminal(s) { 0.max(s.energy - self.shipped().max(self.fees)) } else { s.energy }
     }
 
     pub fn stock(&self) -> Option<i32> {
@@ -359,9 +363,7 @@ impl Ground {
     /// Hivemind's `link-network.ts`.
     pub fn link_net(&self) -> LinkNet {
         let room = |by: &dyn Fn(&LinkFact) -> bool| -> i32 {
-            (self.links.iter().filter(|l| by(l)))
-                .map(|l| l.energy + l.free)
-                .sum()
+            (self.links.iter().filter(|l| by(l))).map(|l| l.energy + l.free).sum()
         };
         let least = room(&|l| l.role.is_controller());
         LinkNet {
@@ -374,11 +376,7 @@ impl Ground {
     /// A site that waits pays back nothing, so while one stands its builders
     /// draw the reserve.
     pub fn kept_from_builders(&self, reserve: i32) -> i32 {
-        if self.sites.iter().any(|s| drawn_for(s.kind)) {
-            0
-        } else {
-            reserve
-        }
+        if self.sites.iter().any(|s| drawn_for(s.kind)) { 0 } else { reserve }
     }
 }
 
@@ -432,20 +430,13 @@ fn pickups_of(
         }
         let (_, loot) = (intel.get(&room)?.loot.clone()).filter(|(c, _)| *c > world.time)?;
         let wall = loot.iter().find(|l| l.3).map(|l| (None, l.0.pos));
-        Some((
-            loot.into_iter()
-                .filter(|l| !l.3)
-                .map(|(at, r, n, _)| (at, r, n))
-                .collect(),
-            wall,
-        ))
+        Some((loot.into_iter().filter(|l| !l.3).map(|(at, r, n, _)| (at, r, n)).collect(), wall))
     };
     (declarations.rooms(OpKind::Pickup))
         .filter_map(|room| {
             let (loot, wall) = seen(room)?;
-            let loot: Vec<(Id, Pos, ResourceType, i32)> = (loot.into_iter())
-                .map(|(at, r, n)| (at.id, at.pos, r, n))
-                .collect();
+            let loot: Vec<(Id, Pos, ResourceType, i32)> =
+                (loot.into_iter()).map(|(at, r, n)| (at.id, at.pos, r, n)).collect();
             // `jobs` fetches only for a bank with room for the load: one with none idles a carrier.
             let least = loot.iter().map(|l| l.3).min().or(wall.map(|_| 0))?;
             let takes =
@@ -582,9 +573,7 @@ fn repair_of(room: &Room, wall: i32, owned_room: bool, s: &Structure) -> Option<
             (wall.min(s.hits_max), chunk, decay, 0.0, 0)
         }
         StructureType::Road => {
-            let bits = room
-                .terrain
-                .map_or(0, |t| t.get_bits()[tiles::of_pos(&s.pos).index()]);
+            let bits = room.terrain.map_or(0, |t| t.get_bits()[tiles::of_pos(&s.pos).index()]);
             let ratio = engine::road_ratio(bits);
             let chunk = engine::ROAD_DECAY_AMOUNT * ratio;
             let block = bodies::block_of(Pattern::Hauler);
@@ -592,13 +581,7 @@ fn repair_of(room: &Room, wall: i32, owned_room: bool, s: &Structure) -> Option<
             let steps = 2.0 / f64::from(load);
             let decay = per(chunk, engine::ROAD_DECAY_TIME);
             let wear = decay * steps * f64::from(block.len() as i32 * engine::ROAD_WEAROUT);
-            (
-                s.hits_max,
-                chunk,
-                decay,
-                wear,
-                engine::ROAD_BUILD_COST * ratio,
-            )
+            (s.hits_max, chunk, decay, wear, engine::ROAD_BUILD_COST * ratio)
         }
         StructureType::Container => {
             let period = if owned_room {
@@ -607,13 +590,7 @@ fn repair_of(room: &Room, wall: i32, owned_room: bool, s: &Structure) -> Option<
                 engine::CONTAINER_DECAY_TIME
             };
             let chunk = engine::CONTAINER_DECAY_AMOUNT;
-            (
-                s.hits_max,
-                chunk,
-                per(chunk, period),
-                0.0,
-                engine::CONTAINER_BUILD_COST,
-            )
+            (s.hits_max, chunk, per(chunk, period), 0.0, engine::CONTAINER_BUILD_COST)
         }
         _ => return None,
     };
@@ -633,9 +610,8 @@ fn repair_of(room: &Room, wall: i32, owned_room: bool, s: &Structure) -> Option<
 
 /// At its strikers' full live power: `World.attacks` drops the event's damage.
 fn strikes_of(world: &World) -> BTreeMap<Id, i32> {
-    let hostiles: BTreeMap<Id, &Creep> = (world.rooms.iter())
-        .flat_map(|r| r.hostiles().map(|c| (c.id, c)))
-        .collect();
+    let hostiles: BTreeMap<Id, &Creep> =
+        (world.rooms.iter()).flat_map(|r| r.hostiles().map(|c| (c.id, c))).collect();
     let mut strikes = BTreeMap::new();
     for (by, at) in &world.attacks {
         if let Some(c) = hostiles.get(by) {
@@ -729,11 +705,7 @@ pub fn stores_of(
             Container | Storage | Terminal if s.kind != Terminal || s.owner.is_ours() => {
                 let energy = s.store.amount_of(Energy);
                 let owned = s.kind == Storage && s.owner.is_ours();
-                let dug = if s.kind == Container {
-                    served_dug(&s.pos)
-                } else {
-                    0
-                };
+                let dug = if s.kind == Container { served_dug(&s.pos) } else { 0 };
 
                 let kind = if matches!(s.kind, Storage | Terminal) {
                     StoreKind::Storage
@@ -785,12 +757,7 @@ fn labs_of(working: &[&Structure]) -> Vec<LabFact> {
         .map(|s| LabFact {
             id: s.id,
             pos: s.pos,
-            held: s
-                .store
-                .held
-                .iter()
-                .find(|(r, n)| *r != Energy && *n > 0)
-                .copied(),
+            held: s.store.held.iter().find(|(r, n)| *r != Energy && *n > 0).copied(),
             cooldown: s.cooldown,
         })
         .collect()
@@ -881,23 +848,14 @@ fn ground_of(
 
     let (bays, refills): (Vec<RefillFact>, Vec<RefillFact>) = (working.iter())
         .filter(|s| {
-            matches!(
-                s.kind,
-                StructureType::Spawn | StructureType::Extension | StructureType::Tower
-            )
+            matches!(s.kind, StructureType::Spawn | StructureType::Extension | StructureType::Tower)
         })
         .filter(|s| s.owner.is_ours() && s.store.free() > 0)
-        .map(|s| RefillFact {
-            id: s.id,
-            pos: s.pos,
-            kind: s.kind,
-            free: s.store.free(),
-        })
+        .map(|s| RefillFact { id: s.id, pos: s.pos, kind: s.kind, free: s.store.free() })
         .partition(|r| in_bay(r.kind, &r.pos));
     let mut stores = stores_of(room, owned_room, &is_buffer, &served_dug);
-    let repairs: Vec<RepairFact> = (room.structures.iter())
-        .flat_map(|s| repair_of(room, wall, owned_room, s))
-        .collect();
+    let repairs: Vec<RepairFact> =
+        (room.structures.iter()).flat_map(|s| repair_of(room, wall, owned_room, s)).collect();
 
     let store_of = |kind: StoreKind, dug: i32, l: &LinkFact| StoreFact {
         id: Target::Object(l.id),
@@ -912,8 +870,7 @@ fn ground_of(
     let feed = match (&controller_link, &hub_link) {
         (Some(c), hub) => {
             stores.push(store_of(StoreKind::Buffer, 0, c));
-            hub.as_ref()
-                .map(|hub| store_of(StoreKind::Container, 0, hub))
+            hub.as_ref().map(|hub| store_of(StoreKind::Container, 0, hub))
         }
         (None, Some(hub)) => {
             let dug: i32 = dug_of(&|s| s.link.is_some());
@@ -952,12 +909,7 @@ fn ground_of(
         piles: room
             .piles
             .iter()
-            .map(|p| PileFact {
-                id: p.id,
-                pos: p.pos,
-                resource: p.resource,
-                amount: p.amount,
-            })
+            .map(|p| PileFact { id: p.id, pos: p.pos, resource: p.resource, amount: p.amount })
             .collect(),
         reservable: room.controller.as_ref().is_some_and(takeable),
         our_reservation: (room.controller.as_ref())
@@ -1040,9 +992,8 @@ fn cluster_of<'g>(g: &'g Ground, boosting: &'g Boosting) -> Cluster<'g> {
     use fabot_base::boost;
     // The lab a body waiting at home is boosted from is the cast's and not
     // a reaction's: its compound is kept while the body still lacks it.
-    let kept: BTreeMap<Id, ResourceType> = (boosting.waits.iter())
-        .map(|w| (w.lab, w.load.compound))
-        .collect();
+    let kept: BTreeMap<Id, ResourceType> =
+        (boosting.waits.iter()).map(|w| (w.lab, w.load.compound)).collect();
     // Roles and rank off every lab, a kept one only leaving the outputs: else
     // a boost lent a lab moved the pair and stopped or unranked a running reaction.
     let labs: Vec<(Id, Pos)> = g.labs.iter().map(|l| (l.id, l.pos)).collect();
@@ -1057,20 +1008,11 @@ fn cluster_of<'g>(g: &'g Ground, boosting: &'g Boosting) -> Cluster<'g> {
     let bench = roles.as_ref().map(|roles| {
         let (a, b) = roles.reagents;
         super::labs::Bench {
-            reagents_held: [a, b]
-                .iter()
-                .filter_map(|id| lab_held(g, *id).map(|h| h.0))
-                .collect(),
+            reagents_held: [a, b].iter().filter_map(|id| lab_held(g, *id).map(|h| h.0)).collect(),
             outputs,
         }
     });
-    Cluster {
-        ground: g,
-        boosting,
-        kept,
-        roles,
-        bench,
-    }
+    Cluster { ground: g, boosting, kept, roles, bench }
 }
 
 fn lab_held(g: &Ground, id: Id) -> Option<(ResourceType, i32)> {
@@ -1095,10 +1037,7 @@ fn plan_cluster(
 ) -> super::labs::Plan {
     let mut plan = super::labs::plan_for(reaction, c.roles.as_ref(), &|id| lab_held(c.ground, id));
     for (id, compound) in &c.kept {
-        for (r, n) in lab_at(world, c.ground.room, *id)
-            .iter()
-            .flat_map(|l| &l.store.held)
-        {
+        for (r, n) in lab_at(world, c.ground.room, *id).iter().flat_map(|l| &l.store.held) {
             if *n > 0 && r != compound && fabot_base::boost::is_mineral(*r) {
                 plan.drains.push((*id, *r));
             }
@@ -1137,11 +1076,7 @@ fn lab_at<'a>(world: &'a World<'a>, home: RoomName, id: Id) -> Option<&'a world:
 fn boost_lab(world: &World, home: RoomName, boosting: &Boosting) -> Option<BoostLab> {
     let mut waited: BTreeMap<Id, Load> = BTreeMap::new();
     for w in boosting.waits.iter().filter(|w| w.stands) {
-        let at = waited.entry(w.lab).or_insert(Load {
-            mineral: 0,
-            energy: 0,
-            ..w.load
-        });
+        let at = waited.entry(w.lab).or_insert(Load { mineral: 0, energy: 0, ..w.load });
         at.mineral += w.load.mineral;
         at.energy += w.load.energy;
     }
@@ -1154,11 +1089,7 @@ fn boost_lab(world: &World, home: RoomName, boosting: &Boosting) -> Option<Boost
                 energy: load.energy - lab.store.amount_of(Energy),
                 ..load
             };
-            Some(BoostLab {
-                id,
-                pos: lab.pos,
-                short,
-            })
+            Some(BoostLab { id, pos: lab.pos, short })
         })
         .find(|b| b.short.mineral > 0 || b.short.energy > 0)
 }
@@ -1231,8 +1162,7 @@ impl Stocks<'_> {
     /// each cluster to keep the reaction its labs run.
     fn spare(&self, g: &Ground, r: ResourceType) -> i32 {
         let running = self.running.iter().find(|c| c.room == g.room);
-        self.level(g, r, running.map_or(&[][..], |c| &c.reagents[..]))
-            .spare()
+        self.level(g, r, running.map_or(&[][..], |c| &c.reagents[..])).spare()
     }
 }
 
@@ -1263,10 +1193,7 @@ fn holdings_of(stocks: &Stocks, spent: &BTreeMap<RoomName, Vec<ResourceType>>) -
         let reagents = spent.get(&g.room).map_or(&[][..], Vec::as_slice);
         Some(Holding {
             room: g.room,
-            levels: wanted
-                .iter()
-                .map(|r| (*r, stocks.level(g, *r, reagents)))
-                .collect(),
+            levels: wanted.iter().map(|r| (*r, stocks.level(g, *r, reagents))).collect(),
             energy: g.stock_and_shipment().unwrap_or(0),
             free: t.store.free(),
         })
@@ -1302,22 +1229,14 @@ fn stock_labs(
     (derived, targets): (&atlas::Derived, &[(ResourceType, i32)]),
     (given_up, fights): (&dyn Fn(RoomName) -> bool, &dyn Fn(RoomName) -> bool),
 ) -> Vec<Shipment> {
-    let ours = Ours {
-        world,
-        grounds: &grounds[..colonies],
-        given_up,
-    };
+    let ours = Ours { world, grounds: &grounds[..colonies], given_up };
     let cluster: Vec<Cluster> = (derived.boosts.iter())
         .filter_map(|(c, b)| Some(cluster_of(ours.grounds.iter().find(|g| g.room == *c)?, b)))
         .collect();
     let boosts: Vec<ResourceType> = targets.iter().map(|(b, _)| *b).collect();
     let wanted = super::labs::wanted(targets, &|r| ours.empire(r));
-    let stocks = Stocks {
-        ours,
-        boosts: &boosts,
-        fights,
-        running: running_of(&cluster, &wanted, targets),
-    };
+    let stocks =
+        Stocks { ours, boosts: &boosts, fights, running: running_of(&cluster, &wanted, targets) };
     let reactions = assign_clusters(&stocks, &cluster, &wanted);
 
     let spent: BTreeMap<RoomName, Vec<ResourceType>> = (cluster.iter().zip(&reactions))
@@ -1329,11 +1248,7 @@ fn stock_labs(
             .map(|(c, r)| {
                 let mut plan = plan_cluster(world, c, *r);
                 drain_asked(&mut plan, c, &holdings, &spent[&c.ground.room]);
-                (
-                    c.ground.room,
-                    plan,
-                    boost_lab(world, c.ground.room, c.boosting),
-                )
+                (c.ground.room, plan, boost_lab(world, c.ground.room, c.boosting))
             })
             .collect();
 
@@ -1344,10 +1259,7 @@ fn stock_labs(
         }
     }
     for (room, fee) in super::balance::fees(&holdings) {
-        grounds
-            .iter_mut()
-            .filter(|g| g.room == room)
-            .for_each(|g| g.fees += fee);
+        grounds.iter_mut().filter(|g| g.room == room).for_each(|g| g.fees += fee);
     }
     balance(&mut holdings)
 }
@@ -1473,24 +1385,12 @@ fn remote_of(
         _ if outpost.reserved
             && capacity >= engine::body_cost(bodies::block_of(Pattern::Claimer)) =>
         {
-            ground_of(
-                (atlas, &world.rules),
-                capacity,
-                engine::HELD_OUTPUT_PER_TICK,
-                &room,
-                0,
-            )
+            ground_of((atlas, &world.rules), capacity, engine::HELD_OUTPUT_PER_TICK, &room, 0)
         }
         // Worked bare, a claimer still strikes an Invader's hold off.
         _ => Ground {
             reservable: room.controller.as_ref().is_some_and(invader_held),
-            ..ground_of(
-                (atlas, &world.rules),
-                capacity,
-                engine::NEUTRAL_OUTPUT_PER_TICK,
-                &room,
-                0,
-            )
+            ..ground_of((atlas, &world.rules), capacity, engine::NEUTRAL_OUTPUT_PER_TICK, &room, 0)
         },
     }
 }
@@ -1500,18 +1400,15 @@ fn ovens_of(world: &World) -> Vec<Body> {
         .spawns
         .iter()
         .filter_map(|s| {
-            s.spawning
-                .as_ref()
-                .filter(|oven| !declarations::fights(&oven.name))
-                .map(|oven| {
-                    body_of(
-                        (None, &oven.name),
-                        &s.pos,
-                        &oven.body,
-                        &Store::default(),
-                        engine::lifetime(oven.body.iter().map(|p| p.kind)),
-                    )
-                })
+            s.spawning.as_ref().filter(|oven| !declarations::fights(&oven.name)).map(|oven| {
+                body_of(
+                    (None, &oven.name),
+                    &s.pos,
+                    &oven.body,
+                    &Store::default(),
+                    engine::lifetime(oven.body.iter().map(|p| p.kind)),
+                )
+            })
         })
         .collect()
 }
@@ -1533,9 +1430,8 @@ pub fn homes(
     declarations: &Declarations,
     ours: &atlas::Derived,
 ) -> Homes {
-    let colony_rooms: Vec<&Room> = (ours.colonies.iter())
-        .filter_map(|name| world.room(*name))
-        .collect();
+    let colony_rooms: Vec<&Room> =
+        (ours.colonies.iter()).filter_map(|name| world.room(*name)).collect();
     let plan_of = |room: RoomName| atlas::plan_of(declarations, &[], room);
     let colonies: Vec<Colony> = (colony_rooms.iter())
         .filter_map(|room| {
@@ -1569,13 +1465,10 @@ pub fn homes(
 
     for g in &mut grounds {
         if let Some(pos) = plan_of(g.room).and_then(|p| p.pile) {
-            let energy: Vec<PileFact> = (g.piles)
-                .extract_if(.., |p| p.pos == pos && p.resource == Energy)
-                .collect();
+            let energy: Vec<PileFact> =
+                (g.piles).extract_if(.., |p| p.pos == pos && p.resource == Energy).collect();
             // A draw picks up the pile by its id; a drop needs none.
-            let id = energy
-                .first()
-                .map_or(Target::Pile(g.room), |p| Target::Object(p.id));
+            let id = energy.first().map_or(Target::Pile(g.room), |p| Target::Object(p.id));
             g.stores.push(StoreFact {
                 id,
                 pos,
@@ -1614,23 +1507,9 @@ pub fn homes(
 
     let bodies: Vec<Body> = creeps
         .iter()
-        .map(|c| {
-            body_of(
-                (Some(c.id), &c.name),
-                &c.pos,
-                &c.body,
-                &c.store,
-                c.ticks_to_live,
-            )
-        })
+        .map(|c| body_of((Some(c.id), &c.name), &c.pos, &c.body, &c.store, c.ticks_to_live))
         .collect();
-    let mut homes = Homes {
-        colonies,
-        grounds,
-        bodies,
-        ovens: ovens_of(world),
-        minerals,
-    };
+    let mut homes = Homes { colonies, grounds, bodies, ovens: ovens_of(world), minerals };
     homes.struck(world, 0);
     homes
 }
@@ -1702,13 +1581,7 @@ pub fn of_world<'t>(
     if homes.grounds.len() > from {
         homes.struck(world, from);
     }
-    let Homes {
-        colonies,
-        mut grounds,
-        bodies,
-        ovens,
-        minerals,
-    } = homes;
+    let Homes { colonies, mut grounds, bodies, ovens, minerals } = homes;
 
     // A terminal sends to one colony a tick: minerals first, as aid can wait
     // in the stock while a lab cannot.
@@ -1721,14 +1594,12 @@ pub fn of_world<'t>(
         }
     }
 
-    let mut routes: BTreeMap<RoomName, Cow<Tree>> = (ours.trees.iter())
-        .map(|(home, tree)| (*home, Cow::Borrowed(tree)))
-        .collect();
+    let mut routes: BTreeMap<RoomName, Cow<Tree>> =
+        (ours.trees.iter()).map(|(home, tree)| (*home, Cow::Borrowed(tree))).collect();
 
     let spawns = world.spawns.iter().map(|s| s.pos.room);
-    for room in spawns
-        .chain(grounds.iter().map(|g| g.room))
-        .chain(creeps.iter().map(|c| c.pos.room))
+    for room in
+        spawns.chain(grounds.iter().map(|g| g.room)).chain(creeps.iter().map(|c| c.pos.room))
     {
         tree_of(&mut routes, atlas, room);
     }
@@ -1743,36 +1614,20 @@ pub fn of_world<'t>(
         })
         .filter(Controller::reservable)
         .collect();
-    let pickups = pickups_of(
-        (world, atlas, intel),
-        declarations,
-        ours,
-        (&colonies, &grounds),
-    );
+    let pickups = pickups_of((world, atlas, intel), declarations, ours, (&colonies, &grounds));
     let mut spots = spots_of(&grounds, &claims, &bodies);
     let walls = pickups.iter().filter_map(|p| Some((p.wall?.0?, p.wall?.1)));
-    for (id, pos) in pickups
-        .iter()
-        .flat_map(|p| &p.loot)
-        .map(|l| (l.0, l.1))
-        .chain(walls)
-    {
+    for (id, pos) in pickups.iter().flat_map(|p| &p.loot).map(|l| (l.0, l.1)).chain(walls) {
         spots.entry(Target::Object(id)).or_insert(pos);
     }
 
     Derived {
         time: world.time,
         rules: &world.rules,
-        abandoning: (colonies.iter())
-            .map(|c| c.room)
-            .filter(|room| given_up(*room))
-            .collect(),
+        abandoning: (colonies.iter()).map(|c| c.room).filter(|room| given_up(*room)).collect(),
         colonies,
         grounds,
-        scouts: scouts
-            .iter()
-            .map(|s| (tiles::middle(s.room), s.age, s.cast))
-            .collect(),
+        scouts: scouts.iter().map(|s| (tiles::middle(s.room), s.age, s.cast)).collect(),
         spots,
         pickups,
         claims,

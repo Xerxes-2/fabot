@@ -3,24 +3,30 @@
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::super::casting;
-use super::super::price;
-use super::super::scene::{Asked, Scene, fresh};
-use super::super::shape::{Engagement, Objective, Phase, Plan, enter};
-use super::square::{self, BLOCK};
 use Part::{Attack, Heal, RangedAttack, Tough};
 use ResourceType::{GhodiumAlkalide, KeaniumAlkalide, LemergiumAlkalide, LemergiumOxide};
 use fabot_atlas::Atlas;
-use fabot_base::boost::{Stock, strength};
-use fabot_base::declarations::{Declarations, OpKind, REACH_HOPS};
-use fabot_base::engine;
-use fabot_base::intents::CreepAct;
-use fabot_base::stronghold::{self as bunker, Stronghold, raw};
-use fabot_base::tiles::{self, TileSet};
-use fabot_base::vocabulary::{Part, ResourceType, multiple, part_count_in, takes};
-use fabot_base::wish::Wish;
-use fabot_base::world::{Creep, Id, Pos, Room, RoomName, Rules, Structure};
+use fabot_base::{
+    boost::{Stock, strength},
+    declarations::{Declarations, OpKind, REACH_HOPS},
+    engine,
+    intents::CreepAct,
+    stronghold::{self as bunker, Stronghold, raw},
+    tiles::{self, TileSet},
+    vocabulary::{Part, ResourceType, multiple, part_count_in, takes},
+    wish::Wish,
+    world::{Creep, Id, Pos, Room, RoomName, Rules, Structure},
+};
 use fabot_tactics::{self as tactics, Sight, Tactic};
+
+use super::{
+    super::{
+        casting, price,
+        scene::{Asked, Scene, fresh},
+        shape::{Engagement, Objective, Phase, Plan, enter},
+    },
+    square::{self, BLOCK},
+};
 
 /// Each body's copies and its parts, `HEAD` order: the struck body loses
 /// its TOUGH, then its MOVE, before a weapon or a HEAL.
@@ -41,11 +47,7 @@ pub struct Recipe {
 /// leaves the ring three off it, on GHO2 TOUGH, as HEAL alone held by 4%.
 const RECIPES: [&[Recipe]; 4] = [
     &[],
-    &[Recipe {
-        bodies: &[(1, [0, 0, 0, 0, 0]), (3, [0, 17, 0, 0, 17])],
-        boosts: &[],
-        sized: true,
-    }],
+    &[Recipe { bodies: &[(1, [0, 0, 0, 0, 0]), (3, [0, 17, 0, 0, 17])], boosts: &[], sized: true }],
     &[Recipe {
         bodies: SPLIT,
         boosts: &[
@@ -83,11 +85,7 @@ impl Recipe {
     }
 
     fn sizes(&self) -> std::ops::RangeInclusive<usize> {
-        if self.sized {
-            1..=engine::MAX_BODY_PARTS / 2
-        } else {
-            0..=0
-        }
+        if self.sized { 1..=engine::MAX_BODY_PARTS / 2 } else { 0..=0 }
     }
 
     fn boosted<'a>(
@@ -147,11 +145,7 @@ impl Recipe {
 }
 
 fn reach(mut swings: impl Iterator<Item = bool>) -> i32 {
-    if swings.any(|s| s) {
-        engine::MELEE_RANGE
-    } else {
-        engine::RANGED_RANGE
-    }
+    if swings.any(|s| s) { engine::MELEE_RANGE } else { engine::RANGED_RANGE }
 }
 
 pub(crate) fn step(
@@ -192,22 +186,13 @@ pub(crate) fn opens(
 ) -> Option<(Engagement, bool)> {
     let held = |room| ranked.iter().any(|(e, _)| e.room == room);
     let standing = |room| (scene.intel.get(&room)).is_some_and(|r| r.stronghold.is_some());
-    if ranked
-        .iter()
-        .any(|(e, _)| e.objective == Objective::Stronghold)
-    {
+    if ranked.iter().any(|(e, _)| e.objective == Objective::Stronghold) {
         return None;
     }
     let row = (declarations.operations.iter())
         .find(|o| o.kind == OpKind::Stronghold && !held(o.room) && standing(o.room))?;
     let id = ranked.iter().fold(first, |most, (e, _)| most.max(e.id + 1));
-    let e = fresh(
-        id,
-        Objective::Stronghold,
-        row.room,
-        scene.world.time,
-        Tactic::Kite,
-    );
+    let e = fresh(id, Objective::Stronghold, row.room, scene.world.time, Tactic::Kite);
     let priority = row.priority;
     Some((Engagement { priority, ..e }, false))
 }
@@ -223,9 +208,8 @@ pub(crate) fn priced(
     if !e.unanswered {
         return e.clone();
     }
-    let colonies: Vec<(RoomName, i32)> = (scene.colonies_of(atlas, e).iter())
-        .map(|r| (r.name, r.energy_capacity))
-        .collect();
+    let colonies: Vec<(RoomName, i32)> =
+        (scene.colonies_of(atlas, e).iter()).map(|r| (r.name, r.energy_capacity)).collect();
     let walk = |c| scene.walk_to(atlas, e, c);
     let Some((_, stock, capacity, walk)) = priced_from(&colonies, walk, &asked.boosts) else {
         return e.clone();
@@ -234,31 +218,15 @@ pub(crate) fn priced(
         return e.clone();
     };
     let left = standing.collapses_at - scene.world.time;
-    let Some(Taken {
-        set,
-        boosted,
-        cost,
-        worth,
-    }) = take(&standing, left, (&stock, capacity, walk))
+    let Some(Taken { set, boosted, cost, worth }) = take(&standing, left, (&stock, capacity, walk))
     else {
-        return Engagement {
-            capacity,
-            ..e.clone()
-        };
+        return Engagement { capacity, ..e.clone() };
     };
     let offers = vec![price::offer(Tactic::Kite, &set, worth, cost)];
-    let asking = casting::Asking {
-        bodies: &set,
-        boosted,
-    };
+    let asking = casting::Asking { bodies: &set, boosted };
     let boosts = scene.ask(atlas, e, asking, asked);
     Engagement {
-        plan: Plan {
-            boosts,
-            tactic: Tactic::Kite,
-            order: Vec::new(),
-            offers,
-        },
+        plan: Plan { boosts, tactic: Tactic::Kite, order: Vec::new(), offers },
         budget: e.lost,
         unanswered: false,
         capacity,
@@ -335,9 +303,7 @@ fn bare<'a>(room: &'a Room) -> impl Iterator<Item = &'a Creep> {
 fn mark(room: &Room) -> Option<(Id, Pos)> {
     let of = |s: &Structure| (s.id, s.pos);
     if let Some(c) = room.invader_core() {
-        return Some(of(
-            fabot_atlas::invader_rampart_at(room, &c.pos).unwrap_or(c)
-        ));
+        return Some(of(fabot_atlas::invader_rampart_at(room, &c.pos).unwrap_or(c)));
     }
     let h = bare(room).min_by_key(|h| (h.hits, h.id))?;
     Some((h.id, h.pos))
@@ -364,30 +330,15 @@ fn ground(rules: &Rules, room: &Room, atlas: &Atlas, reach: i32, set: &[&Creep])
         .filter(|b| b.iter().filter(|p| p.within(reach, &at)).count() >= BLOCK / 2)
         .min_by_key(|b| {
             let striking = b.iter().filter(|p| p.within(reach, &at)).count();
-            let strike: i32 = b
-                .iter()
-                .map(|p| fabot_exchange::tower_strike(&towers, p))
-                .sum();
-            (
-                Reverse(striking),
-                strike,
-                square::far(set, &b[0]),
-                b[0].x,
-                b[0].y,
-            )
+            let strike: i32 = b.iter().map(|p| fabot_exchange::tower_strike(&towers, p)).sum();
+            (Reverse(striking), strike, square::far(set, &b[0]), b[0].x, b[0].y)
         })?;
-    Some(Ground {
-        mark: (id, at),
-        walls,
-        block,
-    })
+    Some(Ground { mark: (id, at), walls, block })
 }
 
 /// Whether `level`'s first recipe has a block its square walks to.
 pub fn reached(rules: &Rules, room: &Room, atlas: &Atlas, level: i32) -> bool {
-    let recipe = usize::try_from(level)
-        .ok()
-        .and_then(|l| RECIPES.get(l)?.first());
+    let recipe = usize::try_from(level).ok().and_then(|l| RECIPES.get(l)?.first());
     let swings = recipe.map(|r| r.set(1).into_iter().map(|b| part_count_in(&b, Attack) > 0));
     swings.is_some_and(|s| ground(rules, room, atlas, reach(s), &[]).is_some())
 }
@@ -398,30 +349,21 @@ pub(crate) fn incoming<'a>(
     scene: &'a Scene,
     decided: &'a [Engagement],
 ) -> impl Iterator<Item = (String, i32)> + 'a {
-    (decided.iter())
-        .filter(|e| e.objective == Objective::Stronghold)
-        .filter_map(|e| {
-            let room = scene.in_sight(e.room)?;
-            let core = room.invader_core()?;
-            let towers = scene.towers_in(room);
-            let fired: BTreeSet<&Id> = towers.iter().map(|t| &t.id).collect();
-            let last = (scene.world.attacks.iter()).find(|(by, _)| fired.contains(by));
-            let here = scene
-                .members_of(e)
-                .into_iter()
-                .filter(|c| c.pos.room == room.name);
-            let struck = here.min_by_key(|c| {
-                let range = c.pos.range(&core.pos).unwrap_or(engine::ROOM_SIDE);
-                (
-                    range,
-                    last.is_none_or(|(_, at)| *at != c.id),
-                    c.name.clone(),
-                )
-            })?;
-            let at: Vec<Pos> = towers.iter().map(|t| t.pos).collect();
-            let strike = fabot_exchange::tower_strike(&at, &struck.pos);
-            Some((struck.name.clone(), strike))
-        })
+    (decided.iter()).filter(|e| e.objective == Objective::Stronghold).filter_map(|e| {
+        let room = scene.in_sight(e.room)?;
+        let core = room.invader_core()?;
+        let towers = scene.towers_in(room);
+        let fired: BTreeSet<&Id> = towers.iter().map(|t| &t.id).collect();
+        let last = (scene.world.attacks.iter()).find(|(by, _)| fired.contains(by));
+        let here = scene.members_of(e).into_iter().filter(|c| c.pos.room == room.name);
+        let struck = here.min_by_key(|c| {
+            let range = c.pos.range(&core.pos).unwrap_or(engine::ROOM_SIDE);
+            (range, last.is_none_or(|(_, at)| *at != c.id), c.name.clone())
+        })?;
+        let at: Vec<Pos> = towers.iter().map(|t| t.pos).collect();
+        let strike = fabot_exchange::tower_strike(&at, &struck.pos);
+        Some((struck.name.clone(), strike))
+    })
 }
 
 /// The set's wishes, once a set: out of a square it forms one round its body
@@ -429,10 +371,7 @@ pub(crate) fn incoming<'a>(
 pub(crate) fn walks(sight: &mut Sight, scene: &Scene, e: &Engagement) -> Vec<Wish> {
     let set = scene.members_of(e);
     let fighting = e.objective == Objective::Stronghold && e.phase == Phase::Fighting;
-    let Some(room) = scene
-        .in_sight(e.room)
-        .filter(|_| fighting && !set.is_empty())
-    else {
+    let Some(room) = scene.in_sight(e.room).filter(|_| fighting && !set.is_empty()) else {
         return Vec::new();
     };
     let reach = reach(set.iter().map(|c| c.live(Attack) > 0));
@@ -457,20 +396,13 @@ pub(crate) fn walks(sight: &mut Sight, scene: &Scene, e: &Engagement) -> Vec<Wis
                 })
                 .filter(|f| !g.walls.contains(tiles::of_pos(&f[0])) && next(&f[0]).is_some())
                 .min_by_key(|f| {
-                    (
-                        f.iter().map(|p| square::far(&set, p)).sum::<i32>(),
-                        f[0].x,
-                        f[0].y,
-                    )
+                    (f.iter().map(|p| square::far(&set, p)).sum::<i32>(), f[0].x, f[0].y)
                 })
         })
     };
     let seat = |tiles: &[Pos; BLOCK], c: &Creep| square::seat(tiles, &at, &set, c);
     match (set.iter().all(around), square::corner(&set)) {
-        (true, _) => set
-            .iter()
-            .map(|c| stand(sight, c, seat(&g.block, c)))
-            .collect(),
+        (true, _) => set.iter().map(|c| stand(sight, c, seat(&g.block, c))).collect(),
         (_, Some(corner)) if rested => match next(&corner) {
             Some(d) => (set.iter())
                 .map(|c| match tiles::neighbour(tiles::of_pos(&c.pos), d) {
@@ -478,17 +410,12 @@ pub(crate) fn walks(sight: &mut Sight, scene: &Scene, e: &Engagement) -> Vec<Wis
                     None => tactics::hold(sight, c),
                 })
                 .collect(),
-            None => set
-                .iter()
-                .map(|c| stand(sight, c, seat(&g.block, c)))
-                .collect(),
+            None => set.iter().map(|c| stand(sight, c, seat(&g.block, c))).collect(),
         },
         (_, Some(_)) => set.iter().map(|c| tactics::hold(sight, c)).collect(),
         (_, None) => {
             let tiles = formed().unwrap_or(g.block);
-            set.iter()
-                .map(|c| stand(sight, c, seat(&tiles, c)))
-                .collect()
+            set.iter().map(|c| stand(sight, c, seat(&tiles, c))).collect()
         }
     }
 }
@@ -496,20 +423,14 @@ pub(crate) fn walks(sight: &mut Sight, scene: &Scene, e: &Engagement) -> Vec<Wis
 pub(crate) fn act(
     sight: &mut Sight,
     scene: &Scene,
-    (e, middles, walking): (
-        &Engagement,
-        &BTreeMap<RoomName, Pos>,
-        &BTreeMap<String, Wish>,
-    ),
+    (e, middles, walking): (&Engagement, &BTreeMap<RoomName, Pos>, &BTreeMap<String, Wish>),
     c: &Creep,
 ) -> Option<(Option<CreepAct>, Wish)> {
     let working = matches!(e.phase, Phase::Approaching | Phase::Fighting);
     if e.objective != Objective::Stronghold || !working {
         return None;
     }
-    let room = scene
-        .in_sight(e.room)
-        .filter(|_| e.phase == Phase::Fighting);
+    let room = scene.in_sight(e.room).filter(|_| e.phase == Phase::Fighting);
     let strike = room.and_then(mark).and_then(|(id, at)| {
         let swings = c.live(Attack) > 0 && c.pos.within(engine::MELEE_RANGE, &at);
         let shoots = c.live(RangedAttack) > 0 && c.pos.within(engine::RANGED_RANGE, &at);
@@ -526,16 +447,13 @@ pub(crate) fn act(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use fabot_base::boost::Held;
+
+    use super::*;
 
     fn stock(held: &[(ResourceType, i32)]) -> Stock {
         let held = (held.iter())
-            .map(|(compound, parts)| Held {
-                compound: *compound,
-                parts: *parts,
-                in_labs: 0,
-            })
+            .map(|(compound, parts)| Held { compound: *compound, parts: *parts, in_labs: 0 })
             .collect();
         Stock { held, energy: 1000 }
     }
@@ -548,11 +466,7 @@ mod tests {
         let l3 = &RECIPES[3][0];
         let set = l3.set(0);
         let casts = |held: &[(ResourceType, i32)]| l3.casts(&set, &stock(held), 5600);
-        let tier = [
-            (GhodiumAlkalide, 12),
-            (KeaniumAlkalide, 24),
-            (LemergiumAlkalide, 50),
-        ];
+        let tier = [(GhodiumAlkalide, 12), (KeaniumAlkalide, 24), (LemergiumAlkalide, 50)];
         assert!(casts(&tier));
         let t3 = [
             (CatalyzedGhodiumAlkalide, 12),
@@ -571,29 +485,15 @@ mod tests {
     #[test]
     fn a_stronghold_is_priced_from_the_colony_nearest_on_foot() {
         let (grid_near, walk_near) = (RoomName::W1N1, RoomName::new(-3, -3));
-        let held = Held {
-            compound: ResourceType::CatalyzedGhodiumAlkalide,
-            parts: 30,
-            in_labs: 0,
-        };
-        let stocks: casting::Boosts = [(
-            grid_near,
-            Stock {
-                held: vec![held],
-                energy: 100,
-            },
-        )]
-        .into();
+        let held = Held { compound: ResourceType::CatalyzedGhodiumAlkalide, parts: 30, in_labs: 0 };
+        let stocks: casting::Boosts = [(grid_near, Stock { held: vec![held], energy: 100 })].into();
         let walk = |c| Some(if c == grid_near { 3 } else { 2 } * engine::ROOM_SIDE);
         let colonies = [(grid_near, 5600), (walk_near, 5600)];
         let (colony, stock, _, walked) = priced_from(&colonies, walk, &stocks).unwrap();
         assert_eq!((colony, walked), (walk_near, 2 * engine::ROOM_SIDE));
         assert_eq!(stock, Stock::default());
         let even = |_| Some(2 * engine::ROOM_SIDE);
-        assert_eq!(
-            priced_from(&colonies, even, &stocks).unwrap().0,
-            grid_near.min(walk_near)
-        );
+        assert_eq!(priced_from(&colonies, even, &stocks).unwrap().0, grid_near.min(walk_near));
         let far = |_| Some((REACH_HOPS + 1) * engine::ROOM_SIDE);
         assert!(priced_from(&colonies, far, &stocks).is_none());
     }

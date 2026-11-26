@@ -1,9 +1,11 @@
 use std::collections::BTreeMap;
 
-use fabot_base::declarations::Declared;
-use fabot_base::tiles;
-use fabot_base::vocabulary::ResourceType;
-use fabot_base::world::{Creep, Id, Owner, Pos, Room, Structure, StructureType};
+use fabot_base::{
+    declarations::Declared,
+    tiles,
+    vocabulary::ResourceType,
+    world::{Creep, Id, Owner, Pos, Room, Structure, StructureType},
+};
 
 use super::Atlas;
 
@@ -30,7 +32,7 @@ pub fn invader_rampart_at<'a>(room: &'a Room, at: &Pos) -> Option<&'a Structure>
 }
 
 pub fn loot(room: &Room) -> Vec<Pos> {
-    let mut at: Vec<Pos> = loot_in(room).into_iter().map(|(at, _, _)| at.pos).collect();
+    let mut at: Vec<Pos> = loot_in(room).into_iter().map(|(at, ..)| at.pos).collect();
     at.dedup();
     at
 }
@@ -54,12 +56,7 @@ pub fn walls_of<'a>(room: &'a Room, atlas: &Atlas, at: &Pos) -> Vec<&'a Structur
     let around = (tiles::around(tiles::of_pos(at)).iter()).map(|t| tiles::to_pos(room.name, *t));
     let sides = (!around.clone().any(|p| open(&p))).then_some(around.filter(walkable));
     (invader_rampart_at(room, at).into_iter())
-        .chain(
-            sides
-                .into_iter()
-                .flatten()
-                .filter_map(|p| invader_rampart_at(room, &p)),
-        )
+        .chain(sides.into_iter().flatten().filter_map(|p| invader_rampart_at(room, &p)))
         .collect()
 }
 

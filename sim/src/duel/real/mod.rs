@@ -5,19 +5,25 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use fabot_atlas::{Atlas, Context, derive};
-use fabot_base::engine::RANGED_RANGE;
-use fabot_base::intents::{Action, CreepAct};
-use fabot_base::world::{Creep, Id, Sightings, StructureType};
-use fabot_fight::shape::{Group, Phase};
-use fabot_fight::tracker::{self, LOST_GROUP_TICKS};
-use fabot_fight::{casting, formation, fortified, reflexes};
+use fabot_base::{
+    engine::RANGED_RANGE,
+    intents::{Action, CreepAct},
+    world::{Creep, Id, Sightings, StructureType},
+};
+use fabot_fight::{
+    casting, formation, fortified, reflexes,
+    shape::{Group, Phase},
+    tracker::{self, LOST_GROUP_TICKS},
+};
 use fabot_tactics::{self as tactics, Tactic};
 use krebs::world::World as Krebs;
 use screeps::LocalRoomTerrain;
 
-use crate::act::{self, Stored};
-use crate::read;
-use crate::view::View;
+use crate::{
+    act::{self, Stored},
+    read,
+    view::View,
+};
 
 #[derive(Clone)]
 pub struct Real {
@@ -40,10 +46,7 @@ impl Real {
     }
 
     pub fn orders(&mut self, k: &Krebs) -> Stored {
-        let (v, declarations) = (
-            View::of(k),
-            fabot_base::declarations::Declarations::default(),
-        );
+        let (v, declarations) = (View::of(k), fabot_base::declarations::Declarations::default());
         let terrain = LocalRoomTerrain::new_from_bits(Box::new(*k.terrain.raw(0)));
         let mut world = read::world(&v, &declarations);
         world.rooms[0].terrain = Some(&terrain);

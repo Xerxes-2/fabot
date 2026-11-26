@@ -1,14 +1,14 @@
-use std::collections::BTreeSet;
-use std::str::Split;
+use std::{collections::BTreeSet, str::Split};
 
 use screeps::game::map::RoomStatus;
 
-use crate::tiles::{self, BOTTOM, LEFT, RIGHT, TOP};
-
 use super::*;
-use crate::declarations::Declarations;
-use crate::engine;
-use crate::vocabulary::Part;
+use crate::{
+    declarations::Declarations,
+    engine,
+    tiles::{self, BOTTOM, LEFT, RIGHT, TOP},
+    vocabulary::Part,
+};
 
 struct Reader<'a> {
     ints: &'a [i32],
@@ -106,10 +106,7 @@ impl<'a> Reader<'a> {
             .filter(|(_, amount)| *amount > 0)
             .filter_map(|(name, amount)| Some((name.parse().ok()?, amount)))
             .collect();
-        Store {
-            held,
-            capacity: self.n(),
-        }
+        Store { held, capacity: self.n() }
     }
 
     fn body(&mut self, hits: i32) -> Vec<BodyPart> {
@@ -182,9 +179,7 @@ impl<'a> Reader<'a> {
             return None;
         };
         let cooldown = if kind.has_cooldown() { self.n() } else { 0 };
-        let spawn = (kind == StructureType::KeeperLair)
-            .then(|| self.n())
-            .filter(|t| *t >= 0);
+        let spawn = (kind == StructureType::KeeperLair).then(|| self.n()).filter(|t| *t >= 0);
         let (collapse, deploy, level) = if kind == StructureType::InvaderCore {
             let running = self.flag();
             let ticks = self.n();
@@ -270,14 +265,7 @@ impl<'a> Reader<'a> {
                 let kind = r.word().parse().ok();
                 let (id, pos, owner) = (r.id(), r.pos_in(name), r.owner());
                 let (progress, progress_total) = (r.n(), r.n());
-                Some(Site {
-                    kind: kind?,
-                    id,
-                    pos,
-                    owner,
-                    progress,
-                    progress_total,
-                })
+                Some(Site { kind: kind?, id, pos, owner, progress, progress_total })
             });
         }
         for room in rooms.iter_mut() {
@@ -285,12 +273,7 @@ impl<'a> Reader<'a> {
                 let (id, pos) = (r.id(), r.pos());
                 let resource = r.word().parse().ok();
                 let amount = r.n();
-                Some(Pile {
-                    id,
-                    pos,
-                    resource: resource?,
-                    amount,
-                })
+                Some(Pile { id, pos, resource: resource?, amount })
             });
         }
         for room in rooms.iter_mut() {
@@ -359,23 +342,16 @@ pub fn world(
     let count = ints.last().map_or(0, |n| *n as usize);
     let mut words: Vec<&str> = text.rsplit('\0').take(count).collect();
     words.reverse();
-    let mut r = Reader {
-        ints,
-        at: 0,
-        strs: text.split('\0'),
-        words,
-        me: String::new(),
-        declarations,
-    };
+    let mut r =
+        Reader { ints, at: 0, strs: text.split('\0'), words, me: String::new(), declarations };
     r.me = r.s();
     let time = r.n();
     let bucket = r.n();
     let mut rooms = r.list(|r| r.room(buffers));
     r.kinds(&mut rooms);
     let attacks = r.list_into(std::mem::take(&mut buffers.attacks), |r| (r.id(), r.id()));
-    let destroyed = r.list_into(std::mem::take(&mut buffers.destroyed), |r| {
-        (r.room_name(), r.id(), r.n())
-    });
+    let destroyed =
+        r.list_into(std::mem::take(&mut buffers.destroyed), |r| (r.room_name(), r.id(), r.n()));
     let spawns = r.list_into(std::mem::take(&mut buffers.spawns), Reader::spawn);
     let creeps = r.list_into(std::mem::take(&mut buffers.creeps), Reader::creep);
     World {

@@ -2,15 +2,20 @@
 //! border both rooms open into the next node; a search grows from the
 //! target's room, so each node's way on is the same whichever room asks and a
 //! body crossing into the next node walks that node's way on, never back.
-use std::cmp::Reverse;
-use std::collections::{BTreeSet, BinaryHeap};
-use std::rc::Rc;
+use std::{
+    cmp::Reverse,
+    collections::{BTreeSet, BinaryHeap},
+    rc::Rc,
+};
+
+use fabot_base::{
+    HashMap,
+    grid::{UNREACHED, weight_of},
+    tiles::{self, Table, Tile, TileSet},
+    world::RoomName,
+};
 
 use super::{Atlas, Coords, Goal, Ground, Mover, RoomGrid, Target};
-use fabot_base::HashMap;
-use fabot_base::grid::{UNREACHED, weight_of};
-use fabot_base::tiles::{self, Table, Tile, TileSet};
-use fabot_base::world::RoomName;
 
 /// Each stretch's first and last tile on its band.
 pub type Exit = Rc<[(Tile, Tile)]>;
@@ -63,9 +68,7 @@ pub struct Way {
 impl Ways {
     /// The room's regions, in the order settled.
     fn regions(&self, room: Coords) -> impl Iterator<Item = usize> + '_ {
-        std::iter::successors(self.rooms.get(&room).copied(), |n| {
-            self.nodes[*n].next_in_room
-        })
+        std::iter::successors(self.rooms.get(&room).copied(), |n| self.nodes[*n].next_in_room)
     }
 
     pub fn tree(&self) -> Tree {
@@ -76,11 +79,7 @@ impl Ways {
         let way = |n: &Node| {
             let next = n.next?;
             let (room, onward) = (self.nodes[next].room, at(next));
-            Some(Way {
-                next: room,
-                onward,
-                exit: n.exit.clone(),
-            })
+            Some(Way { next: room, onward, exit: n.exit.clone() })
         };
         let mut next = HashMap::default();
         next.reserve(self.rooms.len());
@@ -88,10 +87,7 @@ impl Ways {
             let ways = self.regions(*room).filter_map(|n| way(&self.nodes[n]));
             next.insert(*room, ways.collect());
         }
-        Tree {
-            root: self.root,
-            next: Rc::new(next),
-        }
+        Tree { root: self.root, next: Rc::new(next) }
     }
 
     /// The flood out of the region of `room` that holds `at`, and the ticks
@@ -203,12 +199,7 @@ impl Tree {
         } else {
             return None;
         };
-        Some(
-            rooms
-                .into_iter()
-                .map(|(x, y)| RoomName::new(x, y))
-                .collect(),
-        )
+        Some(rooms.into_iter().map(|(x, y)| RoomName::new(x, y)).collect())
     }
 
     /// The borders `route` crosses, without naming its rooms.
@@ -282,11 +273,7 @@ pub fn search(
     max_hops: i32,
     stops: &[Stop],
 ) -> Ways {
-    let mut ways = Ways {
-        nodes: Vec::new(),
-        rooms: HashMap::default(),
-        root: Some(root.coords()),
-    };
+    let mut ways = Ways { nodes: Vec::new(), rooms: HashMap::default(), root: Some(root.coords()) };
     let Some(start) = ways.root.filter(|r| !atlas.closed.contains(r)) else {
         return ways;
     };
@@ -371,9 +358,7 @@ pub fn search(
                     .is_none_or(|d| Atlas::stretch(a, b).iter().any(|t| on(d, *t) != UNREACHED))
             })
         };
-        let held: Vec<_> = (reached[r].exit.clone())
-            .map(|e| (e, holder(exits[e])))
-            .collect();
+        let held: Vec<_> = (reached[r].exit.clone()).map(|e| (e, holder(exits[e]))).collect();
         let mut free = Vec::new();
         for (e, n) in held {
             match n {
@@ -444,9 +429,8 @@ pub fn search(
 /// A stop's room has a region settled (holding its tile if named), or its
 /// borders all lie in settled regions: the tile's region has no way out.
 fn resolved(atlas: &Atlas, mover: Mover, ways: &Ways, (room, at): Stop) -> bool {
-    let dists: Vec<&Table<i32>> = (ways.regions(room))
-        .filter_map(|n| ways.nodes[n].dist.as_deref())
-        .collect();
+    let dists: Vec<&Table<i32>> =
+        (ways.regions(room)).filter_map(|n| ways.nodes[n].dist.as_deref()).collect();
     let (Some(at), Some(grid)) = (at, atlas.rooms.get(&room)) else {
         return ways.regions(room).next().is_some();
     };
@@ -455,9 +439,7 @@ fn resolved(atlas: &Atlas, mover: Mover, ways: &Ways, (room, at): Stop) -> bool 
     }
     Atlas::EXITS.iter().all(|side| {
         let far = atlas.rooms.get(&neighbour(room, *side));
-        stretches(Some(grid), far, *side).all(|s| {
-            s.iter()
-                .any(|(t, _)| dists.iter().any(|d| d[*t] != UNREACHED))
-        })
+        stretches(Some(grid), far, *side)
+            .all(|s| s.iter().any(|(t, _)| dists.iter().any(|d| d[*t] != UNREACHED)))
     })
 }

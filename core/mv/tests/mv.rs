@@ -3,19 +3,24 @@
 //! wishes `plan` builds over generated rooms.
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{arbitrate::arbitrate, plan};
 use fabot_atlas::{Atlas, Mover, Target};
-use fabot_base::grid::{Footprint, factor_of};
-use fabot_base::tiles::{self, Tile, TileSet};
-use fabot_base::vocabulary::Part;
-use fabot_base::wish::Wish;
-use fabot_base::world::{BodyPart, Creep, Owner, Room, RoomName, Store, World, terrain};
-use proptest::bool::weighted;
-use proptest::collection::vec;
-use proptest::prelude::*;
-use proptest::sample::{Index, select};
-use proptest::strategy::ValueTree;
-use proptest::test_runner::TestRunner;
+use fabot_base::{
+    grid::{Footprint, factor_of},
+    tiles::{self, Tile, TileSet},
+    vocabulary::Part,
+    wish::Wish,
+    world::{BodyPart, Creep, Owner, Room, RoomName, Store, World, terrain},
+};
+use proptest::{
+    bool::weighted,
+    collection::vec,
+    prelude::*,
+    sample::{Index, select},
+    strategy::ValueTree,
+    test_runner::TestRunner,
+};
+
+use crate::{arbitrate::arbitrate, plan};
 
 const ROOM: RoomName = RoomName::W1N1;
 const CASES: u32 = 500;
@@ -47,27 +52,14 @@ fn order(n: usize) -> impl Strategy<Value = Vec<usize>> {
 
 /// The box every crowd stands in: eight tiles a side, so bodies jostle.
 fn crowd_box() -> Vec<Tile> {
-    (20..28)
-        .flat_map(|y| (20..28).map(move |x| tiles::index(x, y)))
-        .collect()
+    (20..28).flat_map(|y| (20..28).map(move |x| tiles::index(x, y))).collect()
 }
 
 fn around(tile: Tile) -> Vec<Tile> {
-    tiles::within(1, tile)
-        .into_iter()
-        .filter(|&t| t != tile)
-        .collect()
+    tiles::within(1, tile).into_iter().filter(|&t| t != tile).collect()
 }
 
-type Draw = (
-    bool,
-    Index,
-    Index,
-    (Vec<usize>, Vec<bool>),
-    Option<Vec<bool>>,
-    i32,
-    bool,
-);
+type Draw = (bool, Index, Index, (Vec<usize>, Vec<bool>), Option<Vec<bool>>, i32, bool);
 
 fn draw() -> impl Strategy<Value = Draw> {
     (
@@ -87,11 +79,7 @@ fn wish(draw: Draw, name: String, at: Tile) -> Wish {
     let step = near[step.index(near.len())];
     let next = around(step);
     let onward = next.get(onward.index(next.len() + 1)).copied();
-    let tail = order
-        .into_iter()
-        .filter(|&i| i < near.len() && tail[i])
-        .map(|i| near[i])
-        .collect();
+    let tail = order.into_iter().filter(|&i| i < near.len() && tail[i]).map(|i| near[i]).collect();
     // A work area is only ever handed to a body standing inside it.
     let working = working.map_or(Vec::new(), |w| {
         let kept = near.iter().zip(w).filter(|(_, k)| *k).map(|(t, _)| *t);
@@ -119,30 +107,28 @@ fn crowd() -> impl Strategy<Value = Crowd> {
         vec(draw(), 30),
         (order(30), order(6)),
     )
-        .prop_map(
-            |(walls, cells, (bodies, foreign), draws, (order, held_order))| {
-                let mut passable = vec![true; tiles::COUNT];
-                for (tile, wall) in crowd_box().into_iter().zip(walls) {
-                    passable[tile] = !wall;
-                }
-                let open: Vec<Tile> = cells.into_iter().filter(|&t| passable[t]).collect();
-                let bodies = bodies.index(30.min(open.len()) + 1);
-                let foreign = foreign.index(6.min(open.len() - bodies) + 1);
-                let wishes: Vec<Wish> = (draws.into_iter().zip(&open).take(bodies).enumerate())
-                    .map(|(i, (draw, &at))| wish(draw, format!("c{i}"), at))
-                    .collect();
-                let held = open[bodies..bodies + foreign].to_vec();
-                let shuffled = order.iter().filter(|&&i| i < bodies);
-                let held_shuffled = held_order.iter().filter(|&&i| i < foreign);
-                Crowd {
-                    passable,
-                    shuffled: shuffled.map(|&i| wishes[i].clone()).collect(),
-                    held_shuffled: held_shuffled.map(|&i| held[i]).collect(),
-                    held,
-                    wishes,
-                }
-            },
-        )
+        .prop_map(|(walls, cells, (bodies, foreign), draws, (order, held_order))| {
+            let mut passable = vec![true; tiles::COUNT];
+            for (tile, wall) in crowd_box().into_iter().zip(walls) {
+                passable[tile] = !wall;
+            }
+            let open: Vec<Tile> = cells.into_iter().filter(|&t| passable[t]).collect();
+            let bodies = bodies.index(30.min(open.len()) + 1);
+            let foreign = foreign.index(6.min(open.len() - bodies) + 1);
+            let wishes: Vec<Wish> = (draws.into_iter().zip(&open).take(bodies).enumerate())
+                .map(|(i, (draw, &at))| wish(draw, format!("c{i}"), at))
+                .collect();
+            let held = open[bodies..bodies + foreign].to_vec();
+            let shuffled = order.iter().filter(|&&i| i < bodies);
+            let held_shuffled = held_order.iter().filter(|&&i| i < foreign);
+            Crowd {
+                passable,
+                shuffled: shuffled.map(|&i| wishes[i].clone()).collect(),
+                held_shuffled: held_shuffled.map(|&i| held[i]).collect(),
+                held,
+                wishes,
+            }
+        })
 }
 
 fn errand() -> impl Strategy<Value = Errand> {
@@ -163,40 +149,30 @@ fn errand() -> impl Strategy<Value = Errand> {
         (0..=3, weighted(0.25)),
         (vec(part, 1..=40), fatigue),
     )
-        .prop_map(
-            |(terrain, (at, goal), (range, away), (parts, fatigue))| Errand {
-                terrain,
-                creep: Creep {
-                    id: "c".into(),
-                    name: "c".into(),
-                    owner: Owner::Ours,
-                    pos: tiles::to_pos(ROOM, Tile::of_index(at)),
-                    body: (parts.into_iter())
-                        .map(|kind| BodyPart {
-                            kind,
-                            hits: 100,
-                            boost: None,
-                        })
-                        .collect(),
-                    hits: 100,
-                    hits_max: 100,
-                    ticks_to_live: 1000,
-                    fatigue,
-                    store: Store::default(),
-                },
-                target: Target {
-                    room: if away {
-                        "W2N1".parse::<RoomName>().unwrap()
-                    } else {
-                        ROOM
-                    },
-                    tiles: vec![Tile::of_index(goal)],
-                    range,
-                    avoid: BTreeSet::new(),
-                    max_hops: 4,
-                },
+        .prop_map(|(terrain, (at, goal), (range, away), (parts, fatigue))| Errand {
+            terrain,
+            creep: Creep {
+                id: "c".into(),
+                name: "c".into(),
+                owner: Owner::Ours,
+                pos: tiles::to_pos(ROOM, Tile::of_index(at)),
+                body: (parts.into_iter())
+                    .map(|kind| BodyPart { kind, hits: 100, boost: None })
+                    .collect(),
+                hits: 100,
+                hits_max: 100,
+                ticks_to_live: 1000,
+                fatigue,
+                store: Store::default(),
             },
-        )
+            target: Target {
+                room: if away { "W2N1".parse::<RoomName>().unwrap() } else { ROOM },
+                tiles: vec![Tile::of_index(goal)],
+                range,
+                avoid: BTreeSet::new(),
+                max_hops: 4,
+            },
+        })
 }
 
 /// A one-MOVE body on the border of an open room with no walk (its target
@@ -283,10 +259,7 @@ fn placed_in(crowd: &Crowd) -> Vec<Tile> {
 }
 
 fn met(crowd: &Crowd, wish: &Wish) -> bool {
-    crowd
-        .wishes
-        .iter()
-        .any(|o| !o.movable() && o.at == wish.head && o.head == wish.at)
+    crowd.wishes.iter().any(|o| !o.movable() && o.at == wish.head && o.head == wish.at)
 }
 
 fn head_on(crowd: &Crowd, wish: &Wish) -> bool {
@@ -314,29 +287,17 @@ fn duel(crowd: &Crowd, edge: bool) -> Vec<Wish> {
                 Wish {
                     head: w.at,
                     onward: None,
-                    working: if w.working.is_empty() {
-                        vec![w.at]
-                    } else {
-                        w.working.clone()
-                    },
+                    working: if w.working.is_empty() { vec![w.at] } else { w.working.clone() },
                     ..w.clone()
                 }
             }
         })
         .collect();
     let first = wishes.first().map(|m| m.at);
-    let beside = wishes
-        .iter()
-        .skip(1)
-        .find(|w| first.is_some_and(|at| tiles::range(w.at, at) == 1));
+    let beside =
+        wishes.iter().skip(1).find(|w| first.is_some_and(|at| tiles::range(w.at, at) == 1));
     if let (true, Some((head, weight))) = (edge, beside.map(|w| (w.at, w.weight.max(1) + 1))) {
-        wishes[0] = Wish {
-            head,
-            onward: None,
-            weight,
-            moves: true,
-            ..wishes[0].clone()
-        };
+        wishes[0] = Wish { head, onward: None, weight, moves: true, ..wishes[0].clone() };
     }
     wishes
 }
@@ -347,10 +308,7 @@ fn world_of(errand: &Errand) -> World<'static> {
         me: String::new(),
         cpu_limit: 20.0,
         bucket: 10_000,
-        rooms: vec![Room {
-            terrain: terrain::leak(errand.terrain.clone()),
-            ..Room::empty(ROOM)
-        }],
+        rooms: vec![Room { terrain: terrain::leak(errand.terrain.clone()), ..Room::empty(ROOM) }],
         spawns: Vec::new(),
         creeps: vec![errand.creep.clone()],
         attacks: Vec::new(),
@@ -365,10 +323,7 @@ fn world_of(errand: &Errand) -> World<'static> {
 /// The errand's Atlas, its creep's pace, and the wish `plan::toward` builds.
 fn planned(errand: &Errand, danger: Option<&TileSet>) -> (Atlas, Mover, Wish) {
     let mut atlas = Atlas::of_world(&world_of(errand));
-    let mover = Mover {
-        footprint: Footprint::One,
-        factor: factor_of(&errand.creep),
-    };
+    let mover = Mover { footprint: Footprint::One, factor: factor_of(&errand.creep) };
     let wish = plan::toward_round(&mut atlas, &errand.creep, mover, &errand.target, 3, danger);
     (atlas, mover, wish)
 }

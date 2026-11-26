@@ -1,13 +1,11 @@
 use fabot_atlas::Context;
-use fabot_base::engine;
-use fabot_base::intents::{Action, ModuleOutput, RoomAct};
-use fabot_base::world::Rules;
+use fabot_base::{
+    engine,
+    intents::{Action, ModuleOutput, RoomAct},
+    world::Rules,
+};
 
-use super::derive;
-use super::remote;
-use super::shape::LayoutState;
-use super::sites;
-use super::towers;
+use super::{derive, remote, shape::LayoutState, sites, towers};
 
 pub fn decide_over(rules: &Rules, colonies: &[derive::Colony], mut budget: i32) -> Vec<Action> {
     let mut intents: Vec<Action> = Vec::new();
@@ -20,10 +18,7 @@ pub fn decide_over(rules: &Rules, colonies: &[derive::Colony], mut budget: i32) 
         {
             for p in sites::place(rules, &colony.census, colony.target, plan, budget) {
                 budget -= 1;
-                intents.push(Action::Room(
-                    colony.room,
-                    RoomAct::CreateSite(p.x, p.y, p.kind),
-                ));
+                intents.push(Action::Room(colony.room, RoomAct::CreateSite(p.x, p.y, p.kind)));
             }
         }
 
@@ -75,8 +70,5 @@ pub fn decide(ctx: &mut Context, standing: &mut LayoutState) -> ModuleOutput {
     actions.extend(sites);
 
     *standing = kept;
-    ModuleOutput {
-        actions,
-        ..ModuleOutput::default()
-    }
+    ModuleOutput { actions, ..ModuleOutput::default() }
 }

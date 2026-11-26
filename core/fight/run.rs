@@ -2,16 +2,23 @@
 /// what each committed body does, and what it asks for.
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::kinds::{defend, stronghold, sweep};
-use super::scene::{Hunting, Scene, fresh};
-use super::shape::{Cast, Engagement, FightState, Group, Objective, Phase};
-use super::{casting, open, tracker};
 use fabot_atlas::{Atlas, Context};
-use fabot_base::declarations::OpKind;
-use fabot_base::engine;
-use fabot_base::intents::{Ask, ModuleOutput, Rank};
-use fabot_base::world::{self, Creep, Id, Pos, RoomName, StructureType, sightings};
+use fabot_base::{
+    declarations::OpKind,
+    engine,
+    intents::{Ask, ModuleOutput, Rank},
+    world::{self, Creep, Id, Pos, RoomName, StructureType, sightings},
+};
 use fabot_tactics::{self as tactics, Tactic};
+
+use super::{
+    casting,
+    kinds::{defend, stronghold, sweep},
+    open,
+    scene::{Hunting, Scene, fresh},
+    shape::{Cast, Engagement, FightState, Group, Objective, Phase},
+    tracker,
+};
 
 /// A merge keeps the older group's id; two engagements on one group are one,
 /// the older surviving with both's bodies, casts, losses and budget.
@@ -46,11 +53,7 @@ fn merged(
             Some(at) => {
                 let mut free = kept[at].free(&casts);
                 let k = &mut kept[at];
-                for (c, s) in casts
-                    .iter_mut()
-                    .filter(|c| c.engagement == e.id)
-                    .zip(&mut free)
-                {
+                for (c, s) in casts.iter_mut().filter(|c| c.engagement == e.id).zip(&mut free) {
                     (c.engagement, c.slot) = (k.id, s);
                 }
                 k.ours.extend(e.ours.into_keys().zip(free));
@@ -88,10 +91,8 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
     for r in &world.rooms {
         let mut all: Vec<Creep> = r.hostiles().cloned().collect();
         let seen = all.len();
-        let razed = r
-            .structures
-            .iter()
-            .filter(|s| s.kind == StructureType::InvaderCore && s.level == 0);
+        let razed =
+            r.structures.iter().filter(|s| s.kind == StructureType::InvaderCore && s.level == 0);
         all.extend(razed.map(casting::core_as_hostile));
         cores.extend(all[seen..].iter().map(|c| c.id));
         hostiles.extend(all.iter().cloned());
@@ -101,29 +102,19 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
     let owned = &context.derived.owned;
     let held = (state.engagements.iter()).fold(0, |most, e| most.max(e.group));
 
-    let (groups, events) = tracker::step(
-        tracker::LOST_GROUP_TICKS,
-        held,
-        owned,
-        &state.groups,
-        &hostiles,
-        world.time,
-    );
+    let (groups, events) =
+        tracker::step(tracker::LOST_GROUP_TICKS, held, owned, &state.groups, &hostiles, world.time);
 
     let homes: BTreeSet<RoomName> = context.derived.colonies.iter().copied().collect();
-    let worked: BTreeSet<RoomName> = (declarations.outposts.iter())
-        .chain(&declarations.claims)
-        .map(|o| o.room)
-        .collect();
+    let worked: BTreeSet<RoomName> =
+        (declarations.outposts.iter()).chain(&declarations.claims).map(|o| o.room).collect();
 
     let by_id: BTreeMap<i32, Group> = groups.iter().map(|g| (g.id, g.clone())).collect();
     let hostile_at: BTreeMap<Id, Pos> = hostiles.iter().map(|h| (h.id, h.pos)).collect();
     let ours: BTreeMap<&str, &Creep> = world.creeps.iter().map(|c| (c.name.as_str(), c)).collect();
     let standing: BTreeSet<String> = world.creeps.iter().map(|c| c.name.clone()).collect();
-    let able: BTreeSet<String> = (world.creeps.iter())
-        .filter(|c| !world::spent(&c.body))
-        .map(|c| c.name.clone())
-        .collect();
+    let able: BTreeSet<String> =
+        (world.creeps.iter()).filter(|c| !world::spent(&c.body)).map(|c| c.name.clone()).collect();
     let aging_out: BTreeSet<String> = world
         .creeps
         .iter()
@@ -134,14 +125,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
     let (mut engagements, casts) = merged(&events, &state.engagements, &state.casts);
 
     let (armed, opens) = open::armed_and_opening(owned, (&worked, &homes), &hostiles, &cores);
-    open::newcomers(
-        &mut engagements,
-        &events,
-        &by_id,
-        &homes,
-        &opens,
-        world.time,
-    );
+    open::newcomers(&mut engagements, &events, &by_id, &homes, &opens, world.time);
 
     let alive: BTreeSet<i32> = engagements.iter().map(|e| e.id).collect();
 
@@ -205,28 +189,19 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
         })
         .map(Group::room)
         .collect();
-    let sweeps = || {
-        engagements
-            .iter()
-            .filter(|e| e.objective == Objective::Sweep)
-    };
+    let sweeps = || engagements.iter().filter(|e| e.objective == Objective::Sweep);
     let grounds: BTreeMap<RoomName, Hunting> = (preyed.iter())
         .filter(|room| stirred.contains(*room))
         .chain(sweeps().map(|e| &e.room))
         .filter_map(|room| {
-            Some((
-                *room,
-                scene.ground(atlas, scene.in_sight(*room)?, &state.groups),
-            ))
+            Some((*room, scene.ground(atlas, scene.in_sight(*room)?, &state.groups)))
         })
         .collect();
     let cornered: BTreeSet<i32> = sweeps()
         .filter(|e| {
             let members = scene.members_of(e);
             let mates = |c: &Creep| {
-                (members.iter().copied())
-                    .filter(|m| m.name != c.name)
-                    .collect::<Vec<_>>()
+                (members.iter().copied()).filter(|m| m.name != c.name).collect::<Vec<_>>()
             };
             (grounds.get(&e.room)).is_some_and(|g| {
                 (members.iter().filter(|c| c.pos.room == e.room))
@@ -389,9 +364,8 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
     let mut casts = asked.casts;
     casts.retain(|c| kept.contains(&c.engagement));
 
-    let ovens: BTreeSet<&String> = (world.spawns.iter())
-        .filter_map(|s| s.spawning.as_ref().map(|o| &o.name))
-        .collect();
+    let ovens: BTreeSet<&String> =
+        (world.spawns.iter()).filter_map(|s| s.spawning.as_ref().map(|o| &o.name)).collect();
 
     let rank = |c: &Cast| match decided.iter().find(|e| e.id == c.engagement) {
         Some(e) if e.objective != Objective::Defend => Rank::Fight,
@@ -400,16 +374,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
     };
     let asks = (casts.iter())
         .filter(|c| !ovens.contains(&c.name))
-        .map(|c| {
-            (
-                c.room,
-                Ask {
-                    body: c.body.clone(),
-                    name: c.name.clone(),
-                    rank: rank(c),
-                },
-            )
-        })
+        .map(|c| (c.room, Ask { body: c.body.clone(), name: c.name.clone(), rank: rank(c) }))
         .collect();
 
     let mut out = super::act::act(&scene, atlas, context.trace, (&decided, &casts, &grounds));
@@ -425,8 +390,9 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use fabot_base::vocabulary::Part;
+
+    use super::*;
 
     #[test]
     fn a_merged_defend_holds_each_body_and_cast_in_its_own_slot() {

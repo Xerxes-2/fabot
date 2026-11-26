@@ -1,34 +1,35 @@
 /// `Sweep` (`ARCHITECTURE.md` §6.2); `step` closes it with None.
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::super::casting;
-use super::super::scene::{Hunting, Scene, fresh};
-use super::super::shape::{Engagement, Objective, Phase, enter};
-use super::defend;
 use fabot_atlas::{self as atlas, Atlas};
-use fabot_base::declarations::{Declarations, OpKind};
-use fabot_base::intel::Row;
-use fabot_base::tiles::{self, TileSet};
-use fabot_base::vocabulary::Part;
-use fabot_base::world::{Creep, Fallen, Pos, Room, RoomName, Source, hostiles};
-use fabot_base::{engine, grid};
+use fabot_base::{
+    declarations::{Declarations, OpKind},
+    engine, grid,
+    intel::Row,
+    tiles::{self, TileSet},
+    vocabulary::Part,
+    world::{Creep, Fallen, Pos, Room, RoomName, Source, hostiles},
+};
 use fabot_exchange::Fighter;
 use fabot_tactics::Tactic;
+
+use super::{
+    super::{
+        casting,
+        scene::{Hunting, Scene, fresh},
+        shape::{Engagement, Objective, Phase, enter},
+    },
+    defend,
+};
 
 pub const CANDIDATES: &[Tactic] = &[Tactic::BlobKite, Tactic::Kite];
 
 pub fn beside(reached_from_exits: &TileSet, at: &Pos) -> bool {
-    tiles::around(tiles::of_pos(at))
-        .iter()
-        .any(|t| reached_from_exits.contains(*t))
+    tiles::around(tiles::of_pos(at)).iter().any(|t| reached_from_exits.contains(*t))
 }
 
 pub fn exposed_in(reached_from_exits: &TileSet, room: &Room) -> Vec<Pos> {
-    room.sources
-        .iter()
-        .filter(|s| beside(reached_from_exits, &s.pos))
-        .map(|s| s.pos)
-        .collect()
+    room.sources.iter().filter(|s| beside(reached_from_exits, &s.pos)).map(|s| s.pos).collect()
 }
 
 pub struct Facts {
@@ -82,9 +83,7 @@ pub(crate) fn holds(
     e: &Engagement,
     (room, grounds): (RoomName, &BTreeMap<RoomName, Hunting>),
 ) -> bool {
-    let ours: Vec<Fighter> = (scene.members_of(e).into_iter())
-        .map(casting::fighter_of)
-        .collect();
+    let ours: Vec<Fighter> = (scene.members_of(e).into_iter()).map(casting::fighter_of).collect();
     let (Some(r), Some(g)) = (scene.in_sight(room), grounds.get(&room)) else {
         return false;
     };
@@ -115,9 +114,8 @@ pub fn kept(room: &Room, held: i32, walk: i32) -> i32 {
 /// How many more harassers our spawns cast beside the sweeps fielded, within
 /// a full body's spawn time a spawn, as a set's casts were bounded before.
 pub(crate) fn room_for(scene: &Scene, sweeps: &[&Engagement]) -> i32 {
-    let homes: Vec<&Room> = (scene.world.rooms.iter())
-        .filter(|r| scene.homes.contains(&r.name))
-        .collect();
+    let homes: Vec<&Room> =
+        (scene.world.rooms.iter()).filter(|r| scene.homes.contains(&r.name)).collect();
     let spawn = engine::spawn_ticks(engine::MAX_BODY_PARTS);
     let ticks = |body: &[Part]| engine::spawn_ticks(body.len());
     let fielded: i32 = (sweeps.iter())
@@ -131,11 +129,7 @@ pub(crate) fn room_for(scene: &Scene, sweeps: &[&Engagement]) -> i32 {
                 .map(|c| ticks(&c.body)),
         )
         .sum();
-    let largest = HARASSERS
-        .iter()
-        .max_by_key(|b| b.len())
-        .copied()
-        .unwrap_or_default();
+    let largest = HARASSERS.iter().max_by_key(|b| b.len()).copied().unwrap_or_default();
     casting::copies_within(i32::MAX, spawn * scene.spawns_in(&homes) - fielded, largest)
 }
 
@@ -153,27 +147,18 @@ pub(crate) fn opened(
     (candidates, claimed): (&[(RoomName, i32, i32)], &mut BTreeSet<RoomName>),
     (engagements, first, declarations): (&[Engagement], i32, &Declarations),
 ) -> Vec<(Engagement, bool)> {
-    let sweeps: Vec<&Engagement> = (engagements.iter())
-        .filter(|e| e.objective == Objective::Sweep)
-        .collect();
+    let sweeps: Vec<&Engagement> =
+        (engagements.iter()).filter(|e| e.objective == Objective::Sweep).collect();
     (candidates.iter())
         .map(|(room, ..)| *room)
         .filter(|room| claimed.insert(*room))
         .take(room_for(scene, &sweeps).max(0) as usize)
         .enumerate()
         .map(|(i, room)| {
-            let e = fresh(
-                first + i as i32,
-                Objective::Sweep,
-                room,
-                scene.world.time,
-                Tactic::Kite,
-            );
+            let e = fresh(first + i as i32, Objective::Sweep, room, scene.world.time, Tactic::Kite);
             (
                 Engagement {
-                    priority: declarations
-                        .priority(OpKind::Sweep, room)
-                        .unwrap_or_default(),
+                    priority: declarations.priority(OpKind::Sweep, room).unwrap_or_default(),
                     ..e
                 },
                 false,
@@ -207,10 +192,7 @@ pub(crate) fn patrol(
     let rows: Vec<_> = (open.map(|r| (r, scene.intel.get(&r))))
         .filter(|(_, row)| {
             row.is_none_or(|row| {
-                let users = row
-                    .owner
-                    .iter()
-                    .chain(row.reservation.iter().map(|(u, _)| u));
+                let users = row.owner.iter().chain(row.reservation.iter().map(|(u, _)| u));
                 row.level == 0 && users.into_iter().all(|u| enemies.contains(u))
             })
         })
@@ -220,11 +202,7 @@ pub(crate) fn patrol(
     let walk = |r: RoomName| atlas.route(&towered, Scene::hops(e), from, r);
     atlas::onward(rows.iter().filter_map(|(r, row)| {
         let crossed = walk(*r)?.len() as i32 - 1;
-        Some((
-            *r,
-            age(row.as_ref()).or(stalest)?,
-            engine::ROOM_SIDE * crossed,
-        ))
+        Some((*r, age(row.as_ref()).or(stalest)?, engine::ROOM_SIDE * crossed))
     }))
 }
 
@@ -232,13 +210,7 @@ pub(crate) fn patrol(
 pub fn onto(room: RoomName, time: i32, e: &Engagement) -> Engagement {
     let mut actual = e.actual.clone();
     actual.left_dead += e.lost;
-    Engagement {
-        room,
-        unanswered: false,
-        lost: 0,
-        actual,
-        ..enter(Phase::Approaching, time, e)
-    }
+    Engagement { room, unanswered: false, lost: 0, actual, ..enter(Phase::Approaching, time, e) }
 }
 
 pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
@@ -268,8 +240,9 @@ pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use fabot_base::world::{Id, Remains, Store};
+
+    use super::*;
 
     fn fell(body: Vec<Part>, ticks_to_live: i32) -> Room<'static> {
         let mut room = Room::empty(RoomName::W1N1);
@@ -277,11 +250,7 @@ mod tests {
             id: Id::from("t1"),
             pos: Pos::new(RoomName::W1N1, 25, 25),
             store: Store::default(),
-            fallen: Some(Fallen {
-                body,
-                ticks_to_live,
-                died: 0,
-            }),
+            fallen: Some(Fallen { body, ticks_to_live, died: 0 }),
             theirs: None,
         });
         room

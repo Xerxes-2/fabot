@@ -2,11 +2,15 @@
 //! our first spawn on it as `soak.mjs`'s respawn stands it.
 use std::sync::Arc;
 
-use fabot_base::tiles::{self, Tile};
-use fabot_base::world::{Pos, RoomName, Rules};
+use fabot_base::{
+    tiles::{self, Tile},
+    world::{Pos, RoomName, Rules},
+};
 use fabot_layout as layout;
-use krebs::scenario::GlobalScenario;
-use krebs::world::{EngineConfig, RoomSnapshot, World};
+use krebs::{
+    scenario::GlobalScenario,
+    world::{EngineConfig, RoomSnapshot, World},
+};
 use krebs_util::json::Json;
 use screeps::{SAFE_MODE_DURATION, SPAWN_ENERGY_CAPACITY, SPAWN_ENERGY_START, SPAWN_HITS};
 use serde_json::{Value, json};
@@ -43,9 +47,7 @@ pub fn read(path: &str) -> Map {
     let world: Value = serde_json::from_str(&text).expect("the world is JSON");
     let mut map = Map {
         time: world["time"].as_i64().unwrap_or(0),
-        memory: world
-            .get("simMemory")
-            .map_or_else(String::new, Value::to_string),
+        memory: world.get("simMemory").map_or_else(String::new, Value::to_string),
         intel: (world["segments"]["2"].as_str()).unwrap_or_default().into(),
         users: (world["users"].as_object().into_iter().flatten())
             .filter(|(id, _)| *id != US && *id != INVADER && *id != KEEPER)
@@ -64,8 +66,7 @@ pub fn read(path: &str) -> Map {
             t => t.as_str().unwrap_or_default().to_string(),
         };
         assert_eq!(terrain.len(), 2500, "{name}: terrain");
-        map.objects
-            .extend(room["objects"].as_array().into_iter().flatten().cloned());
+        map.objects.extend(room["objects"].as_array().into_iter().flatten().cloned());
         map.rooms.push((name, terrain));
     }
     map
@@ -74,9 +75,7 @@ pub fn read(path: &str) -> Map {
 impl Map {
     pub fn terrain(&self, room: &str) -> &[u8] {
         let at = self.rooms.iter().find(|(n, _)| n == room);
-        at.unwrap_or_else(|| panic!("{room}: not in the world"))
-            .1
-            .as_bytes()
+        at.unwrap_or_else(|| panic!("{room}: not in the world")).1.as_bytes()
     }
 
     fn in_room(&self, room: &str) -> impl Iterator<Item = &Value> {
@@ -103,10 +102,7 @@ impl Map {
             Pos::new(name, xy("x"), xy("y"))
         };
         let of = |kind: &str| -> Vec<Pos> {
-            self.in_room(room)
-                .filter(|o| o["type"] == kind)
-                .map(at)
-                .collect()
+            self.in_room(room).filter(|o| o["type"] == kind).map(at).collect()
         };
         let controller = *of("controller").first().expect("a controller");
         let terrain = self.terrain(room).iter().map(|b| b - b'0').collect();
@@ -129,11 +125,7 @@ impl Map {
                         merge(&mut o, ours);
                     }
                     if o.get("safeMode").is_none() {
-                        let safe = if ended {
-                            0
-                        } else {
-                            t + i64::from(SAFE_MODE_DURATION)
-                        };
+                        let safe = if ended { 0 } else { t + i64::from(SAFE_MODE_DURATION) };
                         merge(&mut o, json!({ "safeMode": safe }));
                     }
                 }
@@ -180,10 +172,8 @@ impl Map {
 }
 
 pub fn user(id: &str, name: &str) -> Value {
-    crate::badge::put(
-        json!({ "_id": id, "username": name, "usernameLower": name.to_lowercase(),
-    "cpu": 100, "gcl": 0, "cpuAvailable": 10000, "active": 10000, "rooms": [], "money": 0, "power": 0 }),
-    )
+    crate::badge::put(json!({ "_id": id, "username": name, "usernameLower": name.to_lowercase(),
+    "cpu": 100, "gcl": 0, "cpuAvailable": 10000, "active": 10000, "rooms": [], "money": 0, "power": 0 }))
 }
 
 pub fn krebs(db: Value, seed: u64, t: i64) -> World {
@@ -191,13 +181,9 @@ pub fn krebs(db: Value, seed: u64, t: i64) -> World {
             "clock": { "baseMs": 0, "baseTick": 0, "nominalTickMs": crate::TICK_MS }, "gameTime": t, "worldSize": 0,
             "compat": "private", "db": db });
     let text = Json::parse(&scenario.to_string()).expect("krebs reads JSON");
-    let mut w = GlobalScenario::from_json(&text)
-        .and_then(|s| s.world())
-        .expect("krebs stands the world");
-    w.config = Arc::new(EngineConfig {
-        history: false,
-        ..(*w.config).clone()
-    });
+    let mut w =
+        GlobalScenario::from_json(&text).and_then(|s| s.world()).expect("krebs stands the world");
+    w.config = Arc::new(EngineConfig { history: false, ..(*w.config).clone() });
     // An import derives no presence: until a room is processed nobody sees it.
     for r in 0..w.rooms.len() {
         w.rooms[r] = rebuilt(&w, r, w.rooms[r].objects.to_vec());

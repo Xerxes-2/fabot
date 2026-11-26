@@ -1,16 +1,18 @@
 use std::collections::BTreeSet;
 
-use super::loot::garrison;
-use super::{Atlas, Mover, Target, Tree};
-use fabot_base::declarations::{ColonyPlan, Declarations, Outpost, REACH_HOPS, Stage};
-use fabot_base::grid;
-use fabot_base::intel::Intel;
-use fabot_base::tiles::{self, TileSet};
-use fabot_base::vocabulary::{CLAIMER, Part};
-use fabot_base::world::{
-    Controller, Creep, Owner, Pos, Room, RoomName, Sightings, StructureType, World, hostiles,
+use fabot_base::{
+    boost,
+    declarations::{ColonyPlan, Declarations, Outpost, REACH_HOPS, Stage},
+    engine, grid,
+    intel::Intel,
+    tiles::{self, TileSet},
+    vocabulary::{CLAIMER, Part},
+    world::{
+        Controller, Creep, Owner, Pos, Room, RoomName, Sightings, StructureType, World, hostiles,
+    },
 };
-use fabot_base::{boost, engine};
+
+use super::{Atlas, Mover, Target, Tree, loot::garrison};
 
 pub struct Context<'a> {
     pub world: &'a World<'a>,
@@ -60,11 +62,7 @@ pub fn nearest<'t>(
             _ => atlas.ticks_to(walker, &t, at),
         }
     })
-    .or_else(|| {
-        least(atlas, &|atlas, home| {
-            atlas.ticks_toward(REACH_HOPS, home, at)
-        })
-    })
+    .or_else(|| least(atlas, &|atlas, home| atlas.ticks_toward(REACH_HOPS, home, at)))
 }
 
 pub fn plan_of<'a>(
@@ -204,9 +202,8 @@ fn danger(world: &World, owned: &BTreeSet<RoomName>, guarded: bool) -> Vec<(Room
         .filter(|r| !owned.contains(&r.name))
         .filter_map(|r| {
             let reaches = reaches(r);
-            let set: TileSet = (reaches.iter())
-                .flat_map(|(at, reach)| tiles::within(*reach, *at))
-                .collect();
+            let set: TileSet =
+                (reaches.iter()).flat_map(|(at, reach)| tiles::within(*reach, *at)).collect();
             (!reaches.is_empty()).then_some((r.name, set))
         })
         .collect()
@@ -269,9 +266,7 @@ pub fn worked(
         .chain(raised)
         .filter(|o| {
             let unarmed = || fabot_base::world::sightings::unarmed(sightings, world.time, o.room);
-            world
-                .room(o.room)
-                .map_or_else(unarmed, |_| !derived.raided.contains(&o.room))
+            world.room(o.room).map_or_else(unarmed, |_| !derived.raided.contains(&o.room))
                 && (derived.trees.iter()).any(|(_, tree)| tree.contains(o.room))
         })
         .cloned()
@@ -279,9 +274,7 @@ pub fn worked(
 }
 
 fn guards<'w>(world: &'w World, room: RoomName) -> Vec<&'w Creep> {
-    (world.creeps.iter())
-        .filter(|c| c.pos.room == room)
-        .collect()
+    (world.creeps.iter()).filter(|c| c.pos.room == room).collect()
 }
 
 /// v1's guard: a body of ours striking as far as the raider, and in reach of it, holds it off the work.
@@ -296,13 +289,9 @@ fn held(guards: &[&Creep], foe: &Creep) -> bool {
 /// by any armed body; elsewhere a foe stands down the work it can reach and no more.
 fn raided(world: &World, owned: &BTreeSet<RoomName>, colony: bool, seen: &Room) -> bool {
     let guards = guards(world, seen.name);
-    let containers = seen
-        .structures
-        .iter()
-        .filter(|s| s.kind == StructureType::Container);
-    let work: Vec<&Pos> = (seen.sources.iter().map(|s| &s.pos))
-        .chain(containers.map(|s| &s.pos))
-        .collect();
+    let containers = seen.structures.iter().filter(|s| s.kind == StructureType::Container);
+    let work: Vec<&Pos> =
+        (seen.sources.iter().map(|s| &s.pos)).chain(containers.map(|s| &s.pos)).collect();
 
     seen.invader_core().is_some()
         || seen.hostiles().any(|c| {

@@ -10,16 +10,8 @@ const TO_EXIT: i8 = 2;
 const EXIT: i8 = 3;
 const INFINITY: i64 = i64::MAX / 4;
 
-const AROUND: [(i32, i32); 8] = [
-    (0, -1),
-    (-1, -1),
-    (-1, 0),
-    (-1, 1),
-    (0, 1),
-    (1, 1),
-    (1, 0),
-    (1, -1),
-];
+const AROUND: [(i32, i32); 8] =
+    [(0, -1), (-1, -1), (-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1)];
 
 pub struct Rect {
     pub x1: i32,
@@ -46,11 +38,8 @@ fn grid(wall: &dyn Fn(i32, i32) -> bool, safe: [bool; 4]) -> Grid {
     for x in 0..50 {
         for y in 0..50 {
             if !wall(x, y) {
-                a[x as usize][y as usize] = if x == 0 || y == 0 || x == 49 || y == 49 {
-                    EXIT
-                } else {
-                    NORMAL
-                };
+                a[x as usize][y as usize] =
+                    if x == 0 || y == 0 || x == 49 || y == 49 { EXIT } else { NORMAL };
             }
         }
     }
@@ -66,12 +55,7 @@ fn grid(wall: &dyn Fn(i32, i32) -> bool, safe: [bool; 4]) -> Grid {
     }
     let mut kept = vec![false; tiles::COUNT];
     for i in 1..49 {
-        for (on, x, y) in [
-            (safe[0], i, 1),
-            (safe[2], i, 48),
-            (safe[3], 1, i),
-            (safe[1], 48, i),
-        ] {
+        for (on, x, y) in [(safe[0], i, 1), (safe[2], i, 48), (safe[3], 1, i), (safe[1], 48, i)] {
             if on && a[x as usize][y as usize] == TO_EXIT {
                 a[x as usize][y as usize] = PROTECTED;
                 kept[tiles::index(x, y)] = true;
@@ -94,18 +78,13 @@ fn grid(wall: &dyn Fn(i32, i32) -> bool, safe: [bool; 4]) -> Grid {
         if corner.iter().any(|c| at(&a, *c) == PROTECTED)
             && corner.iter().any(|c| at(&a, *c) == TO_EXIT)
         {
-            let mut queue: Vec<(i32, i32)> = corner
-                .into_iter()
-                .filter(|c| at(&a, *c) == PROTECTED)
-                .collect();
+            let mut queue: Vec<(i32, i32)> =
+                corner.into_iter().filter(|c| at(&a, *c) == PROTECTED).collect();
             while !queue.is_empty() {
                 let (x, y) = queue.remove(0);
                 if a[x as usize][y as usize] == PROTECTED {
-                    a[x as usize][y as usize] = if kept[tiles::index(x, y)] {
-                        TO_EXIT
-                    } else {
-                        NORMAL
-                    };
+                    a[x as usize][y as usize] =
+                        if kept[tiles::index(x, y)] { TO_EXIT } else { NORMAL };
                     for (dx, dy) in AROUND {
                         if at(&a, (x + dx, y + dy)) == PROTECTED {
                             queue.push((x + dx, y + dy));
@@ -147,17 +126,9 @@ impl Graph {
             let (i, j) = (next[u], next[v]);
             (next[u], next[v]) = (i + 1, j + 1);
             edges[i] = Edge { v, rev: j, c, f: 0 };
-            edges[j] = Edge {
-                v: u,
-                rev: i,
-                ..Edge::default()
-            };
+            edges[j] = Edge { v: u, rev: i, ..Edge::default() };
         }
-        Graph {
-            level: vec![-1; n],
-            start,
-            edges,
-        }
+        Graph { level: vec![-1; n], start, edges }
     }
 
     fn levels(&mut self, s: usize, t: usize) -> bool {
@@ -180,12 +151,7 @@ impl Graph {
             return f;
         }
         while c[u] < self.start[u + 1] {
-            let Edge {
-                v,
-                rev,
-                c: cap,
-                f: used,
-            } = self.edges[c[u]];
+            let Edge { v, rev, c: cap, f: used } = self.edges[c[u]];
             if self.level[v] == self.level[u] + 1 && used < cap {
                 let sent = self.flow(v, f.min(cap - used), t, c);
                 if sent > 0 {
@@ -215,10 +181,7 @@ impl Graph {
                 }
             }
         }
-        (cut.into_iter())
-            .filter(|(_, v)| self.level[*v] == -1)
-            .map(|(u, _)| u)
-            .collect()
+        (cut.into_iter()).filter(|(_, v)| self.level[*v] == -1).map(|(u, _)| u).collect()
     }
 }
 
@@ -277,7 +240,5 @@ pub fn tiles_of(wall: &dyn Fn(i32, i32) -> bool, rects: &[Rect], safe: [bool; 4]
     if total == 0 {
         return Vec::new();
     }
-    (g.reachable_cut(source).into_iter())
-        .map(|u| Tile::of_index(u % tiles::COUNT))
-        .collect()
+    (g.reachable_cut(source).into_iter()).map(|u| Tile::of_index(u % tiles::COUNT)).collect()
 }

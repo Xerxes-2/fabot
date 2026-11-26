@@ -1,14 +1,16 @@
 use std::collections::BTreeSet;
 
 use fabot_atlas::Atlas;
-use fabot_base::engine;
-use fabot_base::tiles::{self, Tile};
-use fabot_base::world::{
-    Built, Creep, KIND_COUNT, Pos, Room, Rules, Structure, StructureType, terrain,
+use fabot_base::{
+    engine,
+    tiles::{self, Tile},
+    world::{Built, Creep, KIND_COUNT, Pos, Room, Rules, Structure, StructureType, terrain},
 };
 
-use super::plan::{controller_link, haul_level, sized};
-use super::shape::{Item, Plan};
+use super::{
+    plan::{controller_link, haul_level, sized},
+    shape::{Item, Plan},
+};
 
 /// A level's first batch of extensions, and few enough that the builders'
 /// energy goes to the plan's first items before its later ones.
@@ -126,12 +128,8 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
 
     let containers = standing(StructureType::Container);
 
-    let rocks: Vec<Pos> = room
-        .sources
-        .iter()
-        .map(|s| s.pos)
-        .chain(room.minerals.iter().map(|m| m.pos))
-        .collect();
+    let rocks: Vec<Pos> =
+        room.sources.iter().map(|s| s.pos).chain(room.minerals.iter().map(|m| m.pos)).collect();
 
     let mut served = [0u8; tiles::COUNT];
 
@@ -191,11 +189,7 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
             posts.push((tiles::of_pos(&s.pos), None));
         } else if let Some((p, _)) = Atlas::post_of(room, &s.pos) {
             let post = tiles::of_pos(&p);
-            let beside = tiles::around(post)
-                .iter()
-                .copied()
-                .filter(|t| unheld(*t))
-                .collect();
+            let beside = tiles::around(post).iter().copied().filter(|t| unheld(*t)).collect();
             posts.push((tiles::of_pos(&s.pos), Some((post, beside))));
         }
     }
@@ -238,9 +232,7 @@ pub fn may_place(rules: &Rules, census: &Census, level: i32) -> bool {
     kinds.extend(sized());
 
     level >= haul_level(rules)
-        || kinds
-            .iter()
-            .any(|kind| held_of(census, *kind) < rules.allowed(*kind, level))
+        || kinds.iter().any(|kind| held_of(census, *kind) < rules.allowed(*kind, level))
 }
 
 pub fn posted(plan: &Plan, t: Tile) -> bool {
@@ -251,10 +243,7 @@ pub fn posted(plan: &Plan, t: Tile) -> bool {
 /// the room had a plan, it gives way to the post the bays and the link stand
 /// around.
 pub fn astray(plan: &Plan, census: &Census) -> Vec<(Tile, Tile)> {
-    (census.rocked.iter())
-        .filter(|(_, c)| !posted(plan, *c))
-        .copied()
-        .collect()
+    (census.rocked.iter()).filter(|(_, c)| !posted(plan, *c)).copied().collect()
 }
 
 pub fn placeable(item: &Item, level: i32) -> bool {
@@ -327,13 +316,7 @@ pub fn place(
                         && planned[t] == 0
                 };
 
-                controller_link(
-                    walkable,
-                    open,
-                    |t: Tile| t == item.tile || solid[t] == 0,
-                    c,
-                    b,
-                )
+                controller_link(walkable, open, |t: Tile| t == item.tile || solid[t] == 0, c, b)
             }
             (Some((_, Some((post, beside)))), _)
                 if closes(census, *post, item.tile)
@@ -341,9 +324,7 @@ pub fn place(
             {
                 let head = (beside.iter().copied())
                     .filter(|t| {
-                        plan.items
-                            .iter()
-                            .all(|i| i.tile != *t || i.kind == StructureType::Road)
+                        plan.items.iter().all(|i| i.tile != *t || i.kind == StructureType::Road)
                             && !closes(census, *post, *t)
                     })
                     .min_by_key(|t| {
@@ -373,10 +354,7 @@ pub fn place(
     // one for thousands of ticks ahead of the ring.
     let tunnel = |i: &&Item| i.kind == StructureType::Road && census.wall[i.tile] > 0;
     let rest = plan.items.iter().filter(|i| !tunnel(i));
-    for item in rest
-        .chain(plan.items.iter().filter(tunnel))
-        .filter(|i| placeable(i, level))
-    {
+    for item in rest.chain(plan.items.iter().filter(tunnel)).filter(|i| placeable(i, level)) {
         match tile_of(item) {
             Some(t)
                 if (placed.len() as i32) < budget
@@ -404,11 +382,7 @@ pub fn place(
                 paid += i32::from(item.kind.pays_back());
                 added[item.kind as usize] = added_of(&added, item.kind) + 1;
 
-                placed.push(Placement {
-                    x: tiles::x_of(t),
-                    y: tiles::y_of(t),
-                    kind: item.kind,
-                });
+                placed.push(Placement { x: tiles::x_of(t), y: tiles::y_of(t), kind: item.kind });
             }
             _ => (),
         }
@@ -419,9 +393,10 @@ pub fn place(
 
 #[cfg(test)]
 mod tests {
+    use fabot_base::world::{Owner, Structure};
+
     use super::*;
     use crate::fixtures as fx;
-    use fabot_base::world::{Owner, Structure};
 
     #[test]
     fn no_controller_links_site_lands_on_a_seat_of_a_buffer_another_bot_set() {
@@ -439,22 +414,15 @@ mod tests {
                 continue;
             };
 
-            let rocks: Vec<Tile> = ground
-                .sources
-                .iter()
-                .chain(ground.minerals.iter())
-                .copied()
-                .collect();
+            let rocks: Vec<Tile> =
+                ground.sources.iter().chain(ground.minerals.iter()).copied().collect();
 
             let off_plan: Vec<Tile> = tiles::within(engine::UPGRADE_RANGE, controller)
                 .into_iter()
                 .filter(|t| {
                     ground.terrain[*t] != 1
                         && rocks.iter().all(|r| tiles::range(*r, *t) > 1)
-                        && plan
-                            .items
-                            .iter()
-                            .all(|i| i.tile != *t || i.kind == StructureType::Road)
+                        && plan.items.iter().all(|i| i.tile != *t || i.kind == StructureType::Road)
                 })
                 .collect();
 
@@ -479,13 +447,7 @@ mod tests {
                 let mut one = plan.clone();
                 one.items = vec![i.clone()];
 
-                for p in place(
-                    &Rules::vanilla(),
-                    &census,
-                    engine::CONTROLLER_MAX_LEVEL,
-                    &one,
-                    1,
-                ) {
+                for p in place(&Rules::vanilla(), &census, engine::CONTROLLER_MAX_LEVEL, &one, 1) {
                     let t = tiles::index(p.x, p.y);
 
                     assert!(
@@ -537,10 +499,8 @@ mod tests {
                     .iter()
                     .map(|i| fx::structure(&format!("b{}", i.tile), i.kind, Owner::Ours, i.tile)),
             );
-            room.sites = pending
-                .iter()
-                .map(|i| fx::site(&format!("x{}", i.tile), i.kind, i.tile))
-                .collect();
+            room.sites =
+                pending.iter().map(|i| fx::site(&format!("x{}", i.tile), i.kind, i.tile)).collect();
 
             let counted = census_of(&room, &[]);
             let rules = Rules::vanilla();
@@ -578,11 +538,7 @@ mod tests {
             };
 
             let standing = |t: Tile| -> Vec<Structure> {
-                room.structures
-                    .iter()
-                    .filter(|s| tiles::of_pos(&s.pos) == t)
-                    .cloned()
-                    .collect()
+                room.structures.iter().filter(|s| tiles::of_pos(&s.pos) == t).cloned().collect()
             };
 
             // An item the rules admit after what was placed: its level
@@ -602,11 +558,7 @@ mod tests {
             assert!(may_place(&rules, &counted, case.level) || placed.is_empty());
             let full = |i: &Item| {
                 (placed.len() as i32) >= case.budget
-                    || if i.kind.pays_back() {
-                        paying_after
-                    } else {
-                        after
-                    } >= SITES_IN_FLIGHT
+                    || if i.kind.pays_back() { paying_after } else { after } >= SITES_IN_FLIGHT
             };
             assert!((placed.len() as i32) <= case.budget.max(0));
             assert!(paying_after <= SITES_IN_FLIGHT.max(paying));
@@ -685,18 +637,8 @@ mod tests {
             };
             plan.items.retain(|i| i.kind == StructureType::Lab);
             for level in 6..=engine::CONTROLLER_MAX_LEVEL {
-                let placed = place(
-                    &rules,
-                    &census_of(&colony.room, &[]),
-                    level,
-                    &plan,
-                    i32::MAX,
-                );
-                assert_eq!(
-                    placed.is_empty(),
-                    level < engine::CONTROLLER_MAX_LEVEL,
-                    "{level}"
-                );
+                let placed = place(&rules, &census_of(&colony.room, &[]), level, &plan, i32::MAX);
+                assert_eq!(placed.is_empty(), level < engine::CONTROLLER_MAX_LEVEL, "{level}");
             }
         }
     }

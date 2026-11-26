@@ -1,8 +1,10 @@
 //! An augmenting search over the room's whole matching, so swaps and
 //! rotations fall out of it rather than being special cases.
-use fabot_base::grid::Footprint;
-use fabot_base::tiles::{self, Tile};
-use fabot_base::wish::Wish;
+use fabot_base::{
+    grid::Footprint,
+    tiles::{self, Tile},
+    wish::Wish,
+};
 
 fn covered(footprint: Footprint, anchor: Tile) -> Vec<Tile> {
     match footprint {
@@ -141,9 +143,7 @@ pub fn arbitrate_with(
     let reachable: Vec<i32> = (0..n)
         .map(|i| {
             let wish = &order[i];
-            (candidates[i].iter())
-                .map(|tile| wish.value(*tile))
-                .fold(wish.value(wish.at), i32::max)
+            (candidates[i].iter()).map(|tile| wish.value(*tile)).fold(wish.value(wish.at), i32::max)
         })
         .collect();
 
@@ -174,11 +174,8 @@ pub fn arbitrate_with(
         for i in 0..n {
             let from = search.tile_of[i];
             let wish = &order[i];
-            let stale = searched_at[i].is_none_or(|at| {
-                candidates[i]
-                    .iter()
-                    .any(|tile| search.changed_at[*tile] > at)
-            });
+            let stale = searched_at[i]
+                .is_none_or(|at| candidates[i].iter().any(|tile| search.changed_at[*tile] > at));
             let content = wish.value(from) == reachable[i]
                 && (from == wish.at || wish.value(wish.at) < wish.value(from));
 
@@ -220,12 +217,7 @@ pub fn arbitrate_with(
 
     let mut steps: Vec<(String, i32)> = (0..n)
         .filter(|i| tile_of[*i] != order[*i].at)
-        .map(|i| {
-            (
-                order[i].creep.clone(),
-                tiles::direction(order[i].at, tile_of[i]),
-            )
-        })
+        .map(|i| (order[i].creep.clone(), tiles::direction(order[i].at, tile_of[i])))
         .collect();
     steps.sort_by(|a, b| a.0.cmp(&b.0));
 

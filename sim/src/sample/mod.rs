@@ -5,44 +5,37 @@ use std::collections::{BTreeMap, BTreeSet};
 mod labs;
 
 use fabot_base::engine::{self, road_ratio};
-use krebs::atom;
-use krebs::constants::{CREEP_CORPSE_RATE, CREEP_PART_MAX_ENERGY};
-use krebs::doc::{Atom, Obj, Val};
-use krebs::intents::RoomIntents;
+use krebs::{
+    atom,
+    constants::{CREEP_CORPSE_RATE, CREEP_PART_MAX_ENERGY},
+    doc::{Atom, Obj, Val},
+    intents::RoomIntents,
+    room_name::RoomXY,
+};
 use screeps::{
     ENERGY_DECAY, LINK_LOSS_RATIO, Part, REPAIR_COST, SPAWN_ENERGY_CAPACITY, StructureType,
     controller_levels,
 };
 use serde_json::{Map, Value, json};
 
-use crate::lives::{self, Lives};
-use crate::read::build_cost;
-use crate::view::{
-    EVENT_ATTACK, EVENT_BUILD, EVENT_HARVEST, EVENT_HEAL, EVENT_OBJECT_DESTROYED, EVENT_REPAIR,
-    EVENT_TRANSFER, EVENT_UPGRADE_CONTROLLER, Room, View, num, obj, store, text, used, xy,
+use crate::{
+    lives::{self, Lives},
+    read::build_cost,
+    view::{
+        EVENT_ATTACK, EVENT_BUILD, EVENT_HARVEST, EVENT_HEAL, EVENT_OBJECT_DESTROYED, EVENT_REPAIR,
+        EVENT_TRANSFER, EVENT_UPGRADE_CONTROLLER, Room, View, num, obj, store, text, used, xy,
+    },
+    world::Map as World,
 };
-use crate::world::Map as World;
-use krebs::room_name::RoomXY;
 
 /// Where a compound `made` counts stands.
 const MADE_IN: [&str; 3] = ["storage", "terminal", "lab"];
 
-const PAYING: [&str; 6] = [
-    "spawn",
-    "extension",
-    "container",
-    "storage",
-    "link",
-    "tower",
-];
+const PAYING: [&str; 6] = ["spawn", "extension", "container", "storage", "link", "tower"];
 
 /// The level that first allows the kind: a structure's worth is scaled by it.
 fn unlock(kind: StructureType) -> f64 {
-    f64::from(
-        (1..=8)
-            .find(|l| kind.controller_structures(*l) > 0)
-            .unwrap_or(1),
-    )
+    f64::from((1..=8).find(|l| kind.controller_structures(*l) > 0).unwrap_or(1))
 }
 
 /// Every tower firing through a creep's life, twice over.
@@ -57,9 +50,9 @@ fn reserve(level: u32) -> f64 {
 /// A creep's body, or a tombstone's.
 pub fn boosts(o: &Obj) -> Vec<&str> {
     match o.get(atom!("body")) {
-        Some(Val::Arr(b)) => (b.iter())
-            .filter_map(|p| p.as_obj()?.get(atom!("boost"))?.as_str())
-            .collect(),
+        Some(Val::Arr(b)) => {
+            (b.iter()).filter_map(|p| p.as_obj()?.get(atom!("boost"))?.as_str()).collect()
+        }
         _ => Vec::new(),
     }
 }
@@ -74,9 +67,7 @@ pub fn parts(o: &Obj) -> Vec<&str> {
 }
 
 fn life(body: &[&str]) -> f64 {
-    f64::from(fabot_base::engine::lifetime(
-        body.iter().filter_map(|p| p.parse().ok()),
-    ))
+    f64::from(fabot_base::engine::lifetime(body.iter().filter_map(|p| p.parse().ok())))
 }
 
 fn chebyshev((x, y): (i64, i64), (a, b): (i64, i64)) -> i64 {
@@ -204,10 +195,8 @@ impl Sampler {
                 v.ours(o)
                     || obj(o, atom!("reservation")).is_some_and(|r| text(r, atom!("user")) == v.us)
             });
-            let creep = |id: &str| {
-                room.of("creep")
-                    .any(|o| text(o, atom!("_id")) == id && v.ours(o))
-            };
+            let creep =
+                |id: &str| room.of("creep").any(|o| text(o, atom!("_id")) == id && v.ours(o));
             let source = |id: &str| room.of("source").any(|o| text(o, atom!("_id")) == id);
             let worked = room.events().any(|e| {
                 let on = e.data["targetId"].as_str().unwrap_or_default();
@@ -234,11 +223,7 @@ impl Sampler {
             self.homes = std::iter::once(self.rooms[0].clone())
                 .chain(others.filter(|r| *r != self.rooms[0]))
                 .collect();
-            self.homes
-                .clone()
-                .iter()
-                .skip(1)
-                .for_each(|h| self.follow(h));
+            self.homes.clone().iter().skip(1).for_each(|h| self.follow(h));
         }
         let joined = self.follow_worked(v);
         let time = v.k.time as f64;
@@ -389,32 +374,19 @@ impl Sampler {
         let at: Vec<RoomXY> = followed.iter().map(|f| xy(f)).collect();
         let neighbours = |r: &&Room| {
             let xy = xy(r);
-            at.iter()
-                .any(|f| (f.x - xy.x).abs() + (f.y - xy.y).abs() == 1)
+            at.iter().any(|f| (f.x - xy.x).abs() + (f.y - xy.y).abs() == 1)
         };
-        let bordering = v
-            .rooms
-            .iter()
-            .filter(|r| !self.lines.contains_key(r.name))
-            .filter(neighbours);
+        let bordering =
+            v.rooms.iter().filter(|r| !self.lines.contains_key(r.name)).filter(neighbours);
         let around: Vec<&Room> = followed.iter().copied().chain(bordering).collect();
-        for (home, out) in self
-            .lives
-            .observe(&around, (followed.len(), &self.homes, idle), v)
-        {
-            self.lines
-                .get_mut(&home)
-                .expect("a home is followed")
-                .carried_out += out;
+        for (home, out) in self.lives.observe(&around, (followed.len(), &self.homes, idle), v) {
+            self.lines.get_mut(&home).expect("a home is followed").carried_out += out;
         }
     }
 
     /// The piles our bodies pick up and the bodies our spawns recycle, off this tick's intents.
     pub fn intend(&mut self, intents: &[(usize, RoomIntents)]) {
-        let objects = intents
-            .iter()
-            .flat_map(|(_, i)| &i.users)
-            .flat_map(|u| &u.objects);
+        let objects = intents.iter().flat_map(|(_, i)| &i.users).flat_map(|u| &u.objects);
         let target =
             |o: &Obj, act| obj(o, Atom::intern(act)).map(|t| text(t, atom!("id")).to_string());
         let signs = (objects.clone()).filter_map(|(_, o)| obj(o, atom!("signController")));
@@ -430,8 +402,7 @@ impl Sampler {
         let rcl =
             (home.of("controller").find(|o| v.ours(o))).map_or(0.0, |o| num(o, atom!("level")));
         if self.levels.last().is_none_or(|l| l["rcl"] != rcl) {
-            self.levels
-                .push(json!({ "t": t, "time": v.k.time - 1, "rcl": rcl }));
+            self.levels.push(json!({ "t": t, "time": v.k.time - 1, "rcl": rcl }));
         }
         rcl
     }
@@ -476,25 +447,16 @@ impl Sampler {
                 .collect()
         };
         let banks = ours_in(&["storage", "terminal"]);
-        let ore: f64 = banks
-            .iter()
-            .map(|o| used(o) - store(o, atom!("energy")))
-            .sum();
+        let ore: f64 = banks.iter().map(|o| used(o) - store(o, atom!("energy"))).sum();
         let mut made = BTreeMap::<String, f64>::new();
-        for (r, n) in self
-            .rooms
-            .iter()
-            .flat_map(|name| self::made(v.room(name), v))
-        {
+        for (r, n) in self.rooms.iter().flat_map(|name| self::made(v.room(name), v)) {
             *made.entry(r).or_default() += n;
         }
         let creeps = ours_in(&["creep"]);
         let boosts: Vec<Vec<&str>> = creeps.iter().map(|o| boosts(o)).collect();
         let boosted: usize = boosts.iter().map(Vec::len).sum();
-        let boosted_with = (boosts.iter())
-            .map(|b| b.iter().collect::<BTreeSet<_>>().len())
-            .max()
-            .unwrap_or(0);
+        let boosted_with =
+            (boosts.iter()).map(|b| b.iter().collect::<BTreeSet<_>>().len()).max().unwrap_or(0);
         let read = self.sent_seq;
         for d in v.k.market.transactions.iter().filter(|d| d.seq > read) {
             self.sent_seq = d.seq;
@@ -502,35 +464,22 @@ impl Sampler {
             if of("sender") == Some(v.us) {
                 let (to, amount) = (of("to").unwrap_or_default(), num(&d.obj, atom!("amount")));
                 let resource = of("resourceType").unwrap_or_default();
-                self.labs
-                    .sent(v, resource, of("from").unwrap_or_default(), to, amount);
-                *self
-                    .sent_of
-                    .entry(resource.into())
-                    .or_default()
-                    .entry(to.into())
-                    .or_default() += amount;
+                self.labs.sent(v, resource, of("from").unwrap_or_default(), to, amount);
+                *self.sent_of.entry(resource.into()).or_default().entry(to.into()).or_default() +=
+                    amount;
             }
         }
         let mut claimed = Map::new();
-        let raised = v
-            .rooms
-            .iter()
-            .map(|r| r.name)
-            .filter(|n| !self.homes.iter().any(|h| h == n));
+        let raised = v.rooms.iter().map(|r| r.name).filter(|n| !self.homes.iter().any(|h| h == n));
         let raised = raised.filter(|n| {
-            v.room(n)
-                .of("controller")
-                .any(|c| v.ours(c) && num(c, atom!("level")) > 0.0)
+            v.room(n).of("controller").any(|c| v.ours(c) && num(c, atom!("level")) > 0.0)
         });
         for name in self.claims.iter().map(String::as_str).chain(raised) {
             let room = v.room(name);
             let mine = room.of("controller").any(|o| v.ours(o));
             let towers: Vec<&Obj> = room.of("tower").filter(|o| mine && v.ours(o)).collect();
-            let level = room
-                .of("controller")
-                .find(|c| v.ours(c))
-                .map_or(0.0, |c| num(c, atom!("level")));
+            let level =
+                room.of("controller").find(|c| v.ours(c)).map_or(0.0, |c| num(c, atom!("level")));
             let safe = room
                 .of("controller")
                 .any(|c| v.ours(c) && num(c, atom!("safeMode")) > v.k.time as f64);
@@ -621,9 +570,8 @@ impl Sampler {
                 "creep" => hostiles += 1,
                 _ => {}
             }
-            let structure = kind
-                .parse::<StructureType>()
-                .is_ok_and(|k| k != StructureType::Controller);
+            let structure =
+                kind.parse::<StructureType>().is_ok_and(|k| k != StructureType::Controller);
             if structure && (mine || matches!(kind, "road" | "container")) {
                 *built.entry(kind.to_string()).or_default() += 1;
             }
@@ -638,9 +586,8 @@ impl Sampler {
             }
         }
         let rocks: Vec<&Obj> = home.of("source").collect();
-        let source_containers: Vec<&Obj> = (home.of("container"))
-            .filter(|c| rocks.iter().any(|s| near(s, c, 1)))
-            .collect();
+        let source_containers: Vec<&Obj> =
+            (home.of("container")).filter(|c| rocks.iter().any(|s| near(s, c, 1))).collect();
         let roads: Vec<&Obj> = home.of("road").collect();
         let solid: Vec<&Obj> = (home.objects.iter())
             .filter(|(kind, o)| {
@@ -656,17 +603,10 @@ impl Sampler {
             .map(|(_, o)| *o)
             .collect();
         let same = |a: &Obj, b: &Obj| near(a, b, 0);
-        let buried = roads
-            .iter()
-            .filter(|r| solid.iter().any(|s| same(r, s)))
-            .count();
+        let buried = roads.iter().filter(|r| solid.iter().any(|s| same(r, s))).count();
         let terrain = map.terrain(name);
         let extension = |o: &Obj| text(o, atom!("type")) == "extension";
-        let extensions: Vec<_> = solid
-            .iter()
-            .filter(|&&o| extension(o))
-            .map(|o| xy(o))
-            .collect();
+        let extensions: Vec<_> = solid.iter().filter(|&&o| extension(o)).map(|o| xy(o)).collect();
         let open = |(x, y): (i64, i64)| {
             (terrain[(y * 50 + x) as usize] - b'0') & 1 == 0
                 && !solid.iter().any(|s| xy(s) == (x, y))
@@ -678,15 +618,10 @@ impl Sampler {
         let unroaded = (solid.iter())
             .filter(|&&o| extension(o) && !bay(xy(o)))
             .filter(|&&o| !source_containers.iter().any(|c| near(c, o, 1)))
-            .filter(|&&o| {
-                !roads
-                    .iter()
-                    .any(|r| near(r, o, 1) && !solid.iter().any(|s| same(s, r)))
-            })
+            .filter(|&&o| !roads.iter().any(|r| near(r, o, 1) && !solid.iter().any(|s| same(s, r))))
             .count();
-        let posted = (home.of("link"))
-            .filter(|l| source_containers.iter().any(|c| near(c, l, 1)))
-            .count();
+        let posted =
+            (home.of("link")).filter(|l| source_containers.iter().any(|c| near(c, l, 1))).count();
         let row = json!({ "t": t, "time": time, "rcl": level, "safeMode": safe, "progress": progress, "creeps": creeps,
             "parts": body_parts, "spawns": spawns, "hostiles": hostiles, "sources": sources, "energy": cash,
             "capacity": capacity, "stored": stored, "sites": sites, "queued": queued,
@@ -710,10 +645,8 @@ impl Sampler {
                     (_, Some(StructureType::Controller)) if mine => {
                         let at = num(o, atom!("level")) as u32;
                         level = level.max(at);
-                        controller += (1..at)
-                            .filter_map(controller_levels)
-                            .map(f64::from)
-                            .sum::<f64>();
+                        controller +=
+                            (1..at).filter_map(controller_levels).map(f64::from).sum::<f64>();
                         controller += num(o, atom!("progress"));
                     }
                     (_, Some(StructureType::Rampart | StructureType::Wall)) => {
@@ -741,11 +674,7 @@ impl Sampler {
         }
         let stock = self.ledger.stock;
         let reserve = reserve(level);
-        let credit = if reserve > 0.0 {
-            reserve * (stock / reserve).tanh()
-        } else {
-            stock
-        };
+        let credit = if reserve > 0.0 { reserve * (stock / reserve).tanh() } else { stock };
         let worth = json!({ "controller": controller, "structures": structures, "fortification": fortification,
             "sites": sites, "stock": stock });
         let score = json!({ "controller": controller, "structures": scored, "fortification": fortification,

@@ -11,8 +11,9 @@ pub fn js_number<S: Serializer>(n: &f64, s: S) -> Result<S::Ok, S::Error> {
 }
 
 pub mod letters {
-    use crate::vocabulary::{ALL_BODY_PARTS, Part, part_letter};
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
+
+    use crate::vocabulary::{ALL_BODY_PARTS, Part, part_letter};
 
     pub fn serialize<S: Serializer>(body: &[Part], s: S) -> Result<S::Ok, S::Error> {
         s.collect_str(&body.iter().map(|p| part_letter(*p)).collect::<String>())
@@ -21,8 +22,6 @@ pub mod letters {
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Part>, D::Error> {
         let letters = String::deserialize(d)?;
         let part = |c| ALL_BODY_PARTS.into_iter().find(|p| part_letter(*p) == c);
-        (letters.chars())
-            .map(|c| part(c).ok_or_else(|| D::Error::custom("no part")))
-            .collect()
+        (letters.chars()).map(|c| part(c).ok_or_else(|| D::Error::custom("no part"))).collect()
     }
 }

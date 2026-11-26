@@ -1,24 +1,24 @@
 use std::collections::BTreeMap;
 
-use serde::Deserialize;
-use serde::de::DeserializeOwned;
+use fabot_base::{
+    declarations::{ColonyPlan, Declarations, Declared, Outpost, Stage},
+    tuning::Tuning,
+    world::{Id, Pos, RoomName},
+};
+use fabot_economy::{
+    EconomyState,
+    task::{Assignment, of_task_id, task_id},
+};
+use fabot_fight::shape::FightState;
+use fabot_strategy::StrategyState;
+use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::{Map, Value, json};
 
 use super::state::State;
-use fabot_base::declarations::{ColonyPlan, Declarations, Declared, Outpost, Stage};
-use fabot_base::tuning::Tuning;
-use fabot_base::world::{Id, Pos, RoomName};
-use fabot_economy::EconomyState;
-use fabot_economy::task::{Assignment, of_task_id, task_id};
-use fabot_fight::shape::FightState;
-use fabot_strategy::StrategyState;
 
 fn assignment(held: &str) -> Assignment {
     let (slot, task) = held.split_once('|').unwrap_or((held, ""));
-    Assignment {
-        slot: slot.to_string(),
-        task: of_task_id(task),
-    }
+    Assignment { slot: slot.to_string(), task: of_task_id(task) }
 }
 
 pub struct Memory {
@@ -36,9 +36,8 @@ impl Memory {
             Ok(Value::Object(root)) => (root, false),
             _ => (Map::new(), !text.is_empty()),
         };
-        let mut v2 = (root.shift_remove("v2"))
-            .filter(Value::is_object)
-            .unwrap_or_else(|| json!({}));
+        let mut v2 =
+            (root.shift_remove("v2")).filter(Value::is_object).unwrap_or_else(|| json!({}));
         if !v2["switches"].is_object() {
             v2["switches"] = json!({});
         }
@@ -112,12 +111,12 @@ impl Memory {
         let abandon: Vec<RoomName> = list(declared, "abandon");
         let tuned = match &self.v2["tuning"] {
             Value::Null => Ok(Tuning::default()),
-            t => Tuning::deserialize(t)
-                .map_err(|e| e.to_string())
-                .and_then(|t| match t.outside() {
+            t => {
+                Tuning::deserialize(t).map_err(|e| e.to_string()).and_then(|t| match t.outside() {
                     Some(key) => Err(format!("tuning.{} is out of its range", camel(key))),
                     None => Ok(t),
-                }),
+                })
+            }
         };
         let (tuning, mut faults) =
             tuned.map_or_else(|e| (Tuning::default(), vec![e]), |t| (t, Vec::new()));
@@ -157,17 +156,12 @@ impl Memory {
 fn camel(snake: &str) -> String {
     let mut words = snake.split('_');
     let first = words.next().unwrap_or_default().to_string();
-    first
-        + &words
-            .map(|w| w[..1].to_uppercase() + &w[1..])
-            .collect::<String>()
+    first + &words.map(|w| w[..1].to_uppercase() + &w[1..]).collect::<String>()
 }
 
 fn list<T: DeserializeOwned, C: FromIterator<T> + Default>(v: &Value, key: &str) -> C {
     v[key].as_array().map_or_default(|items| {
-        (items.iter())
-            .filter_map(|item| T::deserialize(item).ok())
-            .collect()
+        (items.iter()).filter_map(|item| T::deserialize(item).ok()).collect()
     })
 }
 
@@ -188,18 +182,13 @@ struct Site {
 
 fn outposts(declared: &Value, key: &str) -> Vec<Outpost> {
     let sites: Vec<Site> = list(declared, key);
-    let at = |room, at: At| Declared {
-        id: at.id,
-        pos: Pos::new(room, at.x, at.y),
-    };
+    let at = |room, at: At| Declared { id: at.id, pos: Pos::new(room, at.x, at.y) };
     (sites.into_iter())
         .map(|site| Outpost {
             reserved: true,
             room: site.room,
             controller: at(site.room, site.controller),
-            sources: (site.sources.into_iter())
-                .map(|s| at(site.room, s))
-                .collect(),
+            sources: (site.sources.into_iter()).map(|s| at(site.room, s)).collect(),
         })
         .collect()
 }

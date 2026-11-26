@@ -2,18 +2,24 @@
 //! `scripts/bench.mjs`, in `scripts/capture-read.mjs`'s shape: the World
 //! `decide` reads, as `read.js` reads it off `Game`, so the bundle replays what
 //! sim decided on. A tick writes only the objects that changed since the last.
-use std::collections::BTreeMap;
-use std::fs::File;
-use std::io::{BufWriter, Write};
+use std::{
+    collections::BTreeMap,
+    fs::File,
+    io::{BufWriter, Write},
+};
 
-use fabot_base::declarations::Declarations;
-use fabot_base::intel::{self, Intel};
-use fabot_base::world::{Built, Creep, Id, Owner, Pos, Room, Store, World};
+use fabot_base::{
+    declarations::Declarations,
+    intel::{self, Intel},
+    world::{Built, Creep, Id, Owner, Pos, Room, Store, World},
+};
 use screeps::StructureType as Kind;
 use serde_json::{Map, Value, json};
 
-use crate::view::{EVENT_ATTACK, EVENT_OBJECT_DESTROYED, View};
-use crate::world;
+use crate::{
+    view::{EVENT_ATTACK, EVENT_OBJECT_DESTROYED, View},
+    world,
+};
 
 const SOURCES: &str = "105";
 const MINERALS: &str = "116";
@@ -38,20 +44,12 @@ impl Capture {
     pub fn open(windows: &str, out: &str, map: &world::Map) -> Capture {
         let window = |w: &str| {
             let (a, b) = w.split_once('-').expect("--capture: a-b[,c-d]");
-            (
-                a.parse().expect("--capture: a"),
-                b.parse().expect("--capture: b"),
-            )
+            (a.parse().expect("--capture: a"), b.parse().expect("--capture: b"))
         };
-        let terrain: Map<String, Value> = (map.rooms.iter())
-            .map(|(n, t)| (n.clone(), json!(t)))
-            .collect();
+        let terrain: Map<String, Value> =
+            (map.rooms.iter()).map(|(n, t)| (n.clone(), json!(t))).collect();
         Capture {
-            windows: windows
-                .split(',')
-                .filter(|w| !w.is_empty())
-                .map(window)
-                .collect(),
+            windows: windows.split(',').filter(|w| !w.is_empty()).map(window).collect(),
             out: BufWriter::new(
                 File::create(format!("{out}/capture.jsonl")).expect("capture.jsonl"),
             ),
@@ -66,18 +64,12 @@ impl Capture {
             return;
         }
         let world = crate::read::world(v, &Declarations::default());
-        let mut game = Game {
-            objects: Map::new(),
-            me: &world.me,
-        };
+        let mut game = Game { objects: Map::new(), me: &world.me };
         // `read.js` reads the logs of a room we hold; every strike stands in the first one.
         let held = |r: &&Room| r.controller.as_ref().is_some_and(|c| c.owner.is_ours());
         let logged = world.rooms.iter().find(held).map(|r| r.name);
-        let rooms: Vec<Value> = world
-            .rooms
-            .iter()
-            .map(|r| game.room(&world, r, logged == Some(r.name)))
-            .collect();
+        let rooms: Vec<Value> =
+            world.rooms.iter().map(|r| game.room(&world, r, logged == Some(r.name))).collect();
         let spawns: Map<String, Value> = (world.spawns.iter())
             .map(|s| (s.name.clone(), json!(s.id.text().to_string())))
             .collect();
@@ -85,18 +77,14 @@ impl Capture {
             game.objects[&*s.id.text()]["name"] = json!(s.name);
         }
         let creeps = game.ours(&world);
-        let written: BTreeMap<String, String> = (game.objects.iter())
-            .map(|(k, o)| (k.clone(), o.to_string()))
-            .collect();
+        let written: BTreeMap<String, String> =
+            (game.objects.iter()).map(|(k, o)| (k.clone(), o.to_string())).collect();
         let last = self.last.take();
         let changed: Map<String, Value> = (game.objects.into_iter())
             .filter(|(k, _)| last.as_ref().is_none_or(|l| l.get(k) != written.get(k)))
             .collect();
-        let gone: Vec<&String> = last
-            .iter()
-            .flat_map(|l| l.keys())
-            .filter(|k| !written.contains_key(*k))
-            .collect();
+        let gone: Vec<&String> =
+            last.iter().flat_map(|l| l.keys()).filter(|k| !written.contains_key(*k)).collect();
         let mut line = json!({ "time": world.time, "cpu": { "limit": world.cpu_limit, "bucket": world.bucket },
             "gcl": { "level": world.rooms_allowed }, "memory": memory, "intel": intel::to_text(intel), "rooms": rooms,
             "creeps": creeps, "spawns": spawns, "objects": changed, "gone": gone,
@@ -152,9 +140,8 @@ impl Game<'_> {
 
     /// Our creeps by name, one still in an oven too: `read.js` reads its body off it.
     fn ours(&mut self, world: &World) -> Map<String, Value> {
-        let mut creeps: Map<String, Value> = (world.creeps.iter())
-            .map(|c| (c.name.clone(), json!(self.creep(c))))
-            .collect();
+        let mut creeps: Map<String, Value> =
+            (world.creeps.iter()).map(|c| (c.name.clone(), json!(self.creep(c)))).collect();
         for s in &world.spawns {
             let Some(oven) = &s.spawning else { continue };
             let key = format!("creep:{}", oven.name);
@@ -228,8 +215,7 @@ impl Game<'_> {
             r.structures.iter().map(|s| self.structure(r, s)).collect();
         for (i, p) in r.blocked.iter().enumerate() {
             let key = format!("blocked:{}:{i}", p.room);
-            self.objects
-                .insert(key.clone(), json!({ "structureType": "", "pos": pos(*p) }));
+            self.objects.insert(key.clone(), json!({ "structureType": "", "pos": pos(*p) }));
             structures.push(key);
         }
         find.insert(STRUCTURES.into(), json!(structures));
@@ -239,12 +225,7 @@ impl Game<'_> {
         });
         find.insert(SITES.into(), json!(sites.collect::<Vec<_>>()));
         let piles = (r.piles.iter()).map(|p| {
-            self.put(
-                p.id,
-                p.pos,
-                None,
-                json!({ "resourceType": p.resource, "amount": p.amount }),
-            )
+            self.put(p.id, p.pos, None, json!({ "resourceType": p.resource, "amount": p.amount }))
         });
         find.insert(PILES.into(), json!(piles.collect::<Vec<_>>()));
         let (mut tombstones, mut ruins) = (Vec::new(), Vec::new());
@@ -264,11 +245,7 @@ impl Game<'_> {
                 None,
                 json!({ "store": store(&x.store), "creep": creep, "deathTime": died }),
             );
-            if tombstone {
-                tombstones.push(key)
-            } else {
-                ruins.push(key)
-            }
+            if tombstone { tombstones.push(key) } else { ruins.push(key) }
         }
         find.insert(TOMBSTONES.into(), json!(tombstones));
         find.insert(RUINS.into(), json!(ruins));

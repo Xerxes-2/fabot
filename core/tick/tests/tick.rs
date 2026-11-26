@@ -1,16 +1,19 @@
 //! Invariants of the tick runner: a switched-off module does nothing, and
 //! the accounting covers every module.
-use std::cell::Cell;
-use std::collections::BTreeMap;
+use std::{cell::Cell, collections::BTreeMap};
 
-use crate::state::State;
-use crate::tick::{self, Module, TickResult};
 use fabot_atlas::{self as atlas, Atlas, Context};
-use fabot_base::declarations;
-use fabot_base::intents::{Action, CreepAct, ModuleOutput};
-use fabot_base::world::World;
-use proptest::prelude::*;
-use proptest::sample::Index;
+use fabot_base::{
+    declarations,
+    intents::{Action, CreepAct, ModuleOutput},
+    world::World,
+};
+use proptest::{prelude::*, sample::Index};
+
+use crate::{
+    state::State,
+    tick::{self, Module, TickResult},
+};
 
 const CASES: u32 = 256;
 const NAMES: [&str; 8] = ["m0", "m1", "m2", "m3", "m4", "m5", "m6", "m7"];
@@ -18,15 +21,11 @@ const NAMES: [&str; 8] = ["m0", "m1", "m2", "m3", "m4", "m5", "m6", "m7"];
 /// Module `I` says its name once, as creep `cI`.
 fn say<const I: usize>(_: &mut Context, _: &mut State) -> ModuleOutput {
     let say = CreepAct::Say(NAMES[I].to_string());
-    ModuleOutput {
-        actions: vec![Action::Creep(format!("c{I}"), say)],
-        ..ModuleOutput::default()
-    }
+    ModuleOutput { actions: vec![Action::Creep(format!("c{I}"), say)], ..ModuleOutput::default() }
 }
 
-const SAYS: [tick::ModuleRun; 8] = [
-    say::<0>, say::<1>, say::<2>, say::<3>, say::<4>, say::<5>, say::<6>, say::<7>,
-];
+const SAYS: [tick::ModuleRun; 8] =
+    [say::<0>, say::<1>, say::<2>, say::<3>, say::<4>, say::<5>, say::<6>, say::<7>];
 
 fn run(count: usize, state: State) -> TickResult {
     let world = World {
@@ -57,12 +56,8 @@ fn run(count: usize, state: State) -> TickResult {
         derived: &derived,
         trace: false,
     };
-    let modules: Vec<Module> = (0..count)
-        .map(|i| Module {
-            name: NAMES[i],
-            run: SAYS[i],
-        })
-        .collect();
+    let modules: Vec<Module> =
+        (0..count).map(|i| Module { name: NAMES[i], run: SAYS[i] }).collect();
     // A clock that advances one unit a reading.
     let t = Cell::new(0.0);
     let clock = || {

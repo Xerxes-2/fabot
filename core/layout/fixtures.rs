@@ -3,15 +3,20 @@
 //! mineral, a controller and none, one or two spawns of ours.
 use std::collections::BTreeSet;
 
-use crate::ground::{self, Ground};
-use crate::plan;
-use crate::shape::Plan;
-use fabot_base::declarations::{ColonyPlan, Stage};
-use fabot_base::tiles::{self, Tile};
-use fabot_base::vocabulary::ResourceType;
-use fabot_base::world::{
-    Built, Controller, Creep, Mineral, Owner, Pos, Room, RoomName, Rules, Site, Source, Spawn,
-    Store, Structure, StructureType, World, terrain,
+use fabot_base::{
+    declarations::{ColonyPlan, Stage},
+    tiles::{self, Tile},
+    vocabulary::ResourceType,
+    world::{
+        Built, Controller, Creep, Mineral, Owner, Pos, Room, RoomName, Rules, Site, Source, Spawn,
+        Store, Structure, StructureType, World, terrain,
+    },
+};
+
+use crate::{
+    ground::{self, Ground},
+    plan,
+    shape::Plan,
 };
 
 pub const ROOM: RoomName = RoomName::W1N1;
@@ -143,16 +148,9 @@ fn colony_of(rng: &mut Rng, blobs: i32) -> Option<Colony> {
     let source_tiles = slice(&inner, 0, (sources - 1) as usize);
     let controller = inner[sources as usize];
     let mineral = inner[sources as usize + 1];
-    let spawn_tiles = slice(
-        &inner,
-        (sources + 2) as usize,
-        (sources + 1 + spawns) as usize,
-    );
-    let foreign_tiles = slice(
-        &inner,
-        (sources + 2 + spawns) as usize,
-        (sources + 1 + spawns + foreign) as usize,
-    );
+    let spawn_tiles = slice(&inner, (sources + 2) as usize, (sources + 1 + spawns) as usize);
+    let foreign_tiles =
+        slice(&inner, (sources + 2 + spawns) as usize, (sources + 1 + spawns + foreign) as usize);
 
     let mut structures: Vec<Structure> = spawn_tiles
         .iter()
@@ -160,12 +158,7 @@ fn colony_of(rng: &mut Rng, blobs: i32) -> Option<Colony> {
         .map(|(i, t)| structure(&format!("p{i}"), StructureType::Spawn, Owner::Ours, *t))
         .collect();
     structures.extend(foreign_tiles.iter().enumerate().map(|(i, t)| {
-        structure(
-            &format!("w{i}"),
-            StructureType::Spawn,
-            Owner::Stranger("x".into()),
-            *t,
-        )
+        structure(&format!("w{i}"), StructureType::Spawn, Owner::Stranger("x".into()), *t)
     }));
 
     // The engine stands rocks and the controller on wall.
@@ -200,12 +193,7 @@ fn colony_of(rng: &mut Rng, blobs: i32) -> Option<Colony> {
                 ticks_to_regeneration: 0,
             })
             .collect(),
-        minerals: vec![Mineral {
-            id: "m".into(),
-            pos: at(mineral),
-            resource: None,
-            amount: 0,
-        }],
+        minerals: vec![Mineral { id: "m".into(), pos: at(mineral), resource: None, amount: 0 }],
         structures,
         ..Room::empty(ROOM)
     };
@@ -216,11 +204,7 @@ fn colony_of(rng: &mut Rng, blobs: i32) -> Option<Colony> {
 /// Open rooms and cramped ones, where no square of clearance 5 is left.
 pub fn colony(rng: &mut Rng) -> Colony {
     loop {
-        let blobs = if rng.choose(0, 1) == 0 {
-            rng.choose(0, 8)
-        } else {
-            rng.choose(40, 90)
-        };
+        let blobs = if rng.choose(0, 1) == 0 { rng.choose(0, 8) } else { rng.choose(40, 90) };
 
         if let Some(colony) = colony_of(rng, blobs) {
             return colony;
@@ -405,14 +389,7 @@ pub fn exploited(owned: &BTreeSet<RoomName>) -> Vec<ColonyPlan> {
 }
 
 pub fn site(id: &str, kind: StructureType, tile: Tile) -> Site {
-    Site {
-        id: id.into(),
-        kind,
-        pos: at(tile),
-        owner: Owner::Ours,
-        progress: 0,
-        progress_total: 1,
-    }
+    Site { id: id.into(), kind, pos: at(tile), owner: Owner::Ours, progress: 0, progress_total: 1 }
 }
 
 pub fn creep(id: &str, owner: Owner, hits: i32, tile: Tile) -> Creep {
@@ -436,10 +413,7 @@ pub fn creep(id: &str, owner: Owner, hits: i32, tile: Tile) -> Creep {
 
 pub fn tower(id: &str, tile: Tile, energy: i32) -> Structure {
     Structure {
-        store: Store {
-            held: vec![(ResourceType::Energy, energy)],
-            capacity: 1000,
-        },
+        store: Store { held: vec![(ResourceType::Energy, energy)], capacity: 1000 },
         ..structure(id, StructureType::Tower, Owner::Ours, tile)
     }
 }

@@ -11,9 +11,7 @@ pub fn row(v: &View, memory: &str, t: u64, open: &mut bool) -> Option<Value> {
         .then(|| serde_json::from_str(memory).ok())
         .flatten()
         .unwrap_or_default();
-    let engaged = m["v2"]["fight"]["engagements"]
-        .as_array()
-        .is_some_and(|e| !e.is_empty());
+    let engaged = m["v2"]["fight"]["engagements"].as_array().is_some_and(|e| !e.is_empty());
     let was = std::mem::replace(open, engaged);
     if !was && !*open {
         return None;

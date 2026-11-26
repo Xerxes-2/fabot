@@ -2,25 +2,31 @@
 //! (`Map::stand`), every room in sight, ranked by what it digs at home and
 //! nets from the outposts Strategy opens from it once it banks, beside
 //! Strategy's claim gate and score and Layout's plan.
-use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use fabot_atlas::{self as atlas, Atlas, BANK_LEVEL};
-use fabot_base::declarations::{ColonyPlan, Declarations, Outpost, Stage};
-use fabot_base::engine;
-use fabot_base::intel::{Intel, Row};
-use fabot_base::tiles::{self, Tile};
-use fabot_base::world::{RoomName, Rules, terrain};
+use fabot_base::{
+    declarations::{ColonyPlan, Declarations, Outpost, Stage},
+    engine,
+    intel::{Intel, Row},
+    tiles::{self, Tile},
+    world::{RoomName, Rules, terrain},
+};
 use fabot_core::drive::Terrains;
 use fabot_layout as layout;
 use fabot_strategy::{expand, intel, outposts};
 use krebs::world::Presence;
 
-use crate::driver::Maps;
-use crate::read;
-use crate::seat::Seat;
-use crate::view::View;
-use crate::world::{self, Map};
+use crate::{
+    driver::Maps,
+    read,
+    seat::Seat,
+    view::View,
+    world::{self, Map},
+};
 
 const HEADER: [&str; 22] = [
     "rank", "room", "value", "claim", "score", "src", "near", "mineral", "ore", "season", "spawn",
@@ -40,9 +46,7 @@ pub fn main() {
     let rooms: BTreeSet<&str> = (free.filter_map(|o| o["room"].as_str()))
         .filter(|r| wanted.is_empty() || wanted.contains(r))
         .collect();
-    let mut ranked: Vec<_> = (rooms.into_iter())
-        .filter_map(|r| rank(&map, &maps, r))
-        .collect();
+    let mut ranked: Vec<_> = (rooms.into_iter()).filter_map(|r| rank(&map, &maps, r)).collect();
     ranked.sort_by(|(a, _), (b, _)| b.total_cmp(a));
     let mut rows = vec![HEADER.map(String::from).to_vec()];
     for (i, (_, row)) in ranked.into_iter().enumerate() {
@@ -70,10 +74,7 @@ fn rank(map: &Map, maps: &Maps, room: &str) -> Option<(f64, Vec<String>)> {
     let us = read::our_idx(&View::of(&k));
     for r in &mut k.rooms {
         let r = Arc::get_mut(r).expect("a room of its own");
-        let sight = Presence {
-            vision: 1,
-            ..Presence::default()
-        };
+        let sight = Presence { vision: 1, ..Presence::default() };
         r.presence = (r.presence.iter().cloned()).chain([(us, sight)]).collect();
     }
     let declarations = Declarations::default();
@@ -87,11 +88,7 @@ fn rank(map: &Map, maps: &Maps, room: &str) -> Option<(f64, Vec<String>)> {
     let derived = atlas::derive(&world, &mut atlas);
 
     // Its row before the seat: what the claim rule reads of a room not yet ours.
-    let row = Row {
-        owner: None,
-        level: 0,
-        ..intel.get(&name)?.clone()
-    };
+    let row = Row { owner: None, level: 0, ..intel.get(&name)?.clone() };
     let none = BTreeSet::new();
     let rivals = fabot_strategy::rivals(&world, &declarations, &intel);
     let facts = expand::facts(&world, (&none, &|_| false), &intel, (name, &row), (0, 0.0));
@@ -121,9 +118,8 @@ fn rank(map: &Map, maps: &Maps, room: &str) -> Option<(f64, Vec<String>)> {
     };
     let survey = (&declarations, &[colony][..], None);
     let candidates = outposts::survey((&world, &mut atlas), &derived, survey, &intel);
-    let nets: BTreeMap<RoomName, f64> = (candidates.iter())
-        .map(|c| (c.outpost.room, outposts::net(&world, c)))
-        .collect();
+    let nets: BTreeMap<RoomName, f64> =
+        (candidates.iter()).map(|c| (c.outpost.room, outposts::net(&world, c))).collect();
     let spare = (&none, &BTreeMap::new());
     let chosen = outposts::chosen(&world, candidates, spare, (&declarations.tuning, &[]));
     let net: f64 = chosen.iter().map(|o| nets[&o.room]).sum();
@@ -134,13 +130,7 @@ fn rank(map: &Map, maps: &Maps, room: &str) -> Option<(f64, Vec<String>)> {
     let swamp =
         |t: &&Tile| terrain::is_swamp(maps.terrain(name), tiles::x_of(**t), tiles::y_of(**t));
     let sides = [(1, "T"), (3, "R"), (5, "B"), (7, "L")];
-    let exits = sides.map(|(e, c)| {
-        if tiles::exit_tiles(e).iter().all(wall) {
-            "-"
-        } else {
-            c
-        }
-    });
+    let exits = sides.map(|(e, c)| if tiles::exit_tiles(e).iter().all(wall) { "-" } else { c });
     let open: Vec<Tile> = tiles::all().filter(|t| !wall(t)).collect();
     let grid = name.on_grid()?;
     let keepers = (-5..=5)
@@ -164,25 +154,16 @@ fn rank(map: &Map, maps: &Maps, room: &str) -> Option<(f64, Vec<String>)> {
         format!("{:.1}", facts.mineral),
         format!("{:.1}", facts.worth),
         format!("{},{}", tiles::x_of(spawn), tiles::y_of(spawn)),
-        (chosen.iter().map(|o| o.room.to_string()))
-            .collect::<Vec<_>>()
-            .join(" "),
-        chosen
-            .iter()
-            .map(|o| o.sources.len())
-            .sum::<usize>()
-            .to_string(),
+        (chosen.iter().map(|o| o.room.to_string())).collect::<Vec<_>>().join(" "),
+        chosen.iter().map(|o| o.sources.len()).sum::<usize>().to_string(),
         format!("{net:.1}"),
         exits.concat(),
         (100 * open.iter().filter(swamp).count() / open.len().max(1)).to_string(),
         tiles::from_centre(grid).to_string(),
         tiles::from_highway(grid).to_string(),
         keepers.map_or("-".into(), |d| d.to_string()),
-        (rivals
-            .iter()
-            .map(|(r, _)| tiles::rooms_apart(*r, name))
-            .min())
-        .map_or("-".into(), |d| d.to_string()),
+        (rivals.iter().map(|(r, _)| tiles::rooms_apart(*r, name)).min())
+            .map_or("-".into(), |d| d.to_string()),
         (intel.iter())
             .filter(|(r, w)| w.reservation.is_some() && tiles::rooms_apart(**r, name) <= 2)
             .count()

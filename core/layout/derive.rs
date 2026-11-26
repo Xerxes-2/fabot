@@ -1,13 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use fabot_base::declarations::{ColonyPlan, Stage};
-use fabot_base::tiles::{self, Tile, TileSet};
-use fabot_base::world::{Creep, Id, Pos, RoomName, Structure, StructureType, World};
+use fabot_base::{
+    declarations::{ColonyPlan, Stage},
+    tiles::{self, Tile, TileSet},
+    world::{Creep, Id, Pos, RoomName, Structure, StructureType, World},
+};
 
-use super::ground;
-use super::plan;
-use super::shape::Standing;
-use super::sites::{self, Census};
+use super::{
+    ground, plan,
+    shape::Standing,
+    sites::{self, Census},
+};
 
 pub struct Colony {
     pub room: RoomName,
@@ -77,12 +80,8 @@ pub fn colonies(
         };
         next.insert(room.name, kept);
 
-        let ours: Vec<Creep> = world
-            .creeps
-            .iter()
-            .filter(|creep| creep.pos.room == room.name)
-            .cloned()
-            .collect();
+        let ours: Vec<Creep> =
+            world.creeps.iter().filter(|creep| creep.pos.room == room.name).cloned().collect();
 
         let mut towers: Vec<Structure> = (world.rules.towers(room))
             .filter(|s| s.owner.is_ours() && fabot_base::world::charged(s))
@@ -158,11 +157,13 @@ pub fn colonies(
 
 #[cfg(test)]
 mod tests {
+    use fabot_base::{
+        tiles,
+        world::{Owner, StructureType, hostiles},
+    };
+
     use super::*;
-    use crate::fixtures as fx;
-    use crate::shape::Plan;
-    use fabot_base::tiles;
-    use fabot_base::world::{Owner, StructureType, hostiles};
+    use crate::{fixtures as fx, shape::Plan};
 
     fn agree(a: &Option<Plan>, b: &Option<Plan>) -> bool {
         match (a, b) {

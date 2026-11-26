@@ -1,8 +1,10 @@
 use strum::IntoStaticStr;
 
-use super::vocabulary::{Part, ResourceType};
-use super::wish::{Idle, Wish};
-use super::world::{Id, RoomName, StructureType};
+use super::{
+    vocabulary::{Part, ResourceType},
+    wish::{Idle, Wish},
+    world::{Id, RoomName, StructureType},
+};
 
 /// Into the verb a refusal is counted under (`observe::metrics::verb`).
 #[derive(Clone, Debug, PartialEq, Eq, IntoStaticStr)]
@@ -113,11 +115,7 @@ pub enum LabAct {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TerminalAct {
-    Send {
-        resource: ResourceType,
-        amount: i32,
-        to: RoomName,
-    },
+    Send { resource: ResourceType, amount: i32, to: RoomName },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -252,52 +250,22 @@ mod tests {
     fn the_engine_performs_one_act_per_pipeline_slot_by_its_priority() {
         let id = || Id::from("x");
         let (heal, ranged_heal) = (CreepAct::HealCreep(id()), CreepAct::RangedHealCreep(id()));
-        let (attack, shot) = (
-            CreepAct::AttackCreep(id()),
-            CreepAct::RangedAttackCreep(id()),
-        );
+        let (attack, shot) = (CreepAct::AttackCreep(id()), CreepAct::RangedAttackCreep(id()));
         let (mass, dismantle) = (CreepAct::RangedMassAttack, CreepAct::Dismantle(id()));
         let table: Vec<(Vec<CreepAct>, Vec<CreepAct>)> = vec![
             (vec![attack.clone(), heal.clone()], vec![heal.clone()]),
-            (
-                vec![shot.clone(), ranged_heal.clone()],
-                vec![ranged_heal.clone()],
-            ),
-            (
-                vec![mass.clone(), ranged_heal.clone()],
-                vec![ranged_heal.clone()],
-            ),
-            (
-                vec![attack.clone(), ranged_heal.clone()],
-                vec![ranged_heal.clone()],
-            ),
+            (vec![shot.clone(), ranged_heal.clone()], vec![ranged_heal.clone()]),
+            (vec![mass.clone(), ranged_heal.clone()], vec![ranged_heal.clone()]),
+            (vec![attack.clone(), ranged_heal.clone()], vec![ranged_heal.clone()]),
             (vec![heal.clone(), ranged_heal.clone()], vec![heal.clone()]),
-            (
-                vec![heal.clone(), shot.clone()],
-                vec![heal.clone(), shot.clone()],
-            ),
-            (
-                vec![attack.clone(), shot.clone()],
-                vec![attack.clone(), shot.clone()],
-            ),
-            (
-                vec![attack.clone(), dismantle.clone()],
-                vec![dismantle.clone()],
-            ),
-            (
-                vec![dismantle.clone(), mass.clone()],
-                vec![dismantle.clone(), mass.clone()],
-            ),
+            (vec![heal.clone(), shot.clone()], vec![heal.clone(), shot.clone()]),
+            (vec![attack.clone(), shot.clone()], vec![attack.clone(), shot.clone()]),
+            (vec![attack.clone(), dismantle.clone()], vec![dismantle.clone()]),
+            (vec![dismantle.clone(), mass.clone()], vec![dismantle.clone(), mass.clone()]),
             (vec![shot.clone(), mass.clone()], vec![mass]),
             (vec![heal.clone(), ranged_heal, shot], vec![heal.clone()]),
-            (
-                vec![CreepAct::AttackCreep("a".into()), attack.clone()],
-                vec![attack],
-            ),
-            (
-                vec![CreepAct::Move(1), heal.clone(), dismantle],
-                vec![CreepAct::Move(1), heal],
-            ),
+            (vec![CreepAct::AttackCreep("a".into()), attack.clone()], vec![attack]),
+            (vec![CreepAct::Move(1), heal.clone(), dismantle], vec![CreepAct::Move(1), heal]),
         ];
         for (wanted, done) in table {
             assert_eq!(performed(&wanted), done, "{wanted:?}");

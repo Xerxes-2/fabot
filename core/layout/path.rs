@@ -1,8 +1,7 @@
 //! The planner's one path search: least cost inside one room, every tie
 //! settled by the tiles alone, so a road is the same whatever order a search
 //! visits them in.
-use std::cmp::Reverse;
-use std::collections::BinaryHeap;
+use std::{cmp::Reverse, collections::BinaryHeap};
 
 use fabot_base::tiles::{self, Table, Tile};
 
@@ -30,11 +29,7 @@ pub struct Found {
 fn steps(from: Tile, onto: Tile) -> bool {
     let edge = |v: i32| v == 0 || v == tiles::SIDE - 1;
     let (x, y) = (tiles::x_of(from), tiles::y_of(from));
-    if edge(x) {
-        tiles::x_of(onto) != x
-    } else {
-        !edge(y) || tiles::y_of(onto) != y
-    }
+    if edge(x) { tiles::x_of(onto) != x } else { !edge(y) || tiles::y_of(onto) != y }
 }
 
 impl Search<'_> {
@@ -83,8 +78,7 @@ impl Search<'_> {
 
     /// Each tile's least cost from beside `rock`.
     pub fn from(&self, rock: Tile) -> Table<u32> {
-        self.flood(tiles::around(rock).iter().copied(), |_, _| false)
-            .0
+        self.flood(tiles::around(rock).iter().copied(), |_, _| false).0
     }
 
     pub fn run(&self, origin: Tile, goals: &[Goal]) -> Found {
@@ -120,9 +114,6 @@ impl Search<'_> {
             at = p;
         }
         path.reverse();
-        Found {
-            path,
-            incomplete: end.is_none(),
-        }
+        Found { path, incomplete: end.is_none() }
     }
 }

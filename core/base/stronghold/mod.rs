@@ -36,10 +36,7 @@ pub fn raw(r: ResourceType) -> f64 {
     match r.commodity_recipe().filter(|_| r != ResourceType::Energy) {
         _ if boost::is_mineral(r) => f64::from(boost::ores_in(r).iter().sum::<i32>()),
         Some(c) => {
-            c.components
-                .iter()
-                .map(|(k, n)| f64::from(*n) * raw(*k))
-                .sum::<f64>()
+            c.components.iter().map(|(k, n)| f64::from(*n) * raw(*k)).sum::<f64>()
                 / f64::from(c.amount)
         }
         None => 1.0,

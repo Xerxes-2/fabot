@@ -1,11 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use fabot_base::{
+    vocabulary::Part,
+    world::{Id, Pos, RoomName},
+};
+use fabot_tactics::{Offer, Tactic};
 use serde::{Deserialize, Serialize};
 use strum::IntoStaticStr;
-
-use fabot_base::vocabulary::Part;
-use fabot_base::world::{Id, Pos, RoomName};
-use fabot_tactics::{Offer, Tactic};
 
 pub use crate::price::{Actual, Closed};
 
@@ -134,12 +135,7 @@ pub type Slot = u16;
 impl Engagement {
     pub fn free(&self, casts: &[Cast]) -> impl Iterator<Item = Slot> + use<> {
         let held: BTreeSet<Slot> = (self.ours.values().copied())
-            .chain(
-                casts
-                    .iter()
-                    .filter(|c| c.engagement == self.id)
-                    .map(|c| c.slot),
-            )
+            .chain(casts.iter().filter(|c| c.engagement == self.id).map(|c| c.slot))
             .collect();
         (0..).filter(move |s| !held.contains(s))
     }
@@ -151,11 +147,7 @@ impl Engagement {
 }
 
 pub fn enter(phase: Phase, time: i32, e: &Engagement) -> Engagement {
-    Engagement {
-        phase,
-        since: time,
-        ..e.clone()
-    }
+    Engagement { phase, since: time, ..e.clone() }
 }
 
 /// A body asked of `room`'s spawns under `name`, until it stands.

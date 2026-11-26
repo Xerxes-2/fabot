@@ -3,12 +3,15 @@
 //! reaction or an unboost sets one too, but raises no output.
 use std::collections::BTreeMap;
 
-use fabot_base::boost::{ORES, ores_in};
-use fabot_base::boost::{Roles, roles_of};
-use fabot_base::world::{Id, Pos, RoomName};
-use krebs::atom;
-use krebs::doc::{Atom, Obj, Val};
-use krebs::utils::{calc_rooms_distance, calc_terminal_energy_cost};
+use fabot_base::{
+    boost::{ORES, Roles, ores_in, roles_of},
+    world::{Id, Pos, RoomName},
+};
+use krebs::{
+    atom,
+    doc::{Atom, Obj, Val},
+    utils::{calc_rooms_distance, calc_terminal_energy_cost},
+};
 use screeps::{LAB_BOOST_MINERAL, LAB_MINERAL_CAPACITY, LAB_REACTION_AMOUNT, ResourceType};
 use serde_json::{Value, json};
 
@@ -83,18 +86,12 @@ fn stock_of(room: &Room, us: &str) -> Tally {
 }
 
 fn labs_of<'a>(room: &'a Room, us: &str) -> (Vec<&'a Obj>, Option<Roles>) {
-    let labs: Vec<&Obj> = room
-        .of("lab")
-        .filter(|o| text(o, atom!("user")) == us)
-        .collect();
+    let labs: Vec<&Obj> = room.of("lab").filter(|o| text(o, atom!("user")) == us).collect();
     let tiles: Vec<(Id, Pos)> = labs
         .iter()
         .map(|o| {
             let (x, y) = xy(o);
-            (
-                Id::of_engine(text(o, atom!("_id"))),
-                Pos::new(RoomName::SIM, x as i32, y as i32),
-            )
+            (Id::of_engine(text(o, atom!("_id"))), Pos::new(RoomName::SIM, x as i32, y as i32))
         })
         .collect();
     (labs, roles_of(&tiles))
@@ -115,10 +112,7 @@ impl Labs {
             let target = e.data["targetId"].as_str().unwrap_or_default();
             if let Some(ore) = room.of("mineral").find(|m| text(m, atom!("_id")) == target) {
                 let amount = e.data["amount"].as_f64().unwrap_or(0.0);
-                *self
-                    .dug
-                    .entry(text(ore, atom!("mineralType")).into())
-                    .or_default() += amount;
+                *self.dug.entry(text(ore, atom!("mineralType")).into()).or_default() += amount;
             }
         }
         let cluster = self.clusters.entry(room.name.into()).or_default();
@@ -131,10 +125,8 @@ impl Labs {
                     }
                 }
             }
-            let had = self
-                .boosts
-                .insert(text(c, atom!("_id")).into(), parts.clone())
-                .unwrap_or_default();
+            let had =
+                self.boosts.insert(text(c, atom!("_id")).into(), parts.clone()).unwrap_or_default();
             for (boost, n) in parts {
                 let rise = n - had.get(&boost).copied().unwrap_or(0.0);
                 if rise > 0.0 {
@@ -149,9 +141,7 @@ impl Labs {
         for &o in &labs {
             let until = num(o, atom!("cooldownTime"));
             let held = mineral(o);
-            let was = self
-                .was
-                .insert(text(o, atom!("_id")).into(), (until, held.clone()));
+            let was = self.was.insert(text(o, atom!("_id")).into(), (until, held.clone()));
             if role(roles.as_ref(), o) != "output" {
                 continue;
             }
@@ -165,10 +155,8 @@ impl Labs {
             }
             let rise = amount - before;
             *cluster.produced.entry(compound.clone()).or_default() += rise;
-            if let Some(inputs) = compound
-                .parse::<ResourceType>()
-                .ok()
-                .and_then(ResourceType::reaction_components)
+            if let Some(inputs) =
+                compound.parse::<ResourceType>().ok().and_then(ResourceType::reaction_components)
             {
                 for r in inputs {
                     *cluster.consumed.entry(r.to_string()).or_default() += rise;
@@ -180,42 +168,27 @@ impl Labs {
         let Some(roles) = roles else {
             return;
         };
-        let lab = |id: Id| {
-            labs.iter()
-                .find(|o| Id::of_engine(text(o, atom!("_id"))) == id)
-        };
+        let lab = |id: Id| labs.iter().find(|o| Id::of_engine(text(o, atom!("_id"))) == id);
         let reagents =
             [roles.reagents.0, roles.reagents.1].map(|id| lab(id).and_then(|o| mineral(o)));
         let stands = |m: &Option<(String, f64)>| {
-            m.as_ref()
-                .is_some_and(|m| m.1 >= f64::from(LAB_REACTION_AMOUNT))
+            m.as_ref().is_some_and(|m| m.1 >= f64::from(LAB_REACTION_AMOUNT))
         };
         let missing: Vec<Option<String>> = match cluster.inputs {
             Some(inputs) => inputs
                 .iter()
                 .map(ToString::to_string)
                 .filter(|r| {
-                    !reagents
-                        .iter()
-                        .any(|m| stands(m) && m.as_ref().is_some_and(|m| m.0 == *r))
+                    !reagents.iter().any(|m| stands(m) && m.as_ref().is_some_and(|m| m.0 == *r))
                 })
                 .map(Some)
                 .collect(),
-            None => reagents
-                .iter()
-                .filter(|m| !stands(m))
-                .map(|_| None)
-                .collect(),
+            None => reagents.iter().filter(|m| !stands(m)).map(|_| None).collect(),
         };
         let carried = room
             .of("creep")
             .filter(|c| text(c, atom!("user")) == us)
-            .any(|c| {
-                missing
-                    .iter()
-                    .flatten()
-                    .any(|r| store(c, Atom::intern(r)) > 0.0)
-            });
+            .any(|c| missing.iter().flatten().any(|r| store(c, Atom::intern(r)) > 0.0));
         let full = roles.outputs.iter().all(|id| {
             lab(*id)
                 .and_then(|o| mineral(o))
@@ -237,14 +210,8 @@ impl Labs {
         *self.fee_of.entry(resource.into()).or_default() +=
             calc_terminal_energy_cost(amount, range);
         *self.sends.entry(resource.into()).or_default() += 1.0;
-        *self
-            .routes
-            .entry((resource.into(), from.into(), to.into()))
-            .or_default() += amount;
-        if !v
-            .index(to)
-            .is_some_and(|i| v.rooms[i].of("controller").any(|c| v.ours(c)))
-        {
+        *self.routes.entry((resource.into(), from.into(), to.into())).or_default() += amount;
+        if !v.index(to).is_some_and(|i| v.rooms[i].of("controller").any(|c| v.ours(c))) {
             add_ores(&mut self.away, resource, amount);
         }
     }

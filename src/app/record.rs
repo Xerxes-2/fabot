@@ -5,8 +5,9 @@
 
 use std::fmt::Write;
 
-use super::world::Pass;
 use fabot_base::world::push_int;
+
+use super::world::Pass;
 
 const RING: usize = 5;
 const FIRST: usize = 10;
@@ -20,9 +21,10 @@ const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwx
 fn base64(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
-        let word = chunk.iter().enumerate().fold(0u32, |word, (i, byte)| {
-            word | (u32::from(*byte) << (16 - 8 * i))
-        });
+        let word = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |word, (i, byte)| word | (u32::from(*byte) << (16 - 8 * i)));
         for i in 0..4 {
             out.push(if i <= chunk.len() {
                 char::from(ALPHABET[((word >> (18 - 6 * i)) & 63) as usize])
@@ -54,10 +56,7 @@ fn text(time: i32, cpu_limit: f64, pass: &Pass, memory: &str, intel: &str) -> St
 /// always whole and the ring keeps the last `RING / parts`.
 pub fn record(time: i32, cpu_limit: f64, pass: &Pass, memory: &str, intel: &str) -> Option<String> {
     let text = text(time, cpu_limit, pass, memory, intel);
-    let packed = base64(&miniz_oxide::deflate::compress_to_vec(
-        text.as_bytes(),
-        LEVEL,
-    ));
+    let packed = base64(&miniz_oxide::deflate::compress_to_vec(text.as_bytes(), LEVEL));
     let room = LIMIT - HEAD;
     let parts = packed.len().div_ceil(room);
     if parts > RING {

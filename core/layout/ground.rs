@@ -1,7 +1,9 @@
 //! Built from the room alone, so a plan drawn on it moves only when the
 //! ground does.
-use fabot_base::tiles::{self, Tile};
-use fabot_base::world::{Room, RoomName, StructureType, terrain};
+use fabot_base::{
+    tiles::{self, Tile},
+    world::{Room, RoomName, StructureType, terrain},
+};
 
 use super::place::{SWAMP, WALL};
 
@@ -59,12 +61,7 @@ pub fn of_room(room: &Room) -> Option<Ground> {
         room: room.name,
         terrain: codes,
         sources: sorted(room.sources.iter().map(|s| tiles::of_pos(&s.pos)).collect()),
-        minerals: sorted(
-            room.minerals
-                .iter()
-                .map(|m| tiles::of_pos(&m.pos))
-                .collect(),
-        ),
+        minerals: sorted(room.minerals.iter().map(|m| tiles::of_pos(&m.pos)).collect()),
         controller: room.controller.as_ref().map(|c| tiles::of_pos(&c.pos)),
     })
 }

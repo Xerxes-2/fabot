@@ -3,23 +3,24 @@
 //! `fabot_base::world::read` to decode; this fetches what only the engine
 //! answers. A call across the seam costs more than the field it reads, so the
 //! reader makes a handful a tick.
-use fabot_base::HashMap;
 use std::collections::BTreeSet;
 
-use js_sys::{Array, Float64Array, Int32Array};
-use screeps::LocalRoomTerrain;
-use screeps::game::{
-    self,
-    map::{self, RoomStatus},
+use fabot_base::{
+    HashMap,
+    declarations::Declarations,
+    tiles,
+    world::{RoomName, *},
 };
-use wasm_bindgen::JsCast;
-use wasm_bindgen::prelude::wasm_bindgen;
-
-use fabot_base::declarations::Declarations;
-use fabot_base::tiles;
-use fabot_base::world::RoomName;
-use fabot_base::world::*;
 use fabot_core::drive::{Counts, Phases};
+use js_sys::{Array, Float64Array, Int32Array};
+use screeps::{
+    LocalRoomTerrain,
+    game::{
+        self,
+        map::{self, RoomStatus},
+    },
+};
+use wasm_bindgen::{JsCast, prelude::wasm_bindgen};
 
 #[wasm_bindgen]
 extern "C" {
@@ -133,11 +134,7 @@ pub fn of_game<'t>(
             maps.terrain.insert(name, Some(terrain));
         }
     }
-    let homes = world
-        .spawns
-        .iter()
-        .filter(|s| s.pos.room != RoomName::SIM)
-        .map(|s| s.pos.room);
+    let homes = world.spawns.iter().filter(|s| s.pos.room != RoomName::SIM).map(|s| s.pos.room);
     maps.read_around(homes.collect::<BTreeSet<_>>().into_iter());
     world.closed = read::closed(&world, declarations, |room| maps.status(room));
     let mapped = clock();

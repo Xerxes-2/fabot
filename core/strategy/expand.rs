@@ -1,16 +1,19 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::season;
 use fabot_atlas::{self as atlas, Atlas, Derived};
-use fabot_base::boost::{BOOSTS, ORES, ores_in};
-use fabot_base::declarations::{ColonyPlan, Declarations, Outpost, REACH_HOPS, Stage};
-use fabot_base::engine;
-use fabot_base::intel::{self, Intel, Row};
-use fabot_base::tiles;
-use fabot_base::vocabulary::ResourceType;
-use fabot_base::world::{Id, Mineral, Room, RoomName, World};
+use fabot_base::{
+    boost::{BOOSTS, ORES, ores_in},
+    declarations::{ColonyPlan, Declarations, Outpost, REACH_HOPS, Stage},
+    engine,
+    intel::{self, Intel, Row},
+    tiles,
+    vocabulary::ResourceType,
+    world::{Id, Mineral, Room, RoomName, World},
+};
 use fabot_layout::{ground, plan};
 use screeps::LocalRoomTerrain;
+
+use crate::season;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Expansion {
@@ -77,10 +80,7 @@ pub fn score(f: &Facts) -> f64 {
 }
 
 fn demand(ore: usize) -> i32 {
-    BOOSTS
-        .iter()
-        .map(|(boost, rank)| rank * ores_in(*boost)[ore])
-        .sum()
+    BOOSTS.iter().map(|(boost, rank)| rank * ores_in(*boost)[ore]).sum()
 }
 
 /// The most demanded mineral's first copy is a source's dig, the flat bonus
@@ -157,9 +157,8 @@ pub fn facts(
         crossings,
         worth: season::worth(name),
         failed,
-        mineral: (row.mineral).map_or(0.0, |(m, _)| {
-            mineral_worth(m, copies(world, owned, m, None))
-        }),
+        mineral: (row.mineral)
+            .map_or(0.0, |(m, _)| mineral_worth(m, copies(world, owned, m, None))),
     }
 }
 
@@ -239,11 +238,7 @@ enum Fate {
 }
 
 fn fate(age: i32, owned: bool, lost: bool, stored: bool) -> Fate {
-    let deadline = if owned {
-        RAISE_DEADLINE
-    } else {
-        CLAIM_DEADLINE
-    };
+    let deadline = if owned { RAISE_DEADLINE } else { CLAIM_DEADLINE };
     match () {
         _ if stored => Fate::Raised,
         _ if lost || age > deadline => Fate::Failed,
@@ -260,13 +255,7 @@ pub fn step<'t>(
     terrain: &dyn Fn(RoomName) -> Option<&'t LocalRoomTerrain>,
     expansion: &mut Expansions,
 ) {
-    let Around {
-        rivals,
-        outposts,
-        busy,
-        fought,
-        ..
-    } = *around;
+    let Around { rivals, outposts, busy, fought, .. } = *around;
     let raising = raising(derived, declarations, None).next().is_some();
     let tuning = &declarations.tuning;
     (expansion.failed).retain(|f| world.time - f.since < FORGET);
@@ -278,18 +267,12 @@ pub fn step<'t>(
     };
     // Never the last colony nor one in a fight (owner).
     let may_give_up = |room: RoomName, expansion: &Expansions| {
-        (derived.colonies.iter())
-            .filter(|c| !given(**c, expansion))
-            .count()
-            > 1
+        (derived.colonies.iter()).filter(|c| !given(**c, expansion)).count() > 1
             && !fought.contains(&room)
             && !given(room, expansion)
     };
     let give_up = |room: RoomName, expansion: &mut Expansions| {
-        let e = Expansion {
-            room,
-            since: world.time,
-        };
+        let e = Expansion { room, since: world.time };
         expansion.failed.push(e.clone());
         expansion.abandoned.push(e);
     };
@@ -316,10 +299,7 @@ pub fn step<'t>(
             Fate::Failed if owned && may_give_up(e.room, expansion) => give_up(e.room, expansion),
             // Given up once its fight is over.
             Fate::Failed if owned => expansion.in_flight = Some(e),
-            Fate::Failed => expansion.failed.push(Expansion {
-                since: world.time,
-                ..e
-            }),
+            Fate::Failed => expansion.failed.push(Expansion { since: world.time, ..e }),
             // One not yet owned yields to the operator's claim in flight.
             Fate::Flying if owned || !raising => expansion.in_flight = Some(e),
             _ => (),
@@ -387,10 +367,7 @@ pub fn step<'t>(
         walked(o, expansion) && terrain(o.room).is_some_and(|t| fits(world, o, intel, t))
     });
     if !capped {
-        expansion.in_flight = best.map(|(_, o)| Expansion {
-            room: o.room,
-            since: world.time,
-        });
+        expansion.in_flight = best.map(|(_, o)| Expansion { room: o.room, since: world.time });
         return;
     }
     let held_score = |room: &Room| {
@@ -410,11 +387,7 @@ pub fn step<'t>(
     // Before RCL6's extractor and terminal a colony is cheap to give up for a
     // better room; past them it holds what a new one would take a long climb to.
     let worst = (derived.colonies.iter().filter_map(|c| world.room(*c)))
-        .filter(|r| {
-            r.controller
-                .as_ref()
-                .is_some_and(|c| c.level <= tuning.prune_level)
-        })
+        .filter(|r| r.controller.as_ref().is_some_and(|c| c.level <= tuning.prune_level))
         .filter(|r| !busy.contains(&r.name) && may_give_up(r.name, expansion))
         .map(|r| (held_score(r), r.name))
         .min_by(|(a, x), (b, y)| a.total_cmp(b).then(x.cmp(y)));
@@ -473,10 +446,7 @@ mod tests {
         };
         for (r, terrain) in rooms.iter().zip(&terrains) {
             let name: RoomName = r["name"].as_str().unwrap().parse().unwrap();
-            let mut room = Room {
-                terrain: Some(terrain),
-                ..Room::empty(name)
-            };
+            let mut room = Room { terrain: Some(terrain), ..Room::empty(name) };
             for (i, o) in r["objects"].as_array().unwrap().iter().enumerate() {
                 let id = Id::of_engine(&format!("o{i}"));
                 let xy = |k: &str| o[k].as_i64().unwrap() as i32;
@@ -531,12 +501,7 @@ mod tests {
             let drawn = ground::of_room(room).and_then(|g| plan::first_of(&world.rules, &g));
             let layout = drawn.is_some_and(|p| p.unfit.is_empty());
             let terrain = room.terrain.unwrap();
-            assert_eq!(
-                fits(&world, &outpost, &intel, terrain),
-                layout,
-                "{}",
-                room.name
-            );
+            assert_eq!(fits(&world, &outpost, &intel, terrain), layout, "{}", room.name);
             checked += 1;
         }
         assert_eq!(checked, 20);
@@ -558,10 +523,7 @@ mod tests {
         assert!(worth(ResourceType::Lemergium, 0) > worth(ResourceType::Utrium, 0));
         assert!(worth(ResourceType::Utrium, 1) < worth(ResourceType::Lemergium, 0));
         assert!(worth(ResourceType::Oxygen, 1) < worth(ResourceType::Oxygen, 0));
-        assert_eq!(
-            worth(ResourceType::Oxygen, 0),
-            f64::from(engine::HELD_OUTPUT_PER_TICK)
-        );
+        assert_eq!(worth(ResourceType::Oxygen, 0), f64::from(engine::HELD_OUTPUT_PER_TICK));
         let have = Facts {
             sources: 2,
             free_near: 3,
@@ -570,36 +532,16 @@ mod tests {
             failed: 0.0,
             mineral: worth(ResourceType::Utrium, 1),
         };
-        let lack = Facts {
-            mineral: worth(ResourceType::Lemergium, 0),
-            ..have
-        };
+        let lack = Facts { mineral: worth(ResourceType::Lemergium, 0), ..have };
         assert!(score(&lack) > score(&have));
     }
 
     #[test]
     fn season_worth_outbids_dig() {
-        let near = Facts {
-            sources: 2,
-            free_near: 4,
-            crossings: 2,
-            worth: 0.0,
-            failed: 0.0,
-            mineral: 0.0,
-        };
-        let scoring = Facts {
-            free_near: 0,
-            crossings: 3,
-            worth: 25.0,
-            ..near
-        };
-        assert!(
-            score(&near)
-                > score(&Facts {
-                    worth: 0.0,
-                    ..scoring
-                })
-        );
+        let near =
+            Facts { sources: 2, free_near: 4, crossings: 2, worth: 0.0, failed: 0.0, mineral: 0.0 };
+        let scoring = Facts { free_near: 0, crossings: 3, worth: 25.0, ..near };
+        assert!(score(&near) > score(&Facts { worth: 0.0, ..scoring }));
         assert!(score(&scoring) > score(&near));
     }
 }

@@ -1,6 +1,5 @@
 //! The fight's cast invariants: what a body a set walks out with is made of.
-use fabot_base::engine;
-use fabot_base::vocabulary::Part;
+use fabot_base::{engine, vocabulary::Part};
 use fabot_fight::casting;
 use proptest::prelude::*;
 

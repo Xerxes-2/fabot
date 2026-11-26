@@ -1,34 +1,40 @@
 //! The floods, trees and walks are kept across ticks (`ARCHITECTURE.md` §1).
 //! Built twice from one `World`, an Atlas answers identically: a kept value is
 //! one on equal reads.
-use std::cell::{Cell, RefCell};
-use std::collections::BTreeSet;
+use std::{
+    cell::{Cell, RefCell},
+    collections::BTreeSet,
+    rc::Rc,
+};
 
 use fabot_base::HashMap;
-use std::rc::Rc;
 
 mod derived;
 mod graph;
 mod loot;
 
-pub use self::derived::{
-    BANK_LEVEL, Context, Derived, Home, derive, nearest, plan_of, server, server_of, sponsor,
-    target_at, worked,
-};
-pub use self::graph::Tree;
-use self::graph::Way;
-pub use self::loot::{
-    cast_by_core, fallen, fallen_with_loot, garrison, invader_rampart, invader_rampart_at, loot,
-    loot_in, loot_wall, walls_of,
+use fabot_base::{
+    engine,
+    grid::{
+        self, FatigueFactor, Footprint, UNREACHED, Weight, flood, on_edge, step_table, step_ticks,
+        weight_of,
+    },
+    tiles::{self, Post, Table, Tile, TileSet},
+    world::{Built, Id, Owner, Pos, Room, RoomName, StructureType, World},
 };
 
-use fabot_base::engine;
-use fabot_base::grid::{
-    self, FatigueFactor, Footprint, UNREACHED, Weight, flood, on_edge, step_table, step_ticks,
-    weight_of,
+use self::graph::Way;
+pub use self::{
+    derived::{
+        BANK_LEVEL, Context, Derived, Home, derive, nearest, plan_of, server, server_of, sponsor,
+        target_at, worked,
+    },
+    graph::Tree,
+    loot::{
+        cast_by_core, fallen, fallen_with_loot, garrison, invader_rampart, invader_rampart_at,
+        loot, loot_in, loot_wall, walls_of,
+    },
 };
-use fabot_base::tiles::{self, Post, Table, Tile, TileSet};
-use fabot_base::world::{Built, Id, Owner, Pos, Room, RoomName, StructureType, World};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Mover {
@@ -38,10 +44,7 @@ pub struct Mover {
 
 impl Mover {
     pub const fn one(factor: FatigueFactor) -> Mover {
-        Mover {
-            footprint: Footprint::One,
-            factor,
-        }
+        Mover { footprint: Footprint::One, factor }
     }
 }
 
@@ -161,11 +164,7 @@ impl FloodOf<'_> {
         danger: Option<&'a TileSet>,
         held: bool,
     ) -> FloodOf<'a> {
-        let grounds = [
-            engine::ROAD_WEIGHT,
-            engine::PLAIN_WEIGHT,
-            engine::SWAMP_WEIGHT,
-        ];
+        let grounds = [engine::ROAD_WEIGHT, engine::PLAIN_WEIGHT, engine::SWAMP_WEIGHT];
         FloodOf {
             footprint: mover.footprint,
             steps: grounds.map(|w| step_ticks(mover.factor, w)),
@@ -177,10 +176,7 @@ impl FloodOf<'_> {
 
     fn kept(&self) -> FloodKey {
         let goal = match self.goal {
-            Goal::Seats { range, tiles } => KeptGoal::Seats {
-                range,
-                tiles: tiles.to_vec(),
-            },
+            Goal::Seats { range, tiles } => KeptGoal::Seats { range, tiles: tiles.to_vec() },
             Goal::Exit(exit) => KeptGoal::Exit(exit.to_vec()),
             Goal::Clear => KeptGoal::Clear,
         };
@@ -207,10 +203,7 @@ impl Keyed for FloodOf<'_> {
 impl Keyed for FloodKey {
     fn key(&self) -> FloodOf<'_> {
         let goal = match &self.goal {
-            KeptGoal::Seats { range, tiles } => Goal::Seats {
-                range: *range,
-                tiles,
-            },
+            KeptGoal::Seats { range, tiles } => Goal::Seats { range: *range, tiles },
             KeptGoal::Exit(exit) => Goal::Exit(exit),
             KeptGoal::Clear => Goal::Clear,
         };
@@ -291,16 +284,9 @@ impl RoomGrid {
         }
         let kept = kept.as_ref().map(|(read, dist)| (&**read, &**dist));
         let (dist, relaxed, carried) = self.flooded(mover, key, kept);
-        assert!(
-            !carried || fresh(&dist),
-            "a repaired flood differs from a fresh one"
-        );
+        assert!(!carried || fresh(&dist), "a repaired flood differs from a fresh one");
         let dist = Rc::new(dist);
-        let kept = Kept {
-            read: now.clone(),
-            value: dist.clone(),
-            unasked: Cell::new(0),
-        };
+        let kept = Kept { read: now.clone(), value: dist.clone(), unasked: Cell::new(0) };
         floods.borrow_mut().insert(key.kept(), kept);
         (dist, carried, live, relaxed)
     }
@@ -360,10 +346,7 @@ impl RoomGrid {
 
     fn goals(footprint: Footprint, key: FloodOf, weights: &Table<Weight>) -> Vec<Tile> {
         match key.goal {
-            Goal::Seats {
-                range,
-                tiles: targets,
-            } => {
+            Goal::Seats { range, tiles: targets } => {
                 let mut goals = Vec::new();
                 for &tile in targets {
                     if tile.index() < tiles::COUNT {
@@ -525,10 +508,7 @@ impl Field {
     /// Out of a strike a body stands in, the shortest way across struck
     /// tiles, never deeper, onto the open tile nearest the goal.
     fn escape(&self, from: Tile) -> Option<i32> {
-        let struck = self
-            .struck
-            .as_ref()
-            .filter(|_| self.footprint == Footprint::One)?;
+        let struck = self.struck.as_ref().filter(|_| self.footprint == Footprint::One)?;
         let mut seen = TileSet::default();
         seen.insert(from);
         let mut met = vec![(from, 0)];
@@ -575,10 +555,20 @@ impl Field {
 }
 
 impl Atlas {
+    pub const CROSSING_TICKS: i32 = engine::ROOM_SIDE;
+    const EXITS: [i32; 4] = [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT];
+    /// A room's goals come back a few trips apart: at `TRIP_TICKS` a soak floods 15% more.
+    const FLOOD_TICKS: u32 = 300;
+    /// ~10 kB each, and wasm keeps its high-water mark: twice a soak's busiest room.
+    const MOST_FLOODS: usize = 2000;
+    /// A body that steps every tick off swamp: the pace a route is priced at.
+    const PACE: Mover =
+        Mover { footprint: Footprint::One, factor: FatigueFactor { weight: 1, moves: 1 } };
+    /// A body asks its walks at its choice of work, about once a trip.
+    const TRIP_TICKS: u32 = 100;
+
     pub fn is_buffer(room: &Room, pos: &Pos) -> bool {
-        room.controller
-            .as_ref()
-            .is_some_and(|c| c.pos.within(engine::UPGRADE_RANGE, pos))
+        room.controller.as_ref().is_some_and(|c| c.pos.within(engine::UPGRADE_RANGE, pos))
             && !room.sources.iter().any(|s| s.pos.within(1, pos))
             && !room.minerals.iter().any(|m| m.pos.within(1, pos))
     }
@@ -651,15 +641,11 @@ impl Atlas {
     }
 
     fn from_controller(room: &Room, p: &Pos) -> i32 {
-        (room.controller.as_ref())
-            .and_then(|c| c.pos.range(p))
-            .unwrap_or(0)
+        (room.controller.as_ref()).and_then(|c| c.pos.range(p)).unwrap_or(0)
     }
 
     pub fn source_posts(room: &Room) -> Vec<Pos> {
-        (room.sources.iter())
-            .filter_map(|s| Atlas::post_of(room, &s.pos).map(|(p, _)| p))
-            .collect()
+        (room.sources.iter()).filter_map(|s| Atlas::post_of(room, &s.pos).map(|(p, _)| p)).collect()
     }
 
     /// A harvest bay's extension: its harvester keeps it, not the carriers.
@@ -697,10 +683,7 @@ impl Atlas {
     /// Each lair and the resource its keeper guards, for intel to place
     /// the keepers of a room out of sight.
     pub fn posts(room: &Room) -> Vec<Post> {
-        let lairs = room
-            .structures
-            .iter()
-            .filter(|s| s.kind == StructureType::KeeperLair);
+        let lairs = room.structures.iter().filter(|s| s.kind == StructureType::KeeperLair);
         let post = |t: Tile| (t, Atlas::guarded(room, t).unwrap_or(t));
         lairs.map(|l| post(tiles::of_pos(&l.pos))).collect()
     }
@@ -762,18 +745,9 @@ impl Atlas {
         let striker =
             |from: Tile, reach: i32| (from, Atlas::guarded(room, from).unwrap_or(from), reach);
         let mut strikers: Vec<(Tile, Tile, i32)> = living
-            .map(|c| {
-                striker(
-                    tiles::of_pos(&c.pos),
-                    engine::strike_reach(|p| c.live(p) > 0),
-                )
-            })
+            .map(|c| striker(tiles::of_pos(&c.pos), engine::strike_reach(|p| c.live(p) > 0)))
             .collect();
-        for lair in room
-            .structures
-            .iter()
-            .filter(|s| s.kind == StructureType::KeeperLair)
-        {
+        for lair in room.structures.iter().filter(|s| s.kind == StructureType::KeeperLair) {
             if lair.spawn.is_some_and(|t| t <= Atlas::CROSSING_TICKS) {
                 strikers.push(striker(tiles::of_pos(&lair.pos), Atlas::keeper_reach()));
             }
@@ -793,19 +767,15 @@ impl Atlas {
     /// unasked, they have moved.
     fn kept(previous: Option<RoomGrid>) -> (Floods, Floods) {
         previous.map_or_else(Default::default, |grid| {
-            (
-                Atlas::asked_floods(grid.floods),
-                Atlas::unasked(grid.live, 1),
-            )
+            (Atlas::asked_floods(grid.floods), Atlas::unasked(grid.live, 1))
         })
     }
 
     fn bare(last: Option<&RoomGrid>, terrain: &[u8]) -> [Rc<Table<Weight>>; 2] {
         last.map_or_else(
             || {
-                let paved: Vec<u8> = (terrain.iter())
-                    .map(|t| t & fabot_base::world::terrain::WALL)
-                    .collect();
+                let paved: Vec<u8> =
+                    (terrain.iter()).map(|t| t & fabot_base::world::terrain::WALL).collect();
                 [Atlas::ground(terrain), Atlas::ground(&paved)].map(Rc::new)
             },
             |g| g.bare.clone(),
@@ -863,9 +833,8 @@ impl Atlas {
                 }
             }
 
-            let seats: Vec<(Tile, Weight)> = (Atlas::work_seats(room).into_iter())
-                .map(|t| (t, weights[t]))
-                .collect();
+            let seats: Vec<(Tile, Weight)> =
+                (Atlas::work_seats(room).into_iter()).map(|t| (t, weights[t])).collect();
             for (tile, _) in &seats {
                 weights[*tile] = grid::weight(grid::SEAT_WEIGHT);
             }
@@ -1045,9 +1014,7 @@ impl Atlas {
         let open = |t: Tile| grid.weights[t].is_some();
         let exits = (Atlas::EXITS.iter()).flat_map(|exit| tiles::exit_tiles(*exit).iter().copied());
         let steps = tiles::reach(exits.filter(|t| open(*t)), open);
-        tiles::all()
-            .filter(|t| steps[*t] != tiles::UNREACHED)
-            .collect()
+        tiles::all().filter(|t| steps[*t] != tiles::UNREACHED).collect()
     }
 
     /// With no tile reached (no terrain, or a sealed room), the geometric middle, which may be wall.
@@ -1077,8 +1044,7 @@ impl Atlas {
     }
 
     pub fn passable(&self, room: RoomName, tile: Tile) -> bool {
-        self.grid(room)
-            .is_some_and(|grid| grid.held()[tile].is_some())
+        self.grid(room).is_some_and(|grid| grid.held()[tile].is_some())
     }
 
     pub fn standable(&self, room: RoomName, tile: Tile) -> bool {
@@ -1147,25 +1113,11 @@ impl Atlas {
                     tiles::of_pos(target),
                     &mut found,
                 );
-                found
-                    .into_iter()
-                    .map(|tile| tiles::to_pos(target.room, tile))
-                    .collect()
+                found.into_iter().map(|tile| tiles::to_pos(target.room, tile)).collect()
             }
             None => Vec::new(),
         }
     }
-
-    /// A body that steps every tick off swamp: the pace a route is priced at.
-    const PACE: Mover = Mover {
-        footprint: Footprint::One,
-        factor: FatigueFactor {
-            weight: 1,
-            moves: 1,
-        },
-    };
-
-    const EXITS: [i32; 4] = [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT];
 
     /// Towers cover the whole room: a walk ends there or goes round it, never through.
     fn towered(&self, c: Coords) -> bool {
@@ -1176,11 +1128,7 @@ impl Atlas {
     fn crossed_last(&self, c: Coords) -> bool {
         match self.rooms.get(&c) {
             Some(grid) => grid.blind,
-            None => self
-                .lairs
-                .get(&c)
-                .copied()
-                .unwrap_or(tiles::is_keeper_room(c)),
+            None => self.lairs.get(&c).copied().unwrap_or(tiles::is_keeper_room(c)),
         }
     }
 
@@ -1212,12 +1160,7 @@ impl Atlas {
                 .map(|c| {
                     let grid = self.rooms.get(&c);
                     let (seen, towered) = grid.map_or((false, false), |g| (g.seen, g.towered));
-                    let flags = [
-                        seen,
-                        self.crossed_last(c),
-                        towered,
-                        self.closed.contains(&c),
-                    ];
+                    let flags = [seen, self.crossed_last(c), towered, self.closed.contains(&c)];
                     RoomRead(
                         grid.map(|g| g.weights.clone()),
                         grid.and_then(|g| g.struck.clone()),
@@ -1258,11 +1201,7 @@ impl Atlas {
         }
         let value = fresh();
         self.recomputed.set(self.recomputed.get() + 1);
-        let kept = Kept {
-            read,
-            value: value.clone(),
-            unasked: Cell::new(0),
-        };
+        let kept = Kept { read, value: value.clone(), unasked: Cell::new(0) };
         table.borrow_mut().insert(key, kept);
         value
     }
@@ -1346,9 +1285,7 @@ impl Atlas {
         edge: &[Tile],
     ) -> Vec<Tile> {
         let goals = edge.iter().map(|t| Atlas::anchor(footprint, *t));
-        goals
-            .filter(|t| weight_of(footprint, weights, *t).is_some())
-            .collect()
+        goals.filter(|t| weight_of(footprint, weights, *t).is_some()).collect()
     }
 
     fn stretch(first: Tile, last: Tile) -> &'static [Tile] {
@@ -1456,9 +1393,8 @@ impl Atlas {
         }
         // The graph's way out is walled: any other way on the whole tree knows.
         let all = graph::search(self, mover, target.room, Some(target), avoid, hops, &[]);
-        let (dist, onward) = all
-            .round(self, mover, at.room, tile, danger)
-            .unwrap_or((walled, onward));
+        let (dist, onward) =
+            all.round(self, mover, at.room, tile, danger).unwrap_or((walled, onward));
         Some(field(dist, onward))
     }
 
@@ -1484,17 +1420,6 @@ impl Atlas {
         self.field_in(mover, target, from, Ground::Kept)
             .and_then(|field| field.ticks(tiles::of_pos(from)))
     }
-
-    pub const CROSSING_TICKS: i32 = engine::ROOM_SIDE;
-
-    /// A body asks its walks at its choice of work, about once a trip.
-    const TRIP_TICKS: u32 = 100;
-
-    /// A room's goals come back a few trips apart: at `TRIP_TICKS` a soak floods 15% more.
-    const FLOOD_TICKS: u32 = 300;
-
-    /// ~10 kB each, and wasm keeps its high-water mark: twice a soak's busiest room.
-    const MOST_FLOODS: usize = 2000;
 
     /// `ticks_to` off `tree`, grown from the target's room: each room the
     /// mover's walk from where it lands to where the tree leaves it.
@@ -1526,9 +1451,8 @@ impl Atlas {
                 own = None;
                 last = way;
             }
-            let seats = self
-                .grid(target.room)
-                .map(|g| self.flood_seats(g, mover, target, Ground::Kept));
+            let seats =
+                self.grid(target.room).map(|g| self.flood_seats(g, mover, target, Ground::Kept));
             let entry = match seats {
                 Some(seats) => landed(&seats, &last.exit, own)?,
                 None => Atlas::CROSSING_TICKS,
@@ -1544,9 +1468,8 @@ impl Atlas {
     /// never re-enters its root: a body walled off in it reads None.
     fn toward(&self, key: Toward) -> Option<Rc<Table<i32>>> {
         let rooms = self.read_around(key.to.room.coords(), key.max_hops);
-        let held = (self.towards.borrow().get(&key))
-            .filter(|k| Rc::ptr_eq(&k.read, &rooms))
-            .map(|k| {
+        let held =
+            (self.towards.borrow().get(&key)).filter(|k| Rc::ptr_eq(&k.read, &rooms)).map(|k| {
                 k.unasked.set(0);
                 k.value.dist.clone()
             });
@@ -1564,36 +1487,21 @@ impl Atlas {
         if root {
             let plain = Atlas::ground(&[0; tiles::COUNT]);
             let ground = weights.as_deref().unwrap_or(&plain);
-            Atlas::seats_near(
-                Footprint::One,
-                ground,
-                1,
-                tiles::of_pos(&key.to),
-                &mut seeds,
-            );
+            Atlas::seats_near(Footprint::One, ground, 1, tiles::of_pos(&key.to), &mut seeds);
         }
         let mut seeds: Vec<(Tile, i32)> = seeds.into_iter().map(|t| (t, 0)).collect();
         let ways = tree.as_ref().map_or(&[][..], |t| t.ways(key.room));
         if key.way.is_none() && ways.len() == 1 {
-            let one = Toward {
-                way: Some(0),
-                ..key
-            };
+            let one = Toward { way: Some(0), ..key };
             let dist = self.toward(one);
             let walked = self.towards.borrow()[&one].value.clone();
             self.keep(key, rooms, walked);
             return dist;
         }
-        let ways = key
-            .way
-            .map_or(ways, |w| ways.get(w..=w).unwrap_or_default());
+        let ways = key.way.map_or(ways, |w| ways.get(w..=w).unwrap_or_default());
         for way in ways {
             let way_on = (way.next != key.to.room.coords()).then_some(way.onward);
-            let next = Toward {
-                room: way.next,
-                way: way_on,
-                ..key
-            };
+            let next = Toward { room: way.next, way: way_on, ..key };
             let Some(onto) = self.toward(next) else {
                 continue;
             };
@@ -1603,26 +1511,16 @@ impl Atlas {
         seeds.retain(|(_, d)| *d != UNREACHED);
         seeds.sort_unstable_by_key(|(t, d)| (*d, *t));
         // A room off the tree lies past the read that holds the walk.
-        let walked = Walked {
-            weights: weights.filter(|_| !seeds.is_empty()),
-            seeds,
-            dist: None,
-        };
+        let walked = Walked { weights: weights.filter(|_| !seeds.is_empty()), seeds, dist: None };
         let kept = (self.towards.borrow().get(&key))
             .filter(|k| k.value.reads_as(&walked))
             .map(|k| k.value.dist.clone());
-        assert!(
-            held.is_none() || kept.is_some(),
-            "a held walk reads otherwise"
-        );
+        assert!(held.is_none() || kept.is_some(), "a held walk reads otherwise");
         let walked = match kept {
             Some(dist) if !self.check => Walked { dist, ..walked },
             Some(dist) => {
                 let walked = walked.flooded();
-                assert!(
-                    walked.dist == dist,
-                    "a carried value differs from a fresh one"
-                );
+                assert!(walked.dist == dist, "a carried value differs from a fresh one");
                 walked
             }
             None => {
@@ -1636,11 +1534,7 @@ impl Atlas {
     }
 
     fn keep(&self, key: Toward, read: Reads, value: Walked) {
-        let kept = Kept {
-            read,
-            value,
-            unasked: Cell::new(0),
-        };
+        let kept = Kept { read, value, unasked: Cell::new(0) };
         self.towards.borrow_mut().insert(key, kept);
     }
 
@@ -1656,13 +1550,7 @@ impl Atlas {
     }
 
     fn ticks_on_way(&self, max_hops: i32, to: &Pos, from: &Pos, bare: Option<bool>) -> Option<i32> {
-        let key = Toward {
-            to: *to,
-            max_hops,
-            room: from.room.coords(),
-            way: None,
-            bare,
-        };
+        let key = Toward { to: *to, max_hops, room: from.room.coords(), way: None, bare };
         let dist = self.toward(key)?;
         let tile = tiles::of_pos(from);
         match dist[tile] {
@@ -1677,8 +1565,7 @@ impl Atlas {
     }
 
     pub fn first_step(&self, mover: Mover, target: &Target, from: &Pos) -> Option<i32> {
-        self.field(mover, target, from)
-            .and_then(|field| field.step(tiles::of_pos(from)))
+        self.field(mover, target, from).and_then(|field| field.step(tiles::of_pos(from)))
     }
 }
 
@@ -1688,13 +1575,9 @@ pub fn onward(candidates: impl Iterator<Item = (RoomName, i32, i32)>) -> Option<
     candidates
         .filter(|(_, worth, _)| *worth > 0)
         .max_by_key(|&(room, worth, walk)| {
-            (
-                rate(worth, walk),
-                std::cmp::Reverse(walk),
-                std::cmp::Reverse(room),
-            )
+            (rate(worth, walk), std::cmp::Reverse(walk), std::cmp::Reverse(room))
         })
-        .map(|(room, _, _)| room)
+        .map(|(room, ..)| room)
 }
 
 /// What `onward` ranks by: worth a tick of the walk, a room's crossing counted.
@@ -1704,9 +1587,7 @@ pub fn rate(worth: i32, walk: i32) -> i64 {
 
 /// Beside, not the whole room: a walk round it prices dearer than a step through a seated body.
 pub fn parts(at: Tile, open: impl Fn(Tile) -> bool) -> bool {
-    let beside: Vec<Tile> = (tiles::around(at).iter().copied())
-        .filter(|n| open(*n))
-        .collect();
+    let beside: Vec<Tile> = (tiles::around(at).iter().copied()).filter(|n| open(*n)).collect();
     let mut reached: Vec<Tile> = beside.iter().take(1).copied().collect();
     let mut i = 0;
     while let Some(&t) = reached.get(i) {
@@ -1727,28 +1608,14 @@ mod tests {
     fn a_kept_flood_is_found_by_its_borrowed_goal_and_by_no_other() {
         let t = Tile::of_index;
         let (tiles, exit) = ([t(3), t(7)], [(t(3), t(7))]);
-        let seats = Goal::Seats {
-            range: 1,
-            tiles: &tiles,
-        };
+        let seats = Goal::Seats { range: 1, tiles: &tiles };
         let mut kept: HashMap<FloodKey, i32> = HashMap::default();
         kept.insert(FloodOf::of(Atlas::PACE, seats, None, false).kept(), 1);
-        kept.insert(
-            FloodOf::of(Atlas::PACE, Goal::Exit(&exit), None, false).kept(),
-            2,
-        );
-        let at = |goal| {
-            kept.get(&FloodOf::of(Atlas::PACE, goal, None, false) as &dyn Keyed)
-                .copied()
-        };
+        kept.insert(FloodOf::of(Atlas::PACE, Goal::Exit(&exit), None, false).kept(), 2);
+        let at =
+            |goal| kept.get(&FloodOf::of(Atlas::PACE, goal, None, false) as &dyn Keyed).copied();
         assert_eq!(at(seats), Some(1));
         assert_eq!(at(Goal::Exit(&exit)), Some(2));
-        assert_eq!(
-            at(Goal::Seats {
-                range: 2,
-                tiles: &tiles
-            }),
-            None
-        );
+        assert_eq!(at(Goal::Seats { range: 2, tiles: &tiles }), None);
     }
 }

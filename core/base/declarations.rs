@@ -83,12 +83,7 @@ pub struct Declarations {
     pub says_idle: bool,
 }
 
-pub type Planned = (
-    Vec<ColonyPlan>,
-    Vec<Outpost>,
-    Option<Outpost>,
-    Vec<Operation>,
-);
+pub type Planned = (Vec<ColonyPlan>, Vec<Outpost>, Option<Outpost>, Vec<Operation>);
 
 /// What `refuse` dropped: the rooms the engine keeps a creep out
 /// of, and the tactic rules no name answers to.
@@ -121,15 +116,11 @@ impl Declarations {
     }
 
     pub fn rooms(&self, kind: OpKind) -> impl Iterator<Item = RoomName> + '_ {
-        (self.operations.iter())
-            .filter(move |o| o.kind == kind)
-            .map(|o| o.room)
+        (self.operations.iter()).filter(move |o| o.kind == kind).map(|o| o.room)
     }
 
     pub fn priority(&self, kind: OpKind, room: RoomName) -> Option<f64> {
-        (self.operations.iter())
-            .find(|o| o.kind == kind && o.room == room)
-            .map(|o| o.priority)
+        (self.operations.iter()).find(|o| o.kind == kind && o.room == room).map(|o| o.priority)
     }
 
     #[inline]

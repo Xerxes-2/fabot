@@ -4,12 +4,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use fabot_base::{engine, vocabulary};
-use krebs::atom;
-use krebs::doc::{Obj, Val};
+use krebs::{
+    atom,
+    doc::{Obj, Val},
+};
 use serde_json::{Value, json};
 
-use crate::sample::{boosts, made, parts};
-use crate::view::{EVENT_ATTACK, EVENT_OBJECT_DESTROYED, Room, View, num, obj, store, text, used};
+use crate::{
+    sample::{boosts, made, parts},
+    view::{EVENT_ATTACK, EVENT_OBJECT_DESTROYED, Room, View, num, obj, store, text, used},
+};
 
 #[derive(Default)]
 pub struct Lives {
@@ -37,10 +41,8 @@ struct Step {
 }
 
 pub fn letters(body: &[&str]) -> String {
-    let letter = |p: &str| {
-        p.parse()
-            .map_or('t', |p| vocabulary::part_letter(p).to_ascii_lowercase())
-    };
+    let letter =
+        |p: &str| p.parse().map_or('t', |p| vocabulary::part_letter(p).to_ascii_lowercase());
     body.iter().map(|p| letter(p)).collect()
 }
 
@@ -93,10 +95,7 @@ impl Lives {
         for room in &v.rooms {
             let struck = struck_in.entry(room.name).or_insert(strikes(room));
             let fell = room.events().filter(|e| e.kind == EVENT_OBJECT_DESTROYED);
-            let grave = |id| {
-                room.of("tombstone")
-                    .find(|g| text(g, atom!("creepId")) == id)
-            };
+            let grave = |id| room.of("tombstone").find(|g| text(g, atom!("creepId")) == id);
             for (by, g) in fell.filter_map(|e| Some((&struck.get(e.by)?.1, grave(e.by)?))) {
                 self.deaths.push(json!({ "t": time, "room": room.name, "name": text(g, atom!("creepName")),
                     "ours": v.ours(g), "user": text(g, atom!("user")), "body": letters(&parts(g)), "by": by }));
@@ -117,12 +116,7 @@ impl Lives {
                     json!({ "name": name, "ours": v.ours(o), "body": letters(&body),
                         "cost": engine::body_cost(&typed), "first": time, "rooms": {}, "acts": {} })
                 });
-                let at = format!(
-                    "{} {},{}",
-                    room.name,
-                    num(o, atom!("x")),
-                    num(o, atom!("y"))
-                );
+                let at = format!("{} {},{}", room.name, num(o, atom!("x")), num(o, atom!("y")));
                 if life["at"] == at.as_str() && life["last"] == time - 1 {
                     life["still"] = json!(life["still"].as_u64().unwrap_or(0) + 1);
                 }
@@ -175,8 +169,7 @@ impl Lives {
                         && was.is_some_and(|w| w.0 == at && w.1 == energy)
                         && acts(o).is_empty();
                     let ticks = if idle { was.map_or(0, |w| w.2) + 1 } else { 0 };
-                    self.stills
-                        .insert(name.to_string(), (at.clone(), energy, ticks));
+                    self.stills.insert(name.to_string(), (at.clone(), energy, ticks));
                     self.still_loaded = self.still_loaded.max(ticks);
                 }
                 let [a, b] = self.last_two.remove(name).unwrap_or_default();
@@ -220,13 +213,10 @@ impl Lives {
                 }
             }
         }
-        let gone: Vec<String> = (self.open.iter())
-            .filter(|(_, l)| l["last"] != time)
-            .map(|(k, _)| k.clone())
-            .collect();
+        let gone: Vec<String> =
+            (self.open.iter()).filter(|(_, l)| l["last"] != time).map(|(k, _)| k.clone()).collect();
         for key in gone {
-            self.closed
-                .push(self.open.remove(&key).expect("an open life"));
+            self.closed.push(self.open.remove(&key).expect("an open life"));
         }
         carried_out
     }
@@ -238,9 +228,6 @@ impl Lives {
 
     pub fn close(&mut self) -> Vec<Value> {
         let open = std::mem::take(&mut self.open);
-        std::mem::take(&mut self.closed)
-            .into_iter()
-            .chain(open.into_values())
-            .collect()
+        std::mem::take(&mut self.closed).into_iter().chain(open.into_values()).collect()
     }
 }

@@ -1,12 +1,16 @@
 //! What a fight did, set against its prediction at the close (§10.1); never decided on.
 use std::collections::{BTreeMap, BTreeSet};
 
+use fabot_base::{
+    engine,
+    world::{Creep, Id},
+};
 use serde::{Deserialize, Serialize};
 
-use crate::scene::Scene;
-use crate::shape::{Engagement, Group, Objective};
-use fabot_base::engine;
-use fabot_base::world::{Creep, Id};
+use crate::{
+    scene::Scene,
+    shape::{Engagement, Group, Objective},
+};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -128,11 +132,12 @@ pub fn closed(facts: Facts, open: &[Engagement], decided: &[Engagement]) -> Vec<
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::scene::fresh;
     use fabot_base::world::{Pos, RoomName, Rules, Sightings, World};
     use fabot_exchange::Outcome;
     use fabot_tactics::Tactic;
+
+    use super::*;
+    use crate::scene::fresh;
 
     fn on_tick<T>(time: i32, hostile_at: BTreeMap<Id, Pos>, f: impl FnOnce(&Scene) -> T) -> T {
         let world = World {
@@ -187,10 +192,7 @@ mod tests {
     /// A Defend on one raid body over (time, in sight, its death seen) ticks,
     /// and whether it would close left on the last.
     fn play(ticks: &[(i32, bool, bool)]) -> (Engagement, bool) {
-        let (x, at) = (
-            Id::parse("a1").unwrap(),
-            fabot_base::tiles::middle(RoomName::W1N1),
-        );
+        let (x, at) = (Id::parse("a1").unwrap(), fabot_base::tiles::middle(RoomName::W1N1));
         let (mut e, mut left, mut was_in_sight) = (defend(Some(Outcome::Lose)), true, false);
         for &(time, in_sight, fell) in ticks {
             let hostile_at = in_sight.then_some((x, at)).into_iter().collect();
@@ -215,23 +217,13 @@ mod tests {
 
     #[test]
     fn a_raid_body_back_in_sight_before_its_seen_death_closes_won() {
-        let ticks = [
-            (1, true, false),
-            (2, false, false),
-            (3, true, false),
-            (4, false, true),
-        ];
+        let ticks = [(1, true, false), (2, false, false), (3, true, false), (4, false, true)];
         assert!(!play(&ticks).1);
     }
 
     #[test]
     fn a_raid_body_dead_out_of_sight_closes_won_on_its_tombstone() {
-        let ticks = [
-            (1, true, false),
-            (2, false, false),
-            (3, false, false),
-            (4, false, true),
-        ];
+        let ticks = [(1, true, false), (2, false, false), (3, false, false), (4, false, true)];
         let (e, left) = play(&ticks[..3]);
         assert!(left && !e.actual.unseen.is_empty());
         assert!(!play(&ticks).1);
@@ -246,10 +238,7 @@ mod tests {
 
     #[test]
     fn an_unpriced_close_counts_its_closing_ticks_dead() {
-        let e = Engagement {
-            ours: BTreeMap::from([("a".to_string(), 0)]),
-            ..defend(None)
-        };
+        let e = Engagement { ours: BTreeMap::from([("a".to_string(), 0)]), ..defend(None) };
         let lost = on_tick(1, BTreeMap::new(), |scene| {
             let closes = closed((scene, &[], &BTreeSet::new()), &[e], &[]);
             closes.iter().map(|c| c.engagement.lost).collect::<Vec<_>>()

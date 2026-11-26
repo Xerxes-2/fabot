@@ -1,7 +1,9 @@
-use super::declarations::{self, Declarations};
-use super::engine;
-use super::vocabulary::{self, Part, RESOURCES_ALL, ResourceType, takes};
-use super::world::{self, Id, Pos, RoomName, StructureType, World};
+use super::{
+    declarations::{self, Declarations},
+    engine,
+    vocabulary::{self, Part, RESOURCES_ALL, ResourceType, takes},
+    world::{self, Id, Pos, RoomName, StructureType, World},
+};
 
 /// A lab a carrier fills from the storage takes 85 ticks, measured; a
 /// compound already in a lab costs a tick or two, taken as none.
@@ -43,9 +45,7 @@ impl Stock {
             .map(|c| Held {
                 compound: c,
                 parts: home_holds(world, home, c) / engine::BOOST_MINERAL_PER_PART,
-                in_labs: labs_in(world, home)
-                    .map(|l| l.store.amount_of(c))
-                    .sum::<i32>()
+                in_labs: labs_in(world, home).map(|l| l.store.amount_of(c)).sum::<i32>()
                     / engine::BOOST_MINERAL_PER_PART,
             })
             .filter(|h| h.parts > 0)
@@ -74,12 +74,7 @@ pub fn strength(part: Part, compound: ResourceType) -> i32 {
 /// `BOOSTS` rank: a colony short of stock runs short of the
 /// lowest-ranked.
 pub fn boosted_by(body: &[Part], stock: &mut Stock) -> Visits {
-    let rank = |p: Part| {
-        (BOOSTS.iter())
-            .filter(|(c, _)| takes(p, *c))
-            .map(|(_, r)| *r)
-            .max()
-    };
+    let rank = |p: Part| (BOOSTS.iter()).filter(|(c, _)| takes(p, *c)).map(|(_, r)| *r).max();
     let mut order: Vec<Part> = (vocabulary::ALL_BODY_PARTS.iter().copied())
         .filter(|p| body.contains(p) && stock.held.iter().any(|h| takes(*p, h.compound)))
         .collect();
@@ -145,14 +140,10 @@ pub fn boosting(world: &World, room: RoomName, boosted: &[&str]) -> Boosting {
     let mut queue = LabQueue::default();
 
     for c in bodies {
-        let bare: Vec<Part> = (c.body.iter())
-            .filter(|p| p.boost.is_none())
-            .map(|p| p.kind)
-            .collect();
+        let bare: Vec<Part> =
+            (c.body.iter()).filter(|p| p.boost.is_none()).map(|p| p.kind).collect();
         let on: Vec<ResourceType> = c.body.iter().filter_map(|p| p.boost).collect();
-        let had = (0..on.len())
-            .filter(|i| !on[..*i].contains(&on[*i]))
-            .count();
+        let had = (0..on.len()).filter(|i| !on[..*i].contains(&on[*i])).count();
         let mut share = left.clone();
         let by = boosted_by(&bare, &mut share);
         let age = engine::lifetime(c.body.iter().map(|p| p.kind)) - c.ticks_to_live;
@@ -174,11 +165,7 @@ pub fn boosting(world: &World, room: RoomName, boosted: &[&str]) -> Boosting {
             creep: c.id,
             lab: lab.id,
             at: lab.pos,
-            load: Load {
-                compound,
-                mineral,
-                energy,
-            },
+            load: Load { compound, mineral, energy },
             // No carrier: the body fights unboosted rather than stand at a lab nothing fills.
             stands: holds_room_for(lab, compound) && (can_boost(lab, compound) || carrier),
             carried: can_boost(lab, compound) || carrier,
@@ -206,10 +193,7 @@ fn booster<'a>(
     let reagents = roles_of(&all).map(|r| r.reagents);
     let reagent = |l: &world::Structure| reagents.is_some_and(|(a, b)| l.id == a || l.id == b);
     let other = |l: &world::Structure| {
-        (l.store.held.iter())
-            .filter(|(r, _)| is_mineral(*r))
-            .map(|(_, n)| *n)
-            .sum::<i32>()
+        (l.store.held.iter()).filter(|(r, _)| is_mineral(*r)).map(|(_, n)| *n).sum::<i32>()
     };
 
     let free =
@@ -275,10 +259,7 @@ fn boost_need(creep: &world::Creep, compound: ResourceType) -> (i32, i32) {
         .filter(|p| p.boost.is_none() && vocabulary::takes(p.kind, compound))
         .count() as i32;
 
-    (
-        parts * engine::BOOST_MINERAL_PER_PART,
-        parts * engine::BOOST_ENERGY_PER_PART,
-    )
+    (parts * engine::BOOST_MINERAL_PER_PART, parts * engine::BOOST_ENERGY_PER_PART)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -300,14 +281,8 @@ pub fn roles_of(labs: &[(Id, Pos)]) -> Option<Roles> {
                 .filter(|(id, at)| id != a && id != b && reaches(at, at_a) && reaches(at, at_b))
                 .map(|(id, _)| *id)
                 .collect();
-            if best
-                .as_ref()
-                .map_or(!outputs.is_empty(), |r| outputs.len() > r.outputs.len())
-            {
-                best = Some(Roles {
-                    reagents: (*a, *b),
-                    outputs,
-                });
+            if best.as_ref().map_or(!outputs.is_empty(), |r| outputs.len() > r.outputs.len()) {
+                best = Some(Roles { reagents: (*a, *b), outputs });
             }
         }
     }
@@ -316,9 +291,7 @@ pub fn roles_of(labs: &[(Id, Pos)]) -> Option<Roles> {
 
 pub const ORES: [ResourceType; 7] = {
     use ResourceType::*;
-    [
-        Hydrogen, Oxygen, Utrium, Keanium, Lemergium, Zynthium, Catalyst,
-    ]
+    [Hydrogen, Oxygen, Utrium, Keanium, Lemergium, Zynthium, Catalyst]
 };
 
 /// The owner's rank of the part each T3 boosts.

@@ -3,20 +3,23 @@
 //! the metrics measured. The wasm driver and `sim/` call it alike.
 use std::collections::BTreeMap;
 
+use fabot_atlas::Atlas;
+use fabot_base::{
+    declarations::Declarations,
+    intel::Intel,
+    intents::{Action, Refusal, Telemetry},
+    tiles,
+    world::{RoomName, Sightings, World},
+};
+use fabot_layout::shape::Standing;
+use fabot_observe::{
+    engagements,
+    metrics::{self, Metrics},
+};
+use fabot_tactics::Offer;
 use screeps::LocalRoomTerrain;
 
-use crate::memory::Memory;
-use crate::tick;
-use fabot_atlas::Atlas;
-use fabot_base::declarations::Declarations;
-use fabot_base::intel::Intel;
-use fabot_base::intents::{Action, Refusal, Telemetry};
-use fabot_base::tiles;
-use fabot_base::world::{RoomName, Sightings, World};
-use fabot_layout::shape::Standing;
-use fabot_observe::engagements;
-use fabot_observe::metrics::{self, Metrics};
-use fabot_tactics::Offer;
+use crate::{memory::Memory, tick};
 
 /// `ARCHITECTURE.md` §4's heap rows `decide` reads and hands back; empty after a reset.
 #[derive(Default)]
@@ -141,12 +144,7 @@ where
     }
 
     counts.extend(walked);
-    let tick::Decided {
-        mut result,
-        sightings,
-        atlas,
-        ..
-    } = decided;
+    let tick::Decided { mut result, sightings, atlas, .. } = decided;
     heap.standing = std::mem::take(&mut result.state.layout);
     heap.sightings = sightings;
     heap.atlas = atlas;

@@ -1,5 +1,4 @@
-use crate::grid::Footprint;
-use crate::tiles::Tile;
+use crate::{grid::Footprint, tiles::Tile};
 
 /// Why a body stands idle, set where that is decided; no decision reads it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, strum::IntoStaticStr)]

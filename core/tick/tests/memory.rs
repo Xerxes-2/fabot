@@ -23,17 +23,11 @@ const OURS: &str = concat!(
 #[test]
 fn written_back_is_v2_alone_as_read() {
     let theirs = OURS.replacen(r#""v2":"#, r#""sos":{"b":1,"a":[1.5,"x",null]},"v2":"#, 1);
-    let theirs = format!(
-        "{}{}",
-        &theirs[..theirs.len() - 1],
-        r#","creeps":{"dead":{}},"profiler":7}"#
-    );
+    let theirs =
+        format!("{}{}", &theirs[..theirs.len() - 1], r#","creeps":{"dead":{}},"profiler":7}"#);
     let mut memory = Memory::of_text(theirs);
     let state = memory.state();
-    assert_eq!(
-        (state.fight.groups.len(), state.fight.engagements.len()),
-        (1, 3)
-    );
+    assert_eq!((state.fight.groups.len(), state.fight.engagements.len()), (1, 3));
     assert_eq!(memory.written(&state).as_deref(), Some(OURS));
     let mut memory = Memory::of_text(OURS.to_string());
     assert_eq!(memory.written(&memory.state()), None);
@@ -41,14 +35,9 @@ fn written_back_is_v2_alone_as_read() {
 
 #[test]
 fn garbled_reads_as_none() {
-    for text in [
-        "",
-        "null",
-        "[1]",
-        "{\"v2\":7}",
-        "{\"v2\":{\"fight\":{\"groups\":[{}]}}}",
-        "{\"v2\":",
-    ] {
+    for text in
+        ["", "null", "[1]", "{\"v2\":7}", "{\"v2\":{\"fight\":{\"groups\":[{}]}}}", "{\"v2\":"]
+    {
         let mut memory = Memory::of_text(text.to_string());
         let state = memory.state();
         assert!(state.fight.groups.is_empty() && state.economy.assignments.is_empty());
@@ -62,10 +51,7 @@ fn garbled_reads_as_none() {
 #[test]
 fn declarations_read_each_key() {
     let (declared, faults) = Memory::of_text(OURS.to_string()).declarations();
-    assert_eq!(
-        (declared.tuning.reserve_lifetimes, faults),
-        (1.5, Vec::new())
-    );
+    assert_eq!((declared.tuning.reserve_lifetimes, faults), (1.5, Vec::new()));
     assert_eq!(declared.outposts[0].sources[0].pos.x, 5);
     assert_eq!(declared.tactics.len(), 1);
     assert!(declared.allies.contains("A"));

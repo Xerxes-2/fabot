@@ -1,8 +1,10 @@
-use fabot_base::declarations::MUSTER_RANGE;
-use fabot_base::engine;
 /// Ahead of `State` so `State` can hold the standing plan.
 use fabot_base::tiles::{self, Tile};
-use fabot_base::world::{Built, Pos, RoomName, StructureType};
+use fabot_base::{
+    declarations::MUSTER_RANGE,
+    engine,
+    world::{Built, Pos, RoomName, StructureType},
+};
 
 /// `Level`: from which the engine allows it (its rank among its kind against
 /// CONTROLLER_STRUCTURES), or the level a rule gives a road or container.
@@ -46,9 +48,7 @@ impl Plan {
     /// Hivemind's navigation matrix: the ring's walls count whether or not
     /// Strategy builds the ring yet, since a room it later keeps walls them.
     pub fn solid(&self) -> impl Iterator<Item = Tile> + '_ {
-        (self.items.iter().chain(&self.ring))
-            .filter(|i| !i.kind.walkable())
-            .map(|i| i.tile)
+        (self.items.iter().chain(&self.ring)).filter(|i| !i.kind.walkable()).map(|i| i.tile)
     }
 
     /// The directions a spawn at `spawn` bears a body onto: `open` and walked
@@ -65,10 +65,7 @@ impl Plan {
             .filter(|t| open(*t) && steps[*t] != tiles::UNREACHED)
             .collect();
         doors.sort_by_key(|t| shut[*t]);
-        doors
-            .into_iter()
-            .map(|t| tiles::direction(spawn, t))
-            .collect()
+        doors.into_iter().map(|t| tiles::direction(spawn, t)).collect()
     }
 }
 
@@ -127,10 +124,12 @@ pub fn muster(
 
 #[cfg(test)]
 mod tests {
-    use crate::fixtures as fx;
-    use crate::place::WALL;
-    use fabot_base::tiles::Tile;
-    use fabot_base::world::{Built, StructureType};
+    use fabot_base::{
+        tiles::Tile,
+        world::{Built, StructureType},
+    };
+
+    use crate::{fixtures as fx, place::WALL};
 
     #[test]
     fn every_planned_spawn_has_a_door() {

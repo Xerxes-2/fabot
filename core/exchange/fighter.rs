@@ -1,9 +1,11 @@
 use std::cmp::Reverse;
 
-use fabot_base::grid::{self, FatigueFactor, step_ticks};
-use fabot_base::vocabulary::{Part, ResourceType, takes};
-use fabot_base::world::Pos;
-use fabot_base::{boost, engine};
+use fabot_base::{
+    boost, engine,
+    grid::{self, FatigueFactor, step_ticks},
+    vocabulary::{Part, ResourceType, takes},
+    world::Pos,
+};
 
 /// A body as the exchange reads it, on either side.
 #[derive(Clone, Debug, PartialEq)]
@@ -82,12 +84,7 @@ pub fn gait_of(
 ) -> FatigueFactor {
     let dead = body.len() - engine::live_parts(body, hits).len();
     let boost = |i: usize| boosts.get(i).copied().flatten();
-    grid::factor(
-        body.iter()
-            .enumerate()
-            .map(|(i, p)| (*p, boost(i), i >= dead)),
-        load,
-    )
+    grid::factor(body.iter().enumerate().map(|(i, p)| (*p, boost(i), i >= dead)), load)
 }
 
 pub fn cast(body: &[Part]) -> Fighter {
@@ -113,13 +110,7 @@ pub fn cast_boosted<'a>(
                 .collect();
             Fighter {
                 lab_wait: queue.wait_with(0),
-                ..of_parts(
-                    body,
-                    &boosts,
-                    engine::PART_HITS * body.len() as i32,
-                    None,
-                    0,
-                )
+                ..of_parts(body, &boosts, engine::PART_HITS * body.len() as i32, None, 0)
             }
         })
         .collect()
@@ -148,11 +139,7 @@ pub fn damage_at(f: &Fighter, range: i32) -> i32 {
 
 /// A `heal` beside an `attack` drops the attack, so a body that swings heals nothing.
 pub fn heal_at(f: &Fighter, range: i32) -> i32 {
-    if f.attack > 0 && range <= engine::MELEE_RANGE {
-        0
-    } else {
-        healing(f)
-    }
+    if f.attack > 0 && range <= engine::MELEE_RANGE { 0 } else { healing(f) }
 }
 
 pub fn healing(f: &Fighter) -> i32 {

@@ -10,13 +10,8 @@ use serde_json::{Value, json};
 
 use super::{Duel, Orders, Sample, Side, Thing, View};
 
-pub const FLAGS: [(&str, u64); 5] = [
-    ("--rollout", 0),
-    ("--replan", 10),
-    ("--rounds", 1),
-    ("--theirs", 0),
-    ("--check-fork", 0),
-];
+pub const FLAGS: [(&str, u64); 5] =
+    [("--rollout", 0), ("--replan", 10), ("--rounds", 1), ("--theirs", 0), ("--check-fork", 0)];
 
 /// krebs's `World` holds no `Clone`, so a fork copies its fields by hand: a field krebs adds is
 /// missed silently until `--check-fork` sees a forked duel end otherwise.
@@ -40,13 +35,7 @@ fn fork(d: &Duel) -> Duel {
     w.active.list().iter().for_each(|&r| f.active.insert(r));
     f.reindex();
     let (first, now) = (d.first.clone(), d.now.clone());
-    Duel {
-        world: f,
-        first,
-        now,
-        real: d.real.clone(),
-        ..*d
-    }
+    Duel { world: f, first, now, real: d.real.clone(), ..*d }
 }
 
 /// The duel forked every tick; whether it ends as the unforked one does.
@@ -70,11 +59,7 @@ struct Aim<'v> {
 impl<'v> Aim<'v> {
     fn toward(target: &'v Thing, range: Option<u32>) -> Option<Aim<'v>> {
         let goals = range.map_or_default(|r| vec![(target, r)]);
-        Some(Aim {
-            target,
-            goals,
-            flee: false,
-        })
+        Some(Aim { target, goals, flee: false })
     }
 }
 
@@ -86,18 +71,12 @@ fn close<'v>(c: &Thing, v: &View<'v>) -> Option<Aim<'v>> {
 fn kite<'v>(c: &Thing, v: &View<'v>) -> Option<Aim<'v>> {
     let target = c.closest(&v.foes)?;
     let armed = |f: &&&Thing| f.has(Part::Attack) || f.has(Part::RangedAttack);
-    let near: Vec<_> = (v.foes.iter().filter(armed))
-        .filter(|f| c.range(f) <= 2)
-        .map(|f| (*f, 3))
-        .collect();
+    let near: Vec<_> =
+        (v.foes.iter().filter(armed)).filter(|f| c.range(f) <= 2).map(|f| (*f, 3)).collect();
     if near.is_empty() {
         return Aim::toward(target, (c.range(target) > 3).then_some(3));
     }
-    Some(Aim {
-        target,
-        goals: near,
-        flee: true,
-    })
+    Some(Aim { target, goals: near, flee: true })
 }
 
 fn focus<'v>(c: &Thing, v: &View<'v>) -> Option<Aim<'v>> {
@@ -116,19 +95,12 @@ fn retreat<'v>(c: &Thing, v: &View<'v>) -> Option<Aim<'v>> {
         return Aim::toward(target, None);
     }
     let goals = v.foes.iter().map(|f| (*f, 5)).collect();
-    Some(Aim {
-        target,
-        goals,
-        flee: true,
-    })
+    Some(Aim { target, goals, flee: true })
 }
 
 /// A body's script by name: none aims, the emitter acts on its own.
 #[derive(Clone, Copy)]
-struct Script(
-    &'static str,
-    Option<for<'v> fn(&Thing, &View<'v>) -> Option<Aim<'v>>>,
-);
+struct Script(&'static str, Option<for<'v> fn(&Thing, &View<'v>) -> Option<Aim<'v>>>);
 
 impl PartialEq for Script {
     fn eq(&self, other: &Script) -> bool {
@@ -158,12 +130,7 @@ impl Orders<'_> {
         let Script(_, Some(aim)) = script else {
             return self.act(c, v);
         };
-        let Some(Aim {
-            target,
-            goals,
-            flee,
-        }) = aim(c, v)
-        else {
+        let Some(Aim { target, goals, flee }) = aim(c, v) else {
             return;
         };
         let within = |r: i32| {
@@ -200,10 +167,7 @@ impl Duel {
         let emit = |o: &mut Orders, c: &Thing, v: &View| o.act(c, v);
         let theirs = |o: &mut Orders, c: &Thing, v: &View| {
             let (ids, scripts) = assignment;
-            let at = ids
-                .iter()
-                .position(|id| *id == c.id)
-                .expect("one of the side's");
+            let at = ids.iter().position(|id| *id == c.id).expect("one of the side's");
             o.play(scripts[at], c, v);
         };
         self.tick(&mut self.engine(), pf, [&emit, &theirs])
@@ -301,12 +265,7 @@ pub fn duel(
     }
     let mut out = d.result();
     let named = |s: &[Script]| s.iter().map(|s| s.0).collect::<Vec<_>>();
-    out["plans"] = json!(
-        changes
-            .iter()
-            .map(|(t, p)| json!([t, named(&p.1)]))
-            .collect::<Vec<_>>()
-    );
+    out["plans"] = json!(changes.iter().map(|(t, p)| json!([t, named(&p.1)])).collect::<Vec<_>>());
     out["decisions"] = json!(decisions);
     out["rollouts"] = json!(rollouts);
     out["ms"] = json!(ms);

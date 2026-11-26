@@ -1,11 +1,15 @@
 //! Hivemind's room builder and its tower step (MIT, © David Franke), step
 //! for step: the plan around one centre, as labels.
-use fabot_base::tiles::{self, Tile, index};
-use fabot_base::world::Rules;
+use fabot_base::{
+    tiles::{self, Tile, index},
+    world::Rules,
+};
 
-use super::cut::{self, Rect};
-use super::ground::Ground;
-use super::place::{BLOCKED, Labels, Manager, ROAD, SWAMP, WALL, area, xy};
+use super::{
+    cut::{self, Rect},
+    ground::Ground,
+    place::{BLOCKED, Labels, Manager, ROAD, SWAMP, WALL, area, xy},
+};
 
 const ENDANGERED: u8 = 0;
 const SAFE: u8 = 1;
@@ -35,12 +39,7 @@ const DECORATIVE: [[u8; 12]; 14] = [
 pub fn safe_sides(terrain: &[u8]) -> [bool; 4] {
     let open = |x: i32, y: i32| terrain[index(x, y).index()] & WALL == 0;
     let any = |f: &dyn Fn(i32) -> bool| (1..49).any(f);
-    [
-        !any(&|i| open(i, 0)),
-        !any(&|i| open(49, i)),
-        !any(&|i| open(i, 49)),
-        !any(&|i| open(0, i)),
-    ]
+    [!any(&|i| open(i, 0)), !any(&|i| open(49, i)), !any(&|i| open(i, 49)), !any(&|i| open(0, i))]
 }
 
 /// `getExitCenters`, by side N, S, W, E.
@@ -80,9 +79,8 @@ pub fn exit_centers(terrain: &[u8]) -> Vec<Tile> {
 pub fn centers(ground: &Ground, walls: &[u8], exits: &[u8]) -> Vec<Tile> {
     let open = |t: Tile| ground.terrain[t] & WALL == 0;
     let roads = Manager::new(&ground.terrain, walls, exits);
-    let walks: Vec<_> = (ground.sources.iter().chain(&ground.controller))
-        .map(|r| roads.road_from(*r))
-        .collect();
+    let walks: Vec<_> =
+        (ground.sources.iter().chain(&ground.controller)).map(|r| roads.road_from(*r)).collect();
     // Each source's energy walks to the core, and all of it on to the controller.
     let more = (ground.sources.len() as u32).saturating_sub(1);
     let walk = |t: Tile| {
@@ -128,9 +126,7 @@ pub(super) fn allowed(rules: &Rules, label: &str) -> usize {
         "wall" => "constructedWall",
         other => other,
     };
-    (name.parse())
-        .map_or(0, |kind| rules.allowed(kind, 8))
-        .max(0) as usize
+    (name.parse()).map_or(0, |kind| rules.allowed(kind, 8)).max(0) as usize
 }
 
 impl Builder<'_> {
@@ -188,8 +184,7 @@ impl Builder<'_> {
         }) {
             side.push(n);
         }
-        self.most_space(sx, sy, &side)
-            .or_else(|| self.most_space(sx, sy, ring))
+        self.most_space(sx, sy, &side).or_else(|| self.most_space(sx, sy, ring))
     }
 
     fn most_space(&self, sx: i32, sy: i32, seats: &[Tile]) -> Option<Tile> {
@@ -332,16 +327,7 @@ impl Builder<'_> {
 
     fn core(&mut self, c: Tile) {
         let (cx, cy) = xy(c);
-        for (dx, dy) in [
-            (-2, 0),
-            (2, 0),
-            (0, -2),
-            (0, 2),
-            (-1, -1),
-            (-1, 1),
-            (1, -1),
-            (1, 1),
-        ] {
+        for (dx, dy) in [(-2, 0), (2, 0), (0, -2), (0, 2), (-1, -1), (-1, 1), (1, -1), (1, 1)] {
             self.m.plan_at(index(cx + dx, cy + dy), "road", Some(ROAD));
         }
         self.m.place(index(cx, cy + 1), "storage");
@@ -354,10 +340,7 @@ impl Builder<'_> {
     /// The tiles around a bay, lowest first so no scan order picks them.
     fn seats(&self, bay: Tile, source: bool) -> Vec<Tile> {
         let mut seats: Vec<Tile> = (tiles::around(bay).iter().copied())
-            .filter(|t| {
-                self.m
-                    .buildable(tiles::x_of(*t), tiles::y_of(*t), false, source)
-            })
+            .filter(|t| self.m.buildable(tiles::x_of(*t), tiles::y_of(*t), false, source))
             .collect();
         seats.sort_unstable();
         seats
@@ -484,10 +467,7 @@ impl Builder<'_> {
                 continue;
             }
             let count = (tiles::around(next).iter())
-                .filter(|n| {
-                    self.m
-                        .buildable(tiles::x_of(**n), tiles::y_of(**n), false, false)
-                })
+                .filter(|n| self.m.buildable(tiles::x_of(**n), tiles::y_of(**n), false, false))
                 .count();
             if count <= most {
                 continue;
@@ -738,13 +718,8 @@ impl Builder<'_> {
                 }
             }
         }
-        let mut ramparts: Vec<(Tile, f64)> = self
-            .m
-            .plan
-            .of("rampart")
-            .into_iter()
-            .map(|t| (t, 1.0))
-            .collect();
+        let mut ramparts: Vec<(Tile, f64)> =
+            self.m.plan.of("rampart").into_iter().map(|t| (t, 1.0)).collect();
         let mut count = 0;
         let total = allowed(self.rules, "tower");
         while self.more("tower") {
@@ -894,12 +869,7 @@ pub fn build(rules: &Rules, ground: &Ground, dist: (&[u8], &[u8]), center: Tile)
         b.m.plan_at(*c, "exit", None);
     }
     let (cx, cy) = xy(center);
-    b.entrances = vec![
-        index(cx + 2, cy),
-        index(cx - 2, cy),
-        index(cx, cy + 2),
-        index(cx, cy - 2),
-    ];
+    b.entrances = vec![index(cx + 2, cy), index(cx - 2, cy), index(cx, cy + 2), index(cx, cy - 2)];
     b.m.plan_at(center, "center", None);
     b.harvesters(center)?;
     b.upgrader(controller)?;
@@ -919,8 +889,5 @@ pub fn build(rules: &Rules, ground: &Ground, dist: (&[u8], &[u8]), center: Tile)
     b.towers(safe);
     b.roads_to_ramps();
     b.on_ramps();
-    Some(Built {
-        plan: b.m.plan,
-        center,
-    })
+    Some(Built { plan: b.m.plan, center })
 }

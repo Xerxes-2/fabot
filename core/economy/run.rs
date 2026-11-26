@@ -1,26 +1,32 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use fabot_atlas::{self as atlas, Atlas, Context, Mover, Target};
-use fabot_base::declarations::{self, Declarations};
-use fabot_base::engine;
-use fabot_base::grid::{self, Footprint};
-use fabot_base::intel::Intel;
-use fabot_base::intel::Scout;
-use fabot_base::intents::{
-    Action, Ask, CreepAct, LabAct, LinkAct, ModuleOutput, Rank, SpawnAct, Telemetry, TerminalAct,
+use fabot_base::{
+    declarations::{self, Declarations},
+    engine,
+    grid::{self, Footprint},
+    intel::{Intel, Scout},
+    intents::{
+        Action, Ask, CreepAct, LabAct, LinkAct, ModuleOutput, Rank, SpawnAct, Telemetry,
+        TerminalAct,
+    },
+    tiles::{self, TileSet},
+    vocabulary::{
+        Part,
+        ResourceType::{self, Energy},
+    },
+    wish::{Idle, Wish},
+    world::{Creep, Id, Pos, RoomName, StructureType, World},
 };
-use fabot_base::tiles::{self, TileSet};
-use fabot_base::vocabulary::Part;
-use fabot_base::vocabulary::ResourceType::{self, Energy};
-use fabot_base::wish::{Idle, Wish};
-use fabot_base::world::{Creep, Id, Pos, RoomName, StructureType, World};
 use fabot_mv::plan;
 
-use super::bodies::{self, Pattern};
-use super::derived::{self, Body, Derived, Ground, LinkFact, RefillFact};
-use super::jobs::{self, Jobs};
-use super::slots::{self, Job, Slot, distance};
-use super::task::{self, Assignment, Task};
+use super::{
+    bodies::{self, Pattern},
+    derived::{self, Body, Derived, Ground, LinkFact, RefillFact},
+    jobs::{self, Jobs},
+    slots::{self, Job, Slot, distance},
+    task::{self, Assignment, Task},
+};
 
 /// Re-chosen only on arrival off the exit band, so a walk is never turned
 /// mid-way nor on a border; a scout whose open rooms lie past `REACH_HOPS`
@@ -30,32 +36,26 @@ fn scouting(
     derived: &Derived,
     held: &BTreeMap<String, Assignment>,
 ) -> BTreeMap<String, RoomName> {
-    let mut scouts: Vec<&Body> = (derived.bodies.iter())
-        .filter(|b| b.pattern == Pattern::Scout)
-        .collect();
+    let mut scouts: Vec<&Body> =
+        (derived.bodies.iter()).filter(|b| b.pattern == Pattern::Scout).collect();
     scouts.sort_by(|a, b| a.name.cmp(&b.name));
     let kept = |b: &Body| match held.get(&b.name).and_then(|a| a.task.as_ref()) {
         Some(Task::Scout(room)) => (derived.scouts.iter())
-            .find(|(at, _, _)| at.room == *room)
-            .filter(|(at, _, _)| !b.pos.within(Task::Scout(*room).range_of(), at))
+            .find(|(at, ..)| at.room == *room)
+            .filter(|(at, ..)| !b.pos.within(Task::Scout(*room).range_of(), at))
             .map(|_| *room),
         _ => None,
     };
-    let mut out: BTreeMap<String, RoomName> = (scouts.iter())
-        .filter_map(|b| Some((b.name.clone(), kept(b)?)))
-        .collect();
+    let mut out: BTreeMap<String, RoomName> =
+        (scouts.iter()).filter_map(|b| Some((b.name.clone(), kept(b)?))).collect();
     for b in scouts {
         let walks = |open: &dyn Fn(RoomName) -> bool| {
-            let rooms = (derived.scouts.iter()).filter(|(at, _, _)| open(at.room));
+            let rooms = (derived.scouts.iter()).filter(|(at, ..)| open(at.room));
             // A radius room's route may run past the trees' reach: priced by
             // crossings, as a walk's tree that far floods every region in it.
             let far = |at: &Pos| {
-                let rooms = atlas.route(
-                    &BTreeSet::new(),
-                    declarations::FAR_HOPS,
-                    b.pos.room,
-                    at.room,
-                )?;
+                let rooms =
+                    atlas.route(&BTreeSet::new(), declarations::FAR_HOPS, b.pos.room, at.room)?;
                 Some(Atlas::CROSSING_TICKS * (rooms.len() as i32 - 1))
             };
             atlas::onward(rooms.filter_map(|(at, age, _)| {
@@ -149,9 +149,7 @@ fn piled(derived: &Derived, id: task::Target) -> bool {
 fn act_of(derived: &Derived, task: &Task) -> Option<CreepAct> {
     let held = |id: task::Target| {
         derived.grounds.iter().any(|g| {
-            g.controller
-                .as_ref()
-                .is_some_and(|c| id == c.id.into() && derived::invader_held(c))
+            g.controller.as_ref().is_some_and(|c| id == c.id.into() && derived::invader_held(c))
         })
     };
 
@@ -214,23 +212,17 @@ fn link_send(g: &Ground) -> Option<Action> {
         .filter(|l| l.role.is_source() && l.energy > 0 && l.cooldown == 0)
         .min_by_key(|l| -l.energy)
         .map(|l| (l, l.energy));
-    let hub = (hubs())
-        .filter(|l| l.cooldown == 0 && l.energy > 0)
-        .min_by_key(|l| -l.energy);
+    let hub = (hubs()).filter(|l| l.cooldown == 0 && l.energy > 0).min_by_key(|l| -l.energy);
     let (from, out) = pick(over, hub.map(|l| (l, l.energy)))?;
     let under = (g.links.iter())
         .filter(|l| l.role.is_controller() && l.free > 0)
         .min_by_key(|l| -l.free)
         .map(|l| (l, l.free));
-    let hub = (hubs().filter(|l| l.free > 0))
-        .min_by_key(|l| l.energy)
-        .map(|l| (l, l.free));
+    let hub = (hubs().filter(|l| l.free > 0)).min_by_key(|l| l.energy).map(|l| (l, l.free));
     let (to, room) = pick(under, hub)?;
     let amount = out.min(room);
-    (from.id != to.id && amount >= LINK_MIN_SEND).then_some(Action::Link(
-        from.id,
-        LinkAct::TransferEnergy(to.id, amount),
-    ))
+    (from.id != to.id && amount >= LINK_MIN_SEND)
+        .then_some(Action::Link(from.id, LinkAct::TransferEnergy(to.id, amount)))
 }
 
 /// One send a tick off cooldown: what the terminal holds of the first
@@ -244,29 +236,17 @@ fn terminal_send(g: &Ground) -> Option<Action> {
     }
     let apart = tiles::rooms_apart(g.room, *home);
     let energy = t.store.amount_of(Energy);
-    let ores = g
-        .shipment
-        .iter()
-        .filter(|(r, _)| *r != Energy)
-        .map(|(_, n)| *n);
+    let ores = g.shipment.iter().filter(|(r, _)| *r != Energy).map(|(_, n)| *n);
     let kept = super::balance::send_fee(ores, apart);
     g.shipment.iter().find_map(|(ore, owed)| {
-        let (pays, sent) = if *ore == Energy {
-            (energy - kept, 1)
-        } else {
-            (energy, 0)
-        };
+        let (pays, sent) = if *ore == Energy { (energy - kept, 1) } else { (energy, 0) };
         let mut amount = t.store.amount_of(*ore).min(*owed).min(*free);
         while amount > 0 && engine::send_cost(amount, apart) + sent * amount > pays {
             amount = amount * 9 / 10;
         }
         (amount >= super::balance::LEAST_SEND.min(*owed)).then_some(Action::Terminal(
             t.id,
-            TerminalAct::Send {
-                resource: *ore,
-                amount,
-                to: *home,
-            },
+            TerminalAct::Send { resource: *ore, amount, to: *home },
         ))
     })
 }
@@ -349,10 +329,7 @@ fn reserve_seats(atlas: &Atlas, derived: &Derived, at: &Pos) -> Option<Vec<Pos>>
         })
         .collect();
     let seats = atlas.seats(Footprint::One, 1, at);
-    let open: Vec<Pos> = (seats.iter())
-        .filter(|p| !posts.contains(p))
-        .copied()
-        .collect();
+    let open: Vec<Pos> = (seats.iter()).filter(|p| !posts.contains(p)).copied().collect();
     (!open.is_empty() && open.len() < seats.len()).then_some(open)
 }
 
@@ -379,13 +356,8 @@ fn target_of(
                 .find(|g| g.room == at.room)
                 .map_or(&[][..], |g| &g.buffer_seats[..]);
             let seats = atlas.seats(Footprint::One, task.range_of(), &at);
-            Some(
-                seats
-                    .into_iter()
-                    .filter(|p| !buffer.contains(p))
-                    .collect::<Vec<_>>(),
-            )
-            .filter(|s| !s.is_empty())
+            Some(seats.into_iter().filter(|p| !buffer.contains(p)).collect::<Vec<_>>())
+                .filter(|s| !s.is_empty())
         }
         _ => None,
     };
@@ -405,10 +377,9 @@ fn target_of(
             }
         }
         // A scout walks as far as its choice reached (`scouting`).
-        None if matches!(task, Task::Scout(_)) => Target {
-            max_hops: declarations::FAR_HOPS,
-            ..atlas::target_at(&at, task.range_of())
-        },
+        None if matches!(task, Task::Scout(_)) => {
+            Target { max_hops: declarations::FAR_HOPS, ..atlas::target_at(&at, task.range_of()) }
+        }
         None => atlas::target_at(&at, task.range_of()),
     };
     (target, seats)
@@ -450,19 +421,14 @@ fn work(
         && body.free > 0
         && body.energy < body.work * engine::UPGRADE_DRAIN_PER_WORK
     {
-        acts.push(Action::Creep(
-            creep.name.clone(),
-            CreepAct::Withdraw(id, Energy),
-        ));
+        acts.push(Action::Creep(creep.name.clone(), CreepAct::Withdraw(id, Energy)));
     }
     let digs = matches!(slot.job, Job::Dig(_));
     if let Some(act) = raising(derived, body, slot) {
         acts.push(Action::Creep(creep.name.clone(), act));
     } else {
         let arrived = creep.pos.within(task.range_of(), &at)
-            && seats
-                .as_ref()
-                .is_none_or(|seats| seats.contains(&creep.pos))
+            && seats.as_ref().is_none_or(|seats| seats.contains(&creep.pos))
             && ready(task);
         // The API refuses a spend from an empty store before the draw lands.
         let can = match task {
@@ -489,19 +455,13 @@ fn work(
             .map(|l| l.id);
         if let Some(to) = bay.or(link) {
             if body.energy > 0 {
-                acts.push(Action::Creep(
-                    creep.name.clone(),
-                    CreepAct::Transfer(to, Energy),
-                ));
+                acts.push(Action::Creep(creep.name.clone(), CreepAct::Transfer(to, Energy)));
             }
             let under = (g.stores.iter()).find(|s| s.pos == creep.pos && s.energy > 0);
             if let Some(c) = under.filter(|_| body.free > 0)
                 && let Some(id) = c.id.object()
             {
-                acts.push(Action::Creep(
-                    creep.name.clone(),
-                    CreepAct::Withdraw(id, Energy),
-                ));
+                acts.push(Action::Creep(creep.name.clone(), CreepAct::Withdraw(id, Energy)));
             }
         }
     }
@@ -517,9 +477,7 @@ pub struct EconomyState {
 /// `{ World with Creeps = filtered }`: a creep a fight holds is not in the
 /// economy, and only the creep list differs.
 fn seen<'w>(world: &'w World) -> Vec<&'w Creep> {
-    (world.creeps.iter())
-        .filter(|c| !declarations::fights(&c.name))
-        .collect()
+    (world.creeps.iter()).filter(|c| !declarations::fights(&c.name)).collect()
 }
 
 /// Each colony's spawn time a life left by its own bodies and its stock, read
@@ -533,14 +491,7 @@ pub fn spare(
 ) -> (BTreeMap<RoomName, f64>, BTreeMap<RoomName, i32>) {
     let seen = seen(world);
     let homes = derived::homes(world, &seen, atlas, declarations, ours);
-    let derived = derived::of_world(
-        homes,
-        (world, &seen),
-        atlas,
-        declarations,
-        ours,
-        (intel, &[]),
-    );
+    let derived = derived::of_world(homes, (world, &seen), atlas, declarations, ours, (intel, &[]));
     let owners = slots::owners(atlas, (&derived, declarations));
     let of = (&derived, &declarations.tuning);
     let (_, spare) = slots::colonies(atlas, of, &owners, &state.assignments);
@@ -569,10 +520,7 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
 
     let movers: BTreeMap<&str, Mover> = (seen.iter())
         .map(|c| {
-            let mover = Mover {
-                footprint: Footprint::One,
-                factor: grid::factor_of(c),
-            };
+            let mover = Mover { footprint: Footprint::One, factor: grid::factor_of(c) };
             (c.name.as_str(), mover)
         })
         .collect();
@@ -586,19 +534,8 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
 
     let asks = (casts.iter())
         .map(|cast| {
-            let rank = if cast.floor {
-                Rank::Floor
-            } else {
-                Rank::Economy
-            };
-            (
-                cast.colony,
-                Ask {
-                    body: cast.body.clone(),
-                    name: cast.name.clone(),
-                    rank,
-                },
-            )
+            let rank = if cast.floor { Rank::Floor } else { Rank::Economy };
+            (cast.colony, Ask { body: cast.body.clone(), name: cast.name.clone(), rank })
         })
         .collect();
     let telemetry = Telemetry {
@@ -606,9 +543,7 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
             ("parkedCarriers", slots::parked(&slots, &holders)),
             ("slotIdsShared", slots::shared_ids(&slots)),
         ],
-        short: (short.into_iter())
-            .map(|(room, p, n)| (room, p.into(), n))
-            .collect(),
+        short: (short.into_iter()).map(|(room, p, n)| (room, p.into(), n)).collect(),
         served: (jobs::served(&derived, &owners))
             .map(|(g, ci)| (g.room, derived.colonies[ci].room))
             .collect(),
@@ -617,10 +552,7 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
             .map(|c| {
                 let room = |r: RoomName| r.to_string();
                 let name = ("name", c.name.clone());
-                (
-                    "cast",
-                    vec![name, ("room", room(c.room)), ("colony", room(c.colony))],
-                )
+                ("cast", vec![name, ("room", room(c.room)), ("colony", room(c.colony))])
             })
             .collect(),
         ..Telemetry::default()
@@ -633,9 +565,8 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
         _ => true,
     };
     let stood: BTreeSet<Pos> = seen.iter().map(|c| c.pos).collect();
-    let bodies: BTreeMap<&str, &Body> = (derived.bodies.iter())
-        .map(|b| (b.name.as_str(), b))
-        .collect();
+    let bodies: BTreeMap<&str, &Body> =
+        (derived.bodies.iter()).map(|b| (b.name.as_str(), b)).collect();
 
     let kept = |name: &str| state.assignments.get(name).and_then(|a| a.task.clone());
     let held: Vec<(usize, &Body, Option<Task>)> = (assigned.iter())
@@ -655,15 +586,7 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
             let slot = Slot {
                 id: String::new(),
                 rank: 0,
-                ..Slot::new(
-                    0,
-                    false,
-                    Job::Scout(room),
-                    tiles::middle(room),
-                    "",
-                    0,
-                    Vec::new(),
-                )
+                ..Slot::new(0, false, Job::Scout(room), tiles::middle(room), "", 0, Vec::new())
             };
             Some((b.name.as_str(), slot))
         })
@@ -701,9 +624,8 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
             // A load held idle is lost to every sink.
             let loaded = creep.store.amount_of(Energy) > 0;
             let works = creep.live(Part::Work) > 0;
-            let sink = (derived.grounds.iter())
-                .filter(|g| g.room == creep.pos.room)
-                .find_map(|g| match (works, &g.controller, g.deposit()) {
+            let sink = (derived.grounds.iter()).filter(|g| g.room == creep.pos.room).find_map(
+                |g| match (works, &g.controller, g.deposit()) {
                     (true, Some(c), _)
                         if c.owner.is_ours() && !slots::fed(c) && !g.sites.is_empty() =>
                     {
@@ -719,7 +641,8 @@ pub fn decide(context: &mut Context, state: &mut EconomyState, scouts: &[Scout])
                     }
                     (false, _, Some(s)) => Some((s.pos, 0, CreepAct::Drop(Energy))),
                     _ => None,
-                });
+                },
+            );
             if let Some((to, reach, act)) = sink.filter(|_| loaded) {
                 if creep.pos.within(reach, &to) {
                     acts.push(Action::Creep(creep.name.clone(), act));
@@ -828,9 +751,8 @@ fn home(
     }
     let walk =
         |c: &&derived::Colony| distance(&*atlas, &creep.pos, &c.spawns[0].pos).unwrap_or(i32::MAX);
-    let home = (derived.colonies.iter().rev())
-        .min_by_key(walk)
-        .map_or(creep.pos, |c| c.spawns[0].pos);
+    let home =
+        (derived.colonies.iter().rev()).min_by_key(walk).map_or(creep.pos, |c| c.spawns[0].pos);
     plan::toward_round(atlas, creep, mover, &atlas::target_at(&home, 1), 1, danger)
 }
 
@@ -855,17 +777,17 @@ fn raising(derived: &Derived, body: &Body, slot: &Slot) -> Option<CreepAct> {
         }
         _ => None,
     };
-    kept.filter(|r| 2 * r.hits < r.hits_max)
-        .map(|r| CreepAct::Repair(r.id))
+    kept.filter(|r| 2 * r.hits < r.hits_max).map(|r| CreepAct::Repair(r.id))
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
 
+    use proptest::prelude::*;
+
     use super::*;
     use crate::arb;
-    use proptest::prelude::*;
 
     proptest! {
         #![proptest_config(fabot_base::testing::config(256))]

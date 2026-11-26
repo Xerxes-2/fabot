@@ -1,8 +1,9 @@
 /// Who is out there (`ARCHITECTURE.md` §6.1).
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::shape::Group;
 use fabot_base::world::{Creep, Id, Pos, RoomName, hostiles};
+
+use super::shape::Group;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
@@ -28,11 +29,7 @@ pub const REACH: i32 = 4;
 pub const LOST_GROUP_TICKS: i32 = 30;
 
 pub fn linked(a: &Pos, b: &Pos) -> bool {
-    if a.room == b.room {
-        a.within(REACH, b)
-    } else {
-        a.crow_flies(b) <= 1
-    }
+    if a.room == b.room { a.within(REACH, b) } else { a.crow_flies(b) <= 1 }
 }
 
 fn find(root: &mut [usize], mut i: usize) -> usize {
@@ -52,10 +49,8 @@ fn clusters<'a>(owned: &BTreeSet<RoomName>, hostiles: &'a [Creep]) -> Vec<Vec<&'
     sorted.sort_by_key(|a| a.id);
     let n = sorted.len();
     let mut root: Vec<usize> = (0..n).collect();
-    let armed: Vec<bool> = sorted
-        .iter()
-        .map(|c| hostiles::armed(owned, hostiles.iter(), c))
-        .collect();
+    let armed: Vec<bool> =
+        sorted.iter().map(|c| hostiles::armed(owned, hostiles.iter(), c)).collect();
 
     for (i, and) in armed.iter().enumerate() {
         if *and {
@@ -166,10 +161,7 @@ pub fn step(
             if best[gi] == Some(ci) {
                 match kept {
                     None => kept = Some(prev[gi].id),
-                    Some(into) => events.push(Event::Merged {
-                        into,
-                        from: prev[gi].id,
-                    }),
+                    Some(into) => events.push(Event::Merged { into, from: prev[gi].id }),
                 }
             }
         }
@@ -186,10 +178,7 @@ pub fn step(
                 seen_before = true;
 
                 if best[gi] != Some(ci) {
-                    events.push(Event::Split {
-                        from: prev[gi].id,
-                        into: id,
-                    });
+                    events.push(Event::Split { from: prev[gi].id, into: id });
                 }
             }
         }
@@ -225,13 +214,18 @@ pub fn step(
 
 #[cfg(test)]
 mod tests {
+    use fabot_base::{
+        vocabulary::Part,
+        world::{BodyPart, Owner, Store},
+    };
+    use proptest::{
+        bool::weighted,
+        collection::vec,
+        prelude::*,
+        sample::{Index, select},
+    };
+
     use super::*;
-    use fabot_base::vocabulary::Part;
-    use fabot_base::world::{BodyPart, Owner, Store};
-    use proptest::bool::weighted;
-    use proptest::collection::vec;
-    use proptest::prelude::*;
-    use proptest::sample::{Index, select};
 
     const GRACE: i32 = 3;
 
@@ -242,11 +236,7 @@ mod tests {
             owner: Owner::Stranger("rival".to_string()),
             pos,
             body: vec![BodyPart {
-                kind: if armed {
-                    Part::RangedAttack
-                } else {
-                    Part::Work
-                },
+                kind: if armed { Part::RangedAttack } else { Part::Work },
                 hits: 100,
                 boost: None,
             }],
@@ -285,20 +275,8 @@ mod tests {
 
     /// Who is there first, then one to six ticks of every pool id's turn.
     fn turns() -> impl Strategy<Value = Vec<Vec<Turn>>> {
-        let turn = (
-            -3..=3,
-            -3..=3,
-            weighted(6.0 / 7.0),
-            any::<bool>(),
-            arrival(),
-        )
-            .prop_map(|(dx, dy, stays, arrives, arrival)| Turn {
-                dx,
-                dy,
-                stays,
-                arrives,
-                arrival,
-            });
+        let turn = (-3..=3, -3..=3, weighted(6.0 / 7.0), any::<bool>(), arrival())
+            .prop_map(|(dx, dy, stays, arrives, arrival)| Turn { dx, dy, stays, arrives, arrival });
         vec(vec(turn, POOL), 2..=7)
     }
 

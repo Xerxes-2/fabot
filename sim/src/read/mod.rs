@@ -4,12 +4,16 @@
 //! observers looked at last tick.
 use std::collections::BTreeSet;
 
-use fabot_base::declarations::Declarations;
-use fabot_base::vocabulary::{self, Part};
-use fabot_base::world::*;
-use krebs::atom;
-use krebs::doc::{Atom, Obj, Val};
-use krebs::world::{UserIdx, World as Krebs};
+use fabot_base::{
+    declarations::Declarations,
+    vocabulary::{self, Part},
+    world::*,
+};
+use krebs::{
+    atom,
+    doc::{Atom, Obj, Val},
+    world::{UserIdx, World as Krebs},
+};
 use screeps::{
     CPU_BUCKET_MAX, GCL_MULTIPLY, GCL_POW, StructureType, controller_downgrade, controller_levels,
 };
@@ -22,20 +26,14 @@ fn username<'a>(k: &'a Krebs, user: &'a str) -> &'a str {
 }
 
 pub fn our_idx(v: &View) -> UserIdx {
-    let at =
-        v.k.users
-            .iter()
-            .position(|u| text(&u.doc, atom!("_id")) == v.us);
+    let at = v.k.users.iter().position(|u| text(&u.doc, atom!("_id")) == v.us);
     at.expect("our user") as UserIdx
 }
 
 /// `Game.gcl.level` off our points.
 fn rooms_allowed(v: &View) -> i32 {
     let points = num(&v.k.users[our_idx(v) as usize].doc, atom!("gcl"));
-    (points / f64::from(GCL_MULTIPLY))
-        .powf(1.0 / GCL_POW)
-        .floor() as i32
-        + 1
+    (points / f64::from(GCL_MULTIPLY)).powf(1.0 / GCL_POW).floor() as i32 + 1
 }
 
 /// The cost a destroyed structure's log line is credited with.
@@ -82,10 +80,7 @@ impl Reader<'_> {
         let by_resource =
             obj(o, atom!("storeCapacityResource")).map_or(0.0, |c| num(c, atom!("energy")));
         let whole = num(o, atom!("storeCapacity"));
-        Store {
-            held,
-            capacity: (if whole > 0.0 { whole } else { by_resource }) as i32,
-        }
+        Store { held, capacity: (if whole > 0.0 { whole } else { by_resource }) as i32 }
     }
 
     fn body(o: &Obj) -> Vec<BodyPart> {
@@ -159,19 +154,11 @@ impl Reader<'_> {
             pos: self.pos(room, o),
             hits: num(o, atom!("hits")) as i32,
             hits_max: num(o, atom!("hitsMax")) as i32,
-            store: if kind.has_store() {
-                Reader::store(o)
-            } else {
-                Store::default()
-            },
+            store: if kind.has_store() { Reader::store(o) } else { Store::default() },
             cooldown: if kind.has_cooldown() { cooldown } else { 0 },
             collapse: if core { collapse } else { 0 },
             deploy: if core { deploy } else { 0 },
-            level: if core {
-                num(o, atom!("level")) as i32
-            } else {
-                0
-            },
+            level: if core { num(o, atom!("level")) as i32 } else { 0 },
             spawn: (kind == StructureType::KeeperLair)
                 .then(|| num(o, atom!("nextSpawnTime")) as i32 - self.time)
                 .filter(|t| *t >= 0),
@@ -209,12 +196,7 @@ pub fn world(v: &View, declarations: &Declarations) -> World<'static> {
     let k = v.k;
     let time = k.time as i32;
     let me = username(k, v.us);
-    let r = Reader {
-        time,
-        declarations,
-        k,
-        me,
-    };
+    let r = Reader { time, declarations, k, me };
     let us = our_idx(v);
     let mut world = World {
         time,
@@ -254,8 +236,7 @@ pub fn world(v: &View, declarations: &Declarations) -> World<'static> {
             match kind {
                 "controller" => {
                     room.controller = Some(r.controller(name, o));
-                    room.structures
-                        .push(r.structure(name, StructureType::Controller, o));
+                    room.structures.push(r.structure(name, StructureType::Controller, o));
                 }
                 "source" => room.sources.push(Source {
                     id: Id::of_engine(text(o, atom!("_id"))),
@@ -271,24 +252,23 @@ pub fn world(v: &View, declarations: &Declarations) -> World<'static> {
                     amount: num(o, atom!("mineralAmount")) as i32,
                 }),
                 "constructionSite" => {
-                    room.sites
-                        .extend(text(o, atom!("structureType")).parse().map(|kind| Site {
-                            kind,
-                            id: Id::of_engine(text(o, atom!("_id"))),
-                            pos: r.pos(name, o),
-                            owner: r.owner(o),
-                            progress: num(o, atom!("progress")) as i32,
-                            progress_total: num(o, atom!("progressTotal")) as i32,
-                        }))
+                    room.sites.extend(text(o, atom!("structureType")).parse().map(|kind| Site {
+                        kind,
+                        id: Id::of_engine(text(o, atom!("_id"))),
+                        pos: r.pos(name, o),
+                        owner: r.owner(o),
+                        progress: num(o, atom!("progress")) as i32,
+                        progress_total: num(o, atom!("progressTotal")) as i32,
+                    }))
                 }
-                "energy" => room
-                    .piles
-                    .extend(text(o, atom!("resourceType")).parse().map(|resource| Pile {
+                "energy" => {
+                    room.piles.extend(text(o, atom!("resourceType")).parse().map(|resource| Pile {
                         id: Id::of_engine(text(o, atom!("_id"))),
                         pos: r.pos(name, o),
                         resource,
                         amount: num(o, Atom::intern(text(o, atom!("resourceType")))) as i32,
-                    })),
+                    }))
+                }
                 "tombstone" => room.remains.push(r.remains(name, o, true)),
                 "ruin" => room.remains.push(r.remains(name, o, false)),
                 "creep" if o.get(atom!("spawning")) == Some(&Val::Bool(true)) => {}
@@ -320,9 +300,7 @@ pub fn world(v: &View, declarations: &Declarations) -> World<'static> {
         for (o, mut spawn) in ovens {
             if let Some(oven) = obj(o, atom!("spawning")) {
                 let named = text(oven, atom!("name"));
-                let creep = at
-                    .of("creep")
-                    .find(|c| text(c, atom!("name")) == named && v.ours(c));
+                let creep = at.of("creep").find(|c| text(c, atom!("name")) == named && v.ours(c));
                 spawn.spawning = Some(Oven {
                     name: named.to_string(),
                     remaining: r.left(oven, atom!("spawnTime")),
@@ -338,15 +316,11 @@ pub fn world(v: &View, declarations: &Declarations) -> World<'static> {
         for e in at.events().filter(|_| logged) {
             if e.kind == EVENT_ATTACK {
                 let target = e.data["targetId"].as_str().unwrap_or_default();
-                world
-                    .attacks
-                    .push((Id::of_engine(e.by), Id::of_engine(target)));
+                world.attacks.push((Id::of_engine(e.by), Id::of_engine(target)));
             } else if e.kind == EVENT_OBJECT_DESTROYED {
                 let kind = e.data["type"].as_str().unwrap_or_default();
                 if kind != "creep" {
-                    world
-                        .destroyed
-                        .push((name, Id::of_engine(e.by), build_cost(kind)));
+                    world.destroyed.push((name, Id::of_engine(e.by), build_cost(kind)));
                 }
             }
         }

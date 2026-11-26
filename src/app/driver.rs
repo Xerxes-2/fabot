@@ -1,16 +1,19 @@
 //! The tick driver: read, decide, execute, write.
 use std::cell::RefCell;
 
+use fabot_base::{
+    declarations::Declarations,
+    intel::{self, Intel},
+    world::{World, read},
+};
+use fabot_core::drive;
+use fabot_observe::{
+    engagements::Log,
+    metrics::{self, Metrics},
+};
 use wasm_bindgen::prelude::*;
 
-use crate::app::world;
-use crate::app::{executor, record, wire};
-use fabot_base::declarations::Declarations;
-use fabot_base::intel::{self, Intel};
-use fabot_base::world::{World, read};
-use fabot_core::drive;
-use fabot_observe::engagements::Log;
-use fabot_observe::metrics::{self, Metrics};
+use crate::app::{executor, record, wire, world};
 
 const FAULTS_KEPT: usize = 20;
 
@@ -115,13 +118,8 @@ fn run_tick() {
             phases.push(("write".to_string(), clock() - start));
             if let Some(text) = &recording {
                 let start = clock();
-                recorded = record::record(
-                    world.time,
-                    world.cpu_limit,
-                    pass,
-                    text,
-                    &intel::to_text(rows),
-                );
+                recorded =
+                    record::record(world.time, world.cpu_limit, pass, text, &intel::to_text(rows));
                 phases.push(("record".to_string(), clock() - start));
             }
         },
@@ -136,25 +134,14 @@ fn run_tick() {
     );
 
     let drive::Ran {
-        world,
-        refusals,
-        faults: faulted,
-        counts,
-        off,
-        offers,
-        telemetry,
-        closed,
-        ..
+        world, refusals, faults: faulted, counts, off, offers, telemetry, closed, ..
     } = ran;
     for (creep, scored) in telemetry.traces {
         let tiles: Vec<String> = scored
             .iter()
             .map(|(p, score)| format!("[\"{}\",{},{},{score}]", p.room, p.x, p.y))
             .collect();
-        wire::trace(&format!(
-            r#"{{"creep":"{creep}","tiles":[{}]}}"#,
-            tiles.join(",")
-        ));
+        wire::trace(&format!(r#"{{"creep":"{creep}","tiles":[{}]}}"#, tiles.join(",")));
     }
     for (module, message) in &faulted {
         record_fault(&mut faults, module, message);
@@ -172,10 +159,7 @@ fn run_tick() {
     if let Some(log) = log.as_mut()
         && !pending.is_empty()
     {
-        wire::write_segment(
-            wire::ENGAGEMENTS_SEGMENT,
-            log.push(std::mem::take(&mut pending)),
-        );
+        wire::write_segment(wire::ENGAGEMENTS_SEGMENT, log.push(std::mem::take(&mut pending)));
     }
 
     let observed = wire::Observed {

@@ -4,20 +4,19 @@ pub mod outposts;
 mod season;
 pub mod stronghold;
 
-use fabot_base::intel::Scout;
-use fabot_base::intents::ModuleOutput;
 use std::collections::{BTreeMap, BTreeSet};
 
 use expand::Expansions;
 use fabot_atlas::{self as atlas, Atlas, BANK_LEVEL, Context, Derived};
-use fabot_base::declarations::{
-    ColonyPlan, Declarations, OpKind, Operation, Outpost, Planned, Stage,
+use fabot_base::{
+    declarations::{ColonyPlan, Declarations, OpKind, Operation, Outpost, Planned, Stage},
+    engine,
+    intel::{Intel, Row, Scout},
+    intents::ModuleOutput,
+    tuning::Tuning,
+    vocabulary::{Part, ResourceType, multiple},
+    world::{Owner, Pos, RoomName, Rules, StructureType, World, sightings},
 };
-use fabot_base::engine;
-use fabot_base::intel::{Intel, Row};
-use fabot_base::tuning::Tuning;
-use fabot_base::vocabulary::{Part, ResourceType, multiple};
-use fabot_base::world::{Owner, Pos, RoomName, Rules, StructureType, World, sightings};
 use fabot_economy::EconomyState;
 use fabot_fight::shape::{Cast, Engagement};
 use fabot_layout::{RING_LEVEL, Standing};
@@ -76,10 +75,7 @@ pub fn decide(context: &mut Context, state: &mut StrategyState) -> ModuleOutput 
     );
     scouts.retain(|s| unarmed(s.room));
     state.scouts = scouts;
-    ModuleOutput {
-        actions,
-        ..ModuleOutput::default()
-    }
+    ModuleOutput { actions, ..ModuleOutput::default() }
 }
 
 /// A rival's room this near raids within a creep life.
@@ -119,11 +115,7 @@ pub fn wall(
     let fire =
         rules.allowed(StructureType::Tower, level) * engine::tower_attack_at(engine::ROOM_SIDE);
     let hits = 2 * work * engine::PART_HITS;
-    let held = if fire > heal {
-        HOLD.min(hits / (fire - heal) + 1)
-    } else {
-        HOLD
-    };
+    let held = if fire > heal { HOLD.min(hits / (fire - heal) + 1) } else { HOLD };
     let full = work
         * engine::DISMANTLE_POWER
         * boost(Part::Work, ResourceType::CatalyzedZynthiumAcid)
@@ -145,11 +137,7 @@ pub fn reserve(rules: &Rules, t: &Tuning, level: i32, threatened: bool) -> i32 {
     let fire =
         rules.allowed(StructureType::Tower, level) * engine::tower_spend(engine::CREEP_LIFETIME);
     let full = (f64::from(fire) * t.reserve_lifetimes) as i32;
-    if threatened {
-        full
-    } else {
-        (f64::from(full) / t.quiet_reserve_divisor) as i32
-    }
+    if threatened { full } else { (f64::from(full) / t.quiet_reserve_divisor) as i32 }
 }
 
 fn rival(world: &World, declarations: &Declarations, name: &str) -> bool {
@@ -172,14 +160,9 @@ pub fn plan<'t>(
     intel: &Intel,
     (engagements, casts): (&[Engagement], &[Cast]),
     (layout, economy): (&BTreeMap<RoomName, Standing>, &mut EconomyState),
-    (terrain, state): (
-        &dyn Fn(RoomName) -> Option<&'t LocalRoomTerrain>,
-        &mut StrategyState,
-    ),
+    (terrain, state): (&dyn Fn(RoomName) -> Option<&'t LocalRoomTerrain>, &mut StrategyState),
 ) -> (Planned, Misfiled) {
-    let StrategyState {
-        expansion, piles, ..
-    } = state;
+    let StrategyState { expansion, piles, .. } = state;
     let mut misfiled = Vec::new();
     let rivals = rivals(world, declarations, intel);
     let mut theirs: BTreeSet<RoomName> = BTreeSet::new();
@@ -229,9 +212,7 @@ pub fn plan<'t>(
                 }
                 _ => piles.get(&room.name).copied(),
             };
-            let pile = hub
-                .filter(|_| level >= BANK_LEVEL && !stored)
-                .and_then(Hub::pile);
+            let pile = hub.filter(|_| level >= BANK_LEVEL && !stored).and_then(Hub::pile);
             let muster = plan.and_then(|p| p.muster);
             Some(ColonyPlan {
                 room: room.name,
@@ -263,27 +244,15 @@ pub fn plan<'t>(
     let claimed = claiming.as_ref().map(|c| c.room);
     let mut preyed = intel::preyed(intel, declarations, world.time);
     preyed.retain(|room| atlas.has_terrain(*room));
-    let busy = outposts::busy(
-        atlas,
-        (&plans, derived),
-        (declarations, claiming.as_ref()),
-        engagements,
-    );
-    let candidates = outposts::survey(
-        (world, atlas),
-        derived,
-        (declarations, &plans, claimed),
-        intel,
-    );
+    let busy =
+        outposts::busy(atlas, (&plans, derived), (declarations, claiming.as_ref()), engagements);
+    let candidates =
+        outposts::survey((world, atlas), derived, (declarations, &plans, claimed), intel);
     let homes =
         (declarations.clone()).planned((plans.clone(), Vec::new(), claiming.clone(), Vec::new()));
     let (spare, stocks) = fabot_economy::spare((world, atlas), (derived, &homes), intel, economy);
-    let chosen = outposts::chosen(
-        world,
-        candidates,
-        (&busy, &spare),
-        (&declarations.tuning, engagements),
-    );
+    let chosen =
+        outposts::chosen(world, candidates, (&busy, &spare), (&declarations.tuning, engagements));
     let fought: BTreeSet<RoomName> = engagements.iter().map(|e| e.room).collect();
     let around = expand::Around {
         rivals: &rivals,
@@ -326,9 +295,8 @@ fn operations(
     preyed: &[RoomName],
 ) -> Vec<Operation> {
     let homes: BTreeSet<RoomName> = derived.colonies.iter().copied().collect();
-    let worked: BTreeSet<RoomName> = (worked(derived, declarations, (chosen, claim)))
-        .map(|(o, _)| o.room)
-        .collect();
+    let worked: BTreeSet<RoomName> =
+        (worked(derived, declarations, (chosen, claim))).map(|(o, _)| o.room).collect();
     (homes.iter().map(row(OpKind::Defend, HOME)))
         .chain(worked.iter().map(row(OpKind::Defend, OUTPOST)))
         .chain(preyed.iter().map(row(OpKind::Sweep, 0.0)))
@@ -373,9 +341,5 @@ fn crossed(
 }
 
 fn row(kind: OpKind, priority: f64) -> impl Fn(&RoomName) -> Operation {
-    move |room| Operation {
-        kind,
-        room: *room,
-        priority,
-    }
+    move |room| Operation { kind, room: *room, priority }
 }

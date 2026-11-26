@@ -1,15 +1,18 @@
 use std::collections::BTreeMap;
 
-use crate::shape::{Cast, Engagement};
 use fabot_atlas::Atlas;
-use fabot_base::boost::{self, Boosting, Stock};
-use fabot_base::vocabulary::{Part, ResourceType};
-use fabot_base::world::{
-    self, Creep, Id, Owner, Pos, Room, RoomName, Rules, Spawn, Store, Structure, StructureType,
-    terrain,
+use fabot_base::{
+    boost::{self, Boosting, Stock},
+    engine, tiles,
+    vocabulary::{Part, ResourceType},
+    world::{
+        self, Creep, Id, Owner, Pos, Room, RoomName, Rules, Spawn, Store, Structure, StructureType,
+        terrain,
+    },
 };
-use fabot_base::{engine, tiles};
 use fabot_exchange::{self as exchange, Fighter, fighter};
+
+use crate::shape::{Cast, Engagement};
 
 pub type Body = Vec<Part>;
 
@@ -26,14 +29,8 @@ const GUARD: [Part; 10] = [
     Part::Attack,
     Part::Heal,
 ];
-const RANGER: [Part; 6] = [
-    Part::Move,
-    Part::Move,
-    Part::Move,
-    Part::RangedAttack,
-    Part::RangedAttack,
-    Part::Heal,
-];
+const RANGER: [Part; 6] =
+    [Part::Move, Part::Move, Part::Move, Part::RangedAttack, Part::RangedAttack, Part::Heal];
 pub const DEFENDER: [Part; 2] = [Part::Move, Part::Attack];
 pub const KITER: [Part; 3] = [Part::RangedAttack, Part::Move, Part::Move];
 
@@ -64,10 +61,8 @@ pub fn affordable(capacity: i32) -> Vec<Body> {
 /// heals the damage instead of losing its MOVE to it and crawling. A home's
 /// Defend keeps `affordable`'s bare bodies: they stand beside its towers.
 pub fn walking(capacity: i32) -> Vec<Body> {
-    let mut out: Vec<Body> = affordable(capacity)
-        .into_iter()
-        .filter(|b| b.contains(&Part::Heal))
-        .collect();
+    let mut out: Vec<Body> =
+        affordable(capacity).into_iter().filter(|b| b.contains(&Part::Heal)).collect();
 
     // `affordable`'s smallest HEAL is a RANGER at 700: the pair keeps a bank
     // under that answering.
@@ -188,9 +183,7 @@ pub fn cluster_boosts(
     spawning: &[Cast],
     engagements: &[Engagement],
 ) -> Boosts {
-    let mut left: Boosts = (boosting.iter())
-        .map(|(r, b)| (*r, b.left.clone()))
-        .collect();
+    let mut left: Boosts = (boosting.iter()).map(|(r, b)| (*r, b.left.clone())).collect();
     let priced = |c: &&Cast| crate::scene::boosted(engagements).any(|b| b.name == c.name);
     for c in spawning.iter().filter(priced) {
         if let Some(stock) = left.get_mut(&c.room) {
@@ -232,18 +225,11 @@ pub fn price(
     let stock = if boosted { boosts } else { &bare };
 
     let mut landed = ours.clone();
-    landed
-        .bodies
-        .extend(fighter::cast_boosted(set.iter().map(|b| &b[..]), stock));
+    landed.bodies.extend(fighter::cast_boosted(set.iter().map(|b| &b[..]), stock));
 
     let outcome = exchange::outcome(stance, &landed, theirs, terrain);
 
-    Some(Pricing {
-        set,
-        outcome,
-        landed,
-        boosted,
-    })
+    Some(Pricing { set, outcome, landed, boosted })
 }
 
 pub struct Pricing {
@@ -259,10 +245,7 @@ pub struct Asking<'a> {
 }
 
 pub fn bare(bodies: &[Body]) -> Asking<'_> {
-    Asking {
-        bodies,
-        boosted: false,
-    }
+    Asking { bodies, boosted: false }
 }
 
 /// A cast body the outcome prices costs only what it strikes off: one that
@@ -315,9 +298,7 @@ pub fn colony_for(
 
 /// Each colony `colony_for` picks at rest (no queue, full banks) for some body.
 pub fn homes(banks: &[(RoomName, i32)], walk: impl Fn(RoomName) -> Option<i32>) -> Vec<RoomName> {
-    let mut reached: Vec<_> = (banks.iter())
-        .filter_map(|&(r, c)| Some((walk(r)?, r, c)))
-        .collect();
+    let mut reached: Vec<_> = (banks.iter()).filter_map(|&(r, c)| Some((walk(r)?, r, c))).collect();
     reached.sort();
     let mut most = 0;
     (reached.into_iter())
@@ -333,18 +314,8 @@ mod tests {
     #[test]
     fn homes_are_the_colonies_no_nearer_one_out_banks() {
         let room = |x| RoomName::new(x, 1);
-        let banks = [
-            (room(1), 12_700),
-            (room(3), 5_500),
-            (room(5), 700),
-            (room(7), 12_700),
-        ];
-        let walk = |r: RoomName| {
-            banks
-                .iter()
-                .position(|(b, _)| *b == r)
-                .map(|i| [3, 1, 0, 5][i])
-        };
+        let banks = [(room(1), 12_700), (room(3), 5_500), (room(5), 700), (room(7), 12_700)];
+        let walk = |r: RoomName| banks.iter().position(|(b, _)| *b == r).map(|i| [3, 1, 0, 5][i]);
         assert_eq!(homes(&banks, walk), vec![room(5), room(3), room(1)]);
     }
 
@@ -374,11 +345,9 @@ mod tests {
     fn a_body_is_cast_to_the_colony_that_lands_it_soonest_not_the_nearest() {
         let body: Body = vec![Part::Move; 20];
         let (near, far) = (colony("W1N1", 12_000), colony("W3N1", 12_000));
-        let spawns = [
-            spawns_in(RoomName::W1N1, 3),
-            spawns_in("W3N1".parse::<RoomName>().unwrap(), 1),
-        ]
-        .concat();
+        let spawns =
+            [spawns_in(RoomName::W1N1, 3), spawns_in("W3N1".parse::<RoomName>().unwrap(), 1)]
+                .concat();
         let queued = BTreeMap::from([(RoomName::W1N1, vec![50; 4])]);
         let walk = |from: RoomName| Some(if from == RoomName::W1N1 { 200 } else { 450 });
 
