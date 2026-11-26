@@ -18,7 +18,6 @@ screeps-game-api.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
 fabot-base = { workspace = true, features = ["test-support"] }
 
 [lints]

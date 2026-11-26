@@ -6,6 +6,7 @@ pub mod intel;
 pub mod intents;
 pub mod stronghold;
 #[cfg(any(test, feature = "test-support"))]
+#[allow(clippy::expect_used)]
 pub mod testing;
 pub mod tiles;
 pub mod tuning;

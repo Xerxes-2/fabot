@@ -417,76 +417,8 @@ mod tests {
     /// S11's E24S11 fits only without its mineral, E26S7 only with it.
     #[test]
     fn the_fit_check_plans_the_ground_layout_plans_once_ours() {
-        use fabot_base::world::{Controller, Owner, Pos, Rules, Source};
         let text = include_str!("../../scripts/scenario/worlds/season-outpost-ring.json");
-        let map: serde_json::Value = serde_json::from_str(text).unwrap();
-        let rooms = map["rooms"].as_array().unwrap();
-        let terrains: Vec<LocalRoomTerrain> = (rooms.iter())
-            .map(|r| {
-                let rows = r["terrain"].as_array().unwrap().iter();
-                let bits = rows.flat_map(|row| row.as_str().unwrap().bytes());
-                let bits: Vec<u8> = bits.map(|b| b - b'0').collect();
-                LocalRoomTerrain::new_from_bits(bits.try_into().unwrap())
-            })
-            .collect();
-        let mut world = World {
-            time: 1,
-            me: "us".into(),
-            cpu_limit: 100.0,
-            bucket: 10_000,
-            rooms: Vec::new(),
-            spawns: Vec::new(),
-            creeps: Vec::new(),
-            our_sites: 0,
-            rooms_allowed: 1,
-            closed: BTreeSet::new(),
-            attacks: Vec::new(),
-            destroyed: Vec::new(),
-            rules: Rules::vanilla(),
-        };
-        for (r, terrain) in rooms.iter().zip(&terrains) {
-            let name: RoomName = r["name"].as_str().unwrap().parse().unwrap();
-            let mut room = Room { terrain: Some(terrain), ..Room::empty(name) };
-            for (i, o) in r["objects"].as_array().unwrap().iter().enumerate() {
-                let id = Id::of_engine(&format!("o{i}"));
-                let xy = |k: &str| o[k].as_i64().unwrap() as i32;
-                let pos = Pos::new(name, xy("x"), xy("y"));
-                match o["type"].as_str().unwrap() {
-                    "controller" => {
-                        room.controller = Some(Controller {
-                            id,
-                            pos,
-                            owner: Owner::Nobody,
-                            level: 0,
-                            progress: 0,
-                            progress_total: 0,
-                            ticks_to_downgrade: 0,
-                            reservation: None,
-                            sign: None,
-                            safe_mode: 0,
-                            safe_mode_available: 0,
-                            safe_mode_cooldown: 0,
-                            upgrade_blocked: 0,
-                        })
-                    }
-                    "source" => room.sources.push(Source {
-                        id,
-                        pos,
-                        energy: 0,
-                        energy_capacity: 0,
-                        ticks_to_regeneration: 0,
-                    }),
-                    "mineral" => room.minerals.push(Mineral {
-                        id,
-                        pos,
-                        resource: o["mineralType"].as_str().unwrap().parse().ok(),
-                        amount: 0,
-                    }),
-                    _ => {}
-                }
-            }
-            world.rooms.push(room);
-        }
+        let world = fabot_base::testing::world(text);
         let mut intel = Intel::default();
         crate::intel::step(&world, &fabot_atlas::Atlas::default(), &mut intel);
         let mut checked = 0;

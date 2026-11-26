@@ -5,9 +5,9 @@
 // minus the files of any row beneath it: a `<dir>/*` row holds each of its
 // files to its own ceiling, a `<dir>` row its whole tree. A comment share is
 // per directory of the bot's source (`src`, `core`, `sim`), over its own .rs
-// files. Neither counts a `#[cfg(test)]` item nor a crate's suites under
-// `core/<crate>/tests`. Exits non-zero on any breach, or on a shipped file no
-// row covers.
+// files. Neither counts a `#[cfg(test)]` item, a crate's suites under
+// `core/<crate>/tests`, nor the test support in `core/base/testing`, built
+// only for tests. Exits non-zero on any breach, or on a shipped file no row covers.
 //
 // Usage: node scripts/ceiling.mjs
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -18,7 +18,7 @@ const { lines: ceilings, comments: commentPct } = JSON.parse(
 );
 
 const ROOTS = ["src", "core", "sim"];
-const SUITES = /^core\/[^/]+\/tests\//;
+const SUITES = /^core\/[^/]+\/tests\/|^core\/base\/testing\//;
 
 const rsFiles = (dir) =>
   readdirSync(dir).flatMap((name) => {

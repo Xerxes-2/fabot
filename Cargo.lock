@@ -170,10 +170,12 @@ name = "fabot-base"
 version = "0.1.0"
 dependencies = [
  "enum-iterator",
+ "miniz_oxide",
  "proptest",
  "rustc-hash",
  "screeps-game-api",
  "serde",
+ "serde_json",
  "strum",
 ]
 
@@ -274,7 +276,6 @@ dependencies = [
  "fabot-layout",
  "screeps-game-api",
  "serde",
- "serde_json",
 ]
 
 [[package]]
