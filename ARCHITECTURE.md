@@ -696,14 +696,31 @@ and `cheapest_win` (adds only to already-standing `ours`).
 - `❓` Our set's hit-back on the raid scales with the swing all its living
   bodies keep, whatever their range, and a body worn down off the focus ends
   no pricing window.
+- `❓` Exchange counts a body lost only when it dies, but Defend drops a body
+  left without combat parts (a 2–3-part body after ~100 damage): a kiter that
+  strips parts beats a set priced to win (outpost-kited-by-1r2m).
 - `❓` (after zone-control defence) Exchange's Kite arm prices a self-healing
   healer, or a raid our rangers could kite off a post, as Lose where kiting
   wins.
+- `❓` The together arm prices a gathering set from where its bodies stand,
+  not from the muster they withdraw to; stepping out of reach in place
+  instead lost more bodies (defend-outpost-feeds-no-camped-exit seeds 1-4:
+  6/12/6/7 against the muster's 2/3/6/1).
+- `❓` A home's Defend prices its wait at no cost (`tick_worth` 0), so a home
+  gathers whenever gathering saves bodies, however long its raid stands.
 - **Arrival:** a body counts from the tick it lands (a cast's spawn time and
   walk included), so a set fed in one at a time prices worse than one walked
   in `together`, which pays the wait in ticks instead (a body already in the
-  raid's reach is struck alone through it). A forming set lands as one
-  whatever its arm, as Forming holds it until its last cast stands; casts
+  raid's reach is struck alone through it). Each arm is priced as its set
+  moves: the apart arm feeds each body in on its own walk, and the together
+  arm's wait costs the outpost's yield over it, so the cheaper of gathering
+  and going in now is chosen at commitment (owner, 2026-11-27: Forming holding
+  every arm cost self-play ~4%). A set that gathers (`Blob*`) Forms until its
+  last cast lands: a body in the raid's reach withdraws to the muster (an
+  outpost is left to the raid meanwhile), and each cast walks in, struck or
+  not, until it stands as near the raid as the set's farthest body not cast
+  for it, read each tick, or mustered on that body (one spawned nearer lands
+  at once); casts
   asked once it has gone in, or left behind by bodies that already win
   alone, are fed in alone. `Defend` prices both arms
   (`Close`/`Kite`/`Hold` vs `Blob*`); where only the gathered set wins (its

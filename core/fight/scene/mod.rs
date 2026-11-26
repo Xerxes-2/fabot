@@ -469,7 +469,7 @@ impl<'a> Scene<'a> {
             in_reach: self.in_reach(e),
             home: self.home(e),
             held: self.homes.contains(&e.room),
-            asked: self.spawning.iter().any(|c| c.engagement == e.id),
+            asked: defend::asked(self, e),
             on_our_ground,
             returned: defend::returned(self, was, e),
             // A room in sight shows where its groups stand: one gone from it

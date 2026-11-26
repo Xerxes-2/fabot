@@ -106,6 +106,37 @@ pub(crate) fn recycles(scene: &Scene, atlas: &Atlas, fights: Fights) -> Vec<Acti
         .collect()
 }
 
+/// A gathering set's cast walks in to its farthest body not cast for it, read each tick, so they
+/// go in as one as Exchange's together arm lands them: None once as near the raid, or mustered on it.
+fn landing(scene: &Scene, e: &Engagement, c: &Creep) -> Option<Pos> {
+    let cast = |c: &Creep| cast_of(&c.name).is_some_and(|(t, id)| id == e.id && t >= e.since);
+    let centre = scene.by_id.get(&e.group).filter(|_| e.gathers())?.centre;
+    let standing = scene.members_of(e).into_iter().filter(|m| !cast(m));
+    let far = standing.max_by_key(|m| m.pos.crow_flies(&centre))?.pos;
+    let out = c.pos.crow_flies(&centre) > far.crow_flies(&centre);
+    (cast(c) && out && c.pos.crow_flies(&far) > declarations::MUSTER_RANGE).then_some(far)
+}
+
+/// A cast still to spawn or to land.
+pub(crate) fn asked(scene: &Scene, e: &Engagement) -> bool {
+    let landing = |c: &&Creep| landing(scene, e, c).is_some();
+    scene.spawning.iter().any(|c| c.engagement == e.id) || scene.members_of(e).iter().any(landing)
+}
+
+/// A cast walks in, struck or not, or it never lands; the rest withdraw to the muster.
+pub(crate) fn forms(sight: &mut tactics::Sight, scene: &Scene, e: &Engagement, c: &Creep) -> Wish {
+    let mut spawns = (scene.world.working_spawns()).filter(|s| s.pos.room == c.pos.room);
+    let door = spawns.any(|s| engine::spawn_door(tiles::of_pos(&s.pos), tiles::of_pos(&c.pos)));
+    let reached = scene.in_reach(e);
+    match landing(scene, e, c) {
+        Some(at) => tactics::toward(sight, c, &at, declarations::MUSTER_RANGE),
+        None if e.gathers() && reached => tactics::retreat(sight, c),
+        // Held on a spawn's door a forming body bars it to the casts still to come.
+        None if door && !reached => tactics::retreat(sight, c),
+        None => tactics::hold(sight, c),
+    }
+}
+
 pub fn stands_alone(time: i32, e: &Engagement) -> Engagement {
     if e.phase == Phase::Forming && !e.ours.is_empty() {
         enter(Phase::Approaching, time, e)

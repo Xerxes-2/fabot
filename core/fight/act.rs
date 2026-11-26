@@ -85,7 +85,7 @@ pub(super) fn act(
     for e in decided {
         let on = (e.plan.tactic, &e.plan.order[..]);
         let defends = e.objective == Objective::Defend;
-        let walk = (e.phase, e.unanswered, defends);
+        let walk = (e.phase, e.unanswered || !e.gathers(), defends);
         let members = scene.members_of(e);
         let blob = formation(&mut sight, on, walk, members, centre_of(e), &fortified);
         let held = stronghold::walks(&mut sight, scene, e);
@@ -120,9 +120,6 @@ pub(super) fn act(
 
         let (centre, _) = centre_of(e);
         let enter = e.objective == Objective::Defend;
-        let gathers = enter && matches!(e.plan.tactic, Tactic::BlobClose | Tactic::BlobKite);
-        let mut spawns = (scene.world.working_spawns()).filter(|s| s.pos.room == c.pos.room);
-        let door = spawns.any(|s| engine::spawn_door(tiles::of_pos(&s.pos), tiles::of_pos(&c.pos)));
 
         if e.unanswered {
             return (None, tactics::rampart(sight, &fighters, c));
@@ -133,10 +130,8 @@ pub(super) fn act(
         }
 
         let wish = match e.phase {
-            // Held on a spawn's door a forming body bars it to the casts still to come.
-            Phase::Forming if !scene.in_reach(e) && door => tactics::retreat(sight, c),
-            Phase::Forming if !gathers || !scene.in_reach(e) => tactics::hold(sight, c),
-            Phase::Forming | Phase::Disengaging => tactics::retreat(sight, c),
+            Phase::Forming => defend::forms(sight, scene, e, c),
+            Phase::Disengaging => tactics::retreat(sight, c),
             Phase::Pursuing => tactics::close(sight, &e.plan.order, &centre, enter, c),
             Phase::Approaching | Phase::Fighting => {
                 // A transit room's hostiles are not the sweep's.
@@ -225,7 +220,7 @@ pub fn fortified(world: &world::World) -> BTreeSet<RoomName> {
 pub fn formation(
     sight: &mut tactics::Sight,
     (tactic, order): (Tactic, &[Id]),
-    (phase, unanswered, defends): (Phase, bool, bool),
+    (phase, apart, defends): (Phase, bool, bool),
     members: Vec<&Creep>,
     (centre, range): (Pos, i32),
     fortified: &BTreeSet<RoomName>,
@@ -233,9 +228,7 @@ pub fn formation(
     let foes = sight.hostiles;
     let marked = (order.iter()).find_map(|id| foes.values().flatten().find(|h| h.id == *id));
     let mark = defends.then(|| marked.or_else(|| foes.get(&centre.room)?.first())).flatten();
-    let walks = matches!(tactic, Tactic::BlobClose | Tactic::BlobKite)
-        && !unanswered
-        && (phase == Phase::Approaching || defends && phase == Phase::Fighting);
+    let walks = !apart && (phase == Phase::Approaching || defends && phase == Phase::Fighting);
     let reach = match tactic {
         Tactic::BlobKite => engine::RANGED_RANGE,
         _ => engine::MELEE_RANGE,

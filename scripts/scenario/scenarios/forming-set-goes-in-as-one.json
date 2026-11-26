@@ -1,0 +1,11 @@
+{
+  "why": "a forming Defend's bodies meet the raid no sooner than its last cast lands, as Exchange's forming arm prices them: a melee+healer raid pinned on the outpost at t10120 against one standing 3A1H body and a cast priced Win together. Main held the standing body while the raid walked onto it (killed alone) and went in once the cast spawned, a room's walk behind: hostile 1500, 3 bodies lost, the priced win lost; kept out of reach until the cast walks in, 123, 0, 0",
+  "modules": ["fight", "tactics"],
+  "start": { "gen": 227, "seed": 7, "invaders": "E4S7:100000:10120", "wave": "melee,healer" },
+  "ticks": 11700,
+  "assert": [
+    { "measure": "hostileTicks", "room": "E4S7", "from": 10100, "max": 400 },
+    { "measure": "bodiesLost", "kind": "defend", "from": 10100, "max": 0 },
+    { "measure": "predictedWinsLost", "room": "E4S7", "from": 10100, "max": 0 }
+  ]
+}

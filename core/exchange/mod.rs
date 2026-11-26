@@ -32,14 +32,6 @@ pub struct Side {
     pub keeps: Vec<(Pos, i32)>,
     /// The spawns its casts come off, each in series; none, one.
     pub spawns: i32,
-    /// It forms: every body waits for its last cast, whichever arm it is priced by.
-    pub forming: bool,
-}
-
-impl Side {
-    fn lands_as_one(&self) -> bool {
-        self.together || self.forming
-    }
 }
 
 /// `weight` is the step weight of the ground fought on; `run_off` the tiles a
@@ -978,7 +970,7 @@ fn walks_in(terrain: Terrain, side: &Side, bodies: &[Fighter], raid: &[Fighter])
     let gathered = (bodies.iter().zip(&walks)).filter(|(f, _)| cast(f)).map(|(_, w)| *w).max();
     (bodies.iter().zip(walks))
         .map(|(f, w)| match gathered {
-            Some(last) if side.lands_as_one() && cast(f) => last,
+            Some(last) if side.together && cast(f) => last,
             _ => w,
         })
         .collect()
@@ -1160,15 +1152,15 @@ fn exchange(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> Out
         .collect();
     // A body in the raid's reach is struck from now, though it reaches its own range later.
     let in_reach = struck.contains(&true);
-    let waits = if ours.lands_as_one() && !in_reach { last - first } else { 0 };
+    let waits = if ours.together && !in_reach { last - first } else { 0 };
     let since = if in_reach { 0 } else { first };
     let joins = if in_reach { last } else { 0 };
-    let lands = |walk: i32, struck: bool| match (struck, ours.lands_as_one()) {
+    let lands = |walk: i32, struck: bool| match (struck, ours.together) {
         (true, _) => 0,
         (false, false) => walk - since,
         (false, true) => joins,
     };
-    let acts = |walk: i32, struck: bool| match (struck, ours.lands_as_one()) {
+    let acts = |walk: i32, struck: bool| match (struck, ours.together) {
         (true, _) | (false, false) => walk - since,
         (false, true) => joins,
     };

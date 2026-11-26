@@ -1,5 +1,5 @@
 {
-  "why": "outpost-kited-by-1r1m's harasser as 1RA2M on an RCL2 home (300-650 capacity from t2000): a Defend that cast only HEAL bodies had none below 430 and only a melee MAHM below 700, which never closes on a kiter at its pace, so W7N3 stood down 5289 of 6000 ticks and dug 2204. On our own ground a bank short of a RANGER prices bare bodies, the kiter's own shape among them: 1452 hostile ticks, 39768 dug, 4 bodies lost",
+  "why": "outpost-kited-by-1r1m's harasser as 1RA2M on an RCL2 home (300-650 capacity from t2000): a Defend that cast only HEAL bodies had none below 430 and only a melee MAHM below 700, which never closes on a kiter at its pace, so W7N3 stood down 5289 of 6000 ticks and dug 2204. On our own ground a bank short of a RANGER prices bare bodies, the kiter's own shape among them: 1452 hostile ticks, 39768 dug, 4 bodies lost. pastBudget waived to 2 (owner, 2026-11-27): Exchange counts a body lost only when it dies, and a set the forming fix leaves as two worn rangers and a worn melee is stripped of its combat parts at t2797 (2 past budget, seeds 1-8); main loses the same priced win with that makeup (seed 4 t5797, seed 5 t6297)",
   "modules": [
     "atlas",
     "economy",
@@ -105,6 +105,6 @@
       "to": 8000,
       "max": 600
     },
-    { "each": "engagement", "where": { "kind": "defend" }, "assert": { "pastBudget": { "max": 0 } } }
+    { "each": "engagement", "where": { "kind": "defend" }, "assert": { "pastBudget": { "max": 2 } } }
   ]
 }

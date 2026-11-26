@@ -144,6 +144,10 @@ impl Engagement {
         let joined: Vec<(String, Slot)> = names.into_iter().zip(self.free(casts)).collect();
         self.ours.extend(joined);
     }
+
+    pub fn gathers(&self) -> bool {
+        matches!(self.plan.tactic, Tactic::BlobClose | Tactic::BlobKite)
+    }
 }
 
 pub fn enter(phase: Phase, time: i32, e: &Engagement) -> Engagement {
