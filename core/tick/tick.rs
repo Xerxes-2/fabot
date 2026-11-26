@@ -297,14 +297,7 @@ pub fn decide<'t>(
     phases.push(("world".to_string(), clock() - began));
 
     let start = clock();
-    let seen = (intel.iter()).map(|(room, row)| {
-        (
-            *room,
-            row.lairs.as_deref(),
-            row.stronghold.is_some_and(|s| s.collapses_at > world.time)
-                || row.guarded(&world.me, &declarations),
-        )
-    });
+    let seen = fabot_base::intel::seen(intel, world, &declarations);
     let mut atlas = Atlas::following(atlas, world, seen, terrains);
     phases.push(("atlas".to_string(), clock() - start));
 

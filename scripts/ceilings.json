@@ -22,7 +22,7 @@
     "core/base/world/read": 396,
     "core/base/intel": 280,
     "core/base/stronghold": 44,
-    "core/tick": 832,
+    "core/tick": 824,
     "src": 842,
     "sim": 1487,
     "sim/src/reset": 52,

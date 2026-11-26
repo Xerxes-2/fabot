@@ -53,6 +53,17 @@ impl Row {
 
 pub type Intel = BTreeMap<RoomName, Row>;
 
+pub fn seen<'a, 'b>(
+    intel: &'a Intel,
+    world: &'b World,
+    declarations: &'b Declarations,
+) -> impl Iterator<Item = (RoomName, Option<&'a [Post]>, bool)> + use<'a, 'b> {
+    intel.iter().map(|(room, row)| {
+        let stronghold = row.stronghold.is_some_and(|s| s.collapses_at > world.time);
+        (*room, row.lairs.as_deref(), stronghold || row.guarded(&world.me, declarations))
+    })
+}
+
 /// The owner's: a rival's hold turns over on a reservation's lapse or a
 /// controller's downgrade, slower than a creep life, which one scout's renews.
 pub const STALE: i32 = engine::CREEP_LIFETIME;

@@ -406,12 +406,17 @@ mod tests {
     #[test]
     fn no_controller_links_site_lands_on_a_seat_of_a_buffer_another_bot_set() {
         let mut rng = fx::Rng::new(10);
+        let made =
+            (0..fx::MAX_TEST).map(|_| (fx::colony(&mut rng).room, rng.choose(-1_000, 1_000)));
+        let made: Vec<_> = made.collect();
+        let real: Vec<_> = fabot_base::testing::real_rooms().step_by(10).collect();
+        let real = real.iter().enumerate().map(|(n, r)| (r.room(), n as i32 * 7));
 
-        for _ in 0..fx::MAX_TEST {
-            let colony = fx::colony(&mut rng);
-            let pick = rng.choose(-1_000, 1_000);
-
-            let Some((ground, plan)) = fx::plan_of(&colony) else {
+        for (room, pick) in made.into_iter().chain(real) {
+            let Some(ground) = crate::ground::of_room(&room) else {
+                continue;
+            };
+            let Some(plan) = crate::plan::of_ground(&Rules::vanilla(), &ground) else {
                 continue;
             };
 
@@ -438,13 +443,11 @@ mod tests {
             let buffer = { i64::from(pick) % off_plan.len() as i64 }.unsigned_abs() as usize;
             let buffer = off_plan[buffer];
 
-            let mut room = colony.room.clone();
-            room.structures.push(fx::structure(
-                "buffer",
-                StructureType::Container,
-                Owner::Ours,
-                buffer,
-            ));
+            let mut room = room;
+            room.structures.push(Structure {
+                pos: tiles::to_pos(room.name, buffer),
+                ..fx::structure("buffer", StructureType::Container, Owner::Ours, buffer)
+            });
 
             let census = census_of(&room, &[]);
 
@@ -458,7 +461,9 @@ mod tests {
                     assert!(
                         tiles::range(t, buffer) > 1
                             || tiles::range(t, controller) > engine::UPGRADE_RANGE
-                            || ground.sources.iter().any(|r| tiles::range(*r, t) <= 2)
+                            || ground.sources.iter().any(|r| tiles::range(*r, t) <= 2),
+                        "{}",
+                        room.name
                     );
                 }
             }

@@ -72,8 +72,7 @@ fn worth(rules: &Rules, room: &Room, atlas: &Atlas, level: i32) -> i32 {
     if held.is_empty() || !fabot_fight::kinds::stronghold::reached(rules, room, atlas, level) {
         return 0;
     }
-    let held = held.into_iter();
-    held.map(|(_, r, n)| raw(r) * f64::from(n)).sum::<f64>() as i32
+    held.into_iter().map(|(_, r, n)| raw(r) * f64::from(n)).sum::<f64>() as i32
 }
 
 fn declared(declarations: &Declarations) -> impl Iterator<Item = &RoomName> {
@@ -240,4 +239,80 @@ pub fn sight(
         })
         .collect();
     (observed, scouts)
+}
+
+#[cfg(test)]
+mod tests {
+    use fabot_base::world::{Controller, Pos, Store, terrain};
+
+    use super::*;
+
+    /// The tower rule end to end: the row our step writes walls a stranger's
+    /// towered room off the way through, never an ally's.
+    #[test]
+    fn a_room_seen_with_a_strangers_tower_is_reached_never_crossed_an_allys_is_crossed() {
+        let (from, towered, beyond) =
+            (RoomName::new(0, 0), RoomName::new(1, 0), RoomName::new(2, 0));
+        let mut declarations = Declarations::default();
+        declarations.allies.insert("friend".into());
+        let owners =
+            [(Owner::Stranger("them".into()), false), (Owner::Ally("friend".into()), true)];
+        for (owner, crossed) in owners {
+            let mut world = World {
+                time: 1,
+                me: "us".into(),
+                cpu_limit: 100.0,
+                bucket: 10_000,
+                rooms: Vec::new(),
+                spawns: Vec::new(),
+                creeps: Vec::new(),
+                our_sites: 0,
+                rooms_allowed: 1,
+                closed: BTreeSet::new(),
+                attacks: Vec::new(),
+                destroyed: Vec::new(),
+                rules: Rules::vanilla(),
+            };
+            for name in [from, towered, beyond] {
+                let terrain = terrain::leak(vec![0; tiles::COUNT]);
+                world.rooms.push(Room { terrain, ..Room::empty(name) });
+            }
+            world.rooms[1].controller = Some(Controller {
+                id: "c".into(),
+                pos: Pos::new(towered, 10, 10),
+                owner: owner.clone(),
+                level: 8,
+                progress: 0,
+                progress_total: 0,
+                ticks_to_downgrade: 0,
+                reservation: None,
+                sign: None,
+                safe_mode: 0,
+                safe_mode_available: 0,
+                safe_mode_cooldown: 0,
+                upgrade_blocked: 0,
+            });
+            world.rooms[1].structures.push(Structure {
+                id: "t".into(),
+                kind: StructureType::Tower,
+                pos: Pos::new(towered, 12, 10),
+                owner,
+                hits: 1,
+                hits_max: 1,
+                store: Store::default(),
+                cooldown: 0,
+                collapse: 0,
+                deploy: 0,
+                level: 0,
+                spawn: None,
+                walkable: false,
+            });
+            let mut intel = Intel::default();
+            step(&world, &Atlas::default(), &mut intel);
+            let seen = fabot_base::intel::seen(&intel, &world, &declarations);
+            let atlas = Atlas::following(Atlas::default(), &world, seen, []);
+            assert_eq!(atlas.route(&BTreeSet::new(), 2, from, beyond).is_some(), crossed);
+            assert!(atlas.route(&BTreeSet::new(), 2, from, towered).is_some());
+        }
+    }
 }
