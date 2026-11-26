@@ -51,16 +51,14 @@ pub fn walls_of<'a>(room: &'a Room, atlas: &Atlas, at: &Pos) -> Vec<&'a Structur
             && atlas.passable(room.name, tiles::of_pos(p))
             && invader_rampart_at(room, p).is_none()
     };
-    let around: Vec<Pos> = (tiles::around(tiles::of_pos(at)).iter())
-        .map(|t| tiles::to_pos(room.name, *t))
-        .collect();
-    let sides = (!around.iter().any(open)).then_some(around.iter().filter(|p| walkable(p)));
+    let around = (tiles::around(tiles::of_pos(at)).iter()).map(|t| tiles::to_pos(room.name, *t));
+    let sides = (!around.clone().any(|p| open(&p))).then_some(around.filter(walkable));
     (invader_rampart_at(room, at).into_iter())
         .chain(
             sides
                 .into_iter()
                 .flatten()
-                .filter_map(|p| invader_rampart_at(room, p)),
+                .filter_map(|p| invader_rampart_at(room, &p)),
         )
         .collect()
 }

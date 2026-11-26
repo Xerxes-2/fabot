@@ -739,12 +739,14 @@ impl Atlas {
         vec![from]
     }
 
-    fn strikes(terrain: &[u8], strikers: &[(Tile, Tile, i32)]) -> Vec<Tile> {
-        let walks = strikers.iter().flat_map(|&(from, resource, reach)| {
+    fn strikes(
+        terrain: &[u8],
+        strikers: impl IntoIterator<Item = (Tile, Tile, i32)>,
+    ) -> impl Iterator<Item = Tile> {
+        (strikers.into_iter()).flat_map(move |(from, resource, reach)| {
             let walk = Atlas::walk_of(terrain, from, resource);
             walk.into_iter().flat_map(move |w| tiles::within(reach, w))
-        });
-        walks.collect()
+        })
     }
 
     fn keeper_reach() -> i32 {
@@ -755,7 +757,7 @@ impl Atlas {
     /// The tiles the keepers strike from anywhere on the walk to their posts:
     /// a living one's, and a dead one's successor's from its lair once it
     /// spawns before a crossing ends.
-    fn struck(room: &Room) -> Vec<Tile> {
+    fn struck(room: &Room) -> impl Iterator<Item = Tile> {
         let living = room.others.iter().filter(|c| c.owner == Owner::Keeper);
         let striker =
             |from: Tile, reach: i32| (from, Atlas::guarded(room, from).unwrap_or(from), reach);
@@ -776,10 +778,8 @@ impl Atlas {
                 strikers.push(striker(tiles::of_pos(&lair.pos), Atlas::keeper_reach()));
             }
         }
-        match room.terrain {
-            Some(terrain) => Atlas::strikes(terrain.get_bits(), &strikers),
-            None => Vec::new(),
-        }
+        let strikes = room.terrain.map(|t| Atlas::strikes(t.get_bits(), strikers));
+        strikes.into_iter().flatten()
     }
 
     fn reused(previous: Option<&Rc<Table<Weight>>>, weights: Table<Weight>) -> Rc<Table<Weight>> {
@@ -826,12 +826,15 @@ impl Atlas {
         weights
     }
 
-    fn walled(weights: &mut Table<Weight>, strikes: &[Tile]) -> Option<Rc<TileSet>> {
+    fn walled(
+        weights: &mut Table<Weight>,
+        strikes: impl IntoIterator<Item = Tile>,
+    ) -> Option<Rc<TileSet>> {
         let mut struck = TileSet::default();
         let mut any = false;
         for t in strikes {
-            if weights[*t].take().is_some() {
-                any |= struck.insert(*t);
+            if weights[t].take().is_some() {
+                any |= struck.insert(t);
             }
         }
         any.then(|| Rc::new(struck))
@@ -880,7 +883,7 @@ impl Atlas {
             }
 
             let standing = Rc::new(weights.clone());
-            let struck = Atlas::walled(&mut weights, &Atlas::struck(room));
+            let struck = Atlas::walled(&mut weights, Atlas::struck(room));
             let last = previous.rooms.remove(&c);
             let bare = Atlas::bare(last.as_ref(), terrain.get_bits());
             let weights = Atlas::reused(last.as_ref().map(|g| &g.weights), weights);
@@ -933,8 +936,8 @@ impl Atlas {
             let unseen = |standing: &Rc<Table<Weight>>| {
                 let mut weights = (**standing).clone();
                 let keeper_of = |&(lair, resource): &Post| (lair, resource, Atlas::keeper_reach());
-                let strikers: Vec<_> = placed.unwrap_or(&[]).iter().map(keeper_of).collect();
-                let struck = Atlas::walled(&mut weights, &Atlas::strikes(terrain, &strikers));
+                let strikers = placed.unwrap_or(&[]).iter().map(keeper_of);
+                let struck = Atlas::walled(&mut weights, Atlas::strikes(terrain, strikers));
                 (weights, struck)
             };
             let grid = match previous.rooms.remove(&c) {
