@@ -169,7 +169,7 @@ impl<'a> Reader<'a> {
         let kind = self.word().parse::<StructureType>();
         let id = self.id();
         let pos = self.pos_in(room);
-        let owner = self.owner();
+        let (tagged_ours, owner) = (self.ints[self.at] == 1, self.owner());
         let hits = self.n();
         let hits_max = self.n();
         let store = if kind.as_ref().is_ok_and(|k| !k.has_store()) {
@@ -193,7 +193,7 @@ impl<'a> Reader<'a> {
         } else {
             (0, 0, 0)
         };
-        let public = kind == StructureType::Rampart && self.flag();
+        let public = kind == StructureType::Rampart && !tagged_ours && self.flag();
         let walkable = super::walkable(kind, &owner, public);
         Some(Structure {
             id,

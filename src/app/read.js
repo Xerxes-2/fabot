@@ -130,7 +130,7 @@ globalThis.__fabotRead = (() => {
     if (COOLED.has(type)) n(st.cooldown);
     if (type === "keeperLair") n(st.ticksToSpawn ?? -1);
     if (type === "invaderCore") collapse(st), n(st.level);
-    if (type === "rampart") n(st.isPublic === true);
+    if (type === "rampart" && f.tag !== 1) n(st.isPublic === true);
   };
   // Only what `world.rs` `Fallen` keeps, or another's creep's id.
   const remains = (r) => {
@@ -220,7 +220,7 @@ globalThis.__fabotRead = (() => {
         else o.ticksToDeploy = n();
         o.level = n();
       }
-      if (type === "rampart") o.isPublic = n() === 1;
+      if (type === "rampart" && !o.my) o.isPublic = n() === 1;
       return o.id;
     };
     const room = () => {
