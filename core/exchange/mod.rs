@@ -857,7 +857,7 @@ struct HitBack {
 fn hit_back(
     theirs: &Side,
     fighters: &[Fighter],
-    deals: &[i32],
+    deals: impl IntoIterator<Item = i32>,
     rows: &[(Foe, Vec<i32>)],
 ) -> HitBack {
     let swings: Vec<(Fighter, i32, Vec<i32>)> = rows
@@ -875,8 +875,8 @@ fn hit_back(
 
     let swinging: Vec<bool> = fighters
         .iter()
-        .zip(deals.iter())
-        .map(|(f, range)| f.strikes_back > 0 && *range <= engine::MELEE_RANGE)
+        .zip(deals)
+        .map(|(f, range)| f.strikes_back > 0 && range <= engine::MELEE_RANGE)
         .collect();
 
     let taken = swinging
@@ -1232,7 +1232,7 @@ fn exchange(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> Out
     let back = hit_back(
         theirs,
         &fighters,
-        &mine.iter().map(|(range, _)| *range).collect::<Vec<_>>(),
+        mine.iter().map(|(range, _)| *range),
         &rows,
     );
 
