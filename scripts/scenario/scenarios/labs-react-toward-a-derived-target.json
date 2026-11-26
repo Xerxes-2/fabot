@@ -1,7 +1,0 @@
-{
-  "why": "the cluster's labs are filled from its stores and react toward a target nobody declared: the one T3 combat boost its ores make, XKHO2, its first reagent KO",
-  "modules": ["atlas", "economy", "layout", "mv"],
-  "start": { "room": "W8N3", "seed": 1, "node": "L5" },
-  "ticks": 4000,
-  "assert": [{ "measure": "made", "resource": "KO", "min": 200 }]
-}

@@ -480,6 +480,24 @@ mod tests {
         assert!(!l3.casts(&set, &stock(&tier), 4600));
     }
 
+    /// A stronghold is taken only by a set its colony casts, for no more than
+    /// its loot: unstocked, L2's and L3's boosted recipes cast nothing, and
+    /// L1's bare set outprices a few hundred loot.
+    #[test]
+    fn an_unstocked_colony_takes_a_stronghold_only_where_its_bare_set_pays() {
+        use ResourceType::*;
+        let taken = |level, loot, held: &[(ResourceType, i32)]| {
+            let standing = Stronghold { level, deploys_at: 0, collapses_at: 50_000, loot };
+            take(&standing, 50_000, (&stock(held), 5_600, 100)).is_some()
+        };
+        let tier = [(GhodiumAlkalide, 50), (KeaniumAlkalide, 50), (LemergiumAlkalide, 50)];
+        for level in 1..=3 {
+            assert!(!taken(level, 700, &[]), "L{level}");
+        }
+        assert!(!taken(2, 1_000_000, &[]) && !taken(3, 1_000_000, &[]));
+        assert!(taken(1, 1_000_000, &[]) && taken(3, 1_000_000, &tier));
+    }
+
     /// A colony nearer on the map but further on foot neither casts nor
     /// lends its boosts: the set is priced from the one that boosts it.
     #[test]

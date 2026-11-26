@@ -473,6 +473,17 @@ mod tests {
     }
 
     #[test]
+    fn a_target_is_each_combat_t3_whose_every_ore_is_held() {
+        let made = |have: &[ResourceType]| -> Vec<ResourceType> {
+            targets(have).into_iter().map(|(t, _)| t).collect()
+        };
+        assert_eq!(made(&[Keanium, Oxygen, Hydrogen, Catalyst]), [CatalyzedKeaniumAlkalide]);
+        assert_eq!(made(&[KeaniumOxide, Hydroxide, Catalyst]), [CatalyzedKeaniumAlkalide]);
+        assert!(made(&[Keanium, Oxygen, Hydrogen]).is_empty());
+        assert!(!made(&ORES).contains(&CatalyzedGhodiumAcid), "a work boost");
+    }
+
+    #[test]
     fn targets_sharing_an_ore_take_it_in_turn() {
         fn within(r: ResourceType, of: ResourceType) -> bool {
             r == of || (of.reaction_components()).is_some_and(|rs| rs.iter().any(|c| within(r, *c)))

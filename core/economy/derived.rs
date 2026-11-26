@@ -1751,4 +1751,31 @@ mod tests {
         let stands = [(Utrium, 3_000), (Hydrogen, 3_000), (Energy, 50_000)];
         assert_eq!(run(&stands).0, Some(UtriumHydride));
     }
+
+    /// Mended soonest lost first, a raid's strikes and a tunnel's decay
+    /// counted: what may fall at its next decay ranks 0, and a struck rampart
+    /// ahead of one under its floor that decay alone keeps some 300 ticks.
+    #[test]
+    fn the_structure_lost_soonest_ranks_first() {
+        use world::terrain::{SWAMP, WALL};
+        let name = RoomName::W1N1;
+        let mut bits = vec![0; 2500];
+        bits[31 * 50 + 26] = WALL;
+        bits[31 * 50 + 28] = SWAMP | WALL;
+        let room = Room { terrain: world::terrain::leak(bits), ..Room::empty(name) };
+        let urgency = |kind, x, (hits, hits_max), struck| {
+            let s = testing::built("s", kind, Pos::new(name, x, 31));
+            let s = Structure { hits, hits_max, ..s };
+            let fact = repair_of(&room, 100_000, true, &s).map(|f| RepairFact { struck, ..f });
+            fact.unwrap().urgency(0)
+        };
+        let rampart =
+            |hits, struck| urgency(StructureType::Rampart, 40, (hits, 10_000_000), struck);
+        let floor = rampart(1_201, 0);
+        assert!(floor > 1, "{floor}");
+        assert_eq!(urgency(StructureType::Road, 10, (100, 5_000), 0), 0);
+        assert_eq!(urgency(StructureType::Road, 26, (15_000, 750_000), 0), 0);
+        assert_eq!(urgency(StructureType::Road, 28, (75_000, 3_750_000), 0), 0);
+        assert!(rampart(6_000, 300) < rampart(2_000, 0));
+    }
 }

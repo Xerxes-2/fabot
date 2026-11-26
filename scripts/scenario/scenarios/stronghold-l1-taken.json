@@ -1,5 +1,5 @@
 {
-  "why": "a deployed level-1 stronghold whose container holds loot worth its bare recipe (1000 batteries, as a season stocks its resource there; vanilla's falls short, stronghold-unstocked-casts-none) is taken with no boost stock by the recipe's set, the ATTACK it prices cheapest in time (25A25M) beside three 17H17M walking in as a square, and all its loot hauled home",
+  "why": "a deployed level-1 stronghold whose container holds loot worth its bare recipe (1000 batteries, as a season stocks its resource there; vanilla's falls short) is taken with no boost stock by the recipe's set, the ATTACK it prices cheapest in time (25A25M) beside three 17H17M walking in as a square, and all its loot hauled home",
   "modules": ["fight", "strategy", "economy"],
   "start": { "room": "W8N3", "seed": 1, "node": "P7", "stronghold": "W8N2:1:1:1:battery*1000" },
   "ticks": 4000,

@@ -1,7 +1,0 @@
-{
-  "why": "a road on a wall decays 150 times a road (750 on a tile both swamp and wall): one decay from gone, it is mended before it falls",
-  "modules": ["economy"],
-  "start": { "world": "scripts/scenario/worlds/tunnel-one-decay-from-gone.json", "seed": 1 },
-  "ticks": 300,
-  "assert": [{ "measure": "decayedAway", "max": 0 }]
-}

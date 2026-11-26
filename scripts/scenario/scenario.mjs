@@ -27,7 +27,7 @@
 // so bounds bodiesLost or each engagement's pastBudget; default a fight scenario raising a raid or reading a defend; false opts out), "start": { "gen"? (sim --gen's map, which picks the room) or "room", "seed",
 // "late"?, "node"?, "invaders"? (room:every[:first],…), "wave"? (role[:size],…), "core"? (room:tick,…), "stronghold"? ("room:tick:level[:deploy],…"), "resetEvery"? (soak:many's --reset-every), "unsafe"?, "ended"?,
 // "follow"? ([room] sampled beside the declared), "opponents"? (sim's scripted rivals, `sim/src/rival`), "players"? and "sectors"? (soak.mjs's: our bot in every seat; an assert's "seat" names the one it reads, unset the first) } or { "world": a capture-shaped file
-// (crafted ones under worlds/), "seed", "room"?, "node"?, "late"? (a world with no home of ours, as a recipe's), "ended"?, "follow"?, "invaders"?, "wave"?, "stronghold"? (as a recipe's), "opponents"? (the world's own users), "declarations"? (in place of the world's), "memory"? (keys of Memory.v2 beside the world's), "gcl"? (in place of the world's), "stock"? ({ room: amounts set in its terminal }), "level"? ({ room: its controller level in place of the world's }), "roadless"? ([room]: every road in each taken up), "overlay"? (a world file whose rooms stand in for the base world's of their names, its seat ours) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"? (or "report": true, printed and bounding nothing), "room"?, "kind"?, "name"? }] };
+// (crafted ones under worlds/), "seed", "room"?, "node"?, "late"? (a world with no home of ours, as a recipe's), "ended"?, "follow"?, "invaders"?, "wave"?, "stronghold"? (as a recipe's), "opponents"? (the world's own users), "declarations"? (in place of the world's), "memory"? (keys of Memory.v2 beside the world's), "gcl"? (in place of the world's), "stock"? ({ room: amounts set in its terminal }), "roadless"? ([room]: every road in each taken up), "overlay"? (a world file whose rooms stand in for the base world's of their names, its seat ours) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"? (or "report": true, printed and bounding nothing), "room"?, "kind"?, "name"? }] };
 // a measure is one of `measures` below, read off the soak's output over ticks
 // [from, to), counted from the run's first tick; { "metric": a name the bot's
 // metrics carry (`core/observe/metrics.rs`), "room"?, "total"? } bounds its worst
@@ -54,7 +54,7 @@ const LIBRARY = join(HERE, "scenarios");
 const SCENARIO = ["name", "why", "modules", "nightly", "defends", "start", "ticks", "assert"];
 const RECIPE = ["gen", "room", "seed", "late", "node", "invaders", "wave", "core", "stronghold", "resetEvery", "unsafe", "ended", "follow", "opponents", "players", "sectors"];
 // A "world" start's alone: each is written into the world before it stands.
-const CRAFTED = ["declarations", "memory", "gcl", "stock", "level", "roadless", "overlay"];
+const CRAFTED = ["declarations", "memory", "gcl", "stock", "roadless", "overlay"];
 const WORLD = ["world", "seed", "room", "node", "late", "ended", "follow", "invaders", "wave", "stronghold", "opponents", ...CRAFTED];
 const OPPONENT = ["name", "room", "config", "raid"];
 const defends = (s) => s.defends ?? (s.modules.includes("fight") && Boolean(s.start.invaders || s.start.wave || s.assert.some((a) => a.where?.kind === "defend")));
@@ -166,11 +166,6 @@ const play = async ({ name, start, ticks }) => {
       const terminal = crafted.rooms.find((r) => r.name === room)?.objects.find((o) => o.type === "terminal");
       if (!terminal) fail(`${name}: "stock" names ${room}, which holds no terminal in ${start.world}`);
       Object.assign(terminal.store, add);
-    }
-    for (const [room, level] of Object.entries(start.level ?? {})) {
-      const controller = crafted.rooms.find((r) => r.name === room)?.objects.find((o) => o.type === "controller");
-      if (!controller) fail(`${name}: "level" names ${room}, which holds no controller in ${start.world}`);
-      Object.assign(controller, { level, progress: 0 });
     }
     for (const room of start.roadless ?? []) {
       const r = crafted.rooms.find((r) => r.name === room);

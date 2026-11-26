@@ -1,7 +1,0 @@
-{
-  "why": "a worker mends the structure lost soonest: a road one decay from gone beside it before a rampart under its floor across the room that lasts some 300 ticks, so no road decays away",
-  "modules": ["economy"],
-  "start": { "world": "scripts/scenario/worlds/repair-soonest-lost.json", "seed": 1 },
-  "ticks": 200,
-  "assert": [{ "measure": "decayedAway", "max": 0 }]
-}

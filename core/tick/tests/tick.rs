@@ -78,6 +78,69 @@ fn said(intents: &[Action]) -> Vec<(String, String)> {
         .collect()
 }
 
+/// The engine refuses an act of a structure past its level's allowance
+/// (ERR_RCL_NOT_ENOUGH): a colony fallen a level orders none, in any module.
+#[test]
+fn no_module_orders_a_structure_past_its_level() {
+    use fabot_base::{
+        declarations::{Declared, Outpost},
+        testing,
+        world::{Id, Pos, RoomName, Spawn, StructureType, terrain},
+    };
+    for level in [7, 8] {
+        let home: RoomName = "W2N2".parse().unwrap();
+        let unseen: RoomName = "W3N2".parse().unwrap();
+        let plain = terrain::leak(vec![0; 2500]).unwrap();
+        let at = |y| Pos::new(home, 25, y);
+        let mut room = testing::ours(home, level, plain);
+        room.energy_available = 12_900;
+        room.energy_capacity = 12_900;
+        let mut world = testing::world(r#"{"rooms":[]}"#);
+        for (i, y) in [5, 15, 20].into_iter().enumerate() {
+            let id = format!("s{i}");
+            room.structures.push(testing::built(&id, StructureType::Spawn, at(y)));
+            world.spawns.push(Spawn {
+                id: id.as_str().into(),
+                name: id,
+                pos: at(y),
+                spawning: None,
+            });
+        }
+        room.structures.push(testing::built("o", StructureType::Observer, at(40)));
+        world.rooms.push(room);
+        let declared = Declared { id: Id::MISREAD, pos: Pos::new(unseen, 25, 25) };
+        let outpost = Outpost {
+            reserved: true,
+            room: unseen,
+            controller: declared.clone(),
+            sources: vec![declared],
+        };
+        let declarations =
+            declarations::Declarations { outposts: vec![outpost], ..Default::default() };
+        let mut intel = BTreeMap::new();
+        let decided = tick::decide(
+            (|| 0.0, 0.0),
+            &mut Vec::new(),
+            (&world, false),
+            (declarations, State::default()),
+            (BTreeMap::new(), Atlas::default()),
+            &mut intel,
+            (&|_| Some(plain), [(home, plain.get_bits()), (unseen, plain.get_bits())]),
+        );
+        let working: Vec<Id> = world.rules.working(&world.rooms[0]).map(|s| s.id).collect();
+        let ordered: Vec<Id> = (decided.result.settled.actions.iter())
+            .filter_map(|a| match a {
+                Action::Spawn(id, _) | Action::Observe(id, _) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        let spawned = decided.result.settled.actions.iter().any(|a| matches!(a, Action::Spawn(..)));
+        assert!(spawned, "level {level}: nothing cast");
+        assert!(ordered.iter().all(|id| working.contains(id)), "level {level}: {ordered:?}");
+        assert_eq!(ordered.contains(&"o".into()), level == 8, "{ordered:?}");
+    }
+}
+
 proptest! {
     #![proptest_config(fabot_base::testing::config(CASES))]
 
