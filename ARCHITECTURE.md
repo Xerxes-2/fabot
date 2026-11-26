@@ -731,7 +731,8 @@ and `cheapest_win` (adds only to already-standing `ours`).
   `❓` A `Close` set priced landing together reaches the raid apart where
   the raid walks onto its nearer body (a pair 1 tick apart at landing met it
   6 apart); option: price a non-together arm as if the raid closes on the
-  nearest body.
+  nearest body. Nor does a `Close` set walk as one: a body held back by home
+  traffic reaches the raid after its partner (12 ticks, healed-striker seed 1).
   `❓` A raid spawned beside a forming blob scatters it
   (blob-defend-fights-within-its-heal seed 26: strayTicks 264).
 - **Focus:** the Exchange prices the kill our bodies strike: both rank the
