@@ -1,7 +1,0 @@
-{
-  "why": "a source dug before its container is seated off the only way through the room: on soak:gen seed 123 (E1S7) the seat farthest from the controller, 38,39 beside source 38,38, is the one gap between the spawn and the south, where 39,39 beside the same source is not: main at 8c29b43d jammed the ring's haulers south of it and the scout and workers north for 1,000 ticks (controller 100 to 103, RCL2 at t1528); now RCL2 at t600, median of seeds 121-152 706",
-  "modules": ["atlas", "economy"],
-  "start": { "gen": 123, "seed": 1 },
-  "ticks": 1000,
-  "assert": [{ "measure": "homeLevel", "room": "E1S7", "to": 1000, "min": 2 }, { "measure": "bodiesLost", "max": 0 }]
-}

@@ -684,6 +684,66 @@ mod tests {
         }
     }
 
+    /// Real rooms with their posts built and another bot's extensions round
+    /// the plan's link: a digger holds its post, so a link that parts the
+    /// tiles beside it, the post left out, leaves the post the only way on.
+    #[test]
+    fn no_source_link_site_parts_the_tiles_beside_it_but_across_its_post() {
+        let (rules, mut rng, mut linked) = (Rules::vanilla(), fx::Rng::new(18), 0);
+        for real in fabot_base::testing::real_rooms().step_by(20) {
+            let mut room = real.room();
+            let Some(plan) =
+                crate::ground::of_room(&room).and_then(|g| crate::plan::of_ground(&rules, &g))
+            else {
+                continue;
+            };
+            let at = |t: Tile| tiles::to_pos(real.name, t);
+            let built =
+                |kind, owner, t| Structure { pos: at(t), ..fx::structure("s", kind, owner, t) };
+            let kept = |i: &&Item| matches!(i.kind, StructureType::Container | StructureType::Link);
+            let one =
+                Plan { items: plan.items.iter().filter(kept).cloned().collect(), ..plan.clone() };
+            let posts: Vec<Tile> = (one.items.iter())
+                .filter(|i| i.kind == StructureType::Container)
+                .filter(|i| real.sources.iter().any(|s| tiles::range(*s, i.tile) == 1))
+                .map(|i| i.tile)
+                .collect();
+            for (n, p) in posts.iter().enumerate() {
+                let id = format!("c{n}");
+                let post = Structure {
+                    id: id.as_str().into(),
+                    ..built(StructureType::Container, Owner::Ours, *p)
+                };
+                room.structures.push(post);
+            }
+            let links = one.items.iter().filter(|i| i.kind == StructureType::Link);
+            for (n, t) in links.flat_map(|l| tiles::around(l.tile).iter()).enumerate() {
+                let free = !posts.contains(t) && !one.items.iter().any(|i| i.tile == *t);
+                if free && !tiles::on_edge(*t) && rng.choose(0, 2) == 0 {
+                    let id = format!("x{n}");
+                    let ext = built(StructureType::Extension, Owner::Stranger("x".into()), *t);
+                    room.structures.push(Structure { id: id.as_str().into(), ..ext });
+                }
+            }
+            let census = census_of(&room, &[]);
+            let placed = place(&rules, &census, engine::CONTROLLER_MAX_LEVEL, &one, i32::MAX);
+            for p in placed.iter().filter(|p| p.kind == StructureType::Link) {
+                let t = tiles::index(p.x, p.y);
+                let Some(post) = posts.iter().find(|post| tiles::range(**post, t) == 1) else {
+                    continue;
+                };
+                let open = |n: Tile| n != *post && census.walkable[n] > 0;
+                let beside: Vec<Tile> =
+                    tiles::around(t).iter().copied().filter(|n| open(*n)).collect();
+                let walked = tiles::reach(beside.iter().copied().take(1), |n| open(n) && n != t);
+                let parted = beside.iter().any(|n| walked[*n] == tiles::UNREACHED);
+                assert!(!parted, "{}: a link on {},{} beside {post}", real.name, p.x, p.y);
+                linked += 1;
+            }
+        }
+        assert!(linked > 100, "{linked}");
+    }
+
     #[test]
     fn a_container_off_the_plans_post_gives_way_to_the_plans_own() {
         let rules = Rules::vanilla();

@@ -1070,3 +1070,35 @@ fn a_controller_is_sponsored_and_served_only_where_a_body_walks_to_it_within_the
     }
     assert!(checked > 0);
 }
+
+/// Every real room bare: a source dug before its container is seated where
+/// its harvester parts the room only where every seat beside it would.
+#[test]
+fn a_bare_dig_seat_parts_the_room_only_where_every_seat_would() {
+    let mut seated = 0;
+    for real in fabot_base::testing::real_rooms() {
+        let world = world_of_rooms(vec![real.room()]);
+        let atlas = Atlas::of_world(&world);
+        let room = &world.rooms[0];
+        let open = |t: Tile| !terrain::is_wall(room.terrain, tiles::x_of(t), tiles::y_of(t));
+        let rocks: Vec<Tile> = room.sources.iter().map(|s| tiles::of_pos(&s.pos)).collect();
+        let open = |t: Tile| open(t) && !rocks.contains(&t);
+        // Whether the tiles beside `seat` fall apart in the room without it.
+        let parts = |seat: Tile| {
+            let beside: Vec<Tile> =
+                tiles::around(seat).iter().copied().filter(|n| open(*n)).collect();
+            let walked = tiles::reach(beside.iter().copied().take(1), |t| open(t) && t != seat);
+            beside.iter().any(|n| walked[*n] == tiles::UNREACHED)
+        };
+        for s in &room.sources {
+            let seats = atlas.seats(Footprint::One, 1, &s.pos);
+            let Some(post) = atlas.bare_post(room, &seats) else {
+                continue;
+            };
+            let every = seats.iter().all(|p| parts(tiles::of_pos(p)));
+            assert!(!parts(tiles::of_pos(&post)) || every, "{post:?}");
+            seated += 1;
+        }
+    }
+    assert!(seated > 1000);
+}

@@ -570,22 +570,73 @@ mod tests {
         }
     }
 
+    /// The tiles a body stands on once the plan is built.
+    fn open_of(ground: &Ground, plan: &Plan) -> Vec<bool> {
+        let mut open: Vec<bool> = ground.terrain.iter().map(|t| *t != place::WALL).collect();
+        let planned = || plan.items.iter().chain(&plan.ring);
+        planned().for_each(|i| open[i.tile] |= i.kind == StructureType::Road);
+        planned().for_each(|i| open[i.tile] &= i.kind.walkable());
+        let rocks = (ground.sources.iter().chain(&ground.minerals)).chain(&ground.controller);
+        rocks.for_each(|r| open[*r] = false);
+        open
+    }
+
     /// The tiles a body walks to from `starts`, past every planned structure.
     fn walked(ground: &Ground, plan: &Plan, starts: &[Tile]) -> Vec<bool> {
-        let planned = || plan.items.iter().chain(&plan.ring);
-        let rock = |t: Tile| {
-            (ground.sources.iter().chain(&ground.minerals))
-                .chain(&ground.controller)
-                .any(|r| *r == t)
-        };
-        let road = |t: Tile| planned().any(|i| i.tile == t && i.kind == StructureType::Road);
-        let open = |t: Tile| {
-            (ground.terrain[t] != place::WALL || road(t))
-                && !rock(t)
-                && planned().all(|i| i.tile != t || i.kind.walkable())
-        };
-        let steps = tiles::reach(starts.iter().copied(), open);
+        let open = open_of(ground, plan);
+        let steps = tiles::reach(starts.iter().copied(), |t| open[t]);
         steps.iter().map(|s| *s != tiles::UNREACHED).collect()
+    }
+
+    /// A digger holds its post while it works (`reached`'s `held`): a
+    /// source's post is walked to, and no exit or anything planned is
+    /// reached past a post alone.
+    #[test]
+    fn every_post_is_walked_to_and_never_the_only_way_on() {
+        let rules = Rules::vanilla();
+        let crafted = [
+            ("W1N1", include_str!("../../scripts/scenario/worlds/corridor-post.json")),
+            ("E9S5", include_str!("../../scripts/scenario/worlds/source-across-a-wall.json")),
+            ("E9S5", include_str!("../../scripts/scenario/worlds/ore-post-e9s5.json")),
+            ("E18S11", include_str!("../../scripts/scenario/worlds/source-pocket.json")),
+        ];
+        let crafted = crafted.into_iter().filter_map(|(name, text)| {
+            let world = fabot_base::testing::world(text);
+            ground::of_room(world.rooms.iter().find(|r| r.name.to_string() == name)?)
+        });
+        let real = fabot_base::testing::real_rooms().step_by(5);
+        let mut posts = 0;
+        for ground in crafted.chain(real.filter_map(|r| ground::of_room(&r.room()))) {
+            let Some(plan) = of_ground(&rules, &ground) else {
+                continue;
+            };
+            let rocks = (ground.sources.iter().chain(&ground.minerals)).chain(&ground.controller);
+            let planned = plan.items.iter().chain(&plan.ring).map(|i| i.tile);
+            let ends: Vec<Tile> = planned.chain(rocks.copied()).collect();
+            let open = open_of(&ground, &plan);
+            let alone = |seat: Tile| {
+                let from = |shut| tiles::reach([plan.anchor], |t| open[t] && t != shut);
+                let (all, held) = (from(Tile::of_index(tiles::COUNT)), from(seat));
+                let at = |r: &tiles::Table<u16>, t: Tile| t == seat || r[t] != tiles::UNREACHED;
+                let near = |r: &tiles::Table<u16>, e: Tile| {
+                    tiles::within(1, e).into_iter().any(|n| at(r, n))
+                };
+                all[seat] == tiles::UNREACHED
+                    || tiles::all().any(|t| tiles::on_edge(t) && at(&all, t) && !at(&held, t))
+                    || ends.iter().any(|e| near(&all, *e) && !near(&held, *e))
+            };
+            for rock in ground.sources.iter().chain(&ground.minerals) {
+                let beside = |i: &&Item| {
+                    i.kind == StructureType::Container && tiles::range(i.tile, *rock) == 1
+                };
+                let held: Vec<Tile> = plan.items.iter().filter(beside).map(|i| i.tile).collect();
+                posts += held.len();
+                let unseated = held.is_empty() && ground.sources.contains(rock);
+                let at = tiles::to_pos(ground.room, *rock);
+                assert!(!unseated && !held.iter().any(|p| alone(*p)), "{at:?}'s post {held:?}");
+            }
+        }
+        assert!(posts > 1000, "{posts}");
     }
 
     #[test]
