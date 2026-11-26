@@ -1,0 +1,8 @@
+{
+  "name": "fabot-official",
+  "private": true,
+  "dependencies": {
+    "screeps": "4.3.3",
+    "screepsmod-auth": "2.10.1"
+  }
+}

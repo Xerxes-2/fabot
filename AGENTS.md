@@ -138,11 +138,12 @@ Solo repo: no PRs, no feature branches, work on `main`.
 2. `jj describe` with a conventional-commit subject, one `Fixes #<n>` trailer
    per issue, and `Reviewed: code-review` (`scripts/ship.sh` requires it).
 3. Check `jj log -r 'main..REV'` — every change listed ships. Then run
-   `jj ship [-r REV]`: runs `npm test`, build, `npm run smoke`, and scenarios
-   whose `modules` the change touches (every one when it touches code outside
-   `core/<module>/`), then moves `claude.session-branch` (`main` locally, set
-   once via `jj config set --repo claude.session-branch main`) to `REV` and
-   pushes. Do not re-run `npm test` before it. Pushed changes are immutable.
+   `jj ship [-r REV]`: runs `npm test`, build, `npm run smoke` and
+   `smoke:real`, and scenarios whose `modules` the change touches (every one
+   when it touches code outside `core/<module>/`), then moves
+   `claude.session-branch` (`main` locally, set once via
+   `jj config set --repo claude.session-branch main`) to `REV` and pushes.
+   Do not re-run `npm test` before it. Pushed changes are immutable.
 4. `npm run deploy` only when asked (cold reset on the next tick).
 
 Squash TDD slices into one change per issue; push per issue. A user-flagged live

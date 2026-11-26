@@ -34,6 +34,8 @@
             pkgs.wasm-pack
           ];
         };
+        # `scripts/official/`'s server: default's Node without its Rust toolchain; python3 for node-gyp.
+        official = pkgs.mkShell { packages = [ pkgs.nodejs_24 pkgs.python3 ]; };
       });
     };
 }

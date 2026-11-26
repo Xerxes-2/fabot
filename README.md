@@ -23,6 +23,7 @@ rustup (it reads the same file) and `wasm-pack`. Then:
 npm test          # cargo fmt --check, line ceilings, clippy, cargo test
 npm run build     # wasm-pack → dist/main.js, dist/main.wasm
 npm run smoke     # bundle runs four ticks against a stub game
+npm run smoke:real # bundle on the official server (needs nix; the first run builds it)
 npm run build:sim # PGO native simulator (`sim/`, Rust port of official engine)
 npm run scenario  # scenario library (native `sim`)
 npm run soak:many # long-horizon economy soak across seat extremes

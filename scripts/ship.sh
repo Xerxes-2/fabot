@@ -31,6 +31,8 @@ unreviewed=$(jj log --no-graph -r "$branch..$rev" -T \
 npm test
 npm run build
 npm run smoke
+# A cloud container has no nix, the official server's Node.
+if command -v nix >/dev/null; then npm run smoke:real; else echo "ship: smoke:real skipped: no nix" >&2; fi
 
 # Code outside core/<module>/ (src/, core/tick, the engine
 # scripts, the build) reaches every module's run, so it runs the whole library.

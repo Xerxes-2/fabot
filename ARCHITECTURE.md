@@ -963,6 +963,8 @@ No performance change ships without the representative benchmark:
 
 Noise floor: `npm run bench` reads within `±0.4%` per module on an unchanged
 bundle.
+`npm run bench:real` calibrates it: interleaved A/B rounds on the official
+server (§10.2) from a saved world, not fingerprint-exact.
 
 ### 9.2 Rust dialect — defaults, not rules
 
@@ -1036,6 +1038,11 @@ was not seen to die (the engine's word: its tombstone), offline one it outlived.
 - **Watching:** every scenario and soak is watched on `sim` (`npm run
   scenario -- <name> --watch`, `npm run watch:sim`, `sim/src/watch`): the run
   lazycreep shows is the one scenarios and soaks measure.
+- **Official server (`scripts/official/`):** the bundle itself, on the
+  flake's Node 24 (`nix develop .#official`) and isolated-vm, installed once
+  per machine under `~/.cache/fabot-official`. `npm run smoke:real` plays a
+  fresh colony with a global reset halfway and fails on any error, fault or
+  heap past its limit.
 
 **Scenario library (`npm run scenario`):** every live incident becomes a recipe
 scenario with outcome bounds (`scripts/scenario/scenarios/`). `jj ship` runs
