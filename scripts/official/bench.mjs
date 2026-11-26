@@ -40,13 +40,20 @@ for (let r = 0; r < rounds; r++)
     server.stop();
     const bad = probes.find((p) => p.err);
     if (bad) fail(`${side} threw at tick ${bad.t}: ${bad.err}`);
-    const cpu = probes.slice(cold).map((p) => p.cpu);
-    runs[side].push({ p50: pct(cpu, 0.5), p90: pct(cpu, 0.9), p99: pct(cpu, 0.99), mean: cpu.reduce((a, b) => a + b, 0) / cpu.length });
+    // A tick's billed intents arrive in the next tick's probe.
+    const kept = probes.slice(cold);
+    const billed = kept.slice(0, -1).flatMap((p, i) => (kept[i + 1].intents == null ? [] : [[p.cpu, 0.2 * kept[i + 1].intents]]));
+    const stats = (xs) => ({ p50: pct(xs, 0.5), p90: pct(xs, 0.9), p99: pct(xs, 0.99), mean: xs.reduce((a, b) => a + b, 0) / xs.length });
+    const [cpu, intents] = [billed.map(([c]) => c), billed.map(([, i]) => i)];
+    runs[side].push({ ...stats(cpu), compute: stats(cpu.map((c, i) => c - intents[i])), intents: stats(intents) });
     console.error(`round ${r + 1}/${rounds} ${side}: ${JSON.stringify(runs[side].at(-1))}`);
   }
 const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
-const summary = (side) => Object.fromEntries(["p50", "p90", "p99"].map((k) => [k, median(runs[side].map((run) => run[k]))]));
+const summary = (side, of = (run) => run) => Object.fromEntries(["p50", "p90", "p99"].map((k) => [k, median(runs[side].map((run) => of(run)[k]))]));
 // The median round, not the min: the server's ticks differ run to run (its
 // invaders, its timing), so no round is the one free of noise that a min assumes.
 const ratios = runs.A.map((a, i) => runs.B[i].mean / a.mean);
-console.log(JSON.stringify({ A: summary("A"), B: summary("B"), ratio: +median(ratios).toFixed(3), ratios: ratios.map((x) => +x.toFixed(3)) }));
+// Compute (CPU less 0.2 per billed intent) is the code-speed number; intents follow behaviour.
+const computeRatios = runs.A.map((a, i) => runs.B[i].compute.mean / a.compute.mean);
+const sides = Object.fromEntries(["A", "B"].map((s) => [s, { ...summary(s), compute: summary(s, (r) => r.compute), intents: summary(s, (r) => r.intents) }]));
+console.log(JSON.stringify({ ...sides, ratio: +median(ratios).toFixed(3), ratios: ratios.map((x) => +x.toFixed(3)), computeRatio: +median(computeRatios).toFixed(3), computeRatios: computeRatios.map((x) => +x.toFixed(3)) }));

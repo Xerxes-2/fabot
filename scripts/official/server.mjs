@@ -7,6 +7,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, r
 import { createServer, connect } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { OBSERVE } from "../observe-views.mjs";
 import { modulesOf, upload as post } from "../upload.mjs";
 
 const HERE = new URL(".", import.meta.url).pathname;
@@ -70,9 +71,13 @@ let load = Game.cpu.getUsed() - t0;
 module.exports.loop = function () {
   let err;
   try { bot.loop(); } catch (e) { err = String(e && e.stack || e); }
+  const cpu = Game.cpu.getUsed();
   const h = Game.cpu.getHeapStatistics();
-  console.log('#probe ' + JSON.stringify({ t: Game.time, cpu: Game.cpu.getUsed(), load, err,
-    heap: h.used_heap_size + h.externally_allocated_size, limit: h.heap_size_limit }));
+  let phases, counts;
+  try { ({ phases, counts } = JSON.parse(RawMemory.segments[${OBSERVE}] || '{}')); } catch (e) { err ??= String(e); }
+  // intents: what the runner billed for the previous tick (intents.cjs); null when it billed none.
+  console.log('#probe ' + JSON.stringify({ t: Game.time, cpu, load, err, intents: globalThis.__intents,
+    phases, counts, heap: h.used_heap_size + h.externally_allocated_size, limit: h.heap_size_limit }));
   load = undefined;
 };`;
 const unescape = (s) => s.replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16))).replace(/&quot;/g, '"').replace(/&amp;/g, "&");
@@ -87,6 +92,11 @@ export async function boot(dir, { world } = {}) {
   rmSync(dir, { recursive: true, force: true });
   cpSync(join(mods, "@screeps/launcher/init_dist"), dir, { recursive: true });
   if (world) cpSync(world, join(dir, "db.json"));
+  // screepsmod-auth gives every user it has not touched 100 CPU, NPCs too, and
+  // the runner then runs the Invader's missing code every tick.
+  const db = JSON.parse(readFileSync(join(dir, "db.json"), "utf8"));
+  for (const npc of db.collections.find((c) => c.name === "users").data.filter((u) => u._id === "2" || u._id === "3")) Object.assign(npc, { cpu: 0, authTouched: true });
+  writeFileSync(join(dir, "db.json"), JSON.stringify(db));
   const [port, cli] = [await freePort(), await freePort()];
   const rc = readFileSync(join(dir, ".screepsrc"), "utf8")
     .replace("{{STEAM_KEY}}", "local-dummy") // the backend refuses an empty key; sign-in is screepsmod-auth's
@@ -97,7 +107,7 @@ export async function boot(dir, { world } = {}) {
   writeFileSync(join(dir, ".screepsrc"), rc);
   mkdirSync(join(dir, "bot"));
   writeFileSync(join(dir, "bot/main.js"), "module.exports.loop = () => {};");
-  writeFileSync(join(dir, "mods.json"), JSON.stringify({ mods: [join(mods, "screepsmod-auth/index.js")], bots: { fabot: join(dir, "bot") } }));
+  writeFileSync(join(dir, "mods.json"), JSON.stringify({ mods: [join(mods, "screepsmod-auth/index.js"), join(HERE, "intents.cjs")], bots: { fabot: join(dir, "bot") } }));
   // The backend leaves a rejected storage query unhandled now and then, which
   // Node before 15 only warned about; since, it kills the backend and our socket.
   const env = { ...process.env, PATH: `${dirname(node)}:${join(mods, ".bin")}:${process.env.PATH}`, NODE_OPTIONS: "--unhandled-rejections=warn" };

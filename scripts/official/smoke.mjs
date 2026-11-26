@@ -21,10 +21,8 @@ const rows = await server.play(ticks, async (p) => {
 });
 const probes = rows.map((r) => r.probe).filter(Boolean);
 const loads = probes.filter((p) => p.load !== undefined);
-// The stock Invader AI has no `main` on the private server, every tick.
-const INVADER = "Invader error Error: Unknown module 'main'";
 const engine = ["engine_runner1.log", "engine_processor1.log", "engine_processor2.log"]
-  .flatMap((f) => server.log(f).split("\n").filter((l) => /error/i.test(l) && l !== INVADER).map((l) => `${f}: ${l}`));
+  .flatMap((f) => server.log(f).split("\n").filter((l) => /error/i.test(l)).map((l) => `${f}: ${l}`));
 const errors = [
   ...probes.filter((p) => p.err).map((p) => `tick ${p.t} threw: ${p.err}`),
   ...rows.filter((r) => r.error || r.log).map((r) => `console: ${r.error ?? r.log}`),
