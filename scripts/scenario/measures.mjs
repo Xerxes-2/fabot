@@ -110,7 +110,7 @@ const LEDGER_LEAST = 1000;
 // not stood in the world it started from.
 const SEEN_AFTER_CAST = 2;
 // The engine's CREEP_SPAWN_TIME.
-const SPAWN_TIME_PER_PART = 3;
+export const SPAWN_TIME_PER_PART = 3;
 const CREEP_LIFE_TIME = 1500;
 const firstClaimed = (samples, met) => samples.find((s) => Object.keys(s.claimed ?? {}).length && Object.values(s.claimed).every(met))?.t ?? Infinity;
 // A refused "act code" that counts: not an observer's look past a cut world's
