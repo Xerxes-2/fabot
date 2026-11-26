@@ -615,18 +615,22 @@ impl Atlas {
     /// never seats on a source's post.
     pub fn post_of(room: &Room, source: &Pos) -> Option<(Pos, Option<Id>)> {
         let from_controller = |p: &Pos| Atlas::from_controller(room, p);
-        let rocks =
-            (room.sources.iter().map(|s| &s.pos)).chain(room.minerals.iter().map(|m| &m.pos));
-        let shared = |p: &Pos| rocks.clone().any(|r| r != source && p.within(1, r));
         let built = (room.structures.iter())
             .filter(|s| s.kind == StructureType::Container)
             .map(|s| (s.pos, Some(s.id)));
         let sites = (room.sites.iter())
             .filter(|s| s.kind == StructureType::Container && s.owner.is_ours())
             .map(|s| (s.pos, None));
-        (built.chain(sites))
-            .filter(|(p, _)| p.within(1, source) && p != source)
-            .min_by_key(|(p, built)| (shared(p), -from_controller(p), built.is_none(), p.y, p.x))
+        (built.chain(sites)).filter(|(p, _)| p.within(1, source) && p != source).min_by_key(
+            |(p, built)| (Atlas::shared(room, p), -from_controller(p), built.is_none(), p.y, p.x),
+        )
+    }
+
+    /// Beside more than one rock: a post either may dig from.
+    pub fn shared(room: &Room, p: &Pos) -> bool {
+        let rocks =
+            (room.sources.iter().map(|s| &s.pos)).chain(room.minerals.iter().map(|m| &m.pos));
+        rocks.filter(|r| p.within(1, r)).count() > 1
     }
 
     /// A seat that parts its neighbours ranks last: a harvester there holds the room.

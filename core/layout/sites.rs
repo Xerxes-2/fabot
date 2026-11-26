@@ -145,8 +145,13 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
     for rock in &rocks {
         for p in containers.iter().filter(|p| p.within(1, rock)) {
             rocked.push((tiles::of_pos(rock), tiles::of_pos(p)));
-            for t in tiles::within(1, tiles::of_pos(rock)) {
-                served[t] = 1;
+            // A container on a tile two rocks share serves neither, and a shared
+            // tile is never served: either rock may still need its own post there.
+            if !Atlas::shared(room, p) {
+                let near = tiles::within(1, tiles::of_pos(rock)).into_iter();
+                for t in near.filter(|t| !Atlas::shared(room, &tiles::to_pos(room.name, *t))) {
+                    served[t] = 1;
+                }
             }
         }
     }
@@ -393,7 +398,7 @@ pub fn place(
 
 #[cfg(test)]
 mod tests {
-    use fabot_base::world::{Owner, Structure};
+    use fabot_base::world::{Mineral, Owner, Source, Structure};
 
     use super::*;
     use crate::fixtures as fx;
@@ -639,6 +644,37 @@ mod tests {
             for level in 6..=engine::CONTROLLER_MAX_LEVEL {
                 let placed = place(&rules, &census_of(&colony.room, &[]), level, &plan, i32::MAX);
                 assert_eq!(placed.is_empty(), level < engine::CONTROLLER_MAX_LEVEL, "{level}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_container_beside_two_rocks_leaves_each_its_own_post() {
+        let rules = Rules::vanilla();
+        let colony = fx::samples(16).next().expect("a sample");
+        let at = |x, y| tiles::index(x, y);
+        let (source, mineral) = (colony.room.sources[0].clone(), colony.room.minerals[0].clone());
+        for ore in [false, true] {
+            let mut room = colony.room.clone();
+            room.sources = vec![Source { pos: fx::at(at(12, 13)), ..source.clone() }];
+            room.minerals = vec![Mineral { pos: fx::at(at(10, 13)), ..mineral.clone() }];
+            if !ore {
+                room.sources.push(Source { pos: fx::at(at(10, 13)), ..source.clone() });
+                room.minerals.clear();
+            }
+            for (stood, own) in [(at(11, 12), at(13, 12)), (at(13, 12), at(11, 12))] {
+                room.structures =
+                    vec![fx::structure("c", StructureType::Container, Owner::Nobody, stood)];
+                let plan = Plan {
+                    room: fx::ROOM,
+                    anchor: at(25, 25),
+                    items: vec![Item { kind: StructureType::Container, tile: own, level: 2 }],
+                    ring: Vec::new(),
+                    unfit: Vec::new(),
+                    muster: None,
+                };
+                let placed = place(&rules, &census_of(&room, &[]), 6, &plan, 1);
+                assert_eq!(placed.len(), 1, "{own} not placed beside {stood}, ore {ore}");
             }
         }
     }
