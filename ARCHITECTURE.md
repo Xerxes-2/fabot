@@ -465,7 +465,8 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   its `Derived.boosts` read by Economy, Fight, and `Tick`) are the colonies not given up with a lab, most
   labs first, ties by name: each with three labs reacts, each boosts its own
   bodies. Targets are derived, not declared: every
-  T3 combat boost whose ores the empire digs or holds, in the `BOOSTS` rank
+  T3 combat boost whose ores the empire digs or holds (raw or in a reagent on
+  its recipe: ore in a compound off it never reacts back out), in the `BOOSTS` rank
   expansion scores minerals by, each to Hivemind's "high" stock, so the labs
   make what fights spend from what we dig with no operator in the loop.
   `labs::wanted` lists the reactions toward them from the empire's stock,

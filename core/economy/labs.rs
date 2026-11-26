@@ -14,9 +14,19 @@ use fabot_base::{
 /// Hivemind's "high": past it the first-ranked boost leaves the ore to the next.
 const BOOST_STOCK: i32 = 7_500;
 
-/// An ore is held while a compound made of it is, or a target drops mid-tree.
+/// Every ore of `target` dug or held, raw or in a reagent on its recipe, so a
+/// target stays while its chain runs; ore in a compound off it (looted GO for
+/// GH) reacts back out into nothing.
+pub fn ores_held(target: ResourceType, have: &[ResourceType]) -> bool {
+    fn toward(target: ResourceType, r: ResourceType) -> bool {
+        let reagents = target.reaction_components();
+        r == target || reagents.is_some_and(|rs| rs.into_iter().any(|c| toward(c, r)))
+    }
+    let held = |ore: usize| have.iter().any(|r| toward(target, *r) && ores_in(*r)[ore] > 0);
+    (ores_in(target).iter().enumerate()).all(|(ore, n)| *n == 0 || held(ore))
+}
+
 pub fn targets(have: &[ResourceType]) -> Vec<(ResourceType, i32)> {
-    let held = |ore: usize| have.iter().any(|r| ores_in(*r)[ore] > 0);
     (BOOSTS.iter())
         .filter(|(boost, _)| {
             use Boost::*;
@@ -25,9 +35,7 @@ pub fn targets(have: &[ResourceType]) -> Vec<(ResourceType, i32)> {
                 Some(Attack(_) | RangedAttack(_) | Heal(_) | Tough(_) | Move(_))
             )
         })
-        .filter(|(boost, _)| {
-            (ores_in(*boost).iter().enumerate()).all(|(ore, n)| *n == 0 || held(ore))
-        })
+        .filter(|(boost, _)| ores_held(*boost, have))
         .map(|(boost, _)| (*boost, BOOST_STOCK))
         .collect()
 }
@@ -411,6 +419,15 @@ mod tests {
             }
         }
         panic!("the reactions never end");
+    }
+
+    #[test]
+    fn ore_locked_off_a_target_s_recipe_does_not_make_it() {
+        let gh = [Zynthium, Keanium, Utrium, Lemergium, Hydrogen];
+        assert!(ores_held(GhodiumHydride, &gh));
+        assert!(ores_held(GhodiumHydride, &[ZynthiumKeanite, UtriumLemergite, Hydrogen]));
+        assert!(!ores_held(GhodiumHydride, &[GhodiumOxide, Hydrogen]));
+        assert!(ores_held(CatalyzedGhodiumAlkalide, &[GhodiumOxide, Hydroxide, Catalyst]));
     }
 
     #[test]
