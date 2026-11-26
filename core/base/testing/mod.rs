@@ -6,8 +6,8 @@ use crate::{
     tiles::{self, Tile},
     vocabulary::{Part, ResourceType, takes},
     world::{
-        Controller, Id, Mineral, Owner, Pos, Room, RoomName, Rules, Source, Store, Structure,
-        StructureType, World, terrain,
+        Controller, Id, Mineral, Owner, Pos, Room, RoomName, Rules, Source, Spawn, Store,
+        Structure, StructureType, World, terrain,
     },
 };
 
@@ -143,6 +143,18 @@ pub fn built(id: &str, kind: StructureType, pos: Pos) -> Structure {
         spawn: None,
         walkable: crate::world::walkable(kind, &Owner::Ours, false),
     }
+}
+
+/// `world`'s room `name` ours at `level`, its one spawn at `spawn`.
+pub fn colonize(world: &mut World, name: RoomName, level: i32, spawn: Tile) {
+    let room = world.rooms.iter_mut().find(|r| r.name == name).expect("the room");
+    let controller = room.controller.as_mut().expect("a controller");
+    (controller.owner, controller.level) = (Owner::Ours, level);
+    room.energy_capacity = 12_900;
+    let s = built("spawn", StructureType::Spawn, tiles::to_pos(name, spawn));
+    let (id, pos) = (s.id, s.pos);
+    room.structures.push(s);
+    world.spawns.push(Spawn { id, name: id.to_string(), pos, spawning: None });
 }
 
 fn room<'a>(
