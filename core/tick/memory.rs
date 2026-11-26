@@ -64,7 +64,6 @@ impl Memory {
                 groups: list(fight, "groups"),
                 engagements: list(fight, "engagements"),
                 casts: list(fight, "casts"),
-                due: list(fight, "due"),
                 closed: Vec::new(),
             },
             strategy: StrategyState {
@@ -92,7 +91,6 @@ impl Memory {
             "groups": state.fight.groups,
             "engagements": state.fight.engagements,
             "casts": state.fight.casts,
-            "due": state.fight.due,
         });
         v2["expansion"] = json!(state.strategy.expansion);
         v2["piles"] = json!(state.strategy.piles);
@@ -132,7 +130,6 @@ impl Memory {
             claims: outposts(declared, "claims"),
             allies: list(declared, "allies"),
             enemies: list(declared, "enemies"),
-            sieges: list(declared, "sieges"),
             colonies: (abandon.into_iter())
                 .map(|room| ColonyPlan {
                     room,

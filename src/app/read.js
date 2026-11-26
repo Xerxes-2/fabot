@@ -290,7 +290,7 @@ globalThis.__fabotRead = (() => {
   const marks = new Float64Array(3 * (KINDS.length + 4));
   let m = 0;
   const mark = (count) => ((marks[m++] = Game.cpu.getUsed()), (marks[m++] = count), (marks[m++] = parts), (parts = 0));
-  return (drain) => {
+  return () => {
     m = 0;
     at = 0;
     found.length = 0;
@@ -320,7 +320,7 @@ globalThis.__fabotRead = (() => {
     let logs = 0;
     for (const r of rooms) {
       const c = r.controller;
-      if (r.name !== drain && !stood.has(r.name) && c?.my !== true && c?.reservation?.username !== user) continue;
+      if (!stood.has(r.name) && c?.my !== true && c?.reservation?.username !== user) continue;
       logs++;
       for (const e of eventsOf(r)) {
         const kind = e.event;

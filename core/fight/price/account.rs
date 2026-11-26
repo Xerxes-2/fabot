@@ -66,8 +66,7 @@ fn step((scene, raids, fallen): Facts, prior: Option<&Engagement>, e: &mut Engag
     let (dead, gone): (Vec<&Id>, Vec<&Id>) = (sighted.flat_map(|g| &g.members))
         .filter(|m| !scene.hostile_at.contains_key(m))
         .partition(|m| fallen.contains(m));
-    let razed = matches!(e.objective, Objective::Siege(target) if fallen.contains(&target));
-    if razed || !dead.is_empty() {
+    if !dead.is_empty() {
         e.actual.seen = Some(world.time - 1);
     }
     let tombstoned = (e.actual.unseen.iter()).filter(|(m, _)| fallen.contains(*m));

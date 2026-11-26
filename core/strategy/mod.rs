@@ -59,8 +59,7 @@ pub struct StrategyState {
 
 pub fn decide(context: &mut Context, state: &mut StrategyState) -> ModuleOutput {
     let preyed: Vec<RoomName> = context.declarations.rooms(OpKind::Sweep).collect();
-    // A scout only dies where armed bodies stand, and draws them off; a
-    // siege's sight is the fight's.
+    // A scout only dies where armed bodies stand, and draws them off.
     let unarmed = |room| sightings::unarmed(context.sightings, context.world.time, room);
     let mut radius = intel::threat_radius(
         (context.world, context.atlas),
@@ -75,7 +74,7 @@ pub fn decide(context: &mut Context, state: &mut StrategyState) -> ModuleOutput 
         context.intel,
         (&preyed, &radius),
     );
-    scouts.retain(|s| context.declarations.sieges.contains(&s.room) || unarmed(s.room));
+    scouts.retain(|s| unarmed(s.room));
     state.scouts = scouts;
     ModuleOutput {
         actions,
@@ -171,7 +170,7 @@ pub fn plan<'t>(
     derived: &Derived,
     declarations: &Declarations,
     intel: &Intel,
-    (engagements, casts, due): (&[Engagement], &[Cast], &BTreeSet<RoomName>),
+    (engagements, casts): (&[Engagement], &[Cast]),
     (layout, economy): (&BTreeMap<RoomName, Standing>, &mut EconomyState),
     (terrain, state): (
         &dyn Fn(RoomName) -> Option<&'t LocalRoomTerrain>,
@@ -211,7 +210,7 @@ pub fn plan<'t>(
                 .map(|c| engine::body_cost(&c.body))
                 .sum();
             let threatened = near || fought(room.name) || asked > 0;
-            let owes = asked > 0 || due.contains(&room.name);
+            let owes = asked > 0;
             let tuning = &declarations.tuning;
             let kept = reserve(&world.rules, tuning, level, threatened);
             let rival = threat.unwrap_or(level);
@@ -264,12 +263,11 @@ pub fn plan<'t>(
     let claimed = claiming.as_ref().map(|c| c.room);
     let mut preyed = intel::preyed(intel, declarations, world.time);
     preyed.retain(|room| atlas.has_terrain(*room));
-    let declared = operations(derived, declarations, (&[], claiming.as_ref()), &preyed);
     let busy = outposts::busy(
         atlas,
         (&plans, derived),
         (declarations, claiming.as_ref()),
-        (&declared, engagements),
+        engagements,
     );
     let candidates = outposts::survey(
         (world, atlas),
@@ -316,7 +314,7 @@ pub fn plan<'t>(
     ((plans, chosen, claim, operations), misfiled)
 }
 
-/// A home's raid is answered before an outpost's; a siege or sweep takes
+/// A home's raid is answered before an outpost's; a sweep takes
 /// only the bodies no defence asks for.
 const HOME: f64 = 2.0;
 const OUTPOST: f64 = 1.0;
@@ -333,7 +331,6 @@ fn operations(
         .collect();
     (homes.iter().map(row(OpKind::Defend, HOME)))
         .chain(worked.iter().map(row(OpKind::Defend, OUTPOST)))
-        .chain(declarations.sieges.iter().map(row(OpKind::Siege, 0.0)))
         .chain(preyed.iter().map(row(OpKind::Sweep, 0.0)))
         .collect()
 }

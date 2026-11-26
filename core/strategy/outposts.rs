@@ -2,9 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::expand;
 use fabot_atlas::{self as atlas, Atlas, Derived, Home};
-use fabot_base::declarations::{
-    ColonyPlan, Declarations, OpKind, Operation, Outpost, REACH_HOPS, SIEGE_HOPS, Stage,
-};
+use fabot_base::declarations::{ColonyPlan, Declarations, FAR_HOPS, Outpost, REACH_HOPS, Stage};
 use fabot_base::engine;
 use fabot_base::intel::Intel;
 use fabot_base::tiles;
@@ -100,15 +98,15 @@ fn worked(c: &Candidate, capacity: i32, reserved: bool, spend: &dyn Fn(f64) -> f
 }
 
 /// An operation holds only the colonies it casts from: a claim its sponsor; a
-/// siege from its declaration and a stronghold while answered, the colonies
-/// Fight casts it from at rest, since between waves none is owed; a sweep
+/// stronghold while answered, the colonies Fight casts it from at rest, since
+/// between waves none is owed; a sweep
 /// none (a harasser spawns in a few ticks a life); a Defend its owed casts
 /// (`ColonyPlan.owes`).
 pub fn busy(
     atlas: &mut Atlas,
     (plans, derived): (&[ColonyPlan], &Derived),
     (declarations, claimed): (&Declarations, Option<&Outpost>),
-    (operations, engagements): (&[Operation], &[Engagement]),
+    engagements: &[Engagement],
 ) -> BTreeSet<RoomName> {
     let given_up = |room| {
         (atlas::plan_of(declarations, plans, room)).is_some_and(|p| p.stage == Stage::Abandon)
@@ -118,15 +116,9 @@ pub fn busy(
         let ci = atlas::sponsor(atlas, derived, &given_up, &c.controller.pos);
         serving.extend(ci.map(|i| derived.colonies[i]));
     }
-    let fights: BTreeSet<RoomName> = (operations.iter())
-        .filter(|o| o.kind == OpKind::Siege)
-        .map(|o| o.room)
-        .chain(
-            (engagements.iter())
-                .filter(|e| !matches!(e.objective, Objective::Defend | Objective::Sweep))
-                .filter(|e| !e.unanswered)
-                .map(|e| e.room),
-        )
+    let fights: BTreeSet<RoomName> = (engagements.iter())
+        .filter(|e| e.objective == Objective::Stronghold && !e.unanswered)
+        .map(|e| e.room)
         .collect();
     for room in fights {
         serving.extend(casters(atlas, derived, &declarations.avoid, room));
@@ -151,7 +143,7 @@ pub fn casters(
     let colonies: Vec<(RoomName, i32)> = (derived.colonies.iter().zip(&derived.homes))
         .map(|(r, h)| (*r, h.capacity))
         .collect();
-    let tree = atlas.tree(avoid, SIEGE_HOPS, room);
+    let tree = atlas.tree(avoid, FAR_HOPS, room);
     casting::homes(&colonies, |from| tree.crossings(from, room))
 }
 
@@ -244,7 +236,6 @@ pub fn survey(
     let taken = |room: &RoomName| {
         derived.owned.contains(room)
             || declarations.avoid.contains(room)
-            || declarations.sieges.contains(room)
             || declarations.claims.iter().any(|c| &c.room == room)
             || claimed == Some(*room)
     };

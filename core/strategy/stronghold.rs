@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use fabot_atlas::Atlas;
 use fabot_atlas::Derived;
-use fabot_base::declarations::{OpKind, Operation, SIEGE_HOPS};
+use fabot_base::declarations::{FAR_HOPS, OpKind, Operation};
 use fabot_base::engine;
 use fabot_base::intel::Intel;
 use fabot_base::world::{RoomName, World};
@@ -56,7 +56,7 @@ pub fn rows(
         let stocks = fabot_fight::casting::cluster_boosts(&derived.boosts, &spawning, engagements);
         // Fight's walks: one carried tree a room, its crossings from each colony.
         let near = |room: RoomName| {
-            let tree = atlas.tree(avoid, SIEGE_HOPS, room);
+            let tree = atlas.tree(avoid, FAR_HOPS, room);
             let walk = |c| Some(engine::ROOM_SIDE * tree.crossings(c, room)?);
             stronghold::priced_from(&colonies, walk, &stocks)
         };

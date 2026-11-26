@@ -16,21 +16,14 @@ proptest! {
     #[test]
     fn every_body_a_set_walks_out_with_carries_a_heal(
         capacity in prop_oneof![Just(430), Just(12_900), 430..=12_900],
-        worth in prop_oneof![Just(0), Just(40_000), 0..=40_000],
-        strike in prop_oneof![Just(0), Just(600), 0..=600],
     ) {
         let walked: Vec<casting::Body> = casting::walking(capacity)
             .into_iter()
-            .chain(casting::squad(capacity, strike, worth))
             .chain(casting::razer(capacity, 100_000, &[]))
-            .chain(casting::tapper(capacity))
             .collect();
 
         for body in walked {
-            prop_assert!(
-                body.contains(&Part::Heal),
-                "{body:?} at {capacity} for {worth} under {strike}"
-            );
+            prop_assert!(body.contains(&Part::Heal), "{body:?} at {capacity}");
             prop_assert!(body.len() <= engine::MAX_BODY_PARTS, "{body:?}");
             prop_assert!(engine::body_cost(&body) <= capacity, "{body:?}");
             prop_assert_eq!(body.last(), Some(&Part::Move), "{:?}", body);

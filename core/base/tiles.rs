@@ -383,8 +383,3 @@ const SIDES: [i32; 4] = [TOP, RIGHT, BOTTOM, LEFT];
 pub fn room_toward(name: RoomName, exit: i32) -> Option<RoomName> {
     (name.offset(dx(exit), dy(exit))).filter(|_| SIDES.contains(&exit))
 }
-
-pub fn exit_toward(from: RoomName, onto: RoomName) -> Option<i32> {
-    let ((fx, fy), (tx, ty)) = (from.on_grid()?, onto.on_grid()?);
-    (SIDES.into_iter()).find(|e| (dx(*e), dy(*e)) == (tx - fx, ty - fy))
-}

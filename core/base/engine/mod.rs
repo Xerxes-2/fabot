@@ -1,5 +1,5 @@
 use super::tiles::Tile;
-use super::vocabulary::{Boost, Part, ResourceType, damage_ratio, multiple, part_count_in};
+use super::vocabulary::{Part, ResourceType, damage_ratio, multiple, part_count_in};
 use screeps::{StructureType, Terrain};
 
 pub const MAX_BODY_PARTS: usize = screeps::MAX_CREEP_SIZE as usize;
@@ -278,17 +278,6 @@ pub fn power_at<'a>(
             .map(|(p, boost)| multiple(*p, *boost))
             .sum()
     })
-}
-
-pub fn repair_at(body: &[Part], boosts: &[Option<ResourceType>], hits: i32) -> i32 {
-    let tenths = |b: Option<ResourceType>| match b.and_then(ResourceType::boost) {
-        Some(Boost::BuildAndRepair(r)) => (r * 10.0).round() as i32,
-        _ => 10,
-    };
-    let dead = body.len() - live_parts(body, hits).len();
-    let live = (dead..body.len()).filter(|i| body[*i] == Part::Work);
-    let work: i32 = live.map(|i| tenths(boosts.get(i).copied().flatten())).sum();
-    REPAIR_POWER * work / 10
 }
 
 /// The engine's `_applyDamage`.

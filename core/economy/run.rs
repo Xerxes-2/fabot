@@ -52,7 +52,7 @@ fn scouting(
             let far = |at: &Pos| {
                 let rooms = atlas.route(
                     &BTreeSet::new(),
-                    declarations::SIEGE_HOPS,
+                    declarations::FAR_HOPS,
                     b.pos.room,
                     at.room,
                 )?;
@@ -406,7 +406,7 @@ fn target_of(
         }
         // A scout walks as far as its choice reached (`scouting`).
         None if matches!(task, Task::Scout(_)) => Target {
-            max_hops: declarations::SIEGE_HOPS,
+            max_hops: declarations::FAR_HOPS,
             ..atlas::target_at(&at, task.range_of())
         },
         None => atlas::target_at(&at, task.range_of()),

@@ -88,7 +88,6 @@ fn declared(declarations: &Declarations) -> impl Iterator<Item = &RoomName> {
         .iter()
         .chain(&declarations.outposts)
         .map(|o| &o.room)
-        .chain(&declarations.sieges)
 }
 
 pub fn preyed(intel: &Intel, declarations: &Declarations, time: i32) -> Vec<RoomName> {
@@ -200,12 +199,12 @@ pub fn sight(
     let looked = (preyed.iter()).any(|r| intel.get(r).is_some_and(|row| row.seen >= world.time));
     let hunting = (world.creeps.iter())
         .any(|c| declarations::fights(&c.name) && preyed.contains(&c.pos.room));
-    let sieges = declarations.sieges.iter();
-    let mut observed: Vec<Action> = sieges.filter_map(|r| observe(&mut free, r)).collect();
-    // An observer a siege holds every tick reaches nothing else.
     let eyes: Vec<RoomName> = free.iter().map(|o| o.pos.room).collect();
     let sweep = preyed.first().filter(|_| !hunting && !looked);
-    observed.extend(sweep.and_then(|r| observe(&mut free, r)));
+    let mut observed: Vec<Action> = sweep
+        .and_then(|r| observe(&mut free, r))
+        .into_iter()
+        .collect();
     let covered = |observed: &[Action], room: &RoomName| {
         (observed.iter()).any(|i| matches!(i, Action::Observe(_, r) if r == room))
     };
@@ -251,14 +250,10 @@ pub fn sight(
     rooms.dedup();
     let scouts = rooms
         .into_iter()
-        .map(|room| {
-            // Read every tick, as an observer would.
-            let siege = declarations.sieges.contains(room);
-            Scout {
-                room: *room,
-                age: world.time - seen(room).filter(|_| !siege).unwrap_or(0),
-                cast: siege || seen(room).is_none_or(|at| world.time - at > STALE),
-            }
+        .map(|room| Scout {
+            room: *room,
+            age: world.time - seen(room).unwrap_or(0),
+            cast: seen(room).is_none_or(|at| world.time - at > STALE),
         })
         .collect();
     (observed, scouts)

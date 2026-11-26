@@ -413,7 +413,6 @@ pub fn closed(
         })
         .chain(declarations.outposts.iter().map(|o| o.room))
         .chain(declarations.claims.iter().map(|o| o.room))
-        .chain(declarations.sieges.iter().copied())
         .collect::<BTreeSet<RoomName>>();
     read.into_iter()
         .filter(|room| ours.is_some() && status(*room).is_some_and(|s| Some(s) != ours))

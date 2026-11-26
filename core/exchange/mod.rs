@@ -4,12 +4,12 @@ pub mod fighter;
 
 pub use fighter::Fighter;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
-use fabot_base::grid::{self, FatigueFactor, Weight, step_ticks};
-use fabot_base::tiles::{self, Table, Tile};
+use fabot_base::grid::{FatigueFactor, step_ticks};
+use fabot_base::tiles::{self, Table};
 use fabot_base::vocabulary::Part;
-use fabot_base::world::{Pos, RoomName, Striker};
+use fabot_base::world::{Pos, RoomName};
 use fabot_base::{boost, engine};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -136,15 +136,6 @@ pub type Body = Vec<Part>;
 pub enum Stance {
     Hold,
     Standoff,
-}
-
-/// A rival room as a breach is planned over it: each tile's step weight and
-/// the hits on each barrier tile, its rival ramparts' and walls' together.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Ground {
-    pub room: RoomName,
-    pub weights: Table<Weight>,
-    pub barriers: BTreeMap<Tile, i32>,
 }
 
 /// A cast body lands no sooner than half a room's walk; no fight is read past
@@ -1467,142 +1458,12 @@ pub fn outcome(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> 
     }
 }
 
-pub fn pooled_heal(seated: i32, ours: &[Fighter]) -> i32 {
-    let mut heals = ours.to_vec();
-    heals.sort_by_key(|f| std::cmp::Reverse(f.heal));
-    let seated = seated.min(ours.len() as i32).max(0) as usize;
-    let (beside, apart) = heals.split_at(seated);
-
-    engine::heal_at(beside.iter().map(|f| f.heal).sum(), engine::MELEE_RANGE)
-        + engine::heal_at(apart.iter().map(|f| f.heal).sum(), engine::RANGED_RANGE)
-}
-
-/// What towers deal a body at `at`, the one strike a breach is gated and
-/// re-priced by.
+/// What towers deal a body at `at`.
 pub fn tower_strike(towers: &[Pos], at: &Pos) -> i32 {
     towers
         .iter()
         .map(|p| p.range(at).map_or(0, engine::tower_attack_at))
         .sum()
-}
-
-/// What his armed bodies deal a body at `at` next tick, from where they stand
-/// (owner, 2026-10-21).
-pub fn guard_strike(guards: &[Striker], at: &Pos) -> i32 {
-    guards.iter().map(|g| g.on(at, false)).sum()
-}
-
-pub fn struck(towers: &[Pos], guards: &[Striker], at: &Pos) -> i32 {
-    tower_strike(towers, at) + guard_strike(guards, at)
-}
-
-/// The simple rule; a fire priced in ticks replaces it. A medic heals one body a
-/// tick, so heal that cannot reach a worker covers nothing: each needs its own.
-pub fn crowded(set: &[Fighter], abreast: i32, seated: i32, struck: i32) -> Option<i32> {
-    let n = set.len() as i32;
-    let abreast = abreast.clamp(1, n.max(1));
-    let front = set.iter().filter(|f| f.work > 0).count().max(1) as i32;
-    let healers = set.iter().filter(|f| f.heal > 0).count() as i32;
-
-    (healers >= front && struck <= pooled_heal(seated, set))
-        .then_some((n + abreast - 1) / abreast - 1)
-}
-
-/// A source is a tile, the walk onto it and how many its stretch lands
-/// abreast. A landing and a barrier's work tile hold only the medics seated
-/// there; the barriers come back in order, each with its work tile.
-#[allow(clippy::too_many_arguments)]
-pub fn breach_plan(
-    ground: &Ground,
-    gait: FatigueFactor,
-    towers: &[Pos],
-    guards: &[Striker],
-    set: &[Fighter],
-    seated: i32,
-    seats: impl Fn(Tile) -> i32,
-    rate: i32,
-    sources: &[(Tile, i32, i32)],
-    goals: &[Tile],
-) -> Option<(Vec<(Tile, Tile)>, i32)> {
-    let struck = |t: Tile| struck(towers, guards, &tiles::to_pos(ground.room, t));
-    let n = set.len() as i32;
-    let abreast: BTreeMap<Tile, i32> = sources.iter().map(|(t, _, w)| (*t, *w)).collect();
-    let goal: BTreeSet<Tile> = goals.iter().copied().collect();
-
-    let cost = |from: Tile, to: Tile| -> Option<i32> {
-        if tiles::on_edge(to) {
-            return None;
-        }
-        let step = step_ticks(gait, grid::value(ground.weights[to])?)?;
-        let queued = match abreast.get(&from).filter(|_| tiles::on_edge(from)) {
-            Some(w) => crowded(set, *w, seats(to), struck(to))?,
-            None => crowded(set, n, seated, struck(to))?,
-        };
-
-        match ground.barriers.get(&to) {
-            Some(hits) if rate > 0 => {
-                crowded(set, n, seats(from), struck(from))?;
-                Some(step + queued + (hits + rate - 1) / rate)
-            }
-            Some(_) => None,
-            None => Some(step + queued),
-        }
-    };
-
-    let mut dist = [i32::MAX; tiles::COUNT];
-    let mut prev: [Option<Tile>; tiles::COUNT] = [None; tiles::COUNT];
-
-    for &(t, walk, _) in sources {
-        dist[t] = dist[t].min(walk);
-    }
-
-    let mut queue: BTreeSet<(i32, Tile)> = sources.iter().map(|(t, _, _)| (dist[*t], *t)).collect();
-
-    let found = loop {
-        let Some((d, t)) = queue.pop_first() else {
-            break None;
-        };
-
-        if d > dist[t] {
-            continue;
-        }
-
-        if goal.contains(&t) {
-            break Some(t);
-        }
-
-        for &n in tiles::around(t) {
-            match cost(t, n) {
-                Some(c) if d + c < dist[n] => {
-                    dist[n] = d + c;
-                    prev[n] = Some(t);
-                    queue.insert((d + c, n));
-                }
-                _ => {}
-            }
-        }
-    };
-
-    found.map(|last| {
-        let mut walked = Vec::new();
-        let mut t = last;
-
-        while let Some(p) = prev[t] {
-            walked.push(t);
-            t = p;
-        }
-
-        walked.push(t);
-        walked.reverse();
-
-        let broken = walked
-            .windows(2)
-            .filter(|pair| ground.barriers.contains_key(&pair[1]))
-            .map(|pair| (pair[1], pair[0]))
-            .collect();
-
-        (broken, dist[last] - dist[walked[0]])
-    })
 }
 
 /// The cheapest cast can be a marginal win that loses its bodies, so lost hits
@@ -1828,21 +1689,6 @@ mod tests {
         assert_eq!(left(&healing(300, 0), 0, 10.0, 4000.0), 4000.0);
     }
 
-    #[test]
-    fn each_worker_of_a_struck_tile_needs_a_medic_of_its_own() {
-        let dismantler = fighter::cast(&[Part::Work; 25]);
-        let medic = fighter::cast(&[Part::Heal; 25]);
-        // One medic seated beside a worker heals it as much as a tower strikes it,
-        // so pooling alone would price the pair in.
-        let struck = engine::heal_at(25, engine::MELEE_RANGE);
-
-        let one = [dismantler.clone(), dismantler.clone(), medic.clone()];
-        let two = [dismantler.clone(), dismantler, medic.clone(), medic];
-
-        assert_eq!(crowded(&one, 2, 2, struck), None);
-        assert!(crowded(&two, 2, 2, struck).is_some());
-    }
-
     proptest! {
         #![proptest_config(fabot_base::testing::config(CASES))]
 
@@ -1894,56 +1740,6 @@ mod tests {
                     ours.bodies.len()
                 );
             }
-        }
-
-        #[test]
-        fn a_way_in_found_with_some_heal_is_found_with_more_and_no_slower(
-            hits in vec(prop_oneof![1 => Just(1), 1 => Just(300_000), 6 => 1..=300_000], 48),
-            heal in 0..=50usize,
-            (x, y, wide) in (1..=48, 1..=48, 1..=8),
-        ) {
-            let tile = tiles::index;
-            let ground = Ground {
-                room: ROOM,
-                weights: tiles::table(grid::weight(2)),
-                barriers: hits
-                    .iter()
-                    .enumerate()
-                    .map(|(i, h)| (tile(25, i as i32 + 1), *h))
-                    .collect(),
-            };
-
-            let sources: Vec<(Tile, i32, i32)> = (1..=48).map(|y| (tile(49, y), 0, wide)).collect();
-
-            let plan = |heal: usize| {
-                let set = [
-                    fighter::cast(&[Part::Work]),
-                    fighter::cast(&vec![Part::Heal; heal]),
-                ];
-                breach_plan(
-                    &ground,
-                    FatigueFactor {
-                        weight: 1,
-                        moves: 1,
-                    },
-                    &[Pos::new(ROOM, x, y)],
-                    &[],
-                    &set,
-                    2,
-                    |t| tiles::x_of(t) % 3,
-                    1000,
-                    &sources,
-                    &[tile(5, 25)],
-                )
-            };
-
-            let holds = match (plan(heal), plan(heal + 8)) {
-                (Some((_, ticks)), Some((_, fewer))) => fewer <= ticks,
-                (Some(_), None) => false,
-                _ => true,
-            };
-
-            prop_assert!(holds, "heal {} from {},{}", heal, x, y);
         }
     }
 

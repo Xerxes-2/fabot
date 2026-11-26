@@ -131,13 +131,6 @@ pub fn razer(capacity: i32, hits: i32, ours: &[Fighter]) -> Vec<Body> {
         .collect()
 }
 
-/// Taps land a block apart whatever the body, so only more CLAIM a tap
-/// shortens the declaim (v1). The HEAL a body out of our rooms takes costs it
-/// a block, so none below 950.
-pub fn tapper(capacity: i32) -> Option<Body> {
-    biggest(capacity, &[Part::Move, Part::Claim])
-}
-
 /// Sized with the HEAL and MOVE a body out of our rooms takes (owner), so it
 /// fits the colony the body is cast from.
 fn biggest(capacity: i32, block: &[Part]) -> Option<Body> {
@@ -279,111 +272,6 @@ pub fn spent(unpriced: &[Body], losses: exchange::Losses, ticks: i32, tick_worth
     cast + losses.energy + tick_worth * ticks
 }
 
-/// No more medics heal one body from beside it than the tiles around it.
-const AROUND_ONE: i32 = 8;
-
-pub fn most(capacity: i32, block: &[Part]) -> Body {
-    engine::with_move_last(block.repeat(blocks_fit(capacity, block)))
-}
-
-/// The fewest medics beside two dismantlers the price takes, topped up onto `fielded`.
-pub fn reinforce<T>(
-    capacity: i32,
-    fielded: &[Body],
-    mut priced: impl FnMut(&[Body]) -> Option<T>,
-) -> Option<(Vec<Body>, T)> {
-    let dismantler = most(capacity, &[Part::Work, Part::Move]);
-    let medic = most(capacity, &[Part::Move, Part::Heal]);
-
-    if medic.is_empty() || dismantler.is_empty() {
-        return None;
-    }
-
-    let standing = fielded.iter().filter(|b| b.contains(&Part::Work)).count();
-    let short = 2usize.saturating_sub(standing);
-
-    (1..=AROUND_ONE as usize).find_map(|n| {
-        let mut added = vec![dismantler.clone(); short];
-        added.extend(vec![medic.clone(); n]);
-        let mut set = fielded.to_vec();
-        set.extend(added.iter().cloned());
-        priced(&set).map(|plan| (added, plan))
-    })
-}
-
-/// A drain's pair (`ARCHITECTURE.md` §6.2): TOUGH×20 MOVE×20, 1,200 energy of
-/// 4,000 hits spent on a step a tick, and HEAL×13 MOVE×13, 3,900 energy of 2,600
-/// that heals the volley back. Three pairs at most: a tower fires at one body a
-/// tick (owner, 2026-10-21: a pair walks at full speed on plain).
-const BOUNCER_TOUGH: usize = 20;
-const MEDIC_HEAL: i32 = 13;
-
-pub fn pair() -> [Body; 2] {
-    let bouncer = [
-        vec![Part::Tough; BOUNCER_TOUGH],
-        vec![Part::Move; BOUNCER_TOUGH],
-    ]
-    .concat();
-    let medic = [
-        vec![Part::Heal; MEDIC_HEAL as usize],
-        vec![Part::Move; MEDIC_HEAL as usize],
-    ]
-    .concat();
-    [bouncer, medic]
-}
-
-fn pair_price() -> i32 {
-    pair().iter().map(|b| engine::body_cost(b)).sum()
-}
-
-pub fn pairs(capacity: i32) -> i32 {
-    (capacity / pair_price()).clamp(0, 3)
-}
-
-/// What his towers' volley on the gate has to fall under to be worth drawing.
-pub fn pair_heal(pairs: i32) -> i32 {
-    engine::heal_at(pairs * MEDIC_HEAL, engine::MELEE_RANGE)
-}
-
-pub fn drains(capacity: i32) -> Vec<Body> {
-    let pair = pair();
-    (0..pairs(capacity)).flat_map(|_| pair.clone()).collect()
-}
-
-/// The fewest bodies whose HEAL holds `strike`, each with the RANGED its share
-/// of `worth` buys: the kills pay for the cast (v1's `castBodiesPaid`).
-pub fn squad(capacity: i32, strike: i32, worth: i32) -> Vec<Body> {
-    // The towers' strike falls on one body; it and one body beside it heal it.
-    // A body under no strike still takes one (owner).
-    let heal = (strike.max(1) as usize).div_ceil(engine::heal_at(2, engine::MELEE_RANGE) as usize);
-    let n = if strike > 0 { 2 } else { 1 };
-    let body = |ranged: usize| -> Body {
-        let mut b = vec![Part::RangedAttack; ranged];
-        b.extend(vec![Part::Move; heal + ranged]);
-        b.extend(vec![Part::Heal; heal]);
-        engine::with_move_last(b)
-    };
-    let fits = |b: &Body| b.len() <= engine::MAX_BODY_PARTS && engine::body_cost(b) <= capacity;
-    let paid =
-        (worth / n as i32 / engine::body_cost(&[Part::RangedAttack, Part::Move])).max(1) as usize;
-    (1..=paid)
-        .take_while(|r| fits(&body(*r)))
-        .last()
-        .map_or_else(Vec::new, |r| vec![body(r); n])
-}
-
-pub fn holds(set: &[Fighter], strike: i32) -> bool {
-    let held = |i: usize| {
-        let lent = (0..set.len())
-            .filter(|j| *j != i)
-            .map(|j| set[j].heal)
-            .max();
-        engine::heal_at(set[i].heal + lent.unwrap_or(0), engine::MELEE_RANGE)
-    };
-
-    !set.is_empty() && (strike == 0 || (0..set.len()).all(|i| held(i) >= strike))
-}
-
 pub fn kill_order(hostiles: &[Creep]) -> Vec<Id> {
     let mut ranked: Vec<&Creep> = hostiles.iter().collect();
     ranked.sort_by_cached_key(|h| fighter::kill_rank(&fighter_of(h)));
@@ -441,7 +329,6 @@ pub fn homes(banks: &[(RoomName, i32)], walk: impl Fn(RoomName) -> Option<i32>) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fabot_base::grid;
 
     #[test]
     fn homes_are_the_colonies_no_nearer_one_out_banks() {
@@ -459,34 +346,6 @@ mod tests {
                 .map(|i| [3, 1, 0, 5][i])
         };
         assert_eq!(homes(&banks, walk), vec![room(5), room(3), room(1)]);
-    }
-
-    /// A pair is 5,100 of the bank and three pairs are the most a drain casts,
-    /// a pair's medic seating 156 of heal a tick.
-    #[test]
-    fn a_drain_casts_a_pair_per_5100_and_three_at_most() {
-        let price = pair_price();
-        assert_eq!(price, 5_100);
-        assert!(drains(price - 1).is_empty());
-        assert_eq!(drains(price).len(), 2, "the bouncer then its medic");
-        assert_eq!(drains(3 * price).len(), 6);
-        assert_eq!(drains(4 * price).len(), 6, "three pairs");
-        assert_eq!(pairs(price), 1);
-        assert_eq!(pair_heal(pairs(price)), 156);
-        assert_eq!(pair_heal(pairs(2 * price)), 312);
-    }
-
-    /// The owner's rule: a pair walks a plain tile a tick (a swamp in five).
-    #[test]
-    fn a_drain_body_steps_a_plain_tile_a_tick() {
-        for body in pair() {
-            let factor = grid::empty_factor(&body);
-            assert_eq!(grid::step_ticks(factor, engine::PLAIN_WEIGHT), Some(1));
-            assert_eq!(
-                grid::step_ticks(factor, engine::SWAMP_WEIGHT),
-                Some(engine::SWAMP_WEIGHT / engine::PLAIN_WEIGHT)
-            );
-        }
     }
 
     fn colony(name: &str, bank: i32) -> Room<'static> {

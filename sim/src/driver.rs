@@ -74,8 +74,8 @@ impl<W: Write> Driver<W> {
         let (mut written, mut stored) = (None, None);
         let maps = &self.maps;
         let seam = drive::Seam {
-            read: |declarations: &Declarations, drain, (start, phases, _): drive::Clocked| {
-                let mut world = read::world(v, declarations, drain);
+            read: |declarations: &Declarations, (start, phases, _): drive::Clocked| {
+                let mut world = read::world(v, declarations);
                 let mapping = now();
                 phases.push(("decode".to_string(), mapping - start));
                 world.closed = maps.1.clone();

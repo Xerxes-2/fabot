@@ -11,10 +11,6 @@ const CACHE = new URL("../captures/history/", import.meta.url);
 // holds half a fight.
 const SETTLED = 1000;
 
-/// Kinds `next_razed` takes from the rival (`core/fight/kinds/siege.rs`).
-const RAZED = new Set(["tower", "spawn", "extension", "storage", "terminal", "link", "lab", "extractor", "factory",
-  "powerSpawn", "nuker", "observer"]);
-
 /// `engine::tower_attack_at`.
 const towerAt = (r) => (r > 20 ? 0 : r <= 5 ? 600 : 600 - 30 * (r - 5));
 /// Ranged attack power per part at range 1, and ranged mass attack at range 2.
@@ -47,12 +43,10 @@ const patch = (old, v, id) => {
   return o;
 };
 
-/// The window's ticks, plus the one before `from` so the first tick has a delta,
-/// and the room's sources for `taken`'s link rule.
+/// The window's ticks, plus the one before `from` so the first tick has a delta.
 export async function history({ url, token, shard, room, from, to, now }) {
   const objects = new Map();
   const ticks = [];
-  const sources = new Map();
   for (let base = Math.floor((from - 1) / CHUNK) * CHUNK; base <= to; base += CHUNK) {
     const file = new URL(`${room}_${base}.json`, CACHE);
     const settled = base + CHUNK <= now - SETTLED;
@@ -68,13 +62,12 @@ export async function history({ url, token, shard, room, from, to, now }) {
     }
     const data = JSON.parse(text);
     for (const t of Object.keys(data.ticks).map(Number).sort((a, b) => a - b)) {
-      const rec = { t, creeps: {}, towers: {}, ramparts: {}, died: [], fallen: [] };
+      const rec = { t, creeps: {}, towers: {}, ramparts: {}, died: [] };
       for (const [id, v] of Object.entries(data.ticks[String(t)])) {
         const old = objects.get(id);
         if (v === null) {
           objects.delete(id);
           if (old?.type === "creep") rec.died.push(old.name);
-          else if (RAZED.has(old?.type)) rec.fallen.push({ id, type: old.type, x: old.x, y: old.y, hits: old.hits, standing: [] });
           continue;
         }
         const o = patch(old, v, id);
@@ -86,25 +79,17 @@ export async function history({ url, token, shard, room, from, to, now }) {
         }
         objects.set(id, o);
       }
-      // `next_razed` reads what stood before the fall, and the loop above has
-      // already dropped what fell.
-      if (rec.fallen.length) {
-        const standing = [...objects.values()].filter((o) => RAZED.has(o.type) && o.hits !== undefined)
-          .map((o) => ({ id: o._id, type: o.type, x: o.x, y: o.y, hits: o.hits }));
-        for (const f of rec.fallen) f.standing = [...standing, { id: f.id, type: f.type, x: f.x, y: f.y, hits: f.hits }];
-      }
       for (const o of objects.values()) {
         if (o.type === "creep" && o.name) {
           const fresh = o.logT === t;
           rec.creeps[o.name] = { u: o.user, x: o.x, y: o.y, hits: o.hits, hitsMax: o.hitsMax, body: short(o.body),
             acted: fresh ? acted(o.actionLog) : null, struck: fresh ? o.actionLog.attacked ?? null : null };
         } else if (o.type === "tower") rec.towers[o._id] = { x: o.x, y: o.y, e: o.store?.energy, log: o.logT === t ? o.actionLog : null };
-        else if (o.type === "source") sources.set(`${o.x},${o.y}`, { x: o.x, y: o.y });
       }
       ticks.push(rec);
     }
   }
-  return { room, from, to, sources: [...sources.values()], ticks: ticks.filter((r) => r.t >= from - 1 && r.t <= to) };
+  return { room, from, to, ticks: ticks.filter((r) => r.t >= from - 1 && r.t <= to) };
 }
 
 // ------------------------------------------------------------------ measures
@@ -266,48 +251,6 @@ export function strikes({ ticks, ours }) {
       if (f.took > 0) out.bodies[/[ar]\d/.test(c.body) ? "armed" : "working"] += f.took;
     }
   }
-  return out;
-}
-
-/// `next_razed` (`core/fight/kinds/siege.rs`) replayed on the history's own
-/// structures: his towers' power on a tile, the most the raze costs him, the
-/// nearest to the set's first member by name, then the id.
-export function razes({ ticks, ours, sources }) {
-  const TAKEN = { spawn: 3, extension: 3, tower: 3, storage: 2, terminal: 2, link: 2, extractor: 0 };
-  const taken = (s) => (s.type === "link" && sources.some((p) => range(p, s) <= 2) ? 4 : TAKEN[s.type] ?? 1);
-  const out = { falls: [], hits: 0, played: 0, last: null, tail: 0, still: 0 };
-  for (const [i, rec] of ticks.entries()) {
-    const prev = ticks[i - 1];
-    for (const fall of rec.fallen) {
-      const near = OURS(prev ?? rec, ours).map(([n, c]) => ({ n, ...c })).sort((a, b) => (a.n < b.n ? -1 : a.n > b.n ? 1 : 0))[0];
-      const struck = (at) => Object.values(prev?.towers ?? {}).filter((t) => t.e >= 10).reduce((a, t) => a + towerAt(range(t, at)), 0);
-      const key = (s) => [struck(s), -taken(s), near ? range(near, s) : 0, s.id];
-      const order = fall.standing.slice().sort((a, b) => {
-        const ka = key(a), kb = key(b);
-        for (let i = 0; i < 4; i++) if (ka[i] !== kb[i]) return ka[i] < kb[i] ? -1 : 1;
-        return 0;
-      });
-      const pick = order[0];
-      const who = [...new Set([rec, prev].flatMap((r) => Object.entries(r?.creeps ?? {})).filter(([, c]) =>
-        c.u === ours && c.acted && c.acted.x === fall.x && c.acted.y === fall.y).map(([n]) => n))];
-      out.played++;
-      if (pick && pick.x === fall.x && pick.y === fall.y) out.hits++;
-      out.falls.push({ t: rec.t, type: fall.type, x: fall.x, y: fall.y, hits: fall.hits, pick, ok: pick?.x === fall.x && pick?.y === fall.y,
-        who, near: near?.n ?? null, walk: null, idle: 0 });
-    }
-  }
-  for (const [i, f] of out.falls.entries()) {
-    const before = out.falls[i - 1];
-    f.walk = before ? range(before, f) : null;
-    f.idle = before ? f.t - before.t : 0;
-  }
-  out.last = out.falls.at(-1) ?? null;
-  const start = out.last ? ticks.findIndex((r) => r.t === out.last.t) : ticks.length;
-  out.tail = ticks.length - start - 1;
-  out.still = ticks.slice(start + 1).filter((r, i) => {
-    const before = ticks[start + i];
-    return OURS(r, ours).every(([n, c]) => before.creeps[n]?.x === c.x && before.creeps[n]?.y === c.y);
-  }).length;
   return out;
 }
 

@@ -123,19 +123,6 @@ fn a_loaded_carry_weighs_and_a_boosted_one_holds_its_multiple() {
 }
 
 #[test]
-fn a_work_repairs_at_its_build_boost_not_its_dismantle_one() {
-    use ResourceType::{CatalyzedLemergiumAcid as Repair, CatalyzedZynthiumAcid as Dismantle};
-    let body = [Part::Work; 2];
-    assert_eq!(engine::repair_at(&body, &[Some(Repair), None], 200), 300);
-    assert_eq!(engine::repair_at(&body, &[Some(Dismantle); 2], 200), 200);
-    assert_eq!(
-        engine::repair_at(&body, &[Some(Repair); 2], 100),
-        200,
-        "a dead WORK repairs nothing"
-    );
-}
-
-#[test]
 fn a_volley_counts_a_creeps_whole_share_and_a_structures_hits_alone() {
     let worth = |m: &(i32, i32, bool), hit: &dyn Fn(i32) -> i32| {
         i64::from(engine::landed(hit(m.0), m.1, m.2))

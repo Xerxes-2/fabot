@@ -3,7 +3,7 @@ import { getHeapStatistics } from "node:v8";
 import { load, stand } from "./bench-game.mjs";
 import { ticksOf } from "./capture-read.mjs";
 import { RECORDER, unpack } from "./recorder.mjs";
-import { bodies, defenders, formation, history, razes, strikes, towers } from "./room-history.mjs";
+import { bodies, defenders, formation, history, strikes, towers } from "./room-history.mjs";
 import { fail, segmentReads } from "./screeps-api.mjs";
 import { segmentBudget, tapWindow } from "./tap.mjs";
 
@@ -168,7 +168,7 @@ export function views({ api, shard, url, token, memory, raw }) {
       const now = await time();
       const h = await history({ url, token, shard, room, from, to, now }).catch((e) => fail(e.message));
       const mine = await me();
-      const args = { ticks: h.ticks, ours: mine, sources: h.sources };
+      const args = { ticks: h.ticks, ours: mine };
       console.log(`${room} ${from}–${to} · ${h.ticks.length - 1} ticks · history as of ${now}`);
 
       const B = bodies(args);
@@ -217,14 +217,6 @@ export function views({ api, shard, url, token, memory, raw }) {
         `${S.ramparts.mass} at range 2–3, ${S.ramparts.other} other · ${S.ramparts.decay} of it his own decay`);
       console.log(`his bodies: ${S.bodies.armed} on the armed ones · ${S.bodies.working} on his workers`);
 
-      console.log("\n## razes");
-      const R = razes(args);
-      console.log(`next_razed replayed on the history: ${R.hits}/${R.played} times its pick is the structure that fell next`);
-      for (const x of R.falls)
-        console.log(`${x.t} ${x.type} ${x.x},${x.y} by ${x.who[0] ?? `? (nearest ${x.near})`} · ${x.walk ?? "–"} walked from the last · ${x.idle} ticks` +
-          (x.ok ? "" : ` · MISS (it picks ${x.pick?.type} ${x.pick?.x},${x.pick?.y})`));
-      if (R.last) console.log(`last raze ${R.last.t} · ${R.still} of ${R.tail} ticks after it with every one of us standing`);
-
       console.log("\n## his garrison");
       const D = defenders(args);
       for (const d of [...D.values()].sort((a, b) => a.in - b.in)) {
@@ -252,7 +244,6 @@ export function views({ api, shard, url, token, memory, raw }) {
         console.log(`#${e.id} ${e.kind ?? "defend"} ${e.room} ${e.phase} ${e.tactic} · lost ${e.lost} · opened ${now - e.opened} ago, phase ${now - e.since} ago · predicted ${p ? `${p.kind} ${p.ticks}t dead ${p.dead} hits ${p.hits}` : "none"}`);
         const offers = (priced.get(e.id) ?? []).map(([t, v, c]) => `${t === e.tactic ? "*" : ""}${t} ${v - c} (${v}-${c})`);
         if (offers.length) console.log(`  offers ${offers.join(" · ")}`);
-        if (e.target) console.log(`  target ${await described(e.room, e.target)}`);
         for (const [i, id] of e.order.entries()) console.log(`  order ${i + 1} ${await described(e.room, id)}`);
         for (const n of Object.keys(e.ours)) {
           const c = members.get(n);

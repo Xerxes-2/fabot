@@ -356,7 +356,7 @@ fn ground(rules: &Rules, room: &Room, atlas: &Atlas, reach: i32, set: &[&Creep])
     let closed = square::closed(room);
     let walls = square::walls(room, atlas, &closed);
     let entered = square::from_border(atlas, &walls, room.name)?;
-    let towers = super::raid::charged(rules, room);
+    let towers = rules.charged_towers(room);
     let corners = (-reach - 1..=reach).flat_map(|dx| (-reach - 1..=reach).map(move |dy| (dx, dy)));
     let block = corners
         .filter_map(|(dx, dy)| square::at(room, atlas, &closed, (at.x + dx, at.y + dy)))

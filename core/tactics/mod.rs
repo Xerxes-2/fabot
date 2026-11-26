@@ -1,6 +1,4 @@
-/// What a fight body does this tick (`ARCHITECTURE.md` §6.4): a step read off
-/// the plan and what stands in its room, and the strike reflex. From v1's
-/// Emitter and Resolver step functions. Also which tactic a kind picks (§6.3).
+/// What a fight body does this tick (`ARCHITECTURE.md` §6.4) and which tactic a kind picks (§6.3).
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
@@ -125,8 +123,7 @@ impl Offer {
     }
 }
 
-/// The offer that pays most; ties to the fewest bodies, then to the kind's
-/// declared candidate order.
+/// Ties go to the fewest bodies, then to the kind's declared candidate order.
 pub fn best(offers: &[Offer]) -> Option<&Offer> {
     let ranked = |o: &Offer| (o.net(), std::cmp::Reverse(o.bodies));
     offers
@@ -152,8 +149,7 @@ pub struct Sight<'a> {
     pub rules: &'a Rules,
 }
 
-/// Above every economy wish in the room's one arbitration: a fight step is
-/// not shoved for a haul.
+/// Above every economy wish: a fight step is not shoved for a haul.
 pub const WEIGHT: i32 = 1000;
 
 fn hostiles_in<'a>(sight: &Sight<'a>, room: RoomName) -> &'a [Creep] {
@@ -178,11 +174,8 @@ fn ranked<'a>(sight: &Sight<'a>, order: &[Id], creep: &Creep) -> Vec<&'a Creep> 
 }
 
 /// Every body that strikes, in any phase and engaged or not, at the first in the kill order in reach.
-pub fn strike(sight: &Sight, order: &[Id], creep: &Creep, armed: bool) -> Vec<CreepAct> {
-    let targets: Vec<&Creep> = ranked(sight, order, creep)
-        .into_iter()
-        .filter(|h| !armed || hostiles::strikes(h))
-        .collect();
+pub fn strike(sight: &Sight, order: &[Id], creep: &Creep) -> Vec<CreepAct> {
+    let targets: Vec<&Creep> = ranked(sight, order, creep);
     let within = |r: i32| targets.iter().filter(move |h| creep.pos.within(r, &h.pos));
 
     let melee = within(engine::MELEE_RANGE)
@@ -222,7 +215,7 @@ fn target_at(sight: &Sight, at: &Pos, range: i32) -> Target {
         tiles: vec![tiles::of_pos(at)],
         range,
         avoid: sight.avoid.clone(),
-        max_hops: declarations::SIEGE_HOPS,
+        max_hops: declarations::FAR_HOPS,
     }
 }
 
@@ -433,261 +426,6 @@ pub fn blob(
     blob::wishes(sight.atlas, (&target, WEIGHT), members, fortified, raid)
 }
 
-/// A medic's seat beside a dismantler: open ground off every tile beside the
-/// rival's line, where a body would be struck from a rampart.
-fn seat(atlas: &Atlas, line: &[Pos], room: RoomName, t: Tile) -> bool {
-    atlas.standable(room, t)
-        && !line
-            .iter()
-            .any(|p| p.within(engine::MELEE_RANGE, &tiles::to_pos(room, t)))
-}
-
-pub fn seats_at(atlas: &Atlas, line: &[Pos], room: RoomName, work: Tile) -> i32 {
-    tiles::around(work)
-        .iter()
-        .filter(|t| seat(atlas, line, room, **t))
-        .count() as i32
-}
-
-pub struct Front {
-    pub breach: Pos,
-    /// None where the breach is his controller: tapped, never struck.
-    pub wall: Option<Id>,
-    pub line: Vec<Pos>,
-    pub towers: Vec<Pos>,
-    pub struck: Option<Id>,
-    pub breach_strike: i32,
-    /// The rival's sources outside its ramparts, where pickets stand, and
-    /// how many each holds against the towers.
-    pub posts: Vec<(Pos, usize)>,
-}
-
-pub fn picket_of(creep: &Creep) -> bool {
-    creep.body.iter().any(|p| p.kind == Part::RangedAttack)
-}
-
-pub fn claims(creep: &Creep) -> bool {
-    creep.body.iter().any(|p| p.kind == Part::Claim)
-}
-
-/// Seated beside its post, off the rival's line: there the rival harvests.
-pub fn picket(sight: &mut Sight, front: &Front, members: &[(u16, &Creep)], creep: &Creep) -> Wish {
-    // By slot, which a successor keeps, so a landing never reshuffles posts.
-    let mut pickets: Vec<(u16, &Creep)> = members.to_vec();
-    pickets.retain(|(_, c)| picket_of(c));
-    pickets.sort_by_key(|&(slot, c)| (slot, c.name.as_str()));
-
-    let at = pickets
-        .iter()
-        .position(|(_, c)| c.name == creep.name)
-        .unwrap_or(0);
-    let mut before = 0;
-    let Some((post, seat_at)) = front.posts.iter().find_map(|(post, n)| {
-        let here = (at >= before && at < before + n).then(|| (post, at - before));
-        before += n;
-        here
-    }) else {
-        return hold(sight, creep);
-    };
-
-    let mut seats: Vec<Tile> = tiles::around(tiles::of_pos(post))
-        .iter()
-        .copied()
-        .filter(|t| seat(&*sight.atlas, &front.line, post.room, *t))
-        .collect();
-    seats.sort_unstable();
-
-    match seats.get(seat_at) {
-        Some(t) if creep.pos == tiles::to_pos(post.room, *t) => hold(sight, creep),
-        Some(t) => toward(sight, creep, &tiles::to_pos(post.room, *t), 0),
-        None => toward(sight, creep, post, engine::MELEE_RANGE),
-    }
-}
-
-fn nearest_tower(front: &Front, at: &Pos) -> i32 {
-    front
-        .towers
-        .iter()
-        .fold(99, |least, t| least.min(t.range(at).unwrap_or(99)))
-}
-
-/// Seen, not assumed: a rival's towers may focus the softest, not the nearest.
-pub fn focus_of<'a>(front: &Front, members: &[&'a Creep]) -> Option<&'a Creep> {
-    let spared = |m: &Creep| front.struck.as_ref() != Some(&m.id);
-    (members.iter().copied()).min_by_key(|m| (spared(m), nearest_tower(front, &m.pos), &m.name))
-}
-
-/// The edge a drain bounces through (`ARCHITECTURE.md` §6.2): `bounce`'s
-/// mirror is his.
-#[derive(Clone)]
-pub struct Gate {
-    pub room: RoomName,
-    pub from: RoomName,
-    pub bounce: Tile,
-    pub rest: Tile,
-}
-impl Gate {
-    /// The set waits beside his room, off the pair's tiles: the entry is the plan's.
-    pub fn wait(&self) -> (Pos, i32) {
-        (tiles::middle(self.from), engine::ROOM_SIDE / 2)
-    }
-}
-pub fn drain(sight: &mut Sight, gate: &Gate, creep: &Creep) -> Wish {
-    let at = tiles::of_pos(&creep.pos);
-    let there = |t: Tile| tiles::to_pos(gate.from, t);
-    let strikes = creep.live(Part::Attack) > 0 || creep.live(Part::RangedAttack) > 0;
-
-    if strikes || creep.live(Part::Work) > 0 {
-        let (wait, near) = gate.wait();
-        return toward(sight, creep, &wait, near);
-    }
-
-    if creep.live(Part::Heal) > 0 {
-        return match seat_of(&*sight.atlas, gate) {
-            Some(seat) if at == seat && creep.pos.room == gate.from => step_to(creep, at),
-            Some(seat) => toward(sight, creep, &there(seat), 0),
-            None => step_to(creep, at),
-        };
-    }
-
-    if creep.pos.room == gate.room {
-        return step_to(creep, at);
-    }
-    if creep.hits < engine::tower_attack_at(0) / 2 || at != gate.rest {
-        return toward(sight, creep, &there(gate.rest), 0);
-    }
-    step_to(creep, gate.bounce)
-}
-
-fn seat_of(atlas: &Atlas, gate: &Gate) -> Option<Tile> {
-    (tiles::around(gate.rest).iter())
-        .filter(|t| !tiles::on_edge(**t) && tiles::range(**t, gate.bounce) <= 1)
-        .filter(|t| atlas.passable(gate.from, **t))
-        .min()
-        .copied()
-}
-
-pub fn siege(
-    sight: &mut Sight,
-    front: &Front,
-    members: &[&Creep],
-    creep: &Creep,
-) -> (Option<CreepAct>, Wish) {
-    let room = creep.pos.room;
-    let here = tiles::of_pos(&creep.pos);
-
-    let dismantles = |c: &Creep| c.body.iter().any(|p| p.kind == Part::Work);
-
-    let net = front.breach_strike
-        - members
-            .iter()
-            .map(|m| engine::heal_at(world::power(m, Part::Heal), engine::MELEE_RANGE))
-            .sum::<i32>();
-
-    let relieved = |c: &Creep| c.live(Part::Work) == 0 || c.hits < 2 * net;
-
-    let at_breach = |c: &Creep| c.pos.within(engine::MELEE_RANGE, &front.breach);
-
-    let dismantlers: Vec<&Creep> = members.iter().copied().filter(|c| dismantles(c)).collect();
-
-    if dismantles(creep) {
-        if relieved(creep)
-            && dismantlers
-                .iter()
-                .any(|d| d.name != creep.name && !relieved(d))
-        {
-            let off: Vec<Tile> = tiles::around(here)
-                .iter()
-                .copied()
-                .filter(|t| {
-                    !tiles::on_edge(*t)
-                        && sight.atlas.passable(room, *t)
-                        && !tiles::to_pos(room, *t).within(engine::MELEE_RANGE, &front.breach)
-                })
-                .collect();
-
-            let off = off
-                .iter()
-                .copied()
-                .min_by_key(|t| (-(nearest_tower(front, &tiles::to_pos(room, *t))), *t));
-
-            (
-                None,
-                off.map_or_else(|| hold(sight, creep), |t| step_to(creep, t)),
-            )
-        } else if at_breach(creep) {
-            (
-                front.wall.map(CreepAct::Dismantle),
-                toward(sight, creep, &front.breach, engine::MELEE_RANGE),
-            )
-        } else {
-            // The walk sees no bodies: a tile another dismantler holds reads as the way in.
-            let tiles: Vec<Tile> = tiles::around(tiles::of_pos(&front.breach))
-                .iter()
-                .copied()
-                .filter(|t| {
-                    let at = tiles::to_pos(front.breach.room, *t);
-                    !tiles::on_edge(*t)
-                        && sight.atlas.passable(at.room, *t)
-                        && dismantlers.iter().all(|d| d.pos != at)
-                })
-                .collect();
-            let target = Target {
-                tiles,
-                ..target_at(sight, &front.breach, 0)
-            };
-            (
-                None,
-                plan::toward(sight.atlas, creep, mover_of(creep), &target, WEIGHT),
-            )
-        }
-    } else {
-        // Beside the body his towers strike: there the plan pooled the heal.
-        let struck = |m: &Creep| m.name != creep.name && front.struck.as_ref() == Some(&m.id);
-        let focus: Vec<&Creep> = (members.iter().copied())
-            .filter(|m| struck(m) || (dismantles(m) && m.pos.room == front.breach.room))
-            .collect();
-        let anchor = focus_of(front, &focus).or_else(|| {
-            dismantlers
-                .iter()
-                .copied()
-                .min_by_key(|d| (d.pos.range(&front.breach), &d.name))
-        });
-
-        let wish = match anchor {
-            None => toward(sight, creep, &front.breach, engine::RANGED_RANGE),
-            Some(d) => {
-                let mut seats: Vec<Tile> = tiles::around(tiles::of_pos(&d.pos))
-                    .iter()
-                    .copied()
-                    .filter(|t| seat(&*sight.atlas, &front.line, d.pos.room, *t))
-                    .collect();
-                seats.sort_unstable();
-
-                let mut medics: Vec<String> = members
-                    .iter()
-                    .filter(|m| !dismantles(m) && m.name != d.name)
-                    .map(|m| m.name.clone())
-                    .collect();
-                medics.sort();
-
-                let sit = medics
-                    .iter()
-                    .position(|n| n == &creep.name)
-                    .and_then(|at| seats.get(at).copied());
-
-                match sit {
-                    Some(t) if d.pos.room == room && t == here => hold(sight, creep),
-                    Some(t) => toward(sight, creep, &tiles::to_pos(d.pos.room, t), 0),
-                    None => toward(sight, creep, &d.pos, engine::MELEE_RANGE),
-                }
-            }
-        };
-
-        (None, wish)
-    }
-}
-
 /// One body a rampart, as Exchange's Hold stance seats them: shoving a body off
 /// its rampart trades the tile with it every tick, each bare in turn.
 pub fn rampart(sight: &mut Sight, ours: &[&Creep], creep: &Creep) -> Wish {
@@ -886,8 +624,7 @@ pub struct Mark {
     pub shielded: bool,
     /// It leaves the room in a step: a strike that lands now, never a step.
     pub fleeting: bool,
-    /// Each tile it may stand on next tick, its own first; None where no
-    /// shot lands.
+    /// Each tile it may stand on next tick, its own first; None where no shot lands.
     pub next: Vec<Option<Pos>>,
 }
 

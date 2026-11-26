@@ -24,7 +24,7 @@ use fabot_core::drive::{Counts, Phases};
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_name = __fabotRead)]
-    fn read(drain: Option<String>) -> Array;
+    fn read() -> Array;
 }
 
 /// `ARCHITECTURE.md` §4's `terrain` row.
@@ -53,7 +53,7 @@ impl fabot_core::drive::Terrains for Maps {
 impl Maps {
     /// Kept when empty too, so a room the map lacks is asked once.
     fn read_around(&mut self, homes: impl Iterator<Item = RoomName>) {
-        let reach = fabot_base::declarations::SIEGE_HOPS;
+        let reach = fabot_base::declarations::FAR_HOPS;
         let mut unread: Vec<(i32, RoomName)> = Vec::new();
         for home in homes {
             for dx in -reach..=reach {
@@ -104,10 +104,10 @@ const SECTIONS: [&str; 11] = [
 pub fn of_game<'t>(
     maps: &'t mut Maps,
     buffers: &mut read::Buffers,
-    (declarations, drain): (&Declarations, Option<RoomName>),
+    declarations: &Declarations,
     (clock, start, phases, walked): (&dyn Fn() -> f64, f64, &mut Phases, &mut Counts),
 ) -> (World<'t>, &'t Maps, Pass, f64) {
-    let packed = read(drain.map(|room| room.to_string()));
+    let packed = read();
     let ints = packed.get(0).unchecked_into::<Int32Array>().to_vec();
     let text = packed.get(1).as_string().unwrap_or_default();
     let marks = (packed.get(2).dyn_into::<Float64Array>()).map_or_default(|m| m.to_vec());

@@ -725,6 +725,14 @@ impl Rules {
             .filter(fires)
     }
 
+    /// Where `room`'s hostile towers stand that fire this tick.
+    pub fn charged_towers(&self, room: &Room) -> Vec<Pos> {
+        (self.towers(room))
+            .filter(|s| s.owner.is_theirs() && charged(s))
+            .map(|s| s.pos)
+            .collect()
+    }
+
     #[cfg(any(test, feature = "test-support", feature = "tools"))]
     pub fn vanilla() -> Rules {
         let row = |kind: StructureType| (0..=8).map(move |l| kind.controller_structures(l) as i32);
@@ -1144,7 +1152,7 @@ mod tests {
     use proptest::prelude::*;
     use proptest::sample::Index;
 
-    /// An ally's structures are not theirs: no route avoids its towers and no raid razes them.
+    /// An ally's structures are not theirs: no route avoids its towers.
     #[test]
     fn an_ally_is_not_theirs() {
         assert!(!Owner::Ally("a".to_string()).is_theirs());

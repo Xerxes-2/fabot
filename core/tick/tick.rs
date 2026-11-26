@@ -358,11 +358,7 @@ pub fn decide<'t>(
         &derived,
         &declarations,
         intel,
-        (
-            &state.fight.engagements,
-            &state.fight.casts,
-            &state.fight.due,
-        ),
+        (&state.fight.engagements, &state.fight.casts),
         (&state.layout, &mut state.economy),
         (terrain, &mut state.strategy),
     );

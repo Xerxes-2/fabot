@@ -20,7 +20,7 @@ const USAGE = `usage: npm run observe -- <command>
   switches           Memory.v2.switches as stored
   switch <name> on|off|clear
                      off: \`false\` (the module is skipped); on: \`true\` (the recorder's opt-in); clear: remove the key
-  declare [allies <name,…> | enemies <name,…> | sieges <room,…> | avoid <room,…> | abandon <room,…> | outposts <capture.json> | claims <capture.json> | tactics <rules.json>]
+  declare [allies <name,…> | enemies <name,…> | avoid <room,…> | abandon <room,…> | outposts <capture.json> | claims <capture.json> | tactics <rules.json>]
                      Memory.v2.declarations as stored; with a name, set it
                      (outposts: the capture's, \`scripts/capture-world.mjs\`)
   tuning [<key> <n> | <key> clear]
@@ -31,7 +31,7 @@ const USAGE = `usage: npm run observe -- <command>
                      the ring recorded inside a window — an open engagement's, or from..to —
                      every tick the hour's 360 segment reads pay for, the rest gaps
   battle <room> <from> <to>
-                     the room's history: every body's blood, each tower's shots, the razes, his garrison
+                     the room's history: every body's blood, each tower's shots, his garrison
   wait --ticks N     return after N game ticks
   exchange [segment4.jsonl]
                      the closed engagements of segment 4 (or a run's copy, sim's \`segment4.jsonl\`): \`npm run exchange\`'s table, then each rival's outcomes by tactic
@@ -144,14 +144,14 @@ switch (cmd) {
       console.log(JSON.stringify(declarations, null, 2));
       break;
     }
-    if (["allies", "enemies", "sieges", "avoid", "abandon"].includes(name) && value !== undefined) declarations[name] = value.split(",").filter(Boolean);
+    if (["allies", "enemies", "avoid", "abandon"].includes(name) && value !== undefined) declarations[name] = value.split(",").filter(Boolean);
     else if ((name === "outposts" || name === "claims") && value !== undefined) declarations[name] = JSON.parse(readFileSync(value, "utf8")).declarations[name] ?? [];
     else if (name === "tactics" && value !== undefined) {
       const file = JSON.parse(readFileSync(value, "utf8"));
       const rules = file.declarations?.tactics ?? file.tactics ?? file;
       if (!Array.isArray(rules)) fail("declare tactics: the file holds a list of { \"rival\"?, \"room\"?, \"pin\"?, \"forbid\"? }");
       declarations.tactics = rules;
-    } else fail("usage: observe declare [allies <name,…> | enemies <name,…> | sieges <room,…> | avoid <room,…> | abandon <room,…> | outposts <capture.json> | claims <capture.json> | tactics <rules.json>]");
+    } else fail("usage: observe declare [allies <name,…> | enemies <name,…> | avoid <room,…> | abandon <room,…> | outposts <capture.json> | claims <capture.json> | tactics <rules.json>]");
     // A memory write is not read back at once: a whole-object write would
     // revert a key declared just before it.
     await (stored ? putV2(`declarations.${name}`, declarations[name]) : putV2("declarations", declarations));

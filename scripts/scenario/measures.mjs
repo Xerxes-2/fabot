@@ -358,8 +358,7 @@ export const measures = {
   // over the engagements of `kind` (none named: every one); none seen: 0.
   oscillation: on("kind", (_, a, dir) =>
     Math.max(0, ...rowsOf(dir).filter((e) => !a.kind || e.kind === a.kind).flatMap((e) => Object.values(e.swung).map((s) => Math.round((100 * s.swings) / Math.max(1, s.ticks)))))),
-  // The most re-prices while Fighting, and the most bodies held at once, of one engagement of `kind` (none named: any) opened in [from, to).
-  repriced: on("room kind from to", (_, a, dir) => Math.max(0, ...rowsOf(dir).filter((e) => (!a.kind || e.kind === a.kind) && openedIn(a)(e)).map((e) => e.repriced ?? 0))),
+  // The most bodies held at once of one engagement of `kind` (none named: any) opened in [from, to).
   held: on("room kind from to", (_, a, dir) => Math.max(0, ...rowsOf(dir).filter((e) => (!a.kind || e.kind === a.kind) && openedIn(a)(e)).map((e) => e.held ?? 0))),
   // Our bodies the engagements of `kind` drew at any time that the engine killed, held or no longer: fight
   // losses, a body disarmed in the fight and finished as it leaves counted as one.

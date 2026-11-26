@@ -24,7 +24,7 @@ export function engagements(write, bodyOf, offset, closes, killedAt) {
     if (t !== null && !row && merged) return;
     if (t !== null && !row) throw new Error(`engagement ${rec.id} closed at t${t} with no engagements.log row`);
     if (row) Object.assign(rec, { contact: run(row.contact), seen: run(row.seen), gaveUp: Boolean(row.gaveUp), dead: row.dead, left: Boolean(row.left) });
-    const { members, ours, standing, raid, rooms, swing, blind, asking, fought, formed, empty, kills, was, off, formedSince, formingSet, committed, ...rest } = rec;
+    const { members, ours, standing, raid, rooms, swing, blind, asking, formed, empty, kills, was, off, formedSince, formingSet, committed, ...rest } = rec;
     const swung = Object.fromEntries(Object.entries(swing).map(([n, { ticks, swings }]) => [n, { ticks, swings }]));
     write({ ...rest, swung, closed: t, drew: [...ours], rooms: [...rooms] });
   }
@@ -73,9 +73,6 @@ export function engagements(write, bodyOf, offset, closes, killedAt) {
         if (rec.ours.size) rec.drafted ??= t;
         rec.answered ||= !e.unanswered;
         rec.disengaged ||= e.phase === "disengaging";
-        // `repriced`: the ticks a Fighting engagement re-entered Fighting, the phase a re-price keeps.
-        if (e.phase === "fighting" && rec.fought !== undefined && rec.fought !== e.since) rec.repriced = (rec.repriced ?? 0) + 1;
-        rec.fought = e.phase === "fighting" ? e.since : undefined;
         // `idle`: the most ticks on end a Defend neither acted (held a body, asked one, saw its group) nor stood down.
         const sighted = (fight.groups ?? []).some((g) => g.id === e.group && g.seen === t);
         rec.blind = rec.kind !== "defend" || ours.length || asked.has(e.id) || sighted || e.phase === "disengaging" ? 0 : rec.blind + 1;

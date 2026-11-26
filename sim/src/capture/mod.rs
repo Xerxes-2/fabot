@@ -65,7 +65,7 @@ impl Capture {
         if !self.windows.iter().any(|(a, b)| (*a..*b).contains(&t)) {
             return;
         }
-        let world = crate::read::world(v, &Declarations::default(), None);
+        let world = crate::read::world(v, &Declarations::default());
         let mut game = Game {
             objects: Map::new(),
             me: &world.me,

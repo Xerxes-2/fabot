@@ -1,7 +1,0 @@
-{
-  "why": "the breach is priced against the towers the drain empties: his six towers stand empty behind ramparts, so no drain gate holds the set and its breach must price; before, the price struck the set with the empty towers too, no medic count out-healed them, and the siege never cast a body",
-  "modules": ["fight"],
-  "start": { "world": "scripts/scenario/worlds/enemy-drained-home.json", "room": "W8N3", "seed": 1, "node": "N6" },
-  "ticks": 3000,
-  "assert": [{ "measure": "held", "kind": "siege", "room": "W6N3", "min": 2 }]
-}

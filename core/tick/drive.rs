@@ -13,7 +13,6 @@ use fabot_base::intel::Intel;
 use fabot_base::intents::{Action, Refusal, Telemetry};
 use fabot_base::tiles;
 use fabot_base::world::{RoomName, Sightings, World};
-use fabot_fight::shape::Phase;
 use fabot_layout::shape::Standing;
 use fabot_observe::engagements;
 use fabot_observe::metrics::{self, Metrics};
@@ -47,9 +46,8 @@ pub trait Terrains {
 }
 
 /// The driver's side of a tick, in the order they run: the world read for
-/// the declarations and the room a drain stands in, with the terrain it
-/// holds and what else the driver keeps of the read; the intents executed;
-/// Memory's text (when it changed) written with the world, that read and
+/// the declarations, with its terrain and what else the driver keeps of the
+/// read; the intents executed; Memory's text (when it changed) written with the world, that read and
 /// intel beside it, each pushing its own phases.
 pub type Phases = Vec<(String, f64)>;
 /// Named per-tick counts (`ARCHITECTURE.md` §9.3).
@@ -63,15 +61,6 @@ pub struct Seam<R, E, W> {
     pub write: W,
 }
 
-/// A declared siege's owner, as intel last saw it, is an enemy (owner's call).
-fn besieging(mut declarations: Declarations, intel: &Intel) -> Declarations {
-    let owners: Vec<String> = (declarations.sieges.iter())
-        .filter_map(|room| intel.get(room)?.owner.clone())
-        .collect();
-    declarations.enemies.extend(owners);
-    declarations
-}
-
 pub fn run<'t, P, R, E, W>(
     heap: &mut Heap,
     (memory, intel, metrics): (&mut Memory, &mut Intel, Option<&mut Metrics>),
@@ -79,28 +68,19 @@ pub fn run<'t, P, R, E, W>(
     seam: Seam<R, E, W>,
 ) -> Ran<'t>
 where
-    R: FnOnce(
-        &Declarations,
-        Option<RoomName>,
-        Clocked<'_>,
-    ) -> (World<'t>, &'t dyn Terrains, P, f64),
+    R: FnOnce(&Declarations, Clocked<'_>) -> (World<'t>, &'t dyn Terrains, P, f64),
     E: FnOnce(&[Action]) -> Vec<Refusal>,
     W: FnOnce(&World, &P, &Intel, Option<String>, &mut Vec<(String, f64)>),
 {
     let start = clock();
     let mut state = memory.state();
     let (declarations, untuned) = memory.declarations();
-    let declarations = besieging(declarations, intel);
     state.layout = std::mem::take(&mut heap.standing);
-    let drain = (state.fight.engagements.iter())
-        .find(|e| e.phase == Phase::Draining)
-        .map(|e| e.room);
     let read = clock();
     phases.push(("hydrate".to_string(), read - start));
 
     let mut walked = Counts::new();
-    let (mut world, maps, pass, start) =
-        (seam.read)(&declarations, drain, (read, phases, &mut walked));
+    let (mut world, maps, pass, start) = (seam.read)(&declarations, (read, phases, &mut walked));
     (world.rooms.iter_mut()).for_each(|r| r.terrain = maps.terrain(r.name));
     let misread = world.drop_misread();
     let sightings = std::mem::take(&mut heap.sightings);

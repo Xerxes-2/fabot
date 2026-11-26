@@ -8,7 +8,7 @@ use super::defend;
 use fabot_atlas::{self as atlas, Atlas};
 use fabot_base::declarations::{Declarations, OpKind};
 use fabot_base::intel::Row;
-use fabot_base::tiles;
+use fabot_base::tiles::{self, TileSet};
 use fabot_base::vocabulary::Part;
 use fabot_base::world::{Creep, Fallen, Pos, Room, RoomName, Source, hostiles};
 use fabot_base::{engine, grid};
@@ -16,6 +16,20 @@ use fabot_exchange::Fighter;
 use fabot_tactics::Tactic;
 
 pub const CANDIDATES: &[Tactic] = &[Tactic::BlobKite, Tactic::Kite];
+
+pub fn beside(reached_from_exits: &TileSet, at: &Pos) -> bool {
+    tiles::around(tiles::of_pos(at))
+        .iter()
+        .any(|t| reached_from_exits.contains(*t))
+}
+
+pub fn exposed_in(reached_from_exits: &TileSet, room: &Room) -> Vec<Pos> {
+    room.sources
+        .iter()
+        .filter(|s| beside(reached_from_exits, &s.pos))
+        .map(|s| s.pos)
+        .collect()
+}
 
 pub struct Facts {
     pub time: i32,
@@ -59,7 +73,7 @@ pub fn room_worth(room: &Room, prey: &[&Creep], exposed: &[Pos], held: i32) -> i
     prey.iter().map(|c| worth(c)).sum::<i32>() + denied
 }
 
-pub fn yield_of(s: &Source, held: i32) -> i32 {
+fn yield_of(s: &Source, held: i32) -> i32 {
     s.energy_capacity * held.max(0) / engine::SOURCE_REGEN_TIME
 }
 

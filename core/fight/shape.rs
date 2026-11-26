@@ -14,8 +14,6 @@ pub struct FightState {
     pub groups: Vec<Group>,
     pub engagements: Vec<Engagement>,
     pub casts: Vec<Cast>,
-    /// The colonies a siege successor falls due at within a body's spawn time.
-    pub due: BTreeSet<RoomName>,
     /// This tick's only, for `engagements.log`.
     pub closed: Vec<Closed>,
 }
@@ -41,9 +39,6 @@ impl Group {
 pub enum Phase {
     Forming,
     Approaching,
-    /// His towers are spent at his border before the set breaches: a bouncer
-    /// steps onto it and back across to the medics, a volley a trip.
-    Draining,
     Fighting,
     Pursuing,
     Disengaging,
@@ -73,9 +68,6 @@ pub struct Boosted {
 #[strum(serialize_all = "lowercase")]
 pub enum Objective {
     Defend,
-    /// Into its room to the rival structure `target`; the plan's order is the
-    /// barriers on the way, first broken first.
-    Siege(Id),
     /// A rival's remote, `room`, its economy bodies hunted.
     Sweep,
     Stronghold,
@@ -85,16 +77,13 @@ pub enum Objective {
 struct Kind {
     #[serde(skip_serializing_if = "Option::is_none")]
     kind: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    target: Option<Id>,
 }
 
 impl From<Kind> for Objective {
     fn from(k: Kind) -> Objective {
-        match (k.kind.as_deref(), k.target) {
-            (Some("siege"), Some(target)) => Objective::Siege(target),
-            (Some("sweep"), _) => Objective::Sweep,
-            (Some("stronghold"), _) => Objective::Stronghold,
+        match k.kind.as_deref() {
+            Some("sweep") => Objective::Sweep,
+            Some("stronghold") => Objective::Stronghold,
             _ => Objective::Defend,
         }
     }
@@ -103,16 +92,12 @@ impl From<Kind> for Objective {
 impl From<Objective> for Kind {
     fn from(o: Objective) -> Kind {
         let kind = (o != Objective::Defend).then(|| <&str>::from(&o).to_string());
-        let target = match o {
-            Objective::Siege(target) => Some(target),
-            _ => None,
-        };
-        Kind { kind, target }
+        Kind { kind }
     }
 }
 
 /// A Defend's target is `Group`, and `room` the room held or worked it
-/// threatened; a Siege's and a Sweep's `group` is none (0).
+/// threatened; a Sweep's `group` is none (0).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Engagement {
     #[serde(flatten)]
@@ -133,10 +118,6 @@ pub struct Engagement {
     pub priority: f64,
     /// Starved: towers and ramparts answer it alone.
     pub unanswered: bool,
-    /// Bouncer trips onto his border his towers left untouched, since the last
-    /// one they struck: a drain counts them and gives up (§6.2).
-    #[serde(default)]
-    pub ignored: i32,
     /// The bank it was last priced against; a larger one is an event.
     pub capacity: i32,
     /// What `Exchange` said each time it was answered after standing

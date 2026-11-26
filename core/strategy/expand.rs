@@ -128,7 +128,6 @@ pub fn claimable(
         && apart(owned, name)
         && !declarations.avoid.contains(&name)
         && !world.closed.contains(&name)
-        && !declarations.sieges.contains(&name)
         // A rival this near raids a young room before its towers stand.
         && !(rivals.iter()).any(|(t, _)| tiles::rooms_apart(*t, name) <= threat)
 }
@@ -164,7 +163,7 @@ pub fn facts(
     }
 }
 
-/// One an operation holds (`outposts::busy`) sponsors nothing: a siege's successors lagged.
+/// One an operation holds (`outposts::busy`) sponsors nothing.
 fn spare(world: &World, p: &ColonyPlan, around: &Around) -> Option<i32> {
     let stock = around.stocks.get(&p.room)?;
     let level = (world.room(p.room)?.controller.as_ref()).map_or(0, |c| c.level);

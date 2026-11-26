@@ -1,8 +1,7 @@
 //! `sim duel --real`: our bodies fight as a home's Defend (`core/fight/act.rs`)
 //! with the sample's tactic: the raid's group and kill order, Approaching until
 //! one of ours stands in reach of it, then the same formation, walk, reflexes
-//! and arbitrated moves. Our towers stay the duel's stand-in. A Defend has no
-//! siege front and raids nothing: no heal is owed ahead and the strike is unarmed.
+//! and arbitrated moves. Our towers stay the duel's stand-in.
 use std::collections::{BTreeMap, BTreeSet};
 
 use fabot_atlas::{Atlas, Context, derive};
@@ -46,7 +45,7 @@ impl Real {
             fabot_base::declarations::Declarations::default(),
         );
         let terrain = LocalRoomTerrain::new_from_bits(Box::new(*k.terrain.raw(0)));
-        let mut world = read::world(&v, &declarations, None);
+        let mut world = read::world(&v, &declarations);
         world.rooms[0].terrain = Some(&terrain);
         let (room, t) = (world.rooms[0].name, world.time);
         let terrains = [(room, terrain.get_bits())];
@@ -79,12 +78,9 @@ impl Real {
             rules: &world.rules,
         };
 
-        let (on, walk) = (
-            (self.tactic, &self.order[..]),
-            (self.phase, false, true, false),
-        );
+        let (on, walk) = ((self.tactic, &self.order[..]), (self.phase, false, true));
         let centre = (group.centre, RANGED_RANGE);
-        let fortified = fortified(&world, &[]);
+        let fortified = fortified(&world);
         let blob = formation(&mut sight, on, walk, ours.clone(), centre, &fortified);
         let mut walking: BTreeMap<String, _> =
             blob.into_iter().map(|w| (w.creep.clone(), w)).collect();
@@ -95,7 +91,7 @@ impl Real {
                 tactics::engage(&mut sight, on, (&group.centre, true), set, c)
             });
             wishes.push((room, wish));
-            chosen.insert(c.name.clone(), tactics::strike(&sight, on.1, c, false));
+            chosen.insert(c.name.clone(), tactics::strike(&sight, on.1, c));
         }
         let mut actions: Vec<Action> =
             reflexes(chosen, (&ours, &world.creeps), &BTreeMap::new()).collect();

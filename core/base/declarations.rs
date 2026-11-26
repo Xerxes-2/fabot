@@ -52,7 +52,6 @@ pub struct ColonyPlan {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OpKind {
     Defend,
-    Siege,
     Sweep,
     Stronghold,
     /// A room whose loot Economy hauls home.
@@ -74,7 +73,6 @@ pub struct Declarations {
     pub claims: Vec<Outpost>,
     pub allies: BTreeSet<String>,
     pub enemies: BTreeSet<String>,
-    pub sieges: Vec<RoomName>,
     pub colonies: Vec<ColonyPlan>,
     /// Rooms no fight body walks through on its way: a rival's towers.
     pub avoid: BTreeSet<RoomName>,
@@ -109,7 +107,6 @@ impl Declarations {
         };
         self.outposts.retain(|o| open(&o.room));
         self.claims.retain(|o| open(&o.room));
-        self.sieges.retain(|room| open(room));
         refused
     }
 
@@ -152,7 +149,7 @@ pub fn fights(name: &str) -> bool {
 /// The route search needs a bound; nothing is worked further than this.
 pub const REACH_HOPS: i32 = 3;
 
-/// A declared siege's room stands further off than any room worked.
-pub const SIEGE_HOPS: i32 = 10;
+/// A sweep, stronghold or scout walks further off than any room worked.
+pub const FAR_HOPS: i32 = 10;
 
 pub const MUSTER_RANGE: i32 = 2;

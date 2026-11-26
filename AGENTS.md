@@ -108,7 +108,7 @@ Full engine and metric details live in `ARCHITECTURE.md` §10.
 - **Unit tests:** invariants and pure arithmetic only (`npm test` < 1 min);
   scenarios run on `jj ship` for the modules a change touches. Reject
   any test asserting one creep's action in one scenario.
-- **Large fight changes:** the owner watches siege/sweep/defend scenarios in
+- **Large fight changes:** the owner watches sweep/defend scenarios in
   lazycreep (`npm run scenario -- <name> --watch`). Report scenario name,
   measured numbers, and that command — never a bare pass. A fault the owner sees
   there becomes a measure and a scenario that fails on the old code.

@@ -2,7 +2,7 @@
 /// what each committed body does, and what it asks for.
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::kinds::{defend, raid, siege, stronghold, sweep};
+use super::kinds::{defend, stronghold, sweep};
 use super::scene::{Hunting, Scene, fresh};
 use super::shape::{Cast, Engagement, FightState, Group, Objective, Phase};
 use super::{casting, open, tracker};
@@ -196,34 +196,6 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
         spawning,
     };
 
-    // A planned barrier fallen advances the plan, never re-prices it; a
-    // target fallen re-plans toward the next razed.
-    let mut retargeted: BTreeSet<i32> = BTreeSet::new();
-
-    for e in &mut engagements {
-        if let Objective::Siege(target) = &e.objective
-            && let Some(room) = scene.in_sight(e.room)
-        {
-            let barriers = siege::barrier_at(room);
-            e.plan.order.retain(|id| barriers.contains_key(id));
-
-            let members = scene.members_of(e);
-            let next = if raid::raids(e) {
-                raid::target(&world.rules, room, &members)
-            } else {
-                siege::next_target(&world.rules, room, members.first().map(|c| &c.pos))
-            };
-
-            if (!siege::stands(room, *target) || siege::tapped(room, *target).is_some())
-                && let Some(next) = next
-                && next != *target
-            {
-                e.objective = Objective::Siege(next);
-                retargeted.insert(e.id);
-            }
-        }
-    }
-
     let stirred: BTreeSet<RoomName> = groups
         .iter()
         .filter(|g| g.last_seen == world.time)
@@ -266,28 +238,6 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
     let mut claimed: BTreeSet<RoomName> = sweeps().map(|e| e.room).collect();
     let candidates = scene.candidates(atlas, &grounds, &stirred);
 
-    let edges: BTreeMap<i32, (tactics::Gate, bool)> = (engagements.iter())
-        .filter(|e| matches!(e.objective, Objective::Siege(_)))
-        .filter_map(|e| {
-            let room = scene.in_sight(e.room)?;
-            let towers = raid::charged(&world.rules, room);
-            let from = scene.enter_room(&*atlas, e)?;
-            let gate = siege::drainable(&*atlas, e.room, from, e.capacity, &towers)?;
-            let drains = !raid::raids(e)
-                && matches!(e.phase, Phase::Approaching | Phase::Draining)
-                && (Scene::safe(room) || scene.outstruck(e, &towers));
-            Some((e.id, (gate, drains)))
-        })
-        .collect();
-    let gates: BTreeMap<i32, tactics::Gate> = (edges.iter())
-        .filter(|(_, (_, drains))| *drains)
-        .map(|(id, (gate, _))| (*id, gate.clone()))
-        .collect();
-    let given_up: BTreeSet<i32> = (engagements.iter())
-        .filter(|e| matches!(e.objective, Objective::Siege(_)) && siege::gave_up(e))
-        .map(|e| e.id)
-        .collect();
-
     let stepped: Vec<(Engagement, bool)> = engagements
         .iter()
         .filter_map(|e| {
@@ -296,17 +246,6 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
                     let home = scene.homes.contains(&e.room);
                     let counted = if home { &standing } else { &able };
                     defend::step(&scene.facts_of(e, counted, &aging_out, &state.groups), e)
-                }
-                Objective::Siege(_) => {
-                    let declared = declarations.priority(OpKind::Siege, e.room).is_some();
-                    let f = scene.siege_facts(
-                        e,
-                        declared,
-                        (&standing, &aging_out),
-                        gates.get(&e.id),
-                        edges.contains_key(&e.id),
-                    );
-                    siege::step(&f, e)
                 }
                 Objective::Sweep => {
                     let members = scene.members_of(e);
@@ -335,10 +274,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
                 }
             }?;
 
-            Some((
-                next.clone(),
-                next.ours.len() < e.ours.len() || retargeted.contains(&e.id),
-            ))
+            Some((next.clone(), next.ours.len() < e.ours.len()))
         })
         .collect();
 
@@ -369,52 +305,7 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
     })
     .collect();
 
-    let besieging: BTreeSet<RoomName> = stepped
-        .iter()
-        .filter(|(e, _)| matches!(e.objective, Objective::Siege(_)))
-        .map(|(e, _)| e.room)
-        .collect();
-
-    let declared: Vec<(Engagement, bool)> = declarations
-        .operations
-        .iter()
-        .filter(|o| o.kind == OpKind::Siege && !besieging.contains(&o.room))
-        // A safe mode refuses the breach but not the edge: his towers are
-        // drawn there while it runs, and the siege opens on a drain only where
-        // the pairs it casts out-heal his volley on the gate.
-        .filter_map(|op| {
-            let room = scene.in_sight(op.room)?;
-            let target = siege::next_target(&world.rules, room, None)?;
-            let towers = raid::charged(&world.rules, room);
-            if !Scene::safe(room) {
-                return Some((op, target));
-            }
-            if towers.is_empty() {
-                return None;
-            }
-            let mut watch = fresh(
-                first_id,
-                Objective::Siege(target),
-                room.name,
-                world.time,
-                Tactic::BlobClose,
-            );
-            watch.capacity = scene.capacity_of(&*atlas, &watch);
-            let from = scene.enter_room(&*atlas, &watch)?;
-            siege::drainable(&*atlas, room.name, from, watch.capacity, &towers)?;
-            Some((op, target))
-        })
-        .enumerate()
-        .map(|(i, (op, target))| {
-            let id = first_id + (opened.len() + i) as i32;
-            let tactic = Tactic::BlobClose;
-            let e = fresh(id, Objective::Siege(target), op.room, world.time, tactic);
-            let priority = op.priority;
-            (Engagement { priority, ..e }, false)
-        })
-        .collect();
-
-    let first = first_id + (opened.len() + declared.len()) as i32;
+    let first = first_id + opened.len() as i32;
     let at = (&engagements[..], first, declarations);
     let swept = sweep::opened(&scene, (&candidates, &mut claimed), at);
 
@@ -431,7 +322,6 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
 
     let mut ranked: Vec<(Engagement, bool)> = stepped;
     ranked.extend(opened);
-    ranked.extend(declared);
     ranked.extend(swept);
     let raided = stronghold::opens(&scene, declarations, &ranked, first_id);
     ranked.extend(raided);
@@ -448,11 +338,6 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
         let grew = e.unanswered && scene.capacity_of(atlas, &e) > e.capacity;
 
         match &e.objective {
-            Objective::Siege(target) => {
-                if let Some(next) = scene.besieged(atlas, &mut asked, &e, *target, left, grew) {
-                    decided.push(next);
-                }
-            }
             Objective::Defend | Objective::Sweep if defend::overdue(&scene, &e) => {
                 let stands = sweep::holds(&scene, &e, (e.room, &grounds));
                 decided.extend(defend::late(&mut asked, (world.time, stands), &e))
@@ -527,21 +412,13 @@ pub fn decide(context: &mut Context, state: &mut FightState) -> ModuleOutput {
         })
         .collect();
 
-    let mut out = super::act::act(
-        &scene,
-        atlas,
-        context.trace,
-        (&decided, &casts, &grounds),
-        &gates,
-        &given_up,
-    );
+    let mut out = super::act::act(&scene, atlas, context.trace, (&decided, &casts, &grounds));
     out.asks = asks;
 
     state.groups = groups;
     state.engagements = decided;
     state.engagements.sort_by_key(|e| e.id);
     state.casts = casts;
-    state.due = asked.due;
     state.closed = closed;
     out
 }

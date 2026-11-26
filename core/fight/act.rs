@@ -2,8 +2,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::kinds::defend::{self, Home};
-use super::kinds::{raid, siege, stronghold};
-use super::scene::{Hunting, Scene, picket};
+use super::kinds::stronghold;
+use super::scene::{Hunting, Scene};
 use super::shape::{Engagement, Objective, Phase};
 use super::tracker::REACH;
 use fabot_atlas::Atlas;
@@ -13,7 +13,6 @@ use fabot_base::tiles::Tile;
 use fabot_base::wish::{Idle, Wish};
 use fabot_base::world::{self, Creep, Id, Owner, Pos, RoomName, Structure, StructureType};
 use fabot_base::{engine, tiles};
-use fabot_exchange as exchange;
 use fabot_tactics::{self as tactics, Tactic};
 
 pub(super) fn act(
@@ -21,12 +20,9 @@ pub(super) fn act(
     atlas: &mut Atlas,
     trace: bool,
     fights: defend::Fights,
-    gates: &BTreeMap<i32, tactics::Gate>,
-    given_up: &BTreeSet<i32>,
 ) -> ModuleOutput {
     let (world, (decided, _, grounds)) = (scene.world, fights);
-    let walked = (decided.iter()).filter(|e| !matches!(e.objective, Objective::Siege(_)));
-    let rooms: BTreeSet<RoomName> = walked.map(|e| e.room).collect();
+    let rooms: BTreeSet<RoomName> = decided.iter().map(|e| e.room).collect();
     let middle = |r: RoomName| {
         grounds
             .get(&r)
@@ -80,54 +76,29 @@ pub(super) fn act(
         .filter(|c| declarations::fights(&c.name))
         .collect();
 
-    // A group lost from sight is sought in its room, which brings it back in
-    // sight; a siege's room out of sight is entered anywhere, as its middle
-    // may lie behind its walls.
+    // A group lost from sight is sought in its room, which brings it back in sight.
     let centre_of = |e: &Engagement| -> (Pos, i32) {
-        match (
-            &e.objective,
-            scene.by_id.get(&e.group),
-            scene.next_struck(e),
-        ) {
-            // His towers are spent at the edge before the set breaches: it
-            // waits in the room beside his, off the tiles a pair works.
-            (Objective::Siege(_), _, _) if gates.contains_key(&e.id) => gates[&e.id].wait(),
-            (Objective::Siege(_), _, Some(b)) => (b.pos, engine::RANGED_RANGE),
-            (Objective::Defend, Some(g), _) => (g.centre, engine::RANGED_RANGE),
-            (Objective::Defend, None, _) => (
+        match (&e.objective, scene.by_id.get(&e.group)) {
+            (Objective::Defend, Some(g)) => (g.centre, engine::RANGED_RANGE),
+            (Objective::Defend, None) => (
                 scene.raid_at(e, e.room).unwrap_or(middles[&e.room]),
                 engine::RANGED_RANGE,
             ),
-            (Objective::Siege(_), _, None) => (tiles::middle(e.room), engine::ROOM_SIDE / 2),
             _ => (middles[&e.room], engine::RANGED_RANGE),
         }
     };
 
-    let fortified = fortified(world, decided);
+    let fortified = fortified(world);
     let mut walking: BTreeMap<String, Wish> = BTreeMap::new();
     for e in decided {
         let on = (e.plan.tactic, &e.plan.order[..]);
         let defends = e.objective == Objective::Defend;
-        let walk = (e.phase, e.unanswered, defends, raid::raids(e));
+        let walk = (e.phase, e.unanswered, defends);
         let members = scene.members_of(e);
         let blob = formation(&mut sight, on, walk, members, centre_of(e), &fortified);
         let held = stronghold::walks(&mut sight, scene, e);
         walking.extend(blob.into_iter().chain(held).map(|w| (w.creep.clone(), w)));
     }
-
-    let fronts: BTreeMap<i32, tactics::Front> = (decided.iter())
-        .filter_map(|e| Some((e.id, front_of(scene, sight.atlas, e)?)))
-        .collect();
-
-    let taps: BTreeMap<i32, &world::Controller> = (decided.iter())
-        .filter(|e| e.phase != Phase::Disengaging)
-        .filter_map(|e| match &e.objective {
-            Objective::Siege(target) => {
-                Some((e.id, siege::tapped(scene.in_sight(e.room)?, *target)?))
-            }
-            _ => None,
-        })
-        .collect();
 
     let hunts: BTreeMap<i32, (&Hunting, bool)> = decided
         .iter()
@@ -155,33 +126,6 @@ pub(super) fn act(
             return acted;
         }
 
-        if let Some(controller) = taps.get(&e.id).filter(|_| tactics::claims(c)) {
-            let tap = controller.upgrade_blocked == 0
-                && c.pos.within(engine::MELEE_RANGE, &controller.pos);
-            let act = tap.then_some(CreepAct::Unreserve(controller.id));
-            return (
-                act,
-                tactics::toward(sight, c, &controller.pos, engine::MELEE_RANGE),
-            );
-        }
-
-        if e.phase == Phase::Fighting
-            && picket(e, c)
-            && let Some(front) = fronts.get(&e.id)
-            && !front.posts.is_empty()
-        {
-            return (None, tactics::picket(sight, front, &scene.slotted(e), c));
-        }
-
-        if e.phase == Phase::Fighting && fronts.contains_key(&e.id) && !raid::raids(e) {
-            let members: Vec<&Creep> = scene
-                .members_of(e)
-                .into_iter()
-                .filter(|m| !tactics::picket_of(m))
-                .collect();
-            return tactics::siege(sight, &fronts[&e.id], &members, c);
-        }
-
         let (centre, _) = centre_of(e);
         let enter = e.objective == Objective::Defend;
         let gathers = enter && matches!(e.plan.tactic, Tactic::BlobClose | Tactic::BlobKite);
@@ -197,31 +141,12 @@ pub(super) fn act(
         }
 
         let wish = match e.phase {
-            // The towers' room is the only one a drain presses into.
-            Phase::Draining => match gates.get(&e.id) {
-                Some(gate) if given_up.contains(&e.id) => {
-                    let (wait, near) = gate.wait();
-                    tactics::toward(sight, c, &wait, near)
-                }
-                Some(gate) => tactics::drain(sight, gate, c),
-                None => tactics::hold(sight, c),
-            },
             // Held on a spawn's door a forming body bars it to the casts still to come.
             Phase::Forming if !scene.in_reach(e) && door => tactics::retreat(sight, c),
             Phase::Forming if !gathers || !scene.in_reach(e) => tactics::hold(sight, c),
             Phase::Forming | Phase::Disengaging => tactics::retreat(sight, c),
             Phase::Pursuing => tactics::close(sight, &e.plan.order, &centre, enter, c),
             Phase::Approaching | Phase::Fighting => {
-                if raid::raids(e) {
-                    return (
-                        None,
-                        match scene.in_sight(e.room).filter(|r| r.name == c.pos.room) {
-                            Some(in_sight) => raid::dance(sight, in_sight, &scene.members_of(e), c),
-                            None => tactics::toward(sight, c, &centre, engine::RANGED_RANGE),
-                        },
-                    );
-                }
-
                 // A transit room's hostiles are not the sweep's.
                 if e.objective == Objective::Sweep && c.pos.room != e.room {
                     return (
@@ -273,21 +198,7 @@ pub(super) fn act(
             .push(Action::Controller(id, ControllerAct::ActivateSafeMode));
     }
 
-    let incoming: BTreeMap<String, i32> = decided
-        .iter()
-        .filter_map(|e| {
-            let front = fronts.get(&e.id)?;
-            let members: Vec<&Creep> = scene
-                .members_of(e)
-                .into_iter()
-                .filter(|m| m.pos.room == front.breach.room)
-                .collect();
-
-            tactics::focus_of(front, &members)
-                .map(|focus| (focus.name.clone(), front.breach_strike))
-        })
-        .chain(stronghold::incoming(scene, decided))
-        .collect();
+    let incoming: BTreeMap<String, i32> = stronghold::incoming(scene, decided).collect();
 
     let mut chosen: BTreeMap<String, Vec<CreepAct>> = BTreeMap::new();
 
@@ -297,17 +208,8 @@ pub(super) fn act(
         let order = engaged.map_or(&[][..], |e| e.plan.order.as_slice());
         let mut wanted: Vec<CreepAct> = own.into_iter().collect();
         // A hunt's scored shot stands for the reflex.
-        let raid = engaged.filter(|e| raid::raids(e));
         if wanted.iter().all(|a| a.slots() & intents::RANGED == 0) {
-            let razed = raid
-                .and_then(|e| scene.in_sight(e.room))
-                .filter(|r| r.name == c.pos.room)
-                .and_then(|room| raid::volley(&sight, room, c));
-
-            match (raid.is_some(), razed) {
-                (true, Some(act)) => wanted.push(act),
-                (armed, _) => wanted.extend(tactics::strike(&sight, order, c, armed)),
-            }
+            wanted.extend(tactics::strike(&sight, order, c));
         }
         chosen.insert(c.name.clone(), wanted);
         out.wishes.push((c.pos.room, wish));
@@ -323,15 +225,11 @@ pub(super) fn act(
     out
 }
 
-/// The rooms a blob walks into under towers: a siege's is priced so while out of sight.
-pub fn fortified(world: &world::World, decided: &[Engagement]) -> BTreeSet<RoomName> {
-    let charged = (world.rooms.iter()).filter(|r| !raid::charged(&world.rules, r).is_empty());
-    let sieges = decided
-        .iter()
-        .filter(|e| matches!(e.objective, Objective::Siege(_)));
-    charged
+/// The rooms a blob walks into under towers.
+pub fn fortified(world: &world::World) -> BTreeSet<RoomName> {
+    (world.rooms.iter())
+        .filter(|r| !world.rules.charged_towers(r).is_empty())
         .map(|r| r.name)
-        .chain(sieges.map(|e| e.room))
         .collect()
 }
 
@@ -340,7 +238,7 @@ pub fn fortified(world: &world::World, decided: &[Engagement]) -> BTreeSet<RoomN
 pub fn formation(
     sight: &mut tactics::Sight,
     (tactic, order): (Tactic, &[Id]),
-    (phase, unanswered, defends, raids): (Phase, bool, bool, bool),
+    (phase, unanswered, defends): (Phase, bool, bool),
     members: Vec<&Creep>,
     (centre, range): (Pos, i32),
     fortified: &BTreeSet<RoomName>,
@@ -360,7 +258,7 @@ pub fn formation(
     let (centre, range) = mark.map_or((centre, range), |h| (h.pos, reach));
     let present = |c: &&Creep| phase != Phase::Fighting || c.pos.room == centre.room;
     let members: Vec<&Creep> = (members.into_iter())
-        .filter(|c| (raids || defends || !c.swings()) && present(c))
+        .filter(|c| (defends || !c.swings()) && present(c))
         .collect();
     if !walks || members.is_empty() {
         return Vec::new();
@@ -389,41 +287,6 @@ pub fn reflexes(
         let done = intents::performed(&wanted);
         done.into_iter()
             .map(move |a| Action::Creep(name.clone(), a))
-    })
-}
-
-/// A siege's wall and what holds it: his line, his towers' strike on it, and
-/// the posts a picket denies him from.
-fn front_of(scene: &Scene, atlas: &Atlas, e: &Engagement) -> Option<tactics::Front> {
-    let (Objective::Siege(_), Some(room), Some(wall)) =
-        (&e.objective, scene.in_sight(e.room), scene.next_struck(e))
-    else {
-        return None;
-    };
-    let towers = raid::charged(&scene.world.rules, room);
-    let fired: BTreeSet<&Id> = scene.towers_in(room).iter().map(|t| &t.id).collect();
-    let struck = (scene.world.attacks.iter())
-        .find(|(by, _)| fired.contains(by))
-        .map(|(_, at)| *at);
-    let breach_strike = exchange::tower_strike(&towers, &wall.pos);
-    let posts = if scene.members_of(e).iter().any(|c| tactics::picket_of(c)) {
-        (siege::posts(atlas, room, e.capacity, &towers).into_iter())
-            .map(|(post, squad)| (post, squad.len()))
-            .filter(|(_, n)| *n > 0)
-            .collect()
-    } else {
-        Vec::new()
-    };
-    Some(tactics::Front {
-        breach: wall.pos,
-        wall: (!room.controller.as_ref().is_some_and(|c| c.id == wall.id)).then_some(wall.id),
-        line: (room.structures.iter().filter(|s| siege::bars(s)))
-            .map(|s| s.pos)
-            .collect(),
-        posts,
-        towers,
-        struck,
-        breach_strike,
     })
 }
 

@@ -3,12 +3,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::casting;
 use super::kinds::defend::{self, Facts as DefendFacts};
-use super::kinds::siege::{self, Facts as SiegeFacts};
-use super::kinds::{raid, sweep};
+use super::kinds::sweep;
 use super::shape::{Boosted, Cast, Engagement, Group, Objective, Phase, Plan, Slot};
-use fabot_atlas::{Atlas, Mover, Target, Tree};
+use fabot_atlas::{Atlas, Tree};
 use fabot_base::declarations::{self, TacticRule};
-use fabot_base::grid;
 use fabot_base::tiles::Tile;
 use fabot_base::vocabulary::Part;
 use fabot_base::world::{
@@ -16,7 +14,7 @@ use fabot_base::world::{
     sightings,
 };
 use fabot_base::{boost, engine, tiles};
-use fabot_exchange::{self as exchange, Fighter, fighter};
+use fabot_exchange::{self as exchange, Fighter};
 use fabot_tactics::{self as tactics, Tactic};
 
 #[derive(Default)]
@@ -26,7 +24,6 @@ pub(super) struct Asked {
     /// The energy each room's queued bodies will draw of its bank.
     pub(super) asked: BTreeMap<RoomName, i32>,
     pub(super) casts: Vec<Cast>,
-    pub(super) due: BTreeSet<RoomName>,
     pub(super) boosts: casting::Boosts,
 }
 
@@ -102,10 +99,7 @@ impl<'a> Scene<'a> {
         for next in decided {
             let forming = (before.iter()).find(|e| e.id == next.id && e.phase == Phase::Forming);
             let at_labs = (self.members_of(next).iter()).any(|c| self.at_labs(c).is_some());
-            let onward = matches!(
-                next.phase,
-                Phase::Approaching | Phase::Draining | Phase::Fighting
-            );
+            let onward = matches!(next.phase, Phase::Approaching | Phase::Fighting);
             if let Some(was) = forming.filter(|_| at_labs && onward) {
                 (next.phase, next.since) = (Phase::Forming, was.since);
             }
@@ -177,16 +171,6 @@ impl<'a> Scene<'a> {
         (left, ruling.pin)
     }
 
-    pub(super) fn next_struck(&self, e: &Engagement) -> Option<&'a Structure> {
-        let room = self.in_sight(e.room)?;
-
-        match (e.plan.order.first(), &e.objective) {
-            (Some(first), _) => siege::barrier_at(room).get(first).copied(),
-            (None, Objective::Siege(target)) => room.structures.iter().find(|s| s.id == *target),
-            (None, _) => None,
-        }
-    }
-
     /// `was`: last tick's groups (§6.1), the only record of where a body stood.
     pub(super) fn ground(&self, atlas: &Atlas, room: &Room, was: &[Group]) -> Hunting {
         let reached = atlas.from_exits(room.name);
@@ -202,9 +186,9 @@ impl<'a> Scene<'a> {
         let prey: Vec<&Creep> = all
             .iter()
             .copied()
-            .filter(|c| siege::beside(&reached, &c.pos))
+            .filter(|c| sweep::beside(&reached, &c.pos))
             .collect();
-        let exposed = siege::exposed_in(&reached, room);
+        let exposed = sweep::exposed_in(&reached, room);
         let escort: Vec<Creep> = (room.hostiles())
             .filter(|h| {
                 let strikes = hostiles::foe(h) && hostiles::strikes(h);
@@ -287,7 +271,7 @@ impl<'a> Scene<'a> {
                     s.kind == StructureType::Container
                         || s.kind == StructureType::Link && s.owner.is_theirs()
                 })
-                .filter(|s| creepless && siege::beside(&reached, &s.pos))
+                .filter(|s| creepless && sweep::beside(&reached, &s.pos))
                 .map(|s| tactics::Mark {
                     id: s.id,
                     pos: s.pos,
@@ -302,7 +286,7 @@ impl<'a> Scene<'a> {
                 }),
         );
         Hunting {
-            threat: exchange::damage_map(room.name, &raid::charged(&self.world.rules, room), &foes),
+            threat: exchange::damage_map(room.name, &self.world.rules.charged_towers(room), &foes),
             worth: sweep::room_worth(room, &prey, &exposed, held)
                 * sweep::kept(room, held, walk.unwrap_or(0))
                 / held.max(1),
@@ -325,32 +309,16 @@ impl<'a> Scene<'a> {
     }
 
     pub(super) fn members_of(&self, e: &Engagement) -> Vec<&'a Creep> {
-        self.slotted(e).into_iter().map(|(_, c)| c).collect()
-    }
-
-    pub(super) fn slotted(&self, e: &Engagement) -> Vec<(Slot, &'a Creep)> {
-        (e.ours.iter())
-            .filter_map(|(n, s)| Some((*s, *self.ours.get(n.as_str())?)))
+        (e.ours.keys())
+            .filter_map(|n| self.ours.get(n.as_str()).copied())
             .collect()
     }
 
     pub(super) fn hops(e: &Engagement) -> i32 {
         match e.objective {
             Objective::Defend => declarations::REACH_HOPS,
-            _ => declarations::SIEGE_HOPS,
+            _ => declarations::FAR_HOPS,
         }
-    }
-
-    /// The room a set walks in from: the one before his on its colony's route.
-    pub(super) fn enter_room(&self, atlas: &Atlas, e: &Engagement) -> Option<RoomName> {
-        let colony = self.colonies_of(atlas, e).first()?.name;
-        let hops = Scene::hops(e);
-        let rooms = match self.walks.get(&(e.room, hops)) {
-            Some(tree) => tree.route(colony, e.room),
-            None => atlas.route(self.avoid, hops, colony, e.room),
-        }?;
-
-        (*rooms.get(rooms.len().checked_sub(2)?)?).into()
     }
 
     /// The nearest colony and its walk: a set is priced as walked and boosted
@@ -465,22 +433,6 @@ impl<'a> Scene<'a> {
             .collect()
     }
 
-    /// How many of the drain's bodies the set already holds, standing or in
-    /// an oven: a pair's shape is no other body's.
-    pub(super) fn paired(&self, e: &Engagement, ovens: &[Cast], set: &[casting::Body]) -> usize {
-        let of = |body: &[Part]| set.iter().any(|b| b[..] == *body);
-        let stand = self
-            .members_of(e)
-            .iter()
-            .filter(|c| of(&fabot_base::world::body_kinds(c)))
-            .count();
-        stand
-            + ovens
-                .iter()
-                .filter(|c| c.engagement == e.id && of(&c.body))
-                .count()
-    }
-
     pub(super) fn ask_slots(
         &self,
         atlas: &Atlas,
@@ -538,47 +490,6 @@ impl<'a> Scene<'a> {
         boosts
     }
 
-    /// A body that dies before a successor asked now could stand is
-    /// succeeded in its slot (§6.2's rotation).
-    pub(super) fn succeed(&self, atlas: &Atlas, e: &Engagement, asked: &mut Asked) {
-        let Some((walk, home)) = self.nearest(atlas, e) else {
-            return;
-        };
-
-        let members = self.slotted(e);
-
-        let lasts = |c: &Creep, lead: i32| {
-            c.ticks_to_live > engine::spawn_ticks(c.body.len()) + walk + lead
-        };
-
-        let held: BTreeSet<Slot> = (members.iter())
-            .filter(|(_, c)| lasts(c, 0))
-            .map(|(s, _)| *s)
-            .chain(
-                (asked.casts.iter())
-                    .filter(|c| c.engagement == e.id)
-                    .map(|c| c.slot),
-            )
-            .collect();
-
-        // A successor is cast bare: only a forming set's price boosts.
-        let due: Vec<Wanted> = (members.iter())
-            .filter(|(s, _)| !held.contains(s))
-            .map(|(s, c)| Wanted {
-                slot: *s,
-                body: fabot_base::world::body_kinds(c),
-                boost_at: None,
-            })
-            .collect();
-
-        let lead = engine::spawn_ticks(engine::MAX_BODY_PARTS);
-        asked
-            .due
-            .extend(members.iter().any(|(_, c)| !lasts(c, lead)).then_some(home));
-
-        self.ask_slots(atlas, e, due, asked);
-    }
-
     /// Its room's armed and with `own` its own, as Price fights: the tracker may split a raid.
     pub(super) fn raid<'s>(&'s self, g: &'s Group, own: bool) -> impl Iterator<Item = &'s Creep> {
         (self.foes.get(&g.room()).into_iter().flatten())
@@ -630,145 +541,6 @@ impl<'a> Scene<'a> {
         (e.ours.keys())
             .all(|n| (self.ours.get(n.as_str())).is_some_and(|c| self.homes.contains(&c.pos.room)))
     }
-
-    pub(super) fn siege_facts(
-        &self,
-        e: &Engagement,
-        declared: bool,
-        (standing, aging_out): (&BTreeSet<String>, &BTreeSet<String>),
-        gate: Option<&tactics::Gate>,
-        priced: bool,
-    ) -> SiegeFacts {
-        let room = self.in_sight(e.room);
-        let towers = room.map_or_else(Vec::new, |r| raid::charged(&self.world.rules, r));
-
-        SiegeFacts {
-            time: self.world.time,
-            standing: standing.clone(),
-            aging_out: aging_out.clone(),
-            asked: self.spawning.iter().any(|c| c.engagement == e.id),
-            home: self.home(e),
-            under_fire: e.ours.keys().any(|n| {
-                self.ours
-                    .get(n.as_str())
-                    .is_some_and(|c| c.pos.room == e.room && !picket(e, c))
-            }),
-            charged: !towers.is_empty(),
-            drain: gate.is_some(),
-            priced,
-            // A drain with no pair standing, in an oven, or tripped holds nothing.
-            worked: e.ignored > 0
-                || self.paired(e, &self.spawning, &casting::drains(e.capacity)) > 0,
-            bounced: gate.is_some_and(|g| self.bounced(e, g)),
-            drawn: self.drawn(e),
-            gave_up: siege::gave_up(e),
-            razed: room.is_some_and(|room| match &e.objective {
-                Objective::Siege(target) => {
-                    !siege::stands(room, *target)
-                        && (!raid::raids(e)
-                            || raid::mark(&self.world.rules, room, &self.members_of(e)).is_none())
-                }
-                _ => false,
-            }),
-            safe: room.is_some_and(Scene::safe),
-            withdrawn: !declared,
-        }
-    }
-
-    /// A bouncer carried back from his room this tick: it stands on the tile
-    /// across from his, where the volley that answered the trip is in the log.
-    pub(super) fn bounced(&self, e: &Engagement, gate: &tactics::Gate) -> bool {
-        let back = tiles::to_pos(gate.from, gate.bounce);
-
-        (self.members_of(e))
-            .iter()
-            .any(|c| c.pos == back && !c.body.iter().any(|p| p.kind == Part::Heal))
-    }
-
-    /// One of his towers struck one of ours in his room on the trip just
-    /// ended: the only answer a drain counts.
-    pub(super) fn drawn(&self, e: &Engagement) -> bool {
-        if e.phase != Phase::Draining || self.world.attacks.is_empty() {
-            return false;
-        }
-
-        let towers: BTreeSet<&Id> = (self.in_sight(e.room))
-            .into_iter()
-            .flat_map(|r| self.towers_in(r))
-            .map(|t| &t.id)
-            .collect();
-
-        (self.world.attacks.iter())
-            .any(|(by, at)| towers.contains(by) && (self.world.creeps).iter().any(|c| &c.id == at))
-    }
-
-    /// His towers out-strike the heal the set seats on one body at the breach,
-    /// so the gate is worth working.
-    pub(super) fn outstruck(&self, e: &Engagement, towers: &[Pos]) -> bool {
-        let set = self.fielded(e);
-        let seated = exchange::pooled_heal(set.len() as i32, &set);
-        (self.next_struck(e)).is_some_and(|b| exchange::tower_strike(towers, &b.pos) > seated)
-    }
-
-    /// Whole, as cast: a part struck off is healed back, and only a body lost
-    /// re-prices the set.
-    pub(super) fn fielded(&self, e: &Engagement) -> Vec<Fighter> {
-        self.fielded_bodies(e)
-            .iter()
-            .map(|b| fighter::cast(b))
-            .collect()
-    }
-
-    /// One body a slot: a successor and the body it succeeds are one.
-    pub(super) fn fielded_bodies(&self, e: &Engagement) -> Vec<casting::Body> {
-        let mut bodies: BTreeMap<Slot, casting::Body> = (self.slotted(e).into_iter())
-            .map(|(s, c)| (s, fabot_base::world::body_kinds(c)))
-            .collect();
-
-        bodies.extend(
-            self.spawning
-                .iter()
-                .filter(|c| c.engagement == e.id)
-                .map(|c| (c.slot, c.body.clone())),
-        );
-
-        // A picket holds its post, not the breach.
-        bodies
-            .into_values()
-            .filter(|b| raid::raids(e) || !b.contains(&Part::RangedAttack))
-            .collect()
-    }
-
-    pub(super) fn unreached(
-        &self,
-        atlas: &Atlas,
-        room: &Room,
-        b: &Structure,
-        in_room: &[&Creep],
-    ) -> bool {
-        !in_room.is_empty()
-            && in_room.iter().all(|m| {
-                atlas
-                    .field(
-                        Mover::one(grid::factor_of(m)),
-                        &Target {
-                            room: room.name,
-                            tiles: vec![tiles::of_pos(&b.pos)],
-                            range: engine::MELEE_RANGE,
-                            avoid: BTreeSet::new(),
-                            max_hops: declarations::SIEGE_HOPS,
-                        },
-                        &m.pos,
-                    )
-                    .and_then(|field| field.ticks(tiles::of_pos(&m.pos)))
-                    .is_none()
-            })
-    }
-}
-
-/// A raid's guns are its set, not pickets.
-pub(super) fn picket(e: &Engagement, c: &Creep) -> bool {
-    !raid::raids(e) && tactics::picket_of(c)
 }
 
 pub(super) fn fresh(
@@ -797,93 +569,8 @@ pub(super) fn fresh(
         budget: 0,
         priority: 0.0,
         unanswered: true,
-        ignored: 0,
         capacity: 0,
         predicted: None,
         actual: Default::default(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use fabot_base::world::{BodyPart, Rules, Store};
-
-    fn body(name: &str) -> Creep {
-        let part = |kind| BodyPart {
-            kind,
-            hits: 100,
-            boost: None,
-        };
-        Creep {
-            id: name.into(),
-            name: name.to_owned(),
-            owner: Owner::Ours,
-            pos: tiles::middle(RoomName::W1N1),
-            body: vec![part(Part::Attack), part(Part::Move)],
-            hits: 200,
-            hits_max: 200,
-            ticks_to_live: 1000,
-            fatigue: 0,
-            store: Store::default(),
-        }
-    }
-
-    #[test]
-    fn bodies_in_distinct_slots_are_each_fielded() {
-        for n in 1..=4 {
-            let names: Vec<String> = (0..n).map(|i| format!("b{i}")).collect();
-            let world = World {
-                time: 1,
-                me: String::new(),
-                cpu_limit: 20.0,
-                bucket: 10_000,
-                rooms: Vec::new(),
-                spawns: Vec::new(),
-                creeps: names.iter().map(|n| body(n)).collect(),
-                our_sites: 0,
-                rooms_allowed: 1,
-                closed: BTreeSet::new(),
-                attacks: Vec::new(),
-                destroyed: Vec::new(),
-                rules: Rules::default(),
-            };
-            let e = Engagement {
-                ours: names.iter().cloned().zip(0..).collect(),
-                ..fresh(1, Objective::Defend, RoomName::W1N1, 1, Tactic::Close)
-            };
-            let oven = Cast {
-                engagement: e.id,
-                name: "oven".into(),
-                slot: n as Slot,
-                room: RoomName::W1N1,
-                body: vec![Part::Attack, Part::Move],
-            };
-            let (sightings, avoid) = (Sightings::new(), BTreeSet::new());
-            let scene = Scene {
-                world: &world,
-                sightings: &sightings,
-                intel: &Default::default(),
-                remembered: BTreeMap::new(),
-                avoid: &avoid,
-                rules: &[],
-                walks: BTreeMap::new(),
-                homes: BTreeSet::new(),
-                defended: BTreeSet::new(),
-                musters: Vec::new(),
-                worked: BTreeSet::new(),
-                foes: BTreeMap::new(),
-                cores: BTreeSet::new(),
-                by_id: BTreeMap::new(),
-                hostile_at: BTreeMap::new(),
-                ours: world.creeps.iter().map(|c| (c.name.as_str(), c)).collect(),
-                armed: BTreeSet::new(),
-                landed: Vec::new(),
-                spawning: vec![oven],
-                boosts: BTreeMap::new(),
-                boosting: &[],
-            };
-            assert_eq!(scene.fielded_bodies(&e).len(), n + 1);
-        }
     }
 }

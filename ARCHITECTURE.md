@@ -125,9 +125,9 @@ segments over multiple ticks (economy first); a cold tick never spends more than
   `Strategy`).
 - **Colony:** a resource (controller, spawns, storage, terminal); owns no
   decisions. Service assignment uses nearest walk with a bank (§5), bounded by
-  room-graph hops (`REACH_HOPS = 3`, `SIEGE_HOPS = 10`).
+  room-graph hops (`REACH_HOPS = 3`, `FAR_HOPS = 10`).
 - **Room:** a `World` fact and `intel` row; roles (home, outpost, claim,
-  avoided, siege) are data in `declarations`, never hardcoded.
+  avoided) are data in `declarations`, never hardcoded.
 - **Creep:** belongs to strictly one of `Fight` (`fight-` name prefix) or
   `Economy` for its entire life.
 - **No in-tick fault isolation:** wasm32 is `panic=abort`, so a panic anywhere
@@ -145,8 +145,8 @@ segments over multiple ticks (economy first); a cold tick never spends more than
 | `Atlas` | `fabot-atlas` | Room graph (region nodes, border-stretch crossings, keeper-strike avoidance, blind keeper penalty, a room intel last saw with towers that fire on us (a live stronghold's, a non-ally player's) never crossed, only reached) and per-room tile grid (creep-free weights, reverse floods, seats, footprint queries; a hostile's tile is walled only in step floods and passability, never in a room's flood, so one moving redoes no flood, tree or walk); out-of-sight grids hold what stood when last seen (else terrain) struck where intel places the keepers (`atlas.unseen`); a walk can run on terrain alone, as it lies or paved (`bare`) | `World`, `terrain`, `intel.rooms`, `Declarations` (colony plans, for `server`) | flood table, `atlas.carried` |
 | `Economy` | `fabot-economy` | Slots, casts, sticky tasks, logistics dispatcher, links, labs, terminals, abandon | `Derived`, `Atlas`, `declarations`, `EconomyState`, Strategy's `scouts` | tasks, casts, `assignments` |
 | `Layout` | `fabot-layout` | Colony placement plan (Hivemind's builder, centre first), rampart ring, construction sites, buried-road and off-plan wall destroy, tower firing | `Derived`, `Atlas`, `declarations` | sites, destroys, tower actions, `standing.layout` |
-| `Exchange` | `fabot-exchange` | Pure combat arithmetic (`outcome`, `cheapest_win`, breach planning) | fighters, terrain | — |
-| `Fight` | `fabot-fight` | Hostile `Tracker`, engagements (`kinds/`: defend, siege, sweep, raid, stronghold, square), casting | `Derived`, `Atlas`, `Exchange`, `declarations` (its operations table), `intel`, `FightState` | fight actions, asks, wishes, casts, `FightState` |
+| `Exchange` | `fabot-exchange` | Pure combat arithmetic (`outcome`, `cheapest_win`) | fighters, terrain | — |
+| `Fight` | `fabot-fight` | Hostile `Tracker`, engagements (`kinds/`: defend, sweep, stronghold, square), casting | `Derived`, `Atlas`, `Exchange`, `declarations` (its operations table), `intel`, `FightState` | fight actions, asks, wishes, casts, `FightState` |
 | `Tactics` | `fabot-tactics` | Per-creep combat actions, stepping, and the operator's tactic rules (`ruling`, `checked`) (no `Fight` import) | `Atlas`, `Move`, `Sight` + plan | creep actions, wishes |
 | `Strategy` | `fabot-strategy` | Intel, observers/scouts, `ColonyPlan` & outpost selection, expansion/abandon, operation opening & global force priority | `World`, `Derived`, `intel`, `Season`, `standing.layout`, `economy::spare` over `EconomyState.assignments` (its colonies' own bodies, priced this tick), fight state | `declarations` (`ColonyPlan`, outposts, claims, operations), `intel`, `expansion`, `piles` |
 | `Season` | `fabot-strategy` (private `season`) | Disposable seasonal rules (`worth`, `spent`, season structures/scoring) | `World` | declarations to `Strategy`, season actions |
@@ -200,8 +200,7 @@ architecture change, not a fix.
 | `fight.engagements` | list of `Engagement` (§6.2), with open tick (never moved), each body's slot, and the plan's boosted slots with the colony each is cast and boosted at (`Plan.boosts`, written when the set is priced and cast) | Fight | Memory | active combat commitments (without heap-only `offers`); a home's deaths since open are its raid's; a body is boosted only as its price chose, at the colony that cast it, which no tick can re-derive (owner; old Memory without it reads as no boosts); `actual` (first contact, the last sighting of a rival whose death was seen, the rival bodies out of sight with no word of their death, each at its last sighting and for at most a creep's lifetime, rivals at contact, energy cast, gave up, a sweep's dead in the rooms it moved on from, its log's dead with `lost`), set on those events while open, read only into `engagements.log` and never decided on (owner) |
 | `fight.groups` | list of `Group` (§6.1) | Fight | Memory | hostile cluster identity across ticks |
 | `fight.casts` | pending casts by engagement and slot | Fight | Memory | prevent double-casting while spawning |
-| `fight.due` | colonies with imminent siege successor | Fight | Memory | feeds `ColonyPlan.owes` and `.fights` (§5) |
-| `declarations` | operator overrides + per-tick `Strategy` plans (`ColonyPlan`, outposts, claims, operations, allies, enemies, sieges, avoid, tactic rules) | Strategy | Memory (operator); plans rebuilt per tick | world configuration as data |
+| `declarations` | operator overrides + per-tick `Strategy` plans (`ColonyPlan`, outposts, claims, operations, allies, enemies, avoid, tactic rules) | Strategy | Memory (operator); plans rebuilt per tick | world configuration as data |
 | `tuning` | `Tuning` (`core/base/tuning/mod.rs`): judgment constants of economy, expansion and defence economics (never Fight's), a key left out its default, an unknown or out-of-range one (each key's range beside its default) a fault and every default; carried on `Declarations` | Operator writes; Strategy and Economy read | Memory (`observe tuning`, soak's `--tuning` and a seat's `tuning`) | runtime A/B of judgment constants in self-play and soak without a rebuild |
 | `expansion` | in-flight claim, failed rooms (100k fade), abandoned colonies | Strategy | Memory | outlives travel, stock dips, and raze ticks |
 | `piles` | colony → its hub: pile tile, or built over (`Plan::pile`) | Strategy | Memory | written from the plan whenever one stands, read only while none does (a reset redraws it over ticks), so a colony banks and picks outposts on the cold tick as warm; no `--check`: a heap's first plan apart from the hub kept before it is a live fault, a warm replan updates it; dropped with its colony |
@@ -223,7 +222,7 @@ architecture change, not a fix.
 | `atlas.carried` | carried room trees & outpost road walks + room-read fingerprints | Atlas | heap | a search reads no room past its hops so a carried value equals a fresh one while those read the same (saving ~1/10 of decide); drops the tick after going unasked |
 | `atlas.towards` | per target tile, room and region, on the room's weights or its terrain alone, as it lies or paved (`bare`): the walk toward it, its weights, seeds and room read | Atlas | heap | a body asks at its choice of work, so a walk is dropped only `TRIP_TICKS` unasked (at most the targets asked in that span × the rooms of their trees); recomputed when its weights or seeds change |
 | `atlas.reads` | last tick's room reads around each asked room and hops | Atlas | heap | an unchanged read is handed on as last tick's `Rc`, so a kept walk or tree checks its rooms by address; dropped the tick after going unread |
-| `terrain` | room → `LocalRoomTerrain` (borrowed by `World`) + `getRoomStatus` | World | heap | terrain never changes and status only when novice/respawn ends (prefetched to `SIEGE_HOPS` to avoid seam calls); rooms of foreign status are never routed/served (engine traps creeps on exit) and unread rooms never observed (off-shard refuses observer) |
+| `terrain` | room → `LocalRoomTerrain` (borrowed by `World`) + `getRoomStatus` | World | heap | terrain never changes and status only when novice/respawn ends (prefetched to `FAR_HOPS` to avoid seam calls); rooms of foreign status are never routed/served (engine traps creeps on exit) and unread rooms never observed (off-shard refuses observer) |
 | `buffers` | emptied `World` lists from last tick | World | heap | capacity reuse without allocation (§9.2) |
 | `fixed` | structure id → immutable type/tile/owner/hitsMax | World (`read.js`) | JS heap | avoids repeated getter cost (~1/5 of `read.structures`); checked by `replay --check` |
 
@@ -261,8 +260,8 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   they draw down), and a home's at-risk mender before both, its reservers and
   claims too (their recasts held a busy spawn past a road's last repair); the outposts' carriers take the spawn time the colony's other
   bodies leave over a life, so a far ring of outposts never casts nothing but
-  haulers. While `ColonyPlan.owes` is true (a fight cast owed or imminent siege
-  successor), no surplus-spending body is spawned so spawns stay free.
+  haulers. While `ColonyPlan.owes` is true (a fight cast owed), no
+  surplus-spending body is spawned so spawns stay free.
   `❓` A home's first worker ranked ahead of its outposts' dig recovers a home
   whose dig builds its own containers, but delays outpost income at RCL2: no
   ranking yet passes both.
@@ -520,7 +519,7 @@ pricer would cost ~2× CPU and 580 lines for no gain).
 
 One `Engagement` struct (`core/fight/shape.rs`: `objective`, `id`, `group`,
 `room`, `ours`, `plan { tactic, order, offers }`, `phase`, `opened`, `since`,
-`lost`, `budget`, `priority`, `unanswered`, `ignored`, `capacity`, `predicted`),
+`lost`, `budget`, `priority`, `unanswered`, `capacity`, `predicted`),
 with one phase machine per kind under `core/fight/kinds/`.
 
 **Common rules:**
@@ -595,32 +594,10 @@ with one phase machine per kind under `core/fight/kinds/`.
   time: that deadline sets it `unanswered` and drops its asks, and a later
   event prices it afresh (owner; it formed on casts the floor's refills
   never let begin).
-- **`Siege`, `Raid` & `Drain`** (`kinds/siege.rs`, `kinds/raid.rs`): opened on
-  the table's `Siege` rows, one per `declarations.sieges` room (kept visible by
-  observer/scout). Targets towers and economy structures, least struck by
-  charged towers first and of those highest raze cost to the rival, then
-  declaiming enemy controllers. A **`Raid`** is a ranged blob (`BlobKite`) in an
-  unbarriered room, fighting on the line enemy towers fire into the heal it
-  pools there. A **`Drain`** phase runs while charged enemy towers out-strike
-  breach heal, using **one bouncer/medic pair per 5,100 bank capacity (three
-  pairs at most, full speed on plain)** bouncing across the border gate; a safe
-  mode refuses a breach but not the border edge, so a siege still opens and
-  drains charged towers while safe mode runs if drain pairs out-heal the volley
-  on its gate, a passable border tile toward our colony (spending safe mode
-  rather than letting it block; otherwise safe mode stands the set off), then
-  enters on the breach plan once drain ends. The breach is priced and re-priced
-  against the same charged towers the drain empties. `❓` A tower he refills
-  after the price re-prices it only if it strikes the barrier's work tiles (the
-  Fighting event reads those), not when it strikes only the walk in. If towers
-  leave `Ignored` consecutive trips unanswered in the event log (reset on any
-  tower attack), the drain gives up and holds the edge without casting more —
-  staying open so the room does not reopen afresh. Breach barrier order is
-  derived from `Exchange` on open/events, never stored stale.
 - **`Sweep`** (`kinds/sweep.rs`): one a room on enemy-owned/reserved/
   worked rooms (the table's `Sweep` rows, §7.3; an owned room intel last saw
-  with a tower is none, a siege's by `declarations.sieges` alone, owner
-  decision), harassing his economy, never his guards (owner, 2026-11-24): it
-  is worth prey plus exposed-source harvest over a harasser's life per walk
+  with a tower is none, owner decision), harassing his economy, never his
+  guards (owner, 2026-11-24): it is worth prey plus exposed-source harvest over a harasser's life per walk
   tick, the output it denies; a body of ours fallen there short of its life
   prices it held no longer than that body lived past its walk, but only
   while its tombstone stands in sight (5 ticks a part). What stops a
@@ -794,15 +771,14 @@ and `cheapest_win` (adds only to already-standing `ours`).
 | Tactic | Behaviour |
 |---|---|
 | `Kite` | A body that does not swing walks to a shot's range of its mark round each tile a swing strikes before the body could stand on it and be gone, its rest, legs and the tile's ground counted, from inside one first onto a clear tile beside, else the one struck latest if later than its own (v1's kiteStep, kiteUnsafeFor) |
-| `Close` | Close distance + glue onto moving marks; a body that does not swing closes as `Kite` walks, and on a mark that swings stops at a shot's range; a `Defend` body (`Kite` too, not the blobs) outside its centre's room enters it by any tile and ranks no mark until in. A siege's loose bodies keep its blob's line in |
+| `Close` | Close distance + glue onto moving marks; a body that does not swing closes as `Kite` walks, and on a mark that swings stops at a shot's range; a `Defend` body (`Kite` too, not the blobs) outside its centre's room enters it by any tile and ranks no mark until in |
 | `Hold` | Hold rampart / `Atlas` seat: one body a rampart, as Exchange's Hold stance seats them |
 | `BlobKite`, `BlobClose` | The set walks as one (`mv::blob`) into a shot's / melee reach of its mark (§6.3 Arrival) |
 
 **Helpers** kinds call per body, not tactics an offer selects: `retreat` (to
 `ColonyPlan.muster`: off plan structures and spawns' doors, fewest roads in
-reach), `siege` (dismantle; medics seat beside the body towers struck last
-tick), `drain` (bouncer/medic border-gate volley soaking), `hunt` (ibex-style
-EV over 9 neighbouring tiles: worth − netted damage + glue), `rampart`, `rest`.
+reach), `hunt` (ibex-style EV over 9 neighbouring tiles: worth − netted
+damage + glue), `rampart`, `rest`.
 
 **Reflexes:** strike (swing + shot/volley by stance, static open-time kill
 order, overridden by `hunt`'s scored shot) and heal run for every armed/healing
@@ -826,12 +802,11 @@ conflicts never silently cancel an act.
 - **Colony choice (`fight/price/casting.rs`):** picks the colony landing the body
   soonest (hops + spawn queue + energy refill time); home `Defend` casts at
   home. Bodies end with one `MOVE` (`with_move_last`) and carry `HEAL` when
-  walking into rival rooms (except siege dismantlers covered by medics and §6.2
-  sweep harassers). On our own ground a `Defend` prices the bare AM and 1R2M
-  only while its bank casts no ranged `HEAL` body (a RANGER, 700): a HEAL it
-  cannot cast answers no raid, but beside a RANGER bare bodies win a few ticks
-  sooner while no outpost heals them, so repeated raids wear them out, a wear
-  one exchange does not price (owner, 2026-11-24).
+  walking into rival rooms (except §6.2 sweep harassers). On our own ground a
+  `Defend` prices the bare AM and 1R2M only while its bank casts no ranged
+  `HEAL` body (a RANGER, 700): a HEAL it cannot cast answers no raid, but
+  beside a RANGER bare bodies win a few ticks sooner while no outpost heals
+  them, so repeated raids wear them out, a wear one exchange does not price (owner, 2026-11-24).
 - **Boosts (`core/base/boost/mod.rs`):** `boost::boosted_by` gives each part type
   of a body, by its compound's `BOOSTS` rank, the strongest compound a
   colony's `Stock` covers for all its parts of that type, spending stock and
@@ -860,13 +835,12 @@ expansion, and operation priorities.
 
 - `intel.rooms` updates every tick from visible rooms and persists to segment 2
   every 100 ticks. Out-of-sight outposts and claims are read from intel.
-- **Observers:** watch declared sieges every tick, then stalest rooms older than
-  `STALE` (1 creep life) in range.
+- **Observers:** watch stalest rooms older than `STALE` (1 creep life) in range.
 - **Scouts:** uncovered declared rooms and `threat_radius` rooms (within 3 of
   owned rooms, needed from RCL1 for reserve & outpost selection) emit `Scout`
   declarations. Living 1-MOVE scouts rotate continuously via `atlas::onward`;
   unseen rooms offer nearest ring first and cast ahead of spend. Armed rooms are
-  skipped except declared sieges. A towered room (Atlas never crosses it) stays
+  skipped. A towered room (Atlas never crosses it) stays
   in the radius one past its nearest neighbour, and a scout reaches it only as
   its goal once its row is stale, so a tower since gone clears.
 - `❓` A towered room is never crossed (Atlas), but an outpost or claim in
@@ -874,8 +848,8 @@ expansion, and operation priorities.
 
 ### 7.2 Expansion and declarations
 
-- **Stance (`world::Owner`):** resolved once at read time from `allies`,
-  `enemies`, and declared sieges' owners. A stranger is fought where it threatens
+- **Stance (`world::Owner`):** resolved once at read time from `allies` and
+  `enemies`. A stranger is fought where it threatens
   us or works an owned or worked room (an outpost is ours to defend), never
   followed out or hunted.
 - **Colony plans & outposts (`strategy::plan`, `strategy::outposts`):** rebuilt
@@ -903,8 +877,7 @@ expansion, and operation priorities.
   spawns absorb
   one room's bodies at once; young homes open all paying ones because waiting on
   containers delays RCL3. An operation holds only the colonies it casts from
-  (`outposts::busy`): a claim's sponsor until its spawn stands; a siege from its
-  operation row to its engagement's close, answered or not, and a stronghold
+  (`outposts::busy`): a claim's sponsor until its spawn stands; a stronghold
   while answered, every colony Fight's `colony_for` picks at rest for some
   body (`fight::casting::homes`: none nearer out-banks it), since between
   waves no cast is owed; a sweep none (a harasser spawns in a few ticks a
@@ -943,7 +916,7 @@ expansion, and operation priorities.
   an ally, reserves (1: Hivemind's remote is under attack while any room its
   haul path crosses is, and its paths never cross an owned room; a Defend in
   a rival's remote fights his guards, a stance the enemies list sets),
-  `Siege` on each declared siege (0), `Sweep` on each preyed room, stalest seen
+  `Sweep` on each preyed room, stalest seen
   first (0), whether or not a sweep is open, `Stronghold` and `Pickup` (0)
   on the deployed L1–L3 within reach of a colony that casts a recipe
   taking it in time for less than its loot (`kinds::stronghold::take`, on
@@ -954,7 +927,7 @@ expansion, and operation priorities.
   priced once, not every tick (owner); a `Stronghold` engagement closes once
   its room is no row. `Fight` opens only on a row's room and ranks by its
   priority, but keeps its event gate (`stirred`) and prices winnability at
-  open (`Exchange`, `drainable`): which rooms and how they rank is
+  open (`Exchange`): which rooms and how they rank is
   Strategy's call, whether a set wins there is Fight's (§6.2), save a
   stronghold's, which Strategy prices with Fight's own `take`.
 
@@ -1033,8 +1006,7 @@ scenario as an `Exchange` bug. Live, each engagement's row lands in
 the same table, then each rival's outcomes by tactic; `liveAstray` holds those
 rows to the engine's classification in scenarios. A rival that leaves alive is
 **left**, neither won nor lost (owner): live, a close where some rival body
-was not seen to die (the engine's word: its tombstone, or a siege target's
-raze), offline one it outlived.
+was not seen to die (the engine's word: its tombstone), offline one it outlived.
 
 ### 10.2 The engine
 
@@ -1200,7 +1172,7 @@ on a live-sized world.
 | M2 structures | nodes N1–N7; links (controller's + longest-way source's first beat hub-first by +5–17k over 20k ticks on N4); labs & boosts; factory and RCL8 set wait for a sink (one room mines one ore, reactions need two, offline has no market) | links beat no-links; labs feed boosts | ✅ |
 | M3 defence | `Exchange`, `Defend`, tactics, casting, rival harness | fixed rivals & self-play held; error in bound | ✅ (self-play `❓`) |
 | M4 live | v2 replaces v1 live | v2 runs live | ✅ |
-| M5 reach | multi-colony `Strategy`, `Siege`/`Sweep`/`Drain`, offensive kinds | endgame in §0 | ⏳ |
+| M5 reach | multi-colony `Strategy`, `Sweep`, offensive kinds | endgame in §0 | ⏳ |
 
 **Remaining known gaps:**
 - `Atlas` room graph ignores `Footprint` (2×2 Quad routing through 1-wide gaps);

@@ -196,9 +196,8 @@ fn danger(world: &World, owned: &BTreeSet<RoomName>, guarded: bool) -> Vec<(Room
             .filter(|c| hostiles::foe(c) && hostiles::strikes(c) && !garrison(r, c))
             .filter(|c| !(guarded && held(&guards, c)))
             .map(|c| (tiles::of_pos(&c.pos), hostiles::reach(c)));
-        let towers = (world.rules.towers(r))
-            .filter(|s| s.owner.is_theirs() && fabot_base::world::charged(s))
-            .map(|s| (tiles::of_pos(&s.pos), engine::TOWER_FALLOFF_RANGE));
+        let towers = (world.rules.charged_towers(r).into_iter())
+            .map(|p| (tiles::of_pos(&p), engine::TOWER_FALLOFF_RANGE));
         creeps.chain(towers).collect::<Vec<_>>()
     };
     (world.rooms.iter())

@@ -20,6 +20,7 @@ use proptest::sample::{Index, select};
 
 const ROOM: RoomName = RoomName::W1N1;
 const CASES: u32 = 256;
+const SIDES: [i32; 4] = [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT];
 
 fn structure(kind: StructureType, walkable: bool, x: i32, y: i32) -> Structure {
     Structure {
@@ -152,7 +153,7 @@ fn mover() -> impl Strategy<Value = Mover> {
 }
 
 fn exit() -> impl Strategy<Value = i32> {
-    select(vec![tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT])
+    select(SIDES.to_vec())
 }
 
 fn creep(owner: Owner, pos: Pos) -> Creep {
@@ -292,7 +293,7 @@ fn around_lists_the_in_room_neighbours_in_direction_order() {
 
 #[test]
 fn an_exits_landing_is_on_the_opposite_exit_and_lands_back() {
-    for exit in [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT] {
+    for exit in SIDES {
         let room = tiles::room_toward(ROOM, exit).unwrap();
         for &tile in tiles::exit_tiles(exit) {
             let landing = tiles::landing(tile).unwrap();
@@ -306,11 +307,6 @@ fn an_exits_landing_is_on_the_opposite_exit_and_lands_back() {
                 "one tile across the seam"
             );
         }
-        assert_eq!(
-            tiles::exit_toward(ROOM, room),
-            Some(exit),
-            "the room across"
-        );
     }
 }
 
@@ -376,7 +372,7 @@ fn walled_rooms() -> impl Strategy<Value = World<'static>> {
         for x in 0..3 {
             for y in 0..3 {
                 let mut terrain = vec![0u8; tiles::COUNT];
-                let around = [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT];
+                let around = SIDES;
                 for (side, (from, shut, unopened, long)) in around.into_iter().zip(&mut sides) {
                     let back = (x + tiles::dx(side), y + tiles::dy(side), (side + 3) % 8 + 1);
                     let open = match borders.get(&back) {
@@ -642,7 +638,7 @@ proptest! {
                 prop_assert!(
                     chain
                         .windows(2)
-                        .all(|p| tiles::exit_toward(p[0], p[1]).is_some())
+                        .all(|p| SIDES.iter().any(|e| tiles::room_toward(p[0], *e) == Some(p[1])))
                 );
                 prop_assert!(
                     chain

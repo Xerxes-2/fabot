@@ -104,7 +104,7 @@ const RULES = [
     homes: ["core/base/engine/mod.rs", "core/base/world.rs"],
     names: /\b(?:RANGED_)?(?:ATTACK|HEAL)_POWER\b|\bRANGED_MASS_ATTACK_POWER\w*|\bTOWER_(?:POWER_\w+|FALLOFF\w*|OPTIMAL_RANGE)\b/g,
     // The tower's reach, not its falloff damage.
-    allowed: { "core/atlas/derived.rs": ["TOWER_FALLOFF_RANGE"], "core/fight/kinds/siege.rs": ["TOWER_FALLOFF_RANGE"] },
+    allowed: { "core/atlas/derived.rs": ["TOWER_FALLOFF_RANGE"] },
     calls: "engine::strike_at / heal_at / mass_at / tower_attack_at",
   },
   {
