@@ -1022,11 +1022,13 @@ fn approach_of(terrain: Terrain, stance: Stance, fighters: &[Fighter], raid: &[F
 }
 
 /// A raider that walks in strikes from its range of the body it strikes, the
-/// one farthest from the tower.
+/// one farthest from the tower; one standing off is struck where it stands by
+/// a body that must walk to it, out of the towers' cover.
 fn towers_on(
     towers: &[Tower],
     strikes_from: &dyn Fn(&Foe) -> Vec<(Fighter, i32)>,
     raid: &[Foe],
+    stands_off: bool,
 ) -> i32 {
     let loaded: Vec<&Tower> = towers.iter().filter(|t| engine::tower_shots(t.energy) > 0).collect();
 
@@ -1036,16 +1038,14 @@ fn towers_on(
             .map(|t| {
                 let here = range_to(&t.pos, &h.f).unwrap_or(engine::ROOM_SIDE);
 
-                let struck: Vec<i32> = strikes_from(h)
-                    .iter()
-                    .filter_map(|(f, range)| range_to(&t.pos, f).map(|r| r + range))
-                    .collect();
-
-                let range = if struck.is_empty() {
-                    here
-                } else {
-                    struck.iter().copied().max().unwrap_or(here)
-                };
+                let walks_to = |f: &Fighter| stands_off && f.reach <= h.f.reach;
+                let range = (strikes_from(h).iter())
+                    .filter_map(|(f, range)| {
+                        let at = range_to(&t.pos, f)? + range;
+                        Some(if walks_to(f) { at.max(here) } else { at })
+                    })
+                    .max()
+                    .unwrap_or(here);
 
                 engine::tower_attack_at(range)
             })
@@ -1136,8 +1136,9 @@ fn exchange(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> Out
         }
     };
 
-    let towers = towers_on(&ours.towers, &|h: &Foe| strikes_from(h), &raid);
-    let walking_in = towers_on(&ours.towers, &|_: &Foe| Vec::new(), &raid);
+    let stands_off = stance == Stance::Standoff;
+    let towers = towers_on(&ours.towers, &|h: &Foe| strikes_from(h), &raid, stands_off);
+    let walking_in = towers_on(&ours.towers, &|_: &Foe| Vec::new(), &raid, stands_off);
 
     let walks = walks_in(terrain, ours, &fighters, &theirs.bodies);
     let first = walks.iter().copied().min().unwrap_or(0);

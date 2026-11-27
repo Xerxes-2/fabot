@@ -1,0 +1,7 @@
+{
+  "why": "an Invader pair (a 25-HEAL healer beside a 16-TOUGH ranged striker) stands at E8S8's north edge, 20 tiles from the home's one tower (soak:gen seed 1644, t27896); its second cast never begins, and the one landed body, priced with the tower firing at its rest 7 tiles off, is sent alone and walks out to the raid, where the tower lands 150: it died at t28038 on a Win priced 0 dead. The NPC is the incident's own: no scripted rival stands off as the Invader AI does. Bound: no home Defend loses a body past its budget",
+  "modules": ["atlas", "economy", "exchange", "fight", "layout", "mv", "observe", "strategy", "tactics"],
+  "start": { "gen": 1644, "seed": 1 },
+  "ticks": 28300,
+  "assert": [{ "each": "engagement", "where": { "kind": "defend", "home": true }, "assert": { "pastBudget": { "max": 0 } } }]
+}
