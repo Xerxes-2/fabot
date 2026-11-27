@@ -68,6 +68,12 @@ pub struct SourceFact {
     pub dug: i32,
 }
 
+impl SourceFact {
+    pub fn fills(&self) -> bool {
+        self.bay > 0 || self.link.is_some()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct TerminalFact {
     pub id: Id,
@@ -543,7 +549,7 @@ fn seats_at(atlas: &Atlas, range: i32, target: &Pos) -> Option<i32> {
 
 pub fn dug_at(capacity: i32, home: bool, rate: i32, posted: bool, seats: Option<i32>) -> i32 {
     let body = if posted {
-        bodies::harvester(home, rate, capacity)
+        bodies::harvester((home, false), rate, capacity)
     } else {
         bodies::sized(Pattern::Worker, engine::MAX_BODY_PARTS as i32, capacity)
     };

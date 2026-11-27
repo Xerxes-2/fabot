@@ -313,6 +313,13 @@ pricer would cost ~2× CPU and 580 lines for no gain).
 - **Harvest bays & links:** each source post is a Hivemind harvest bay (from
   RCL3, ahead of extension bays); harvesters fill bay extensions before links,
   and spawns draw bay extensions first (`drawn`) so that energy is never hauled.
+  A bay or link's harvester carries, its CARRY outranking the spare WORK, as
+  Hivemind's 5-WORK harvester does (`bodies::harvester`).
+  `❓` E23S9 soak:many 1+7 fell 729 → 639 (base spread 657–729, mean −12 over 8
+  starts, home dig 277k vs 275k): HYPOTHESIS, divergent outpost timing or the
+  lost WORK; the alternative is a priced CARRY-vs-WORK crossover.
+  `❓` Home carrier pools (rank 1) on long legs take a single spawn's time ahead
+  of the spend (soak:gen 1702 at RCL2): HYPOTHESIS, unfixed.
   Links run Hivemind's single send/tick network (fullest source link → emptiest
   controller link, with hub fallback); carriers bring a controller link by hand
   only while upgraders drink more than links send, and while they do **only

@@ -120,9 +120,9 @@ fn worker_body(most: i32, capacity: i32) -> Vec<Part> {
     body
 }
 
-/// The dig falls into the container under it with no Carry; only a link takes
-/// it from the store, and a bank that holds links has the room.
-fn harvester_body(moves: impl Fn(i32) -> i32, most: i32, capacity: i32) -> Vec<Part> {
+/// The dig falls into the container under it with no Carry; only a link or a
+/// bay takes it from the store, so a Carry outranks the `spare` Work.
+fn harvester_body(moves: impl Fn(i32) -> i32, most: i32, spare: i32, capacity: i32) -> Vec<Part> {
     let dig = |n: i32| -> Vec<Part> {
         let mut body = replicate(n, Part::Work);
         body.extend(replicate(moves(n), Part::Move));
@@ -130,15 +130,15 @@ fn harvester_body(moves: impl Fn(i32) -> i32, most: i32, capacity: i32) -> Vec<P
     };
 
     let mut n = most.min((engine::MAX_BODY_PARTS as i32 - 1) * 2 / 3);
-
-    while n > 2 && engine::body_cost(&dig(n)) > capacity {
+    let carry = engine::part_cost(Part::Carry);
+    while n > 2 && engine::body_cost(&dig(n)) + carry * i32::from(n > most - spare) > capacity {
         n -= 1;
     }
 
     let n = n.max(2);
 
     let mut body = replicate(n, Part::Work);
-    if engine::body_cost(&dig(n)) + engine::part_cost(Part::Carry) <= capacity {
+    if engine::body_cost(&dig(n)) + carry <= capacity {
         body.push(Part::Carry);
     }
     body.extend(replicate(moves(n), Part::Move));
@@ -213,7 +213,7 @@ pub fn sized(pattern: Pattern, most: i32, capacity: i32) -> Option<Vec<Part>> {
     let most = most.max(1);
     let body = match pattern {
         Pattern::Worker => worker_body(most, capacity),
-        Pattern::Harvester => harvester_body(|n| (n + 1) / 2, most.max(2), capacity),
+        Pattern::Harvester => harvester_body(|n| (n + 1) / 2, most.max(2), 0, capacity),
         Pattern::Hauler => whole_blocks(block_of(pattern), (most + 1) / 2, capacity),
         Pattern::Upgrader => upgrader_body(0, 0, most, capacity),
         Pattern::Claimer | Pattern::Dismantler => whole_blocks(block_of(pattern), most, capacity),
@@ -272,18 +272,24 @@ pub fn upgradable_at(level: i32) -> i32 {
 /// ticks a body loses walking and dropping its load.
 const HARVEST_SPARE_WORK: i32 = 1;
 
-/// `home`: a seat in the casting colony's own room, which it walks once.
-pub fn harvester(home: bool, rate: i32, capacity: i32) -> Option<Vec<Part>> {
+/// `home`: a seat in the casting colony's own room, which it walks once;
+/// `fills`: a bay or link beside it, which only its Carry refills.
+pub fn harvester((home, fills): (bool, bool), rate: i32, capacity: i32) -> Option<Vec<Part>> {
     let work = engine::work_to_dig(rate) + HARVEST_SPARE_WORK;
-    if home { home_harvester(work, capacity) } else { sized(Pattern::Harvester, work, capacity) }
+    if home {
+        home_harvester(work, fills, capacity)
+    } else {
+        sized(Pattern::Harvester, work, capacity)
+    }
 }
 
 /// Its legs never cost it a Work.
-fn home_harvester(most: i32, capacity: i32) -> Option<Vec<Part>> {
+fn home_harvester(most: i32, fills: bool, capacity: i32) -> Option<Vec<Part>> {
     if capacity < engine::body_cost(block_of(Pattern::Harvester)) {
         return None;
     }
-    let mut body = harvester_body(|_| 1, most.max(2), capacity);
+    let mut body =
+        harvester_body(|_| 1, most.max(2), HARVEST_SPARE_WORK * i32::from(fills), capacity);
     let legs = (part_count_in(&body, Part::Work) + 1) / 2 - 1;
     let spare = (capacity - engine::body_cost(&body)) / engine::part_cost(Part::Move);
     body.extend(replicate(legs.min(spare), Part::Move));
@@ -319,12 +325,17 @@ mod tests {
                         }
                     }
                 }
-                match home_harvester(most, capacity) {
+                match home_harvester(most, true, capacity) {
                     None => assert!(capacity < engine::body_cost(block_of(Pattern::Harvester))),
                     Some(body) => {
                         assert!(body.len() <= engine::MAX_BODY_PARTS);
                         assert!(engine::body_cost(&body) <= capacity);
                         assert_eq!(body.last(), Some(&Part::Move));
+                        // A bay's harvester refills it: its spare Work never costs the Carry.
+                        let mut dug = replicate((most - HARVEST_SPARE_WORK).max(2), Part::Work);
+                        dug.extend([Part::Carry, Part::Move]);
+                        let fits = engine::body_cost(&dug) <= capacity;
+                        assert!(!fits || body.contains(&Part::Carry), "{most} {capacity}");
                     }
                 }
             }

@@ -1,0 +1,17 @@
+{
+  "why": "a source bay 83 walk ticks from the hub pile is refilled by its harvester's Carry: gen 111013's E5S18 sat at RCL3's 650 capacity with a 6W1M bay harvester, every 600-650 body waited on haulers walking out to the bay, home haulers (rank 1) took the spawn, no worker was cast and the RCL3 sites never stood (upgrade 0 from t12000 to t20000; 54k once the harvester carries)",
+  "modules": ["economy"],
+  "start": {
+    "gen": 111013,
+    "sectors": "2x2",
+    "seed": 1,
+    "players": [
+      { "name": "alpha", "declarations": { "enemies": ["beta"] } },
+      { "name": "beta", "declarations": { "enemies": ["alpha"] } }
+    ]
+  },
+  "ticks": 20000,
+  "assert": [
+    { "measure": "upgrade", "room": "E5S18", "from": 12000, "to": 20000, "min": 20000 }
+  ]
+}

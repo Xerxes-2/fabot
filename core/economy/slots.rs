@@ -466,7 +466,7 @@ impl Plan<'_> {
             }
             let mut upkeep_work = 0;
             for s in &g.sources {
-                let body = bodies::harvester(own, s.rate, capacity);
+                let body = bodies::harvester((own, s.fills()), s.rate, capacity);
                 // An outpost out of sight shows no post: its harvester walks
                 // to the source, where the post comes into view.
                 let body = body.filter(|_| s.post.is_some() || !own);
@@ -1392,8 +1392,8 @@ pub fn casts(
         if let Some(s) =
             anchor.filter(|_| !digging && bank < colony.bank_capacity && !idle.is_empty())
             && let Job::Dig(id) = &s.job
-            && let Some(rate) = sources.iter().find(|x| &x.id == id).map(|x| x.rate)
-            && let Some(body) = bodies::harvester(true, rate, bank)
+            && let Some(x) = sources.iter().find(|x| &x.id == id)
+            && let Some(body) = bodies::harvester((true, x.fills()), x.rate, bank)
             && engine::body_cost(&body) <= bank
         {
             casts.push(cast(s, body, true, &mut idle, &mut bank));

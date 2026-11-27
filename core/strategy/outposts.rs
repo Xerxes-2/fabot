@@ -74,7 +74,7 @@ fn worked(c: &Candidate, capacity: i32, reserved: bool, spend: &dyn Fn(f64) -> f
     let rate =
         if reserved { engine::HELD_OUTPUT_PER_TICK } else { engine::NEUTRAL_OUTPUT_PER_TICK };
     let n = c.outpost.sources.len() as f64;
-    let dig = bodies::harvester(false, rate, capacity).map(|b| (b, n));
+    let dig = bodies::harvester((false, false), rate, capacity).map(|b| (b, n));
     let haul =
         |walk| slots::haul(&[(n * f64::from(rate), bodies::Leg::bare(walk, c.paved))], capacity);
     let mend = (c.paved).then(|| slots::mender(n as i32 * slots::mend_work(c.walked), capacity));
