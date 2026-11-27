@@ -1,6 +1,8 @@
 //! Hivemind's room plan (MIT, © David Franke): built around the first
 //! centre that fits one, each structure given the level its room manager
 //! builds it at.
+use std::cmp::Reverse;
+
 use fabot_atlas::Atlas;
 use fabot_base::{
     engine,
@@ -11,6 +13,7 @@ use fabot_base::{
 use super::{
     build::{self, Built},
     ground::Ground,
+    path::Search,
     place::{self, Labels, SWAMP},
     shape::{self, Item, Plan},
 };
@@ -50,13 +53,7 @@ pub fn controller_link(
 pub const RING_LEVEL: i32 = 4;
 
 /// The room manager's order a kind is built in at a level.
-fn order(
-    rules: &Rules,
-    plan: &Labels,
-    kind: &str,
-    level: i32,
-    controller: Option<Tile>,
-) -> Vec<Tile> {
+fn order(rules: &Rules, plan: &Labels, kind: &str, level: i32, walk: &[u32]) -> Vec<Tile> {
     let both = |a: &str, b: &str| -> Vec<Tile> {
         (plan.of(a).into_iter()).filter(|t| plan.has(b, *t)).collect()
     };
@@ -77,9 +74,8 @@ fn order(
         "link" => {
             let mut v = plan.of("link.controller");
             let mut sources = plan.of("link.source");
-            if let Some(c) = controller {
-                sources.sort_by_key(|t| -tiles::range(*t, c));
-            }
+            // Hivemind ranks by range, but a link saves the walk.
+            sources.sort_by_key(|t| Reverse(walk.get(t.index()).copied()));
             v.extend(sources);
             v.extend(plan.of("link.storage"));
             v
@@ -101,16 +97,13 @@ fn order(
 
 /// Each kind's tiles with the level the room manager first builds them at,
 /// in the order it builds them.
-fn leveled(
-    rules: &Rules,
-    plan: &Labels,
-    kind: StructureType,
-    controller: Option<Tile>,
-) -> Vec<(Tile, i32)> {
+fn leveled(rules: &Rules, plan: &Labels, kind: StructureType, ground: &Ground) -> Vec<(Tile, i32)> {
     let mut built: Vec<(Tile, i32)> = Vec::new();
+    let link = ground.controller.filter(|_| kind == StructureType::Link);
+    let walk = link.map_or(Vec::new(), |c| walk_from(ground, c));
     for level in 1..=engine::CONTROLLER_MAX_LEVEL {
         let allowed = rules.allowed(kind, level).max(0) as usize;
-        for t in order(rules, plan, &kind.to_string(), level, controller) {
+        for t in order(rules, plan, &kind.to_string(), level, &walk) {
             if built.len() >= allowed {
                 break;
             }
@@ -120,6 +113,13 @@ fn leveled(
         }
     }
     built
+}
+
+/// Over the terrain alone; an unreached tile ranks last.
+fn walk_from(ground: &Ground, rock: Tile) -> Vec<u32> {
+    let (plain, swamp) = (engine::PLAIN_WEIGHT as u32, engine::SWAMP_WEIGHT as u32);
+    let search = Search { terrain: &ground.terrain, matrix: &[0; tiles::COUNT], plain, swamp };
+    search.from(rock).iter().map(|d| d % u32::MAX).collect()
 }
 
 /// Where the room manager's `manageStructures` reaches a kind, but a source
@@ -183,7 +183,7 @@ fn drawn(rules: &Rules, ground: &Ground, built: &Built) -> (Plan, Vec<Item>) {
         Tower, Spawn, Extension, Container, Storage, Terminal, Link, Extractor, Lab, Nuker,
         PowerSpawn, Observer, Factory,
     ] {
-        for (t, level) in leveled(rules, plan, kind, ground.controller) {
+        for (t, level) in leveled(rules, plan, kind, ground) {
             push(kind, t, level);
         }
     }
@@ -194,7 +194,7 @@ fn drawn(rules: &Rules, ground: &Ground, built: &Built) -> (Plan, Vec<Item>) {
     // Main's: each spawn, tower, storage and terminal has its own rampart
     // from the ring's level, which a ring the roads hold back would leave bare.
     for kind in [Spawn, Tower, Storage, Terminal] {
-        for (t, level) in leveled(rules, plan, kind, ground.controller) {
+        for (t, level) in leveled(rules, plan, kind, ground) {
             push(Rampart, t, level.max(RING_LEVEL));
         }
     }
@@ -363,9 +363,13 @@ pub fn of_ground(rules: &Rules, ground: &Ground) -> Option<Plan> {
 /// The first centre alone: whether a room fits a whole plan, at a
 /// fraction of the search.
 pub fn first_of(rules: &Rules, ground: &Ground) -> Option<Plan> {
+    first_built(rules, ground).map(|b| to_plan(rules, ground, &b))
+}
+
+fn first_built(rules: &Rules, ground: &Ground) -> Option<Built> {
     let (walls, exits) = place::distances(&ground.terrain);
     let center = *build::centers(ground, &walls, &exits).first()?;
-    build::build(rules, ground, (&walls, &exits), center).map(|b| to_plan(rules, ground, &b))
+    build::build(rules, ground, (&walls, &exits), center)
 }
 
 #[cfg(test)]
@@ -502,6 +506,26 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_first_source_link_has_the_longest_walk_to_the_controller() {
+        let rules = Rules::vanilla();
+        let mut linked = 0;
+        for ground in fabot_base::testing::real_rooms().filter_map(|r| ground::of_room(&r.room())) {
+            let Some(b) = first_built(&rules, &ground) else { continue };
+            let sources = b.plan.of("link.source");
+            let Some(c) = ground.controller.filter(|_| sources.len() > 1) else {
+                continue;
+            };
+            linked += 1;
+            let walk = walk_from(&ground, c);
+            let links = leveled(&rules, &b.plan, StructureType::Link, &ground).into_iter();
+            let first = links.map(|(t, _)| t).find(|t| sources.contains(t));
+            let longest = sources.iter().map(|t| walk[*t]).max();
+            assert_eq!(first.map(|t| walk[t]), longest, "{}", ground.room);
+        }
+        assert!(linked > 1000, "{linked}");
     }
 
     #[test]
