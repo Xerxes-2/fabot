@@ -302,7 +302,7 @@ pub fn decide<'t>(
     phases.push(("derive".to_string(), clock() - start));
     let fight: Vec<_> =
         fabot_fight::boosted(&state.fight.engagements).map(|b| (b.colony, &*b.name)).collect();
-    derived.boosts = fabot_economy::derived::boosts(world, &declarations, &fight);
+    fabot_economy::derived::boosts(world, &declarations, &fight, &mut derived);
     let sampled = world.time % fabot_observe::metrics::WINDOW == 0;
     let (plans, misfiled, verdicts) = strategy::plan(
         (!state.off.contains(STRATEGY), sampled, world, &mut atlas),

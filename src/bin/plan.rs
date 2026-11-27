@@ -56,7 +56,7 @@ fn main() {
     build(&mut built, StructureType::Spawn, first_spawn);
     loop {
         let census = sites::census_of(&Room { structures: built.clone(), ..room.clone() }, &[]);
-        let placed = sites::place(&rules, &census, level, &plan, i32::MAX);
+        let placed = sites::place(&rules, &census, (level, false), &plan, i32::MAX);
         if placed.is_empty() {
             break;
         }
@@ -66,7 +66,8 @@ fn main() {
     }
 
     let labs = input["labs"].as_bool().unwrap_or(false);
-    for i in (plan.items.iter()).filter(|i| labs && i.level <= level && !sites::placeable(i, level))
+    for i in (plan.items.iter())
+        .filter(|i| labs && i.level <= level && !sites::placeable(i, (level, false)))
     {
         build(&mut built, i.kind, i.tile);
     }

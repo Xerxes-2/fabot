@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use fabot_atlas::{self as atlas, Atlas, Tree};
 use fabot_base::{
     HashMap,
-    boost::{self, Boosting, Load},
+    boost::{self, Act, Boosting, Load},
     declarations::{self, Declarations, OpKind, Outpost},
     engine,
     grid::Footprint,
@@ -932,14 +932,12 @@ fn ground_of(
             .collect(),
         lab_plan: None,
         boost_lab: None,
-        terminal: (working.iter())
-            .find(|s| s.kind == StructureType::Terminal && s.owner.is_ours())
-            .map(|s| TerminalFact {
-                id: s.id,
-                pos: s.pos,
-                store: s.store.clone(),
-                cooldown: s.cooldown,
-            }),
+        terminal: terminal_in(working.iter().copied()).map(|s| TerminalFact {
+            id: s.id,
+            pos: s.pos,
+            store: s.store.clone(),
+            cooldown: s.cooldown,
+        }),
         shipment: Vec::new(),
         ship_to: None,
         fees: 0,
@@ -947,6 +945,10 @@ fn ground_of(
         buffer_seats: buffer_seats_of(atlas, room, buffer.as_ref()),
         buffer,
     }
+}
+
+fn terminal_in<'a>(working: impl IntoIterator<Item = &'a Structure>) -> Option<&'a Structure> {
+    working.into_iter().find(|s| s.kind == StructureType::Terminal && s.owner.is_ours())
 }
 
 fn tree_of(routes: &mut BTreeMap<RoomName, Cow<'_, Tree>>, atlas: &Atlas, room: RoomName) {
@@ -1019,11 +1021,31 @@ pub fn boosts(
     world: &World,
     declarations: &Declarations,
     fight: &[(RoomName, &str)],
-) -> Vec<(RoomName, Boosting)> {
-    let here = |r| fight.iter().filter(|b| b.0 == r).map(|b| b.1).collect::<Vec<_>>();
-    (boost::clusters(world, declarations).into_iter())
+    derived: &mut atlas::Derived,
+) {
+    let rooms = || {
+        (derived.colonies.iter())
+            .filter(|r| !declarations.abandoning(**r))
+            .filter_map(|r| world.room(*r))
+    };
+    let held = rooms().any(|r| boost::home_holds(world, r.name, super::labs::UPGRADE) > 0);
+    let grown = rooms().filter_map(|r| {
+        let terminal = terminal_in(world.rules.working(r)).is_some();
+        Some((r.name, r.controller.as_ref()?.level, terminal))
+    });
+    let upgraded = super::labs::upgrade_boosted(grown, held);
+    let here = |r| {
+        let fights = fight.iter().filter(|b| b.0 == r).map(|b| (b.1, Act::Fight));
+        let upgraders = (world.creeps.iter())
+            .filter(|c| upgraded == Some(r) && c.owner.is_ours() && c.pos.room == r)
+            .filter(|c| bodies::pattern_of_name(&c.name) == Some(Pattern::Upgrader))
+            .map(|c| (c.name.as_str(), Act::Upgrade));
+        fights.chain(upgraders).collect::<Vec<_>>()
+    };
+    derived.boosts = (boost::clusters(world, declarations).into_iter())
         .map(|r| (r, boost::boosting(world, r, &here(r))))
-        .collect()
+        .collect();
+    derived.upgrade_boosted = upgraded;
 }
 
 pub fn once(rs: impl IntoIterator<Item = ResourceType>) -> Vec<ResourceType> {
@@ -1134,7 +1156,7 @@ impl<'a> Ours<'a> {
 struct Stocks<'a> {
     ours: Ours<'a>,
     boosts: &'a [ResourceType],
-    fights: &'a dyn Fn(RoomName) -> bool,
+    uses: &'a dyn Fn(RoomName, ResourceType) -> bool,
     running: Vec<Running>,
 }
 
@@ -1158,10 +1180,11 @@ impl Stocks<'_> {
 
     fn level(&self, g: &Ground, r: ResourceType, reagents: &[ResourceType]) -> Level {
         Level {
-            want: want(r, reagents, self.boosts, (self.fights)(g.room)),
+            want: want(r, reagents, self.boosts.contains(&r) && (self.uses)(g.room, r)),
             held: self.ours.held(g, r),
             shippable: self.sendable(g, r),
-            boost: self.boosts.contains(&r),
+            boost: self.boosts.contains(&r)
+                && (r != super::labs::UPGRADE || (self.uses)(g.room, r)),
         }
     }
 
@@ -1234,7 +1257,8 @@ fn stock_labs(
     grounds: &mut [Ground],
     colonies: usize,
     (derived, targets): (&atlas::Derived, &[(ResourceType, i32)]),
-    (given_up, fights): (&dyn Fn(RoomName) -> bool, &dyn Fn(RoomName) -> bool),
+    given_up: &dyn Fn(RoomName) -> bool,
+    uses: &dyn Fn(RoomName, ResourceType) -> bool,
 ) -> Vec<Shipment> {
     let ours = Ours { world, grounds: &grounds[..colonies], given_up };
     let cluster: Vec<Cluster> = (derived.boosts.iter())
@@ -1243,7 +1267,7 @@ fn stock_labs(
     let boosts: Vec<ResourceType> = targets.iter().map(|(b, _)| *b).collect();
     let wanted = super::labs::wanted(targets, &|r| ours.empire(r));
     let stocks =
-        Stocks { ours, boosts: &boosts, fights, running: running_of(&cluster, &wanted, targets) };
+        Stocks { ours, boosts: &boosts, uses, running: running_of(&cluster, &wanted, targets) };
     let reactions = assign_clusters(&stocks, &cluster, &wanted);
 
     let spent: BTreeMap<RoomName, Vec<ResourceType>> = (cluster.iter().zip(&reactions))
@@ -1497,7 +1521,11 @@ pub fn homes(
             &mut grounds,
             colonies.len(),
             (ours, &targets),
-            (&given_up, &|room| plan_of(room).is_some_and(|p| p.fights)),
+            &given_up,
+            &|room, r| match r == super::labs::UPGRADE {
+                true => ours.upgrade_boosted == Some(room),
+                false => plan_of(room).is_some_and(|p| p.fights),
+            },
         );
     }
 

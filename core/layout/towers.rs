@@ -157,7 +157,7 @@ mod tests {
             let owned = fabot_base::world::hostiles::owned(&world.rooms);
             let plans = fx::exploited(&owned);
             let (colonies, _) = derive::colonies(&world, &owned, &plans, BTreeMap::new());
-            let acts = run::decide_over(&world.rules, &colonies, 0);
+            let acts = run::decide_over((&world.rules, None), &colonies, 0);
 
             let ids: Vec<String> = acts.iter().map(fabot_base::intents::Action::actor).collect();
             let mut distinct: Vec<String> = Vec::new();

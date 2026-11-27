@@ -156,6 +156,8 @@ pub struct Derived {
     /// The colonies whose labs react and boost (`boost::clusters`), their
     /// boosting read before Strategy plans, as Economy's labs are.
     pub boosts: Vec<(RoomName, boost::Boosting)>,
+    /// The colony whose upgraders `labs::upgrade_boosted` boosts from its one lab.
+    pub upgrade_boosted: Option<RoomName>,
 }
 
 /// A colony banks its haul from here (§5): on its storage, else on its hub's pile.
@@ -248,6 +250,7 @@ pub fn derive(world: &World, atlas: &mut Atlas) -> Derived {
         worked: Vec::new(),
         trees,
         boosts: Vec::new(),
+        upgrade_boosted: None,
     }
 }
 

@@ -8,7 +8,7 @@ use fabot_base::{
     boost::{BOOSTS, Roles, ores_in},
     engine,
     vocabulary::{Boost, ResourceType},
-    world::Id,
+    world::{Id, RoomName},
 };
 
 /// Hivemind's "high": past it the first-ranked boost leaves the ore to the next.
@@ -26,18 +26,35 @@ pub fn ores_held(target: ResourceType, have: &[ResourceType]) -> bool {
     (ores_in(target).iter().enumerate()).all(|(ore, n)| *n == 0 || held(ore))
 }
 
+/// Owner: RCL8's labs make it for the colony `upgrade_boosted` names.
+pub const UPGRADE: ResourceType = ResourceType::GhodiumHydride;
+
+/// Fight boosts first, so the upgrade's takes what they leave.
 pub fn targets(have: &[ResourceType]) -> Vec<(ResourceType, i32)> {
     (BOOSTS.iter())
-        .filter(|(boost, _)| {
+        .map(|(boost, _)| *boost)
+        .filter(|boost| {
             use Boost::*;
             matches!(
                 boost.boost(),
                 Some(Attack(_) | RangedAttack(_) | Heal(_) | Tough(_) | Move(_))
             )
         })
-        .filter(|(boost, _)| ores_held(*boost, have))
-        .map(|(boost, _)| (*boost, BOOST_STOCK))
+        .chain([UPGRADE])
+        .filter(|boost| ores_held(*boost, have))
+        .map(|boost| (boost, BOOST_STOCK))
         .collect()
+}
+
+/// Owner: one lab boosting the youngest colony's upgraders pays where six raced them.
+/// Within a level by name, not progress, which the boost itself moves.
+pub fn upgrade_boosted(
+    colonies: impl Iterator<Item = (RoomName, i32, bool)>,
+    held: bool,
+) -> Option<RoomName> {
+    (colonies.filter(|(_, level, terminal)| held && *terminal && !engine::topped_out(*level)))
+        .min_by_key(|(room, level, _)| (*level, *room))
+        .map(|(room, ..)| room)
 }
 
 /// Its product, its reagents, and how much of the product its target asks.
@@ -347,6 +364,15 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn upgrade_boosted_is_the_youngest_below_the_top_level_with_a_terminal_once_gh_is_held() {
+        let room = |x| RoomName::new(x, 0);
+        let colonies =
+            [(room(1), 8, true), (room(3), 7, true), (room(2), 7, true), (room(4), 5, false)];
+        assert_eq!(upgrade_boosted(colonies.into_iter(), true), Some(room(2)));
+        assert_eq!(upgrade_boosted(colonies.into_iter(), false), None);
+    }
 
     fn stocked(pairs: &[(ResourceType, i32)]) -> impl Fn(ResourceType) -> i32 + '_ {
         move |r| pairs.iter().find(|(p, _)| *p == r).map_or(0, |(_, n)| *n)

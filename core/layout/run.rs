@@ -2,12 +2,16 @@ use fabot_atlas::Context;
 use fabot_base::{
     engine,
     intents::{Action, ModuleOutput, RoomAct},
-    world::Rules,
+    world::{RoomName, Rules},
 };
 
 use super::{derive, remote, shape::LayoutState, sites, towers};
 
-pub fn decide_over(rules: &Rules, colonies: &[derive::Colony], mut budget: i32) -> Vec<Action> {
+pub fn decide_over(
+    (rules, lab): (&Rules, Option<RoomName>),
+    colonies: &[derive::Colony],
+    mut budget: i32,
+) -> Vec<Action> {
     let mut intents: Vec<Action> = Vec::new();
 
     for colony in colonies {
@@ -16,7 +20,8 @@ pub fn decide_over(rules: &Rules, colonies: &[derive::Colony], mut budget: i32) 
             && colony.census.drawn < sites::SITES_IN_FLIGHT
             && sites::may_place(rules, &colony.census, colony.target)
         {
-            for p in sites::place(rules, &colony.census, colony.target, plan, budget) {
+            let due = (colony.target, lab == Some(colony.room));
+            for p in sites::place(rules, &colony.census, due, plan, budget) {
                 budget -= 1;
                 intents.push(Action::Room(colony.room, RoomAct::CreateSite(p.x, p.y, p.kind)));
             }
@@ -53,7 +58,7 @@ pub fn decide(ctx: &mut Context, standing: &mut LayoutState) -> ModuleOutput {
     );
 
     let budget = engine::MAX_CONSTRUCTION_SITES - world.our_sites;
-    let home = decide_over(&world.rules, &colonies, budget);
+    let home = decide_over((&world.rules, ctx.derived.upgrade_boosted), &colonies, budget);
 
     let placed = (home.iter())
         .filter(|i| matches!(i, Action::Room(_, RoomAct::CreateSite(..))))

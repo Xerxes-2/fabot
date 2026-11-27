@@ -354,7 +354,8 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   batch of the taker's terminal room. It sends only from a terminal
   `economy/balance.rs` leaves idle: our colonies take below 10k of each reagent
   their cluster uses and 2.5k of each target boost while they cast or owe a
-  cast for any fight (`ColonyPlan.fights`), and give above want + 5k (all of
+  cast for any fight (`ColonyPlan.fights`), or of GH while `labs::upgrade_boosted`
+  names them (GH stays nowhere else), and give above want + 5k (all of
   a reagent or product they want none of, Hivemind's cutoffs; a boost only
   past 5k, so one sent to a fight stays); a reagent taker asks up to a 5k
   batch (to the giving band), so a reacting lab is not topped up per hundred,
@@ -416,7 +417,8 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   at RCL4 behind storage, swamp roads to sources/controller from RCL2). Key
   departures: near-exit source fallback (3 tiles vs 6); no harvest-bay spawn;
   multi-seat source container before extensions; no labs below RCL8 (worth
-  little early, owner); nuker last; unreachable cut pockets kept unroaded;
+  little early, owner) but the one boost lab the colony `labs::upgrade_boosted`
+  names places (a former receiver keeps it); nuker last; unreachable cut pockets kept unroaded;
   source links never split a 1-wide post; a quad or decorative wall closing a
   structure in gives way, as does one closing in what only an ore's post
   leads to (its digger yields only to a chain two weights heavier) or cuts the
@@ -467,7 +469,10 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   T3 combat boost whose ores the empire digs or holds (raw or in a reagent on
   its recipe: ore in a compound off it never reacts back out), in the `BOOSTS` rank
   expansion scores minerals by, each to Hivemind's "high" stock, so the labs
-  make what fights spend from what we dig with no operator in the loop.
+  make what fights spend from what we dig with no operator in the loop; then
+  GH, for the lowest-level colony below RCL8 with a terminal (ties by name:
+  the boost moves progress), once any is held (owner): its one lab boosts its upgraders' WORK, as six labs at RCL7 raced
+  the upgrade for energy and lost.
   `labs::wanted` lists the reactions toward them from the empire's stock,
   depth-first down `reaction_components()`, each target cut to whole
   reactions the stock carries through to it after the targets before it

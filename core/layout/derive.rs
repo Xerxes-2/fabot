@@ -226,7 +226,7 @@ mod tests {
                 .map(|s| tiles::of_pos(&s.pos))
                 .collect();
             assert_eq!(held, solid, "{}", real.name);
-            let destroyed = (crate::run::decide_over(&rules, &found, 0).into_iter())
+            let destroyed = (crate::run::decide_over((&rules, None), &found, 0).into_iter())
                 .filter(|a| matches!(a, Action::Room(_, RoomAct::Destroy(_))))
                 .count();
             assert_eq!(destroyed, found[0].buried.len() + found[0].astray.len());
