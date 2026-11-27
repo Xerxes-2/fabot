@@ -7,7 +7,7 @@ use fabot_atlas::Atlas;
 use fabot_base::{
     HashMap, engine,
     vocabulary::ResourceType::{self, Energy},
-    world::{Built, Id, Pos, StructureType},
+    world::{Built, Id, Pos, RoomName, StructureType},
 };
 
 use super::{
@@ -528,11 +528,13 @@ impl<'a> Jobs<'a> {
         *booked_load.entry(task.clone()).or_default() += n;
     }
 
-    /// The ring is held by the loads bound for it, Hivemind's way; any other
-    /// spot is booked down, main's.
-    fn book(booked_load: &mut HashMap<Task, i32>, spot: &mut Spot, n: i32) {
+    /// The ring is held by the loads in its room bound for it, Hivemind's way (a
+    /// relay books it only home); any other spot is booked down, main's.
+    fn book(booked_load: &mut HashMap<Task, i32>, spot: &mut Spot, n: i32, from: RoomName) {
         if !matches!(spot.of, Of::Ring { .. }) {
             spot.amount -= n;
+        } else if from != spot.pos.room {
+            return;
         }
         Jobs::count(booked_load, &spot.task, n);
     }
@@ -557,7 +559,7 @@ impl<'a> Jobs<'a> {
         let Task::Refill(_, r) = &spot.task else {
             return None;
         };
-        Jobs::book(&mut self.booked_load, spot, body.store.amount_of(*r));
+        Jobs::book(&mut self.booked_load, spot, body.store.amount_of(*r), body.pos.room);
         Some(spot.task.clone())
     }
 
@@ -635,7 +637,7 @@ impl<'a> Jobs<'a> {
             }
         }
         let spot = &mut takes[i?];
-        Jobs::book(&mut self.booked_load, spot, body.free);
+        Jobs::book(&mut self.booked_load, spot, body.free, body.pos.room);
         Some(spot.task.clone())
     }
 

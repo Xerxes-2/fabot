@@ -1,10 +1,11 @@
 {
-  "why": "minerals balance between our own terminals by want/give bands: 20k K sits in W7S5's terminal, whose 3 labs react too slowly to keep a step; given X, XKHO2 becomes a target, so W5S8 (the 10-lab cluster nearest the K) reacts KO and wants 10k of K, W7S9 reacts KO and KHO2 in turn, and W2S8 reacts XKHO2 and wants KHO2; each product goes on to the cluster short of it, where one cluster's reaction asked only what that reaction's target cut lacked",
+  "why": "minerals balance between our own terminals by want/give bands: 20k K sits in W7S5's terminal, whose 3 labs react too slowly to keep a step; given X, XKHO2 becomes a target, so W5S8 (the 10-lab cluster nearest the K) reacts KO and wants 10k of K, W7S9 and W2S8 take KHO2 and XKHO2 between them (which takes which is a tie the run's timing breaks: with outposts' loads holding no ring the two swap, the XKHO2 chain starts at t1100 against t700, 400 of the 1500 ticks instead of 800, and compounds made fall only 4%, 4065 against 4245; so KHO2 sent on and XKHO2 made are asserted, not where); each product goes on to the cluster short of it, where one cluster's reaction asked only what that reaction's target cut lacked",
   "modules": ["economy"],
   "start": { "world": "scripts/scenario/worlds/young-among-colonies.json", "seed": 1, "stock": { "W3S8": { "X": 3000 }, "W5S8": { "X": 3000 }, "W7S5": { "K": 20000 } } },
   "ticks": 1500,
   "assert": [
     { "measure": "sentTo", "room": "W5S8", "resource": "K", "min": 7500 },
-    { "measure": "sentTo", "room": "W2S8", "resource": "KHO2", "min": 200 }
+    { "measure": "sentTo", "resource": "KHO2", "min": 1000 },
+    { "measure": "made", "resource": "XKHO2", "min": 150 }
   ]
 }

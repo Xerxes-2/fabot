@@ -1,5 +1,5 @@
 {
-  "why": "outpost-kited-by-1a1m's seat with its rival casting nothing: the dig and the worked ticks the kited runs are bounded against, which it passes. The window ends at t5800, before the engine's own Invaders, drawn by W7N3's dig, raid at t5857. Bounds by the owner",
+  "why": "outpost-kited-by-1a1m's seat with its rival casting nothing: the dig and the worked ticks the kited runs are bounded against, which it passes. The window ends at t5800, before the engine's own Invaders, drawn by W7N3's dig, raid (t5857-6160 as the dig's pace moves); the run goes to t7000 so the Defend they open is held to its budget. Bounds by the owner",
   "modules": [
     "atlas",
     "fight",
@@ -27,7 +27,7 @@
       }
     ]
   },
-  "ticks": 6000,
+  "ticks": 7000,
   "assert": [
     {
       "metric": "held",

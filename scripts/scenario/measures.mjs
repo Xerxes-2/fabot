@@ -269,7 +269,8 @@ export const measures = {
   bounced: on("from to", (samples, a) => at(samples, a.to ?? Infinity).bounced - at(samples, a.from ?? 0).bounced),
   // Sent to `room`: energy, or `resource` if one is named.
   sentTo: on("room resource from to", (samples, a) => {
-    const of = (s) => (a.resource ? s.sentOf?.[a.resource] : s.sent)?.[a.room] ?? 0;
+    const to = (s) => (a.resource ? s.sentOf?.[a.resource] : s.sent) ?? {};
+    const of = (s) => (a.room ? (to(s)[a.room] ?? 0) : Object.values(to(s)).reduce((n, v) => n + v, 0));
     return of(at(samples, a.to ?? Infinity)) - of(at(samples, a.from ?? 0));
   }),
   // Energy spent on construction (`room`: in that room alone).
