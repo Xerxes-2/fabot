@@ -1,0 +1,10 @@
+{
+  "why": "a forming Defend re-prices when its raid grows: a lone Invader (ttmmmmrwam) seen in E4S7 a tick before a melee+healer wave was priced one Close 3A1H; the wave merged into its group while the cast spawned, and the cast walked in alone on the old plan and died. Starts from a world captured at the incident tick",
+  "modules": ["fight", "exchange"],
+  "start": { "world": "scripts/scenario/worlds/forming-raid-grows.json", "seed": 1 },
+  "ticks": 1600,
+  "assert": [
+    { "measure": "hostileTicks", "room": "E4S7", "max": 400 },
+    { "measure": "bodiesLost", "kind": "defend", "max": 0 }
+  ]
+}

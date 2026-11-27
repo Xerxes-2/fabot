@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use fabot_base::world::{Creep, Id, RoomName, hostiles};
 
 use crate::{
-    shape::{Engagement, Group, Objective, Phase},
+    shape::{Engagement, Group, Objective, Phase, Plan},
     tracker,
 };
 
@@ -25,6 +25,26 @@ pub fn armed_and_opening(
         .map(|h| h.id)
         .collect();
     (armed, opens)
+}
+
+/// Only a raid with a body its kill order lacks grew: our own losses are none (§6.2).
+pub fn grew<'a>(order: &[Id], mut raid: impl Iterator<Item = &'a Id>) -> bool {
+    raid.any(|id| !order.contains(id))
+}
+
+/// A waiting set wins each growth into its kill order once, or answers it anew (§6.2).
+pub fn waited(e: &Engagement, order: Vec<Id>, wins: impl FnOnce() -> bool) -> (Engagement, bool) {
+    if !grew(&e.plan.order, order.iter()) {
+        (e.clone(), false)
+    } else if wins() {
+        (Engagement { plan: Plan { order, ..e.plan.clone() }, ..e.clone() }, false)
+    } else {
+        (anew(e), true)
+    }
+}
+
+pub fn anew(e: &Engagement) -> Engagement {
+    Engagement { budget: e.lost, unanswered: true, predicted: None, ..e.clone() }
 }
 
 /// A Defend left open holds its room: a newcomer inside it is its target
@@ -60,10 +80,41 @@ pub fn newcomers(
         });
 
         if let Some(id) = newcomer {
-            e.group = id;
-            e.budget = e.lost;
-            e.unanswered = true;
-            e.predicted = None;
+            *e = Engagement { group: id, ..anew(e) };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_body_the_order_lacks_grows_a_raid() {
+        let order: Vec<Id> = ["a", "b"].map(Id::from).to_vec();
+        let grown: Vec<Id> = ["a", "c"].map(Id::from).to_vec();
+        assert!(!grew(&order, order.iter()), "a set shrunk by its losses, raid unchanged");
+        assert!(!grew(&order, order[..1].iter()), "a raid that lost a body");
+        assert!(grew(&order, grown.iter()), "a raid with a body its order lacks");
+    }
+
+    #[test]
+    fn each_growth_past_what_the_set_wins_is_answered_once() {
+        let ids = |s: &[&str]| s.iter().map(|&i| Id::from(i)).collect::<Vec<Id>>();
+        let mut e = crate::scene::fresh(
+            1,
+            Objective::Defend,
+            RoomName::W1N1,
+            0,
+            fabot_tactics::Tactic::Close,
+        );
+        (e.plan.order, e.lost, e.budget, e.unanswered) = (ids(&["a", "b"]), 1, 0, false);
+        assert!(!waited(&e, ids(&["a", "b"]), || false).1, "our losses, raid unchanged");
+        assert!(!waited(&e, ids(&["a"]), || false).1, "a raid that lost a body");
+        let (anew, fresh) = waited(&e, ids(&["a", "b", "c"]), || false);
+        assert!(fresh && anew.budget == e.lost && anew.unanswered, "grown and losing");
+        let (kept, fresh) = waited(&e, ids(&["a", "b", "c"]), || true);
+        assert!(!fresh && kept.plan.order.len() == 3, "grown and still winning");
+        assert!(!waited(&kept, ids(&["a", "b", "c"]), || false).1, "a later death, no growth");
     }
 }

@@ -285,8 +285,7 @@ impl<'a> Scene<'a> {
         // as it stands. Held, it counts a body only if it lives to the fight's
         // end, or bodies with 19-99 ticks to live price a win it reaches with one.
         let colony = self.nearest(atlas, e).map(|(walk, _)| walk);
-        let colonies = self.colonies_of(atlas, e);
-        let spawns = self.spawns_in(&colonies);
+        let spawns = self.spawns_in(&self.colonies_of(atlas, e));
         let waiting = |casts: &[casting::Body]| {
             (exchange::spawned(casts.iter().map(Vec::len), spawns).into_iter())
                 .max()
@@ -301,13 +300,13 @@ impl<'a> Scene<'a> {
         let joining: Vec<String> = (self.joining(atlas, e, free).into_iter())
             .filter(|n| self.ours.get(n.as_str()).is_some_and(lasts))
             .collect();
-
         let fielding: Vec<&Creep> = (e.ours.keys().chain(&joining))
             .filter_map(|n| self.ours.get(n.as_str()).copied())
             .filter(lasts)
             .collect();
 
-        let bodies: Vec<Fighter> = fielding.iter().map(|c| self.fighter(c)).collect();
+        let mut ours_now: Vec<Fighter> = fielding.iter().map(|c| self.fighter(c)).collect();
+        ours_now.extend(asked_fighters.iter().cloned());
 
         let core_hits: i32 =
             raid.iter().filter(|h| self.cores.contains(&h.id)).map(|h| h.hits).sum();
@@ -339,7 +338,6 @@ impl<'a> Scene<'a> {
                         .fold(0, |most, h| most.max(h.ticks_to_live));
 
                     let razing = casting::razer(capacity, core_hits, &[]);
-
                     let fielded_cost: i32 =
                         (fielding.iter().map(|c| fabot_base::world::body_kinds(c)))
                             .chain(asked_bodies.iter().cloned())
@@ -348,7 +346,6 @@ impl<'a> Scene<'a> {
                             .sum();
 
                     let worth = tick_worth * ticks - fielded_cost;
-
                     let spawn_ticks = spawns * ticks
                         - engine::spawn_ticks(asked_bodies.iter().map(Vec::len).sum());
 
@@ -361,9 +358,6 @@ impl<'a> Scene<'a> {
                 }
                 _ => (Box::new(|_: &casting::Body| casting::HOME_COPIES), 0),
             };
-
-        let mut ours_now: Vec<Fighter> = bodies.clone();
-        ours_now.extend(asked_fighters.iter().cloned());
 
         let blocks = if home {
             casting::affordable(capacity)
@@ -395,14 +389,13 @@ impl<'a> Scene<'a> {
                 let priced = [&ours_now[..], &cast_all(&set)].concat();
                 set.extend(casting::razer(capacity, core_hits, &priced));
 
-                let price = Priced {
+                Some(Priced {
                     set,
                     boosted,
                     cast,
                     tick_worth,
                     ..Priced::arm(stance, (&landed, &theirs), terrain, outcome)
-                };
-                Some(price)
+                })
             })
             .collect();
 
@@ -423,9 +416,17 @@ impl<'a> Scene<'a> {
                 }
 
                 let first_answer = e.predicted.is_none() || self.homes.contains(&e.room);
-                // An arm needing bodies its answer never asked is not one it carries: it waits.
+                let grown = super::open::grew(&e.plan.order, kin.iter().map(|h| &h.id));
+                // Needing bodies never asked, it waits or answers a grown raid anew (§6.2).
                 if !defend::answers(e, self.world.time, first_answer) && !price.set.is_empty() {
-                    return e.clone();
+                    let side = casting::side_in(&self.world.rules, room, ours_now);
+                    let wins = || casting::wins(price.stance, &side, &theirs, terrain);
+                    let (next, anew) = super::open::waited(e, casting::kill_order(&kin), wins);
+                    if !anew {
+                        return next;
+                    }
+                    let held = (Some(wait), fight);
+                    return self.priced_after(atlas, asked, &next, free, declarations, held);
                 }
                 free.retain(|n| !joining.contains(n));
                 let boosts = self.ask(
@@ -463,7 +464,7 @@ impl<'a> Scene<'a> {
 
                 let gathers = price.together
                     && (price.cast > 0 || !asked_bodies.is_empty())
-                    && (!self.in_reach(e) || kin.iter().any(|h| !e.plan.order.contains(&h.id)))
+                    && (!self.in_reach(e) || grown)
                     && arms.iter().all(|a| a.together);
                 if casting::wins(
                     price.stance,

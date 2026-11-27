@@ -101,9 +101,13 @@ export function engagements(write, bodyOf, offset, closes, killedAt) {
         const apart = bodies.some((o) => o.room === e.room && !fighting.some((m) => near(m, o, 3)));
         if (apart && fighting.length && e.phase === "fighting" && e.tactic.startsWith("blob")) rec.strayed = (rec.strayed ?? 0) + 1;
         swinging(rec, bodies, t, struck);
-        // `raised`: the re-prices a forming Defend raised its set on after the tick it began forming.
+        // `raised`: the re-prices a forming Defend raised its set on after the tick it began forming,
+        // a fresh answer (its `predicted` re-priced, §6.2) to a raid its kill order lacked a body of none.
         const set = ours.length + (fight.casts ?? []).filter((c) => c.engagement === e.id).length;
-        if (e.phase === "forming" && rec.formedSince === e.since && !recommitted && set > rec.formingSet) rec.raised = (rec.raised ?? 0) + 1;
+        const answer = JSON.stringify(e.predicted ?? null);
+        const anew = answer !== rec.answer && e.order.some((m) => !rec.order?.includes(m));
+        if (e.phase === "forming" && rec.formedSince === e.since && !recommitted && !anew && set > rec.formingSet) rec.raised = (rec.raised ?? 0) + 1;
+        [rec.answer, rec.order] = [answer, e.order];
         rec.committed = e.budget;
         [rec.formedSince, rec.formingSet] = [e.phase === "forming" ? e.since : null, set];
         // A sweep with all its bodies in its room: `bare`, the most ticks on end no rival creep stood there.
