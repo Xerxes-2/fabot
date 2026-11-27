@@ -7,7 +7,7 @@ use fabot_base::{
     intel::Intel,
     tiles,
     tuning::Tuning,
-    vocabulary::{CLAIMER, Part},
+    vocabulary::CLAIMER,
     world::{Owner, Pos, RoomName, World},
 };
 use fabot_economy::{bodies, slots};
@@ -32,8 +32,9 @@ pub struct Candidate {
     pub home: RoomName,
     /// One way, in ticks.
     pub walk: i32,
-    /// The path the spawn budget charges: unroaded while young, paved once stocked.
+    /// The path the spawn budget charges, paved once its home builds away.
     pub walked: i32,
+    pub paved: bool,
     /// Another player's bodies work it: ours are lost once a life.
     pub contested: bool,
     /// The operator's row, worked whatever it pays.
@@ -70,28 +71,22 @@ pub fn net(world: &World, c: &Candidate) -> f64 {
 }
 
 fn worked(c: &Candidate, capacity: i32, reserved: bool, spend: &dyn Fn(f64) -> f64) -> Price {
-    use Part::{Carry, Move};
     let rate =
         if reserved { engine::HELD_OUTPUT_PER_TICK } else { engine::NEUTRAL_OUTPUT_PER_TICK };
     let n = c.outpost.sources.len() as f64;
-    let dig = bodies::harvester(false, rate, capacity).unwrap_or_default();
-    // A new remote has no road: its haulers are 1:1.
-    let pair = [Carry, Move];
-    let carry = |walk: i32| engine::carry_parts(n * f64::from(rate * (2 * walk + 2)));
-    let (carry, walked) = (carry(c.walk), carry(c.walked));
-    let per_body = f64::from((capacity / engine::body_cost(&pair)).clamp(1, 25));
-
-    let mut upkeep = n * slots::upkeep(&dig) + carry * slots::upkeep(&pair);
-    let mut spawn = n * slots::spawn_load(&dig) + walked * slots::spawn_load(&pair);
-    let mut bodies = n + (carry / per_body).ceil();
-    if reserved {
-        upkeep += slots::upkeep(&CLAIMER);
-        spawn += slots::spawn_load(&CLAIMER);
-        bodies += 1.0;
-    }
+    let dig = bodies::harvester(false, rate, capacity).map(|b| (b, n));
+    let haul =
+        |walk| slots::haul(&[(n * f64::from(rate), bodies::Leg::bare(walk, c.paved))], capacity);
+    let mend = (c.paved).then(|| slots::mender(n as i32 * slots::mend_work(c.walked), capacity));
+    let claim = reserved.then(|| (CLAIMER.to_vec(), 1.0));
+    let kept = [dig.clone(), haul(c.walk), mend.clone().flatten(), claim.clone()];
+    let cast = [dig, haul(c.walked), mend.flatten(), claim];
+    let upkeep: f64 = kept.iter().flatten().map(|(b, k)| k * slots::upkeep(b)).sum();
+    let spawn: f64 = cast.iter().flatten().map(|(b, k)| k * slots::spawn_load(b)).sum();
+    let bodies: f64 = kept.iter().flatten().map(|(_, k)| k.ceil()).sum();
     let lost = if c.contested { upkeep } else { 0.0 };
     let net = n * f64::from(rate) - upkeep - lost;
-    // Its haul is priced unroaded, so a road repays itself and is no setup.
+    // A road repays itself, so it is no setup.
     let setup = n * f64::from(engine::CONTAINER_BUILD_COST) / TENURE;
     Price {
         net,
@@ -148,10 +143,6 @@ pub fn casters(
     casting::homes(&colonies, |from| tree.crossings(from, room))
 }
 
-fn stocked(world: &World, home: RoomName) -> bool {
-    world.room(home).is_some_and(|r| r.storage().is_some())
-}
-
 pub fn chosen(
     world: &World,
     candidates: Vec<Candidate>,
@@ -160,7 +151,7 @@ pub fn chosen(
     verdicts: &mut Vec<Verdict>,
 ) -> Vec<Outpost> {
     // A young home opens every room that pays at once, as The International does.
-    let stocked = |home: RoomName| stocked(world, home);
+    let stocked = |home: RoomName| world.room(home).is_some_and(|r| r.storage().is_some());
     // Before a storage the spawns' share the outposts leave is the spend's;
     // spend parts (spenders' and their carriers', an energy a tick) measured at RCL5.
     let spend = |home: RoomName, net: f64| {
@@ -249,7 +240,8 @@ pub fn survey(
         };
         // `ARCHITECTURE.md` §7.2.
         let banks = plans.iter().any(|p| p.room == *home && h.banks(p));
-        let young = !stocked(world, *home);
+        let level = world.room(*home).and_then(|r| r.controller.as_ref()).map_or(0, |c| c.level);
+        let paved = slots::builds_away(&world.rules, level);
         let mean_of = |hops: i32, outpost: &Outpost, along: &dyn Fn(&Pos) -> Option<i32>| {
             let ranges: Vec<i32> = (outpost.sources.iter()).filter_map(|s| along(&s.pos)).collect();
             let mean = ranges.iter().sum::<i32>() / (ranges.len() as i32).max(1);
@@ -260,7 +252,7 @@ pub fn survey(
         let walked = |hops: i32, outpost: &Outpost| {
             let path = |at: &Pos| {
                 let line = straight(at)?;
-                let path = atlas.ticks_bare(!young, REACH_HOPS, at, spawn);
+                let path = atlas.ticks_bare(paved, REACH_HOPS, at, spawn);
                 Some(path.map_or(line, |w| w.max(line)))
             };
             mean_of(hops, outpost, &path)
@@ -278,6 +270,7 @@ pub fn survey(
                     (Some(o), _) => Candidate {
                         walk: walk(hops, o),
                         walked: walked(hops, o),
+                        paved,
                         outpost: o.clone(),
                         home: *home,
                         contested: false,
@@ -311,6 +304,7 @@ pub fn survey(
                         Candidate {
                             walk: walk(hops, &outpost),
                             walked: walked(hops, &outpost),
+                            paved,
                             outpost,
                             home: *home,
                             contested: worker.is_some(),
@@ -391,6 +385,7 @@ mod tests {
             home: home_room(),
             walk,
             walked: walk,
+            paved: false,
             contested: false,
             declared: false,
             stands,
@@ -451,21 +446,11 @@ mod tests {
     }
 
     /// A reserved source is dug by the harvester Economy casts, its spare WORK
-    /// counted: 6W1C3M at 800 energy, not 5W.
+    /// counted: 6W1C3M at 800 energy, not 5W; its haul by 10C5M haulers.
     #[test]
     fn a_reserved_dig_is_priced_at_the_harvester_economy_casts() {
-        let room: RoomName = "W1N1".parse().unwrap();
-        let at = Declared { id: Id::MISREAD, pos: Pos::new(room, 25, 25) };
-        let c = Candidate {
-            outpost: Outpost { reserved: true, room, controller: at.clone(), sources: vec![at] },
-            home: room,
-            walk: 0,
-            walked: 0,
-            contested: false,
-            declared: false,
-            stands: true,
-        };
-        let haul = f64::from(engine::HELD_OUTPUT_PER_TICK * 2) / 50.0 * 100.0 / 1500.0;
+        let c = candidate("W1N1", 1, 0, true);
+        let haul = f64::from(engine::HELD_OUTPUT_PER_TICK * 2) / 50.0 * 75.0 / 1500.0;
         let upkeep = 800.0 / 1500.0 + haul + 650.0 / 600.0;
         let net = f64::from(engine::HELD_OUTPUT_PER_TICK) - upkeep;
         assert!((worked(&c, 800, true, &|_| 0.0).net - net).abs() < 1e-9);

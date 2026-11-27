@@ -13,7 +13,7 @@ use fabot_base::{
     tiles,
     tuning::Tuning,
     vocabulary::{Part, ResourceType, part_count_in},
-    world::{Controller, Id, Pos, RoomName, Spawn, StructureType},
+    world::{Controller, Id, Pos, RoomName, Rules, Spawn, StructureType},
 };
 
 use super::{
@@ -183,13 +183,19 @@ fn leg(atlas: &Atlas, derived: &Derived, from: &Pos, to: &Pos) -> Option<Leg> {
     };
     walked().or_else(|| {
         let d = distance(atlas, from, to)?;
-        Some(Leg { even: d, roaded: 2 * d, empty: d })
+        Some(Leg::bare(d, false))
     })
 }
 
 /// The haulers that carry each flow, a rate a tick over its leg: one body
 /// shape for them all, chosen on their walks weighted by what each carries.
 fn haulers(flows: &[(f64, Leg)], capacity: i32) -> Vec<Vec<Part>> {
+    // Bodies are sized to the bank: the share over the flow carries what a
+    // body loses waiting on a container or a sink.
+    haul(flows, capacity).map_or_else(Vec::new, |(most, n)| vec![most; n.ceil() as usize])
+}
+
+pub fn haul(flows: &[(f64, Leg)], capacity: i32) -> Option<(Vec<Part>, f64)> {
     let weighed = |at: fn(&Leg) -> i32| {
         let sum: f64 = flows.iter().map(|(rate, leg)| rate * f64::from(at(leg))).sum();
         sum.round() as i32
@@ -205,14 +211,9 @@ fn haulers(flows: &[(f64, Leg)], capacity: i32) -> Vec<Vec<Part>> {
             rate * f64::from(2 + loaded + leg.empty)
         })
         .sum();
-    let carry = engine::carry_parts(ticks).ceil() as i32;
-    let Some(most) = bodies::hauler(ratio, engine::MAX_BODY_PARTS as i32, capacity) else {
-        return Vec::new();
-    };
-    // Bodies are sized to the bank: the share over the flow carries what a
-    // body loses waiting on a container or a sink.
+    let most = bodies::hauler(ratio, engine::MAX_BODY_PARTS as i32, capacity)?;
     let per = part_count_in(&most, Part::Carry).max(1);
-    vec![most; ((carry + per - 1) / per) as usize]
+    Some((most, engine::carry_parts(ticks) / f64::from(per)))
 }
 
 fn sponsor(atlas: &Atlas, derived: &Derived, at: &Pos) -> Option<usize> {
@@ -253,6 +254,22 @@ pub fn claim_parts_for(held: i32) -> i32 {
     let ceil = |n: i32, d: i32| (n + d - 1) / d;
     let short = 0.max(engine::RESERVATION_CAP - held - engine::CLAIM_LIFETIME);
     1 + ceil(ceil(short, engine::CLAIM_LIFETIME), engine::RESERVE_PER_CLAIM)
+}
+
+/// Owner, 2026-11-12: the tower is rushed, so the sites away from home wait for it.
+pub fn builds_away(rules: &Rules, level: i32) -> bool {
+    level >= rules.level_of(StructureType::Tower, 0)
+}
+
+/// Hivemind's mine builders, `estimateRequiredWorkPartsForMaintenance` WORK a source.
+pub fn mend_work(walk: i32) -> i32 {
+    (0.7 + 0.03 * f64::from(walk)).ceil() as i32
+}
+
+pub fn mender(work: i32, capacity: i32) -> Option<(Vec<Part>, f64)> {
+    let body = bodies::sized(Pattern::Worker, work, capacity)?;
+    let share = f64::from(work) / f64::from(part_count_in(&body, Part::Work).max(1));
+    Some((body, share))
 }
 
 pub fn upkeep(body: &[Part]) -> f64 {
@@ -421,7 +438,7 @@ impl Plan<'_> {
         let mut far: Vec<String> = Vec::new();
         let mut worn: Vec<(i32, RoomName)> = Vec::new();
         let fed = fed(&colony.controller);
-        let tower_level = derived.rules.level_of(StructureType::Tower, 0);
+        let away = builds_away(derived.rules, colony.controller.level);
         let mut upgrade_capacity: i32 = (derived.bodies.iter().chain(derived.ovens.iter()))
             .filter(|b| b.pos.room == colony.room && b.work > 0 && b.carry > 0)
             .filter(|b| b.pattern != Pattern::Harvester)
@@ -435,8 +452,7 @@ impl Plan<'_> {
             }
             let own = gi == ci;
             let raised = !own && g.controller.as_ref().is_some_and(|c| c.owner.is_ours());
-            // Owner, 2026-11-12: the tower is rushed, so an outpost's sites wait for it.
-            if own || raised || colony.controller.level >= tower_level {
+            if own || raised || away {
                 owed += g.sites.iter().map(|s| s.left).sum::<i32>();
                 payback +=
                     (g.sites.iter()).filter(|s| drawn_for(s.kind)).map(|s| s.left).sum::<i32>();
@@ -525,7 +541,7 @@ impl Plan<'_> {
                 let Some(leg) = leg(atlas, derived, &post, &to) else {
                     continue;
                 };
-                upkeep_work += (0.7 + 0.03 * f64::from(leg.empty)).ceil() as i32;
+                upkeep_work += mend_work(leg.empty);
                 if own {
                     local.push(f64::from(rate + backlog), f64::from(steady), leg);
                 } else {
@@ -534,7 +550,7 @@ impl Plan<'_> {
                 }
             }
             let paves = g.sites.iter().any(|s| s.kind == StructureType::Road);
-            if !own && (at_risk || paves) && colony.controller.level >= tower_level {
+            if !own && (at_risk || paves) && away {
                 worn.push((upkeep_work.max(1), g.room));
             }
             match &g.controller {
@@ -553,7 +569,6 @@ impl Plan<'_> {
             }
         }
 
-        // Hivemind's mine builders, `estimateRequiredWorkPartsForMaintenance` WORK a source.
         let wanted: i32 = worn.iter().map(|(w, _)| w).sum();
         let most = bodies::sized(Pattern::Worker, wanted, capacity);
         let most = most.map_or(1, |b| part_count_in(&b, Part::Work)).max(1);
@@ -567,7 +582,7 @@ impl Plan<'_> {
 
         for cj in (0..sponsors.len()).filter(|cj| sponsors[*cj] == Some(ci)) {
             // Past its tower's level they build: upgrading, they drank what its builders draw.
-            let builds = derived.colonies[cj].controller.level >= tower_level;
+            let builds = builds_away(derived.rules, derived.colonies[cj].controller.level);
             for k in 0..self.tuning.pioneers {
                 let room = derived.colonies[cj].room;
                 let cost = self.worker(ci, room, k, (builds, false), PIONEER, MOST);
@@ -822,11 +837,12 @@ impl Plan<'_> {
             }
         }
         // The carriers home's flows need come first, then the outposts',
-        // each cast once an outpost's dig stands.
+        // each cast once an outpost's dig stands; only bodies cast ahead of
+        // them hold the spawn time they fit in.
         let home_carriers = haulers(&local.all, capacity).len();
         let mut carriers = haulers(&[&local.all[..], &remote].concat(), capacity);
         let spawn_time = f64::from(engine::CREEP_LIFETIME) * colony.spawns.len() as f64;
-        let mut spent = (self.out.iter().filter(|s| s.colony == ci))
+        let mut spent = (self.out.iter().filter(|s| s.colony == ci && s.rank < OUTPOST_HAUL))
             .map(|s| spawn_load(&s.body))
             .chain(carriers.iter().take(home_carriers).map(|b| spawn_load(b)))
             .sum::<f64>();

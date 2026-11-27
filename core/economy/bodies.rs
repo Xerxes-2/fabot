@@ -232,6 +232,12 @@ pub struct Leg {
     pub empty: i32,
 }
 
+impl Leg {
+    pub fn bare(tiles: i32, paved: bool) -> Leg {
+        Leg { even: tiles, roaded: if paved { tiles } else { 2 * tiles }, empty: tiles }
+    }
+}
+
 /// CARRY a MOVE: any ratio between 2 and 1 walks plain no faster than 2 and
 /// carries less, so only these two are ever cast. Energy delivered over a
 /// life per energy spent decides; a tie goes to 2, fewer parts and creeps a
@@ -328,10 +334,8 @@ mod tests {
     #[test]
     fn a_hauler_on_road_carries_two_a_move_and_on_plain_one() {
         for d in 1..60 {
-            let road = Leg { even: d, roaded: d, empty: d };
-            let plain = Leg { even: d, roaded: 2 * d, empty: d };
-            assert_eq!(carry_per_move(road), 2);
-            assert_eq!(carry_per_move(plain), 1);
+            assert_eq!(carry_per_move(Leg::bare(d, true)), 2);
+            assert_eq!(carry_per_move(Leg::bare(d, false)), 1);
         }
     }
 
