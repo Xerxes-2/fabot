@@ -8,7 +8,7 @@ import { gunzipSync } from "node:zlib";
 import { connect, fail } from "./screeps-api.mjs";
 import { METRICS, windows } from "./metrics.mjs";
 import { OBSERVE, replay, views } from "./observe-views.mjs";
-import { outcome, report, tested } from "./sim/prediction.mjs";
+import { engagement, outcome, report, tested } from "./sim/prediction.mjs";
 
 const ENGAGEMENTS = 4;
 const USAGE = `usage: npm run observe -- <command>
@@ -35,13 +35,15 @@ const USAGE = `usage: npm run observe -- <command>
   wait --ticks N     return after N game ticks
   exchange [segment4.jsonl]
                      the closed engagements of segment 4 (or a run's copy, sim's \`segment4.jsonl\`): \`npm run exchange\`'s table, then each rival's outcomes by tactic
+  grudges [segment4.jsonl]
+                     per rival, off segment 4 (or sim's \`segment4.jsonl\`): fights by kind, our bodies dead, energy cast, won, first contact, last close
   engagements        each open engagement: members, plan order, offers, target, prediction; pending casts
   room <room>        controller, structures, creeps, tombstones, sites, as the server holds them
   creep <name>       one of our creeps and its assignment
   regions <room>     walkable regions past rival ramparts: exits per side, owned structures beside
   replay <capture.jsonl> [--trace <creep>]
                      dist/main.js run on the captured ticks, offline: intents, refusals, tile scores`;
-const LIVE = ["metrics", "health", "cpu", "faults", "switches", "switch", "declare", "tuning", "capture", "tap", "battle", "wait", "engagements", "exchange", "room", "creep", "regions"];
+const LIVE = ["metrics", "health", "cpu", "faults", "switches", "switch", "declare", "tuning", "capture", "tap", "battle", "wait", "engagements", "exchange", "grudges", "room", "creep", "regions"];
 
 // The rows of `engagements.log` as `report` reads them, then the outcomes per rival (`npc`: none named) and tactic.
 function exchange(text) {
@@ -54,6 +56,28 @@ function exchange(text) {
   }
 }
 
+// Each rival's ledger, for the owner alone: each rival a row names is charged the whole row, so totals overlap;
+// a row naming none (an Invader's, or closed before contact) is `npc`'s.
+function grudges(text) {
+  const by = new Map();
+  for (const r of (text ?? "").split("\n").filter(Boolean).map((l) => JSON.parse(l))) {
+    for (const rival of r.rivals.length ? r.rivals : ["npc"]) {
+      const g = by.get(rival) ?? { fights: {}, dead: 0, energy: 0, won: 0, first: Infinity, last: 0 };
+      by.set(rival, g);
+      g.fights[r.kind] = (g.fights[r.kind] ?? 0) + 1;
+      Object.assign(g, { dead: g.dead + r.dead, energy: g.energy + r.energy, last: Math.max(g.last, r.closed) });
+      g.won += outcome(engagement(r)) === "won" ? 1 : 0;
+      g.first = Math.min(g.first, r.contact ?? r.opened);
+    }
+  }
+  const table = [["rival", "fights", "our dead", "cast", "won", "first", "last"]].concat(
+    [...by].sort(([, a], [, b]) => b.energy - a.energy).map(([rival, g]) =>
+      [rival, Object.entries(g.fights).map(([k, n]) => `${k} ${n}`).join(","), g.dead, g.energy, g.won, `t${g.first}`, `t${g.last}`]),
+  );
+  const widths = table[0].map((_, i) => Math.max(...table.map((row) => String(row[i]).length)));
+  for (const row of table) console.log(row.map((v, i) => String(v)[i < 2 ? "padEnd" : "padStart"](widths[i])).join("  "));
+}
+
 const [cmd, ...args] = process.argv.slice(2);
 if (cmd === "replay") {
   const traced = args.includes("--trace") ? args[args.indexOf("--trace") + 1] : undefined;
@@ -63,6 +87,10 @@ if (cmd === "replay") {
 }
 if (cmd === "exchange" && args[0]) {
   exchange(readFileSync(args[0], "utf8"));
+  process.exit(0);
+}
+if (cmd === "grudges" && args[0]) {
+  grudges(readFileSync(args[0], "utf8"));
   process.exit(0);
 }
 if (!LIVE.includes(cmd)) fail(USAGE);
@@ -210,6 +238,9 @@ switch (cmd) {
   }
   case "exchange":
     exchange(await raw(ENGAGEMENTS));
+    break;
+  case "grudges":
+    grudges(await raw(ENGAGEMENTS));
     break;
   case "engagements":
     await view.engagements();
