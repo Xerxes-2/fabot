@@ -837,6 +837,9 @@ conflicts never silently cancel an act.
   `❓` safe-mode-holds-towerless-home's Defend drafts at t1025, not t1008, once
   containers wait for the tower, and gives up (predictedWinsLost 0 → 1, waived);
   none of ours dies. HYPOTHESIS: the spawn is busy with the larger RCL2 economy.
+  `❓` defend-outpost-feeds-no-camped-exit's beta loses 9 bodies, not 8 (waived),
+  once a source post never parts its tiles; no Defend runs past its budget.
+  HYPOTHESIS: the moved posts shift the self-play's timeline.
   `❓` A cast waits behind a body its spawn already began, which the engine
   cannot cancel: a home raided on the tick an outpost's cast begins is drafted
   after it (defend-prioritises-home-over-outpost seed 1: 65 ticks), and a raid

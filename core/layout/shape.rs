@@ -137,8 +137,7 @@ mod tests {
             let Some((ground, plan)) = fx::plan_of(&colony) else {
                 continue;
             };
-            let rocks = ground.sources.iter().chain(&ground.minerals);
-            let rocks: Vec<Tile> = rocks.chain(&ground.controller).copied().collect();
+            let rocks: Vec<Tile> = ground.rocks().collect();
             let road =
                 |t| (plan.items.iter()).any(|i| i.tile == t && i.kind == StructureType::Road);
             let taken = |t| {

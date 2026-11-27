@@ -157,10 +157,7 @@ fn to_plan(rules: &Rules, ground: &Ground, built: &Built) -> Plan {
 fn drawn(rules: &Rules, ground: &Ground, built: &Built) -> (Plan, Vec<Item>) {
     use StructureType::*;
     let plan = &built.plan;
-    let fixed: Vec<Tile> = (ground.sources.iter().chain(&ground.minerals))
-        .chain(&ground.controller)
-        .copied()
-        .collect();
+    let fixed: Vec<Tile> = ground.rocks().collect();
     let mut keyed: Vec<(i32, i32, usize, Item)> = Vec::new();
     let mined = rules.level_of(Extractor, 0);
     let mut push = |kind: StructureType, tile: Tile, level: i32| {
@@ -282,9 +279,7 @@ fn reached<'a>(
     planned: impl Iterator<Item = &'a Item>,
 ) -> Vec<bool> {
     let mut blocked: Vec<bool> = (ground.terrain.iter()).map(|t| *t == place::WALL).collect();
-    for t in (ground.sources.iter().chain(&ground.minerals)).chain(&ground.controller) {
-        blocked[*t] = true;
-    }
+    ground.rocks().for_each(|t| blocked[t] = true);
     let mut post = vec![false; tiles::COUNT];
     for i in planned {
         post[i.tile] |= held
@@ -391,10 +386,7 @@ mod tests {
             let Some((ground, plan)) = fx::plan_of(&colony) else {
                 continue;
             };
-            let rocks: Vec<Tile> = (ground.sources.iter().chain(&ground.minerals))
-                .chain(&ground.controller)
-                .copied()
-                .collect();
+            let rocks: Vec<Tile> = ground.rocks().collect();
             for level in 0..=engine::CONTROLLER_MAX_LEVEL {
                 for kind in
                     sized().into_iter().chain([StructureType::Link, StructureType::Container])
@@ -600,8 +592,7 @@ mod tests {
         let planned = || plan.items.iter().chain(&plan.ring).filter(|i| i.level <= level);
         planned().for_each(|i| open[i.tile] |= i.kind == StructureType::Road);
         planned().for_each(|i| open[i.tile] &= i.kind.walkable());
-        let rocks = (ground.sources.iter().chain(&ground.minerals)).chain(&ground.controller);
-        rocks.for_each(|r| open[*r] = false);
+        ground.rocks().for_each(|r| open[r] = false);
         open
     }
 
@@ -623,6 +614,7 @@ mod tests {
             ("E9S5", include_str!("../../scripts/scenario/worlds/source-across-a-wall.json")),
             ("E9S5", include_str!("../../scripts/scenario/worlds/ore-post-e9s5.json")),
             ("E18S11", include_str!("../../scripts/scenario/worlds/source-pocket.json")),
+            ("E13S19", include_str!("../../scripts/scenario/worlds/exit-pocket-post.json")),
         ];
         let crafted = crafted.into_iter().filter_map(|(name, text)| {
             let world = fabot_base::testing::world(text);
@@ -635,9 +627,8 @@ mod tests {
                 continue;
             };
             plans += 1;
-            let rocks = (ground.sources.iter().chain(&ground.minerals)).chain(&ground.controller);
             let planned = plan.items.iter().chain(&plan.ring).map(|i| i.tile);
-            let ends: Vec<Tile> = planned.chain(rocks.copied()).collect();
+            let ends: Vec<Tile> = planned.chain(ground.rocks()).collect();
             let open = open_of(&ground, &plan, engine::CONTROLLER_MAX_LEVEL);
             let alone = |seat: Tile| {
                 let from = |shut| tiles::reach([plan.anchor], |t| open[t] && t != shut);

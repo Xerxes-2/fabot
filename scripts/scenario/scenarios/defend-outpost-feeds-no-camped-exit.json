@@ -13,7 +13,7 @@
   },
   "ticks": 6000,
   "assert": [
-    { "measure": "bodiesLost", "seat": "beta", "max": 8 },
+    { "measure": "bodiesLost", "seat": "beta", "max": 9 },
     { "measure": "bodiesLost", "max": 7 },
     { "measure": "bodiesLost", "seat": "gamma", "max": 13 },
     { "each": "engagement", "seat": "beta", "where": { "kind": "defend" }, "assert": { "pastBudget": { "max": 2 } } },

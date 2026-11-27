@@ -187,8 +187,11 @@ impl Builder<'_> {
         self.most_space(sx, sy, &side).or_else(|| self.most_space(sx, sy, ring))
     }
 
+    /// A seat that parts its neighbours ranks last: its harvester holds the way past.
     fn most_space(&self, sx: i32, sy: i32, seats: &[Tile]) -> Option<Tile> {
-        let mut best: Option<(Tile, i32)> = None;
+        let shut = |n| self.harvest.contains(&n) || self.ground.rocks().any(|r| r == n);
+        let open = |n: Tile| !self.m.wall(tiles::x_of(n), tiles::y_of(n)) && !shut(n);
+        let mut best: Option<(Tile, (bool, i32))> = None;
         for near_exit in [false, true] {
             area(sx, sy, 1, |x, y| {
                 if seats.contains(&index(x, y)) && self.m.buildable(x, y, false, near_exit) {
@@ -197,8 +200,9 @@ impl Builder<'_> {
                         free += i32::from(self.m.buildable(x2, y2, false, near_exit));
                         true
                     });
-                    if best.is_none_or(|(_, f)| f < free) {
-                        best = Some((index(x, y), free));
+                    let key = (!fabot_atlas::parts(index(x, y), open), free);
+                    if best.is_none_or(|(_, k)| k < key) {
+                        best = Some((index(x, y), key));
                     }
                 }
                 true

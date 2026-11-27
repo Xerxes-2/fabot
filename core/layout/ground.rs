@@ -19,6 +19,12 @@ pub struct Ground {
     pub controller: Option<Tile>,
 }
 
+impl Ground {
+    pub fn rocks(&self) -> impl Iterator<Item = Tile> + '_ {
+        (self.sources.iter().chain(&self.minerals)).chain(&self.controller).copied()
+    }
+}
+
 /// The only part of a room's ground that can change.
 pub fn obstacles(room: &Room) -> Vec<Tile> {
     let mut found: Vec<Tile> = room
