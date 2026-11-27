@@ -235,8 +235,8 @@ fn held_of(census: &Census, kind: StructureType) -> i32 {
     census.held[kind as usize]
 }
 
-/// Below the haul's level no road or container is due, so only a kind short
-/// of its allowance can be placed; false lets the caller skip the plan.
+/// Below the haul's level only a kind short of its allowance can be placed;
+/// false lets the caller skip the plan.
 pub fn may_place(rules: &Rules, census: &Census, level: i32) -> bool {
     let mut kinds = vec![StructureType::Link, StructureType::Extractor];
     kinds.extend(sized());
@@ -371,8 +371,8 @@ pub fn place(
     let astray = astray(plan, census);
     // Past the container's own level a room keeps what stands rather than
     // rebuild it.
-    let replaces = |t: Tile| {
-        level <= haul_level(rules)
+    let replaces = |own: i32, t: Tile| {
+        level <= own
             && (census.rocked.iter())
                 .filter(|(rock, _)| tiles::range(*rock, t) == 1)
                 .all(|rc| astray.contains(rc))
@@ -407,7 +407,7 @@ pub fn place(
                     && !taken.contains(&t)
                     && (item.kind != StructureType::Container
                         || census.served[t] == 0
-                        || replaces(t))
+                        || replaces(item.level, t))
                     && (item.kind != StructureType::Road
                         || census.road[t] == 0 && !unpaved.contains(t))
                     && held_of(census, item.kind) + added_of(&added, item.kind)
@@ -877,8 +877,7 @@ mod tests {
                 ));
                 let mut one = plan.clone();
                 one.items = vec![post.clone()];
-                let placed =
-                    place(&rules, &census_of(&room, &[]), (haul_level(&rules), false), &one, 1);
+                let placed = place(&rules, &census_of(&room, &[]), (post.level, false), &one, 1);
                 assert_eq!(placed.len(), 1, "{} beside {rock} not placed", post.tile);
             }
         }

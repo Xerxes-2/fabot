@@ -1,9 +1,9 @@
 {
-  "why": "a source whose seats ring it gets its container before the extensions: none stands when the first source container does",
+  "why": "a source whose seats ring it gets its container before its own level's extensions: containers wait for the tower (RCL3), so when the first source container stands only RCL2's five extensions do (t6400, RCL3 at t5927; before containers waited, none stood at t2400)",
   "modules": ["atlas", "layout"],
   "start": { "room": "W3N1", "seed": 1 },
-  "ticks": 3000,
+  "ticks": 7000,
   "assert": [
-    { "measure": "extensionsBeforeContainer", "max": 0 }
+    { "measure": "extensionsBeforeContainer", "max": 5 }
   ]
 }

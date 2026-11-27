@@ -96,8 +96,12 @@ fn sink_for<'p>(
 ) -> Option<Pos> {
     let anchors = (room.controller.as_ref(), room.sources.first().map(|s| s.pos));
     let home = derived.colonies[atlas::server_of(atlas, derived, planned, anchors)?];
+    let at = world.room(home)?;
+    if !at.controller.as_ref().is_some_and(|c| atlas::builds_away(&world.rules, c.level)) {
+        return None;
+    }
 
-    (world.room(home)?.storage()).map(|s| s.pos).or_else(|| planned(home)?.pile)
+    at.storage().map(|s| s.pos).or_else(|| planned(home)?.pile)
 }
 
 /// v1's seat: the shortest walk out toward home. The owner's rule: the walk

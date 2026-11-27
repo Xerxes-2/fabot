@@ -241,7 +241,7 @@ pub fn survey(
         // `ARCHITECTURE.md` §7.2.
         let banks = plans.iter().any(|p| p.room == *home && h.banks(p));
         let level = world.room(*home).and_then(|r| r.controller.as_ref()).map_or(0, |c| c.level);
-        let paved = slots::builds_away(&world.rules, level);
+        let paved = atlas::builds_away(&world.rules, level);
         let mean_of = |hops: i32, outpost: &Outpost, along: &dyn Fn(&Pos) -> Option<i32>| {
             let ranges: Vec<i32> = (outpost.sources.iter()).filter_map(|s| along(&s.pos)).collect();
             let mean = ranges.iter().sum::<i32>() / (ranges.len() as i32).max(1);

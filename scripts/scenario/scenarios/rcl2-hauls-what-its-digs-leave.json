@@ -1,11 +1,11 @@
 {
-  "why": "an RCL2 colony casts the carriers what its digs leave on the ground needs, at home too, and none for dig its outposts' harvesters spend raising their containers. Read over the run: idle haulers in every window, task churn summed (d288c92e, before the fix: idle 79 in a window, churn 12,119; main seeds 1-5: 52, 3,561-3,913)",
+  "why": "an RCL2 colony casts the carriers what its digs leave on the ground needs, at home too. Read while RCL2 (RCL3 at t4426 since containers wait for the tower; its site burst idles carriers on an empty bank): idle haulers in every window, task churn summed (d288c92e, before the fix: idle 79 in a window, churn 12,119; main seeds 1-5: 52, 3,561-3,913; to t4400: 48 and 3,700 with RCL2 containers, 29 and 3,950 without)",
   "modules": ["economy"],
   "start": { "room": "W9N8", "seed": 1 },
   "ticks": 7000,
   "assert": [
-    { "metric": "idle.hauler", "max": 65 },
-    { "metric": "churn.task", "total": true, "max": 6000 },
+    { "metric": "idle.hauler", "to": 4400, "max": 65 },
+    { "metric": "churn.task", "to": 4400, "total": true, "max": 6000 },
     { "measure": "homeLevel", "min": 3 }
   ]
 }

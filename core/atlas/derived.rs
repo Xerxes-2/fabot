@@ -8,7 +8,8 @@ use fabot_base::{
     tiles::{self, TileSet},
     vocabulary::{CLAIMER, Part},
     world::{
-        Controller, Creep, Owner, Pos, Room, RoomName, Sightings, StructureType, World, hostiles,
+        Controller, Creep, Owner, Pos, Room, RoomName, Rules, Sightings, StructureType, World,
+        hostiles,
     },
 };
 
@@ -162,6 +163,11 @@ pub struct Derived {
 
 /// A colony banks its haul from here (§5): on its storage, else on its hub's pile.
 pub const BANK_LEVEL: i32 = 2;
+
+/// Containers and sites away from home wait for the rushed tower (owner; §5).
+pub fn builds_away(rules: &Rules, level: i32) -> bool {
+    level >= rules.level_of(StructureType::Tower, 0)
+}
 
 impl Home {
     pub fn banks(&self, plan: &ColonyPlan) -> bool {

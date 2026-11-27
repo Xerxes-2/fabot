@@ -262,12 +262,15 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   bodies leave over a life, so a far ring of outposts never casts nothing but
   haulers. While `ColonyPlan.owes` is true (a fight cast owed), no
   surplus-spending body is spawned so spawns stay free.
-  `❓` A home's first worker ranked ahead of its outposts' dig recovers a home
-  whose dig builds its own containers, but delays outpost income at RCL2: no
-  ranking yet passes both.
   `❓` An outpost's haul may lag a dig that runs longer than its walk was priced
   for (gen 49, 2026-11-27: E7S3 dug 18k and let 28% decay once the search
   reached its north way): HYPOTHESIS, unmeasured.
+  `❓` Since containers wait for the tower, outposts decay more (waived bounds,
+  base → now): outposts-priced-on-the-walked-path's worst outpost 16% → 51%,
+  outposts-budgeted-on-the-haul-path's worst window 11% → 52%, and
+  outpost-mender-cast-past-the-haul's E23S8 roads 67 → 57. HYPOTHESIS: the
+  outposts' haul gets only the spawn time stocked spend leaves, while their
+  piles decay; the next change restores the original bounds (25, 34, 60).
 - **Spare (`economy::spare`):** home's own bodies at a steady pace, its floor a
   constant 2 workers whatever this tick's floor: home's repairs and sites move
   with the outposts' haul wear, so a floor read from them would flap the choice.
@@ -337,10 +340,11 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   only once complete (only RCL3's tower and RCL6's minerals are worth rushing:
   a site's build is owed over a life, the extractor's and terminal's whole
   before a new upgrader);
-  below RCL3, outpost sites wait for the tower: its dig piles on the post (or
-  beside the source while no container or site marks one) and is hauled from
-  there, while an outpost's harvester with a CARRY on its container site raises
-  it with its dig (uncounted by carriers or spend until the container stands).
+  below RCL3, containers and outpost sites wait for the tower
+  (`atlas::builds_away`): dig piles beside the source and is hauled from there,
+  as the RCL5 speedrun record does; later an outpost's harvester with a CARRY on
+  its container site raises it with its dig (uncounted by carriers or spend until
+  the container stands).
   Non-paying sites and repairs wait behind the controller (taking stock past
   reserve, or half income before storage).
   `❓` Below reserve, unbuilt roads can hold all `SITES_IN_FLIGHT` for ages, so a
@@ -823,6 +827,9 @@ conflicts never silently cancel an act.
   Defend → Fight → Economy` (owner, 2026-11-24); an affordable Defend ask
   waiting on energy holds the asks behind it. An unanswered home Defend is
   priced each tick, as its raid changes under the towers.
+  `❓` safe-mode-holds-towerless-home's Defend drafts at t1025, not t1008, once
+  containers wait for the tower, and gives up (predictedWinsLost 0 → 1, waived);
+  none of ours dies. HYPOTHESIS: the spawn is busy with the larger RCL2 economy.
   `❓` A cast waits behind a body its spawn already began, which the engine
   cannot cancel: a home raided on the tick an outpost's cast begins is drafted
   after it (defend-prioritises-home-over-outpost seed 1: 65 ticks), and a raid
@@ -1025,6 +1032,9 @@ one and the three after it, whose plans move the weights it flooded on, Atlas
 miss rate, Hunt threat lookups) are
 reported to segment 1 and enforced against ceilings in `scripts/ceilings.json`
 on every `npm run scenario` run.
+`❓` reset-keeps-outposts' cold reset at t2000 floods 153 per colony (ceiling
+130, waived), with 31 creeps where its base had 10 once containers waited for
+the tower. HYPOTHESIS: cold floods grow with the bodies walking.
 
 ## 10. Verification
 

@@ -26,8 +26,8 @@ use fabot_base::{
 use self::graph::Way;
 pub use self::{
     derived::{
-        BANK_LEVEL, Context, Derived, Home, derive, nearest, plan_of, server, server_of, sponsor,
-        target_at, worked,
+        BANK_LEVEL, Context, Derived, Home, builds_away, derive, nearest, plan_of, server,
+        server_of, sponsor, target_at, worked,
     },
     graph::Tree,
     loot::{

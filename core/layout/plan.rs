@@ -84,7 +84,7 @@ fn order(
             v.extend(plan.of("link.storage"));
             v
         }
-        "container" if level < 2 => return Vec::new(),
+        "container" if !fabot_atlas::builds_away(rules, level) => return Vec::new(),
         "container" => {
             let mut v = plan.of("container.source");
             v.extend(plan.of("container.controller"));

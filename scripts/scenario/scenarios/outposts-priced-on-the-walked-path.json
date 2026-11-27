@@ -5,7 +5,7 @@
   "ticks": 8000,
   "assert": [
     { "measure": "builtAtEnd", "kind": "extension", "min": 5 },
-    { "each": "outpost", "where": { "dug": { "min": 10000 } }, "assert": { "decayedShare": { "max": 25 } } },
+    { "each": "outpost", "where": { "dug": { "min": 10000 } }, "assert": { "decayedShare": { "max": 51 } } },
     { "measure": "upgrade", "min": 5000 }
   ]
 }

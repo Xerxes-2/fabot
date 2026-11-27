@@ -13,7 +13,7 @@ use fabot_base::{
     tiles,
     tuning::Tuning,
     vocabulary::{Part, ResourceType, part_count_in},
-    world::{Built, Controller, Id, Pos, RoomName, Rules, Spawn, StructureType},
+    world::{Built, Controller, Id, Pos, RoomName, Spawn, StructureType},
 };
 
 use super::{
@@ -256,11 +256,6 @@ pub fn claim_parts_for(held: i32) -> i32 {
     1 + ceil(ceil(short, engine::CLAIM_LIFETIME), engine::RESERVE_PER_CLAIM)
 }
 
-/// Owner, 2026-11-12: the tower is rushed, so the sites away from home wait for it.
-pub fn builds_away(rules: &Rules, level: i32) -> bool {
-    level >= rules.level_of(StructureType::Tower, 0)
-}
-
 /// Hivemind's mine builders, `estimateRequiredWorkPartsForMaintenance` WORK a source.
 pub fn mend_work(walk: i32) -> i32 {
     (0.7 + 0.03 * f64::from(walk)).ceil() as i32
@@ -438,7 +433,7 @@ impl Plan<'_> {
         let mut far: Vec<String> = Vec::new();
         let mut worn: Vec<(i32, RoomName)> = Vec::new();
         let fed = fed(&colony.controller);
-        let away = builds_away(derived.rules, colony.controller.level);
+        let away = atlas::builds_away(derived.rules, colony.controller.level);
         let mut upgrade_capacity: i32 = (derived.bodies.iter().chain(derived.ovens.iter()))
             .filter(|b| b.pos.room == colony.room && b.work > 0 && b.carry > 0)
             .filter(|b| b.pattern != Pattern::Harvester)
@@ -582,7 +577,7 @@ impl Plan<'_> {
 
         for cj in (0..sponsors.len()).filter(|cj| sponsors[*cj] == Some(ci)) {
             // Past its tower's level they build: upgrading, they drank what its builders draw.
-            let builds = builds_away(derived.rules, derived.colonies[cj].controller.level);
+            let builds = atlas::builds_away(derived.rules, derived.colonies[cj].controller.level);
             for k in 0..self.tuning.pioneers {
                 let room = derived.colonies[cj].room;
                 let cost = self.worker(ci, room, k, (builds, false), PIONEER, MOST);
