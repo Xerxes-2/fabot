@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use fabot_atlas::Atlas;
 use fabot_base::{
-    boost::{self, Act::Fight, Boosting, Stock},
+    boost::{self, Boosting, Stock},
     engine, tiles,
     vocabulary::{Part, ResourceType},
     world::{
@@ -187,7 +187,7 @@ pub fn cluster_boosts(
     let priced = |c: &&Cast| crate::scene::boosted(engagements).any(|b| b.name == c.name);
     for c in spawning.iter().filter(priced) {
         if let Some(stock) = left.get_mut(&c.room) {
-            boost::boosted_by(Fight, &c.body, stock);
+            boost::boosted_by(&c.body, stock);
         }
     }
     left

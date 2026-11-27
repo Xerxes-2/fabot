@@ -354,8 +354,7 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   batch of the taker's terminal room. It sends only from a terminal
   `economy/balance.rs` leaves idle: our colonies take below 10k of each reagent
   their cluster uses and 2.5k of each target boost while they cast or owe a
-  cast for any fight (`ColonyPlan.fights`), or of the upgrade compound while it
-  boosts its upgraders (`labs::boosts_upgrade`), and give above want + 5k (all of
+  cast for any fight (`ColonyPlan.fights`), and give above want + 5k (all of
   a reagent or product they want none of, Hivemind's cutoffs; a boost only
   past 5k, so one sent to a fight stays); a reagent taker asks up to a 5k
   batch (to the giving band), so a reacting lab is not topped up per hundred,
@@ -416,9 +415,8 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   (towers, spawns, harvest bays from RCL3, extension bays in order; plain roads
   at RCL4 behind storage, swamp roads to sources/controller from RCL2). Key
   departures: near-exit source fallback (3 tiles vs 6); no harvest-bay spawn;
-  multi-seat source container before extensions; labs from RCL7 once the
-  upgrade boost's ores are held (owner; S11's median; `labs::labs_from`),
-  else RCL8; nuker last; unreachable cut pockets kept unroaded;
+  multi-seat source container before extensions; no labs below RCL8 (worth
+  little early, owner); nuker last; unreachable cut pockets kept unroaded;
   source links never split a 1-wide post; a quad or decorative wall closing a
   structure in gives way, as does one closing in what only an ore's post
   leads to (its digger yields only to a chain two weights heavier) or cuts the
@@ -468,11 +466,9 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   labs first, ties by name: each with three labs reacts, each boosts its own
   bodies. Targets are derived, not declared: every
   T3 combat boost whose ores the empire digs or holds (raw or in a reagent on
-  its recipe: ore in a compound off it never reacts back out), in the `BOOSTS`
-  rank expansion scores minerals by, then, while labs come at RCL7 and a cluster is below RCL8, the
-  upgrade compound with most gain per lab tick of its chain (GH: labs, not
-  ore, bind), each to Hivemind's "high" stock, so the labs make what fights
-  and upgraders spend from what we dig with no operator in the loop.
+  its recipe: ore in a compound off it never reacts back out), in the `BOOSTS` rank
+  expansion scores minerals by, each to Hivemind's "high" stock, so the labs
+  make what fights spend from what we dig with no operator in the loop.
   `labs::wanted` lists the reactions toward them from the empire's stock,
   depth-first down `reaction_components()`, each target cut to whole
   reactions the stock carries through to it after the targets before it
@@ -845,11 +841,8 @@ conflicts never silently cancel an act.
   wait, only where it wins cheaper than the bare one, and the boosted slots
   and their colony go into `Plan.boosts`. A body priced boosted and cast
   elsewhere walks straight out. Each tick `boost::boosting` (`Derived.boosts`,
-  per cluster) shares a colony's stock, a fight's bodies first, then oldest
-  first, among the bodies a forming set's plan boosts there that no fight has
-  touched and, while labs come at RCL7 and below RCL8, the colony's upgraders
-  (`labs::boosted`; an `Act` picks the parts and compounds each takes; they
-  draw the stock after the fight's bodies, so fight prices see a little less), and names each
+  per cluster) shares a colony's stock, oldest first, among the bodies a
+  forming set's plan boosts there that no fight has touched, and names each
   one's next lab; what they leave, less the casts still to spawn, prices new
   casts. A Defend priced boosted stays Forming while its bodies stand at their
   labs, so no body is held once its set fights. Owner-approved bound: a body

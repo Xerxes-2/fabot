@@ -1,10 +1,9 @@
 use std::cmp::Reverse;
 
 use fabot_base::{
-    boost::{self, Act::Fight, takes},
-    engine,
+    boost, engine,
     grid::{self, FatigueFactor, step_ticks},
-    vocabulary::{Part, ResourceType},
+    vocabulary::{Part, ResourceType, takes},
     world::Pos,
 };
 
@@ -101,16 +100,18 @@ pub fn cast_boosted<'a>(
     let mut queue = boost::LabQueue::default();
     (bodies.into_iter())
         .map(|body| {
-            let by = boost::boosted_by(Fight, body, &mut left);
+            let by = boost::boosted_by(body, &mut left);
             if by.compounds.is_empty() {
                 return cast(body);
             }
             queue.0 += by.fills;
             let boosts: Vec<Option<ResourceType>> = (body.iter())
-                .map(|p| by.compounds.iter().copied().find(|c| takes(Fight, *p, *c)))
+                .map(|p| by.compounds.iter().copied().find(|c| takes(*p, *c)))
                 .collect();
-            let hits = engine::PART_HITS * body.len() as i32;
-            Fighter { lab_wait: queue.wait_with(0), ..of_parts(body, &boosts, hits, None, 0) }
+            Fighter {
+                lab_wait: queue.wait_with(0),
+                ..of_parts(body, &boosts, engine::PART_HITS * body.len() as i32, None, 0)
+            }
         })
         .collect()
 }

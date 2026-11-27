@@ -3,9 +3,8 @@ use std::collections::BTreeSet;
 use screeps::LocalRoomTerrain;
 
 use crate::{
-    boost::{Act, takes},
     tiles::{self, Tile},
-    vocabulary::{Part, ResourceType},
+    vocabulary::{Part, ResourceType, takes},
     world::{
         Controller, Id, Mineral, Owner, Pos, Room, RoomName, Rules, Source, Spawn, Store,
         Structure, StructureType, World, terrain,
@@ -23,7 +22,7 @@ pub fn boosted(part: Part, tier: usize) -> Option<ResourceType> {
         [ZynthiumHydride, ZynthiumAcid, CatalyzedZynthiumAcid],
     ];
     let t = tier.checked_sub(1)?;
-    LINES.iter().map(|line| line[t]).find(|c| takes(Act::Fight, part, *c))
+    LINES.iter().map(|line| line[t]).find(|c| takes(part, *c))
 }
 
 /// Regressions persist beside the source file: proptest's default files them in

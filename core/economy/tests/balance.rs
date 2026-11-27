@@ -85,14 +85,14 @@ fn stock(want: i32) -> impl Strategy<Value = (i32, i32)> {
 }
 
 /// Levels read as `Stocks::level` reads them: a want per the cluster's
-/// reagents and its use of a boost, every target boost marked a boost.
+/// reagents and the fight, every target boost marked a boost.
 fn colony(room: RoomName, boosts: Vec<ResourceType>) -> impl Strategy<Value = Colony> {
     (prop::collection::vec(any::<bool>(), KINDS.len()), any::<bool>())
         .prop_flat_map(move |(spends, fights)| {
             let reagents: Vec<ResourceType> =
                 (KINDS.iter().zip(&spends)).filter_map(|(r, s)| s.then_some(*r)).collect();
             let wants: Vec<i32> =
-                (KINDS.iter()).map(|r| want(*r, &reagents, fights && boosts.contains(r))).collect();
+                (KINDS.iter()).map(|r| want(*r, &reagents, &boosts, fights)).collect();
             let boosted: Vec<bool> = KINDS.iter().map(|r| boosts.contains(r)).collect();
             (
                 Just((wants.clone(), boosted)),
@@ -177,14 +177,20 @@ proptest! {
     #![proptest_config(fabot_base::testing::config(CASES))]
 
     #[test]
-    fn want_is_a_reagent_batch_and_a_boost_only_while_used(
+    fn want_is_a_reagent_batch_and_a_boost_only_while_fighting(
         r in prop::sample::select(&KINDS[..]),
         reagent: bool,
+        boost: bool,
+        fights: bool,
     ) {
         let reagents: &[ResourceType] = if reagent { &[r] } else { &[] };
-        prop_assert_eq!(want(r, &[], false), 0);
-        prop_assert_eq!(want(r, reagents, false), if reagent { REAGENT } else { 0 });
-        prop_assert_eq!(want(r, reagents, true) - want(r, reagents, false), BOOST);
+        let boosts: &[ResourceType] = if boost { &[r] } else { &[] };
+        let unlisted = want(r, &[], &[], fights);
+        let quiet = want(r, reagents, boosts, false);
+        let fighting = want(r, reagents, boosts, true);
+        prop_assert_eq!(unlisted, 0);
+        prop_assert_eq!(quiet, if reagent { REAGENT } else { 0 });
+        prop_assert_eq!(fighting - quiet, if boost { BOOST } else { 0 });
     }
 
     #[test]

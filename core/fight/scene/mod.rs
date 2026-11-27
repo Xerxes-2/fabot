@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use fabot_atlas::{Atlas, Tree};
 use fabot_base::{
-    boost::{self, Act::Fight},
+    boost,
     declarations::{self, TacticRule},
     engine, tiles,
     tiles::Tile,
@@ -317,8 +317,10 @@ impl<'a> Scene<'a> {
         e: &Engagement,
         left: &casting::Boosts,
     ) -> boost::Stock {
-        let home = self.nearest(atlas, e).filter(|_| e.phase == Phase::Forming);
-        home.and_then(|(_, h)| left.get(&h).cloned()).unwrap_or_default()
+        (self.nearest(atlas, e).map(|(_, home)| home).filter(|_| e.phase == Phase::Forming))
+            .and_then(|home| left.get(&home))
+            .cloned()
+            .unwrap_or_default()
     }
 
     pub(super) fn walk_to(&self, atlas: &Atlas, e: &Engagement, from: RoomName) -> Option<i32> {
@@ -425,7 +427,7 @@ impl<'a> Scene<'a> {
                 let name = defend::cast_name(self.world.time, e.id, slot);
                 // A body priced boosted and cast elsewhere walks straight out.
                 let stock = asked.boosts.get_mut(&colony).filter(|_| Some(colony) == at);
-                if stock.is_some_and(|s| !boost::boosted_by(Fight, &body, s).compounds.is_empty()) {
+                if stock.is_some_and(|s| !boost::boosted_by(&body, s).compounds.is_empty()) {
                     boosts.push(Boosted { name: name.clone(), colony });
                 }
 

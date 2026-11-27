@@ -1,9 +1,7 @@
-use std::collections::HashSet;
-
 use super::{
     declarations::{self, Declarations},
     engine,
-    vocabulary::{self, Boost, Part, RESOURCES_ALL, ResourceType, damage_ratio, multiple},
+    vocabulary::{self, Part, RESOURCES_ALL, ResourceType, takes},
     world::{self, Id, Pos, RoomName, StructureType, World},
 };
 
@@ -43,7 +41,7 @@ pub struct Stock {
 impl Stock {
     pub fn of(world: &World, home: RoomName) -> Stock {
         let held = (RESOURCES_ALL.iter().copied())
-            .filter(|c| c.boost().is_some())
+            .filter(|c| vocabulary::ALL_BODY_PARTS.iter().any(|p| takes(*p, *c)))
             .map(|c| Held {
                 compound: c,
                 parts: home_holds(world, home, c) / engine::BOOST_MINERAL_PER_PART,
@@ -65,35 +63,20 @@ pub struct Visits {
     pub fills: usize,
 }
 
-/// What a body is boosted for: a fight's every part, or an economy act's.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Act {
-    Fight,
-    Upgrade,
-}
-
-/// What `compound` makes of `part` at `act`, in percent: TOUGH's by what it lets through.
-pub fn strength(act: Act, part: Part, compound: ResourceType) -> i32 {
-    let c = Some(compound);
-    match (act, part, compound.boost()) {
-        (Act::Fight, ..) => (100.0 * f64::from(multiple(part, c)) / damage_ratio(part, c)) as i32,
-        (Act::Upgrade, Part::Work, Some(Boost::UpgradeController(m))) => (100.0 * m).round() as i32,
-        (Act::Upgrade, ..) => 100,
-    }
-}
-
-pub fn takes(act: Act, part: Part, compound: ResourceType) -> bool {
-    strength(act, part, compound) > 100
+/// What `compound` makes of `part`, in percent: TOUGH's by what it lets through.
+pub fn strength(part: Part, compound: ResourceType) -> i32 {
+    (100.0 * f64::from(vocabulary::multiple(part, Some(compound)))
+        / vocabulary::damage_ratio(part, Some(compound))) as i32
 }
 
 /// Spent from `stock` as the body's visits spend it, so neither pricing nor
 /// the cast counts one stock or one energy twice. Part types go by
 /// `BOOSTS` rank: a colony short of stock runs short of the
 /// lowest-ranked.
-pub fn boosted_by(act: Act, body: &[Part], stock: &mut Stock) -> Visits {
-    let rank = |p: Part| (BOOSTS.iter()).filter(|(c, _)| takes(act, p, *c)).map(|(_, r)| *r).max();
+pub fn boosted_by(body: &[Part], stock: &mut Stock) -> Visits {
+    let rank = |p: Part| (BOOSTS.iter()).filter(|(c, _)| takes(p, *c)).map(|(_, r)| *r).max();
     let mut order: Vec<Part> = (vocabulary::ALL_BODY_PARTS.iter().copied())
-        .filter(|p| body.contains(p) && stock.held.iter().any(|h| takes(act, *p, h.compound)))
+        .filter(|p| body.contains(p) && stock.held.iter().any(|h| takes(*p, h.compound)))
         .collect();
     order.sort_by_key(|p| std::cmp::Reverse(rank(*p)));
 
@@ -102,8 +85,8 @@ pub fn boosted_by(act: Act, body: &[Part], stock: &mut Stock) -> Visits {
         let n = vocabulary::part_count_in(body, p);
         let fuel = stock.energy;
         let best = (stock.held.iter_mut())
-            .filter(|h| n <= fuel && takes(act, p, h.compound) && n <= h.parts)
-            .max_by_key(|h| strength(act, p, h.compound));
+            .filter(|h| n <= fuel && takes(p, h.compound) && n <= h.parts)
+            .max_by_key(|h| strength(p, h.compound));
         if let Some(h) = best {
             h.parts -= n;
             stock.energy -= n;
@@ -139,29 +122,30 @@ pub struct Boosting {
     pub left: Stock,
 }
 
-/// Read afresh each tick, nothing kept: of the bodies boosted here at full
-/// hits, a fight's first, then oldest first, as pricing spends a set in cast
-/// order, each still within its lab wait takes its share.
-pub fn boosting(world: &World, room: RoomName, boosted: &[(&str, Act)]) -> Boosting {
+/// Read afresh each tick, nothing kept: of the bodies a forming set's plan
+/// boosts here and no fight has touched, oldest first, as pricing spends a
+/// set in cast order, each still within its lab wait takes its share.
+pub fn boosting(world: &World, room: RoomName, boosted: &[&str]) -> Boosting {
     let ours = |c: &&world::Creep| c.owner.is_ours() && c.pos.room == room;
     let carrier = (world.creeps.iter())
         .filter(ours)
         .any(|c| !declarations::fights(&c.name) && c.store.capacity > 0);
-    let mut bodies: Vec<(Act, &world::Creep)> = (world.creeps.iter())
-        .filter(|c| ours(c) && c.hits == c.hits_max)
-        .filter_map(|c| Some((boosted.iter().find(|b| b.0 == c.name)?.1, c)))
+    let mut bodies: Vec<&world::Creep> = (world.creeps.iter())
+        .filter(ours)
+        .filter(|c| c.hits == c.hits_max && boosted.contains(&c.name.as_str()))
         .collect();
-    bodies.sort_by_key(|(act, c)| (*act, c.ticks_to_live, c.name.clone()));
+    bodies.sort_by(|a, b| (a.ticks_to_live, &a.name).cmp(&(b.ticks_to_live, &b.name)));
     let mut left = Stock::of(world, room);
     let mut waits: Vec<Wait> = Vec::new();
     let mut queue = LabQueue::default();
 
-    for (act, c) in bodies {
+    for c in bodies {
         let bare: Vec<Part> =
             (c.body.iter()).filter(|p| p.boost.is_none()).map(|p| p.kind).collect();
-        let had = c.body.iter().filter_map(|p| p.boost).collect::<HashSet<_>>().len();
+        let on: Vec<ResourceType> = c.body.iter().filter_map(|p| p.boost).collect();
+        let had = (0..on.len()).filter(|i| !on[..*i].contains(&on[*i])).count();
         let mut share = left.clone();
-        let by = boosted_by(act, &bare, &mut share);
+        let by = boosted_by(&bare, &mut share);
         let age = engine::lifetime(c.body.iter().map(|p| p.kind)) - c.ticks_to_live;
         // A fill for each compound it took and for its next, one come early too.
         let own = had + by.fills.max(usize::from(!by.compounds.is_empty()));
@@ -176,16 +160,12 @@ pub fn boosting(world: &World, room: RoomName, boosted: &[(&str, Act)]) -> Boost
         };
         left = share;
         queue.0 += by.fills;
-        let parts = bare.iter().filter(|p| takes(act, **p, compound)).count() as i32;
+        let (mineral, energy) = boost_need(c, compound);
         waits.push(Wait {
             creep: c.id,
             lab: lab.id,
             at: lab.pos,
-            load: Load {
-                compound,
-                mineral: parts * engine::BOOST_MINERAL_PER_PART,
-                energy: parts * engine::BOOST_ENERGY_PER_PART,
-            },
+            load: Load { compound, mineral, energy },
             // No carrier: the body fights unboosted rather than stand at a lab nothing fills.
             stands: holds_room_for(lab, compound) && (can_boost(lab, compound) || carrier),
             carried: can_boost(lab, compound) || carrier,
@@ -244,11 +224,16 @@ pub fn labs_in<'a>(world: &'a World, room: RoomName) -> impl Iterator<Item = &'a
 
 /// A load between a store and a lab is still the room's.
 pub fn home_holds(world: &World, room: RoomName, compound: ResourceType) -> i32 {
-    let kinds = [StructureType::Lab, StructureType::Terminal, StructureType::Storage];
     let stores = (world.rooms.iter())
         .filter(|r| r.name == room)
         .flat_map(|r| r.structures.iter())
-        .filter(|s| s.owner.is_ours() && kinds.contains(&s.kind))
+        .filter(|s| {
+            s.owner.is_ours()
+                && matches!(
+                    s.kind,
+                    StructureType::Lab | StructureType::Terminal | StructureType::Storage
+                )
+        })
         .map(|s| s.store.amount_of(compound))
         .chain(
             (world.creeps.iter())
@@ -267,6 +252,14 @@ fn holds_room_for(lab: &world::Structure, compound: ResourceType) -> bool {
 pub fn can_boost(lab: &world::Structure, compound: ResourceType) -> bool {
     lab.store.amount_of(compound) >= engine::BOOST_MINERAL_PER_PART
         && lab.store.amount_of(ResourceType::Energy) >= engine::BOOST_ENERGY_PER_PART
+}
+
+fn boost_need(creep: &world::Creep, compound: ResourceType) -> (i32, i32) {
+    let parts = (creep.body.iter())
+        .filter(|p| p.boost.is_none() && vocabulary::takes(p.kind, compound))
+        .count() as i32;
+
+    (parts * engine::BOOST_MINERAL_PER_PART, parts * engine::BOOST_ENERGY_PER_PART)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

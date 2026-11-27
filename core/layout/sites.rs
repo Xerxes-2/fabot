@@ -251,16 +251,16 @@ pub fn astray(plan: &Plan, census: &Census) -> Vec<(Tile, Tile)> {
     (census.rocked.iter()).filter(|(_, c)| !posted(plan, *c)).copied().collect()
 }
 
-pub fn placeable(item: &Item, level: i32, labs_from: i32) -> bool {
-    item.level <= level && (item.kind != StructureType::Lab || level >= labs_from)
+pub fn placeable(item: &Item, level: i32) -> bool {
+    item.level <= level && (item.kind != StructureType::Lab || engine::topped_out(level))
 }
 
 /// Whether a planned rampart's site may go down on a tile: one over a
 /// structure due by this level waits for it to stand; a later one would hold
 /// a ring tile open until it stands.
-pub fn rampart_fits(plan: &Plan, (level, labs_from): (i32, i32)) -> impl Fn(&Census, Tile) -> bool {
+pub fn rampart_fits(plan: &Plan, level: i32) -> impl Fn(&Census, Tile) -> bool {
     let mut under = [false; tiles::COUNT];
-    for i in plan.items.iter().filter(|i| placeable(i, level, labs_from)) {
+    for i in plan.items.iter().filter(|i| placeable(i, level)) {
         under[i.tile] |= !matches!(i.kind, StructureType::Road | StructureType::Rampart);
     }
     move |census, t| (census.solid[t] > 0 || !under[t]) && census.rampart[t] == 0
@@ -271,7 +271,7 @@ pub fn rampart_fits(plan: &Plan, (level, labs_from): (i32, i32)) -> impl Fn(&Cen
 pub fn place(
     rules: &Rules,
     census: &Census,
-    (level, labs_from): (i32, i32),
+    level: i32,
     plan: &Plan,
     budget: i32,
 ) -> Vec<Placement> {
@@ -284,7 +284,7 @@ pub fn place(
 
     let mut planned = [0u8; tiles::COUNT];
     let mut solid = [0u8; tiles::COUNT];
-    let rampart_fits = rampart_fits(plan, (level, labs_from));
+    let rampart_fits = rampart_fits(plan, level);
 
     for i in &plan.items {
         planned[i.tile] = 1;
@@ -364,9 +364,7 @@ pub fn place(
     // one for thousands of ticks ahead of the ring.
     let tunnel = |i: &&Item| i.kind == StructureType::Road && census.wall[i.tile] > 0;
     let rest = plan.items.iter().filter(|i| !tunnel(i));
-    for item in
-        rest.chain(plan.items.iter().filter(tunnel)).filter(|i| placeable(i, level, labs_from))
-    {
+    for item in rest.chain(plan.items.iter().filter(tunnel)).filter(|i| placeable(i, level)) {
         match tile_of(item) {
             Some(t)
                 if (placed.len() as i32) < budget
@@ -409,7 +407,6 @@ mod tests {
 
     use super::*;
     use crate::fixtures as fx;
-    const MAX: i32 = engine::CONTROLLER_MAX_LEVEL;
 
     #[test]
     fn no_controller_links_site_lands_on_a_seat_of_a_buffer_another_bot_set() {
@@ -463,7 +460,7 @@ mod tests {
                 let mut one = plan.clone();
                 one.items = vec![i.clone()];
 
-                for p in place(&Rules::vanilla(), &census, (MAX, MAX), &one, 1) {
+                for p in place(&Rules::vanilla(), &census, engine::CONTROLLER_MAX_LEVEL, &one, 1) {
                     let t = tiles::index(p.x, p.y);
 
                     assert!(
@@ -522,7 +519,7 @@ mod tests {
 
             let counted = census_of(&room, &[]);
             let rules = Rules::vanilla();
-            let placed = place(&rules, &counted, (case.level, MAX), &plan, case.budget);
+            let placed = place(&rules, &counted, case.level, &plan, case.budget);
 
             let held = |kind: StructureType| -> i32 {
                 (room.structures.iter().filter(|s| s.kind == kind).count()
@@ -565,7 +562,7 @@ mod tests {
                 let t = i.tile;
                 let added = placed.iter().filter(|q| q.kind == i.kind).count() as i32;
 
-                placeable(i, case.level, MAX)
+                placeable(i, case.level)
                     && !room.sites.iter().any(|x| tiles::of_pos(&x.pos) == t)
                     && !tiles_placed.contains(&t)
                     && !(i.kind == StructureType::Container && counted.served[t] > 0)
@@ -622,7 +619,7 @@ mod tests {
             plan.items.append(&mut plan.ring);
             let mut room = colony.room.clone();
             loop {
-                let placed = place(&rules, &census_of(&room, &[]), (level, MAX), &plan, i32::MAX);
+                let placed = place(&rules, &census_of(&room, &[]), level, &plan, i32::MAX);
                 if placed.is_empty() {
                     break;
                 }
@@ -670,18 +667,16 @@ mod tests {
                 plan.ring.iter().filter(|i| i.kind == StructureType::Rampart).cloned().collect();
             plan.items.append(&mut plan.ring);
             for level in crate::RING_LEVEL..=engine::CONTROLLER_MAX_LEVEL {
-                let fits = rampart_fits(&plan, (level, MAX));
+                let fits = rampart_fits(&plan, level);
                 loop {
                     let census = census_of(&room, &[]);
-                    let placed = place(&rules, &census, (level, MAX), &plan, i32::MAX);
+                    let placed = place(&rules, &census, level, &plan, i32::MAX);
                     if placed.is_empty() {
                         break;
                     }
                     let sited = |t: Tile| placed.iter().any(|p| tiles::index(p.x, p.y) == t);
                     let open = (ring.iter())
-                        .filter(|i| {
-                            placeable(i, level, MAX) && fits(&census, i.tile) && !sited(i.tile)
-                        })
+                        .filter(|i| placeable(i, level) && fits(&census, i.tile) && !sited(i.tile))
                         .map(|i| i.tile)
                         .next();
                     let tunnels = placed.iter().any(tunnel);
@@ -701,7 +696,7 @@ mod tests {
     }
 
     #[test]
-    fn no_lab_is_placed_below_the_level_labs_come_from() {
+    fn no_lab_is_placed_below_the_top_level() {
         let rules = Rules::vanilla();
         for colony in fx::samples(14).take(fx::MAX_TEST) {
             let Some((_, mut plan)) = fx::plan_of(&colony) else {
@@ -709,11 +704,8 @@ mod tests {
             };
             plan.items.retain(|i| i.kind == StructureType::Lab);
             for level in 6..=engine::CONTROLLER_MAX_LEVEL {
-                for labs_from in [MAX - 1, MAX] {
-                    let census = census_of(&colony.room, &[]);
-                    let placed = place(&rules, &census, (level, labs_from), &plan, i32::MAX);
-                    assert_eq!(placed.is_empty(), level < labs_from, "{level} {labs_from}");
-                }
+                let placed = place(&rules, &census_of(&colony.room, &[]), level, &plan, i32::MAX);
+                assert_eq!(placed.is_empty(), level < engine::CONTROLLER_MAX_LEVEL, "{level}");
             }
         }
     }
@@ -743,7 +735,7 @@ mod tests {
                     unfit: Vec::new(),
                     muster: None,
                 };
-                let placed = place(&rules, &census_of(&room, &[]), (6, MAX), &plan, 1);
+                let placed = place(&rules, &census_of(&room, &[]), 6, &plan, 1);
                 assert_eq!(placed.len(), 1, "{own} not placed beside {stood}, ore {ore}");
             }
         }
@@ -791,7 +783,7 @@ mod tests {
                 }
             }
             let census = census_of(&room, &[]);
-            let placed = place(&rules, &census, (MAX, MAX), &one, i32::MAX);
+            let placed = place(&rules, &census, engine::CONTROLLER_MAX_LEVEL, &one, i32::MAX);
             for p in placed.iter().filter(|p| p.kind == StructureType::Link) {
                 let t = tiles::index(p.x, p.y);
                 let Some(post) = posts.iter().find(|post| tiles::range(**post, t) == 1) else {
@@ -838,8 +830,7 @@ mod tests {
                 ));
                 let mut one = plan.clone();
                 one.items = vec![post.clone()];
-                let placed =
-                    place(&rules, &census_of(&room, &[]), (haul_level(&rules), MAX), &one, 1);
+                let placed = place(&rules, &census_of(&room, &[]), haul_level(&rules), &one, 1);
                 assert_eq!(placed.len(), 1, "{} beside {rock} not placed", post.tile);
             }
         }
