@@ -80,8 +80,8 @@ impl Real {
             avoid: &avoid,
             rules: &world.rules,
         };
-
-        let (on, walk) = ((self.tactic, &self.order[..]), (self.phase, false, true));
+        let apart = !matches!(self.tactic, Tactic::BlobClose | Tactic::BlobKite);
+        let (on, walk) = ((self.tactic, &self.order[..]), (self.phase, apart, true));
         let centre = (group.centre, RANGED_RANGE);
         let fortified = fortified(&world);
         let blob = formation(&mut sight, on, walk, ours.clone(), centre, &fortified);
