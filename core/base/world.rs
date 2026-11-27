@@ -340,19 +340,19 @@ impl Store {
 }
 
 pub trait Built: Copy {
-    /// Hivemind's (MIT) build-out, and the ore RCL6 is reached for (owner).
-    fn pays_back(self) -> bool;
+    /// Builders draw the reserve for it: a build-out, or a rampart, whose site costs one energy.
+    fn drawn_for(self) -> bool;
     fn has_store(self) -> bool;
     fn has_cooldown(self) -> bool;
     fn walkable(self) -> bool;
 }
 
 impl Built for StructureType {
-    fn pays_back(self) -> bool {
+    fn drawn_for(self) -> bool {
         use StructureType::*;
         matches!(
             self,
-            Spawn | Extension | Container | Storage | Link | Tower | Extractor | Terminal
+            Spawn | Extension | Container | Storage | Link | Tower | Extractor | Terminal | Rampart
         )
     }
 

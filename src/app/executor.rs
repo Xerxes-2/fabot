@@ -136,6 +136,7 @@ impl Pack {
                 (self.call(ROOM, name, "createConstructionSite").int(*x).int(*y)).text(kind)
             }
             Action::Room(_, RoomAct::Destroy(id)) => self.call(OBJECT, id, "destroy"),
+            Action::Room(_, RoomAct::RemoveSite(id)) => self.call(OBJECT, id, "remove"),
             Action::Tower(id, TowerAct::Attack(t)) => self.call(OBJECT, id, "attack").by_id(t),
             Action::Tower(id, TowerAct::Heal(t)) => self.call(OBJECT, id, "heal").by_id(t),
             Action::Tower(id, TowerAct::Repair(t)) => self.call(OBJECT, id, "repair").by_id(t),

@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use fabot_atlas::Atlas;
 use fabot_base::{
     engine,
-    tiles::{self, Tile},
+    tiles::{self, Tile, TileSet},
     world::{Built, Creep, KIND_COUNT, Pos, Room, Rules, Structure, StructureType, terrain},
 };
 
@@ -53,7 +53,10 @@ pub struct Census {
     pub held: [i32; KIND_COUNT],
     /// One under a creep is not counted, so it never holds back the rest.
     pub pending: i32,
-    pub paying: i32,
+    pub drawn: i32,
+    pub ramparts: i32,
+    /// The storage holds the reserve: the surplus pays a rampart's mend.
+    pub stocked: bool,
 }
 
 pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
@@ -99,8 +102,7 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
         (solid[t], walkable[t]) = (1, 0);
     }
 
-    let mut pending = 0;
-    let mut paying = 0;
+    let (mut pending, mut drawn, mut ramparts) = (0, 0, 0);
 
     for s in &room.sites {
         let t = tiles::of_pos(&s.pos);
@@ -114,7 +116,8 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
         // A site no creep crosses is not built while a creep stands on it.
         if s.owner.is_ours() && (s.kind.walkable() || occupied[t] == 0) {
             pending += 1;
-            paying += i32::from(s.kind.pays_back());
+            drawn += i32::from(s.kind.drawn_for());
+            ramparts += i32::from(s.kind == StructureType::Rampart);
         }
     }
 
@@ -216,7 +219,9 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
         seat,
         held,
         pending,
-        paying,
+        drawn,
+        ramparts,
+        stocked: false,
     }
 }
 
@@ -266,6 +271,12 @@ pub fn rampart_fits(plan: &Plan, level: i32) -> impl Fn(&Census, Tile) -> bool {
     move |census, t| (census.solid[t] > 0 || !under[t]) && census.rampart[t] == 0
 }
 
+/// A planned rampart's tile until it stands: the engine takes one site a tile.
+pub fn unpaved<'a>(plan: &'a Plan, census: &'a Census) -> impl Iterator<Item = Tile> + 'a {
+    let ramparts = plan.items.iter().filter(|i| i.kind == StructureType::Rampart);
+    ramparts.map(|i| i.tile).filter(|t| census.rampart[*t] == 0)
+}
+
 /// The engine stacks a road only with a rampart, any other kind only with a
 /// road or a rampart.
 pub fn place(
@@ -276,7 +287,7 @@ pub fn place(
     budget: i32,
 ) -> Vec<Placement> {
     let mut placed: Vec<Placement> = Vec::new();
-    let mut paid = census.paying;
+    let mut drawn = census.drawn;
     let mut added = [0i32; KIND_COUNT];
     let added_of = |added: &[i32; KIND_COUNT], kind: StructureType| -> i32 { added[kind as usize] };
 
@@ -360,22 +371,27 @@ pub fn place(
                 .all(|rc| astray.contains(rc))
     };
 
+    let unpaved: TileSet = unpaved(plan, census).collect();
     // A tunnel takes only the slots nothing else wants: its site would hold
-    // one for thousands of ticks ahead of the ring.
+    // one for thousands of ticks.
     let tunnel = |i: &&Item| i.kind == StructureType::Road && census.wall[i.tile] > 0;
     let rest = plan.items.iter().filter(|i| !tunnel(i));
     for item in rest.chain(plan.items.iter().filter(tunnel)).filter(|i| placeable(i, level)) {
         match tile_of(item) {
             Some(t)
                 if (placed.len() as i32) < budget
-                    && if item.kind.pays_back() {
-                        paid
+                    // Below the reserve builders take only drawn sites.
+                    && if item.kind.drawn_for() {
+                        drawn
                     } else {
                         census.pending + placed.len() as i32
                     } < SITES_IN_FLIGHT
                     && census.site[t] == 0
                     && (if item.kind == StructureType::Rampart {
+                        // Its mend outranks the build-out's sites.
                         rampart_fits(census, t)
+                            && (census.stocked
+                                || drawn == census.ramparts + added_of(&added, item.kind))
                     } else {
                         census.solid[t] == 0
                     })
@@ -384,12 +400,13 @@ pub fn place(
                     && (item.kind != StructureType::Container
                         || census.served[t] == 0
                         || replaces(t))
-                    && (item.kind != StructureType::Road || census.road[t] == 0)
+                    && (item.kind != StructureType::Road
+                        || census.road[t] == 0 && !unpaved.contains(t))
                     && held_of(census, item.kind) + added_of(&added, item.kind)
                         < rules.allowed(item.kind, level) =>
             {
                 taken.insert(t);
-                paid += i32::from(item.kind.pays_back());
+                drawn += i32::from(item.kind.drawn_for());
                 added[item.kind as usize] = added_of(&added, item.kind) + 1;
 
                 placed.push(Placement { x: tiles::x_of(t), y: tiles::y_of(t), kind: item.kind });
@@ -528,11 +545,11 @@ mod tests {
 
             let tiles_placed: Vec<Tile> = placed.iter().map(|p| tiles::index(p.x, p.y)).collect();
 
-            let paid = |kinds: &mut dyn Iterator<Item = StructureType>| {
-                kinds.filter(|k| k.pays_back()).count() as i32
+            let drawn_of = |kinds: &mut dyn Iterator<Item = StructureType>| {
+                kinds.filter(|k| k.drawn_for()).count() as i32
             };
-            let paying = paid(&mut room.sites.iter().map(|s| s.kind));
-            let paying_after = paying + paid(&mut placed.iter().map(|p| p.kind));
+            let drawn = drawn_of(&mut room.sites.iter().map(|s| s.kind));
+            let drawn_after = drawn + drawn_of(&mut placed.iter().map(|p| p.kind));
             let after = room.sites.len() as i32 + placed.len() as i32;
 
             let solid =
@@ -573,12 +590,12 @@ mod tests {
             assert!(may_place(&rules, &counted, case.level) || placed.is_empty());
             let full = |i: &Item| {
                 (placed.len() as i32) >= case.budget
-                    || if i.kind.pays_back() { paying_after } else { after } >= SITES_IN_FLIGHT
+                    || if i.kind.drawn_for() { drawn_after } else { after } >= SITES_IN_FLIGHT
             };
             assert!((placed.len() as i32) <= case.budget.max(0));
-            assert!(paying_after <= SITES_IN_FLIGHT.max(paying));
+            assert!(drawn_after <= SITES_IN_FLIGHT.max(drawn));
             assert!((placed.iter().enumerate()).all(|(i, p)| {
-                p.kind.pays_back() || room.sites.len() + i < SITES_IN_FLIGHT as usize
+                p.kind.drawn_for() || room.sites.len() + i < SITES_IN_FLIGHT as usize
             }));
             assert!(plan.items.iter().all(|i| !admitted(i) || full(i)));
             assert_eq!(fx::distinct(&tiles_placed), tiles_placed);
@@ -643,56 +660,49 @@ mod tests {
         }
     }
 
-    /// A tunnel's site holds its slot for thousands of ticks, so it takes
-    /// none a ring rampart could.
+    /// Below the reserve no builder takes a road site, so none may hold a
+    /// rampart's slot or tile.
     #[test]
-    fn no_tunnel_takes_a_slot_while_a_ring_rampart_is_placeable_at_any_ring_level() {
+    fn every_ring_rampart_is_placed_while_no_road_site_finishes() {
         let rules = Rules::vanilla();
-        let mut tunnelled = 0;
-        for real in fabot_base::testing::real_rooms().step_by(3) {
+        for real in fabot_base::testing::real_rooms().step_by(3).take(8) {
             let mut room = real.room();
             let Some(mut plan) =
                 crate::ground::of_room(&room).and_then(|g| crate::plan::of_ground(&rules, &g))
             else {
                 continue;
             };
-            let wall = census_of(&room, &[]).wall;
-            let tunnel =
-                |p: &Placement| p.kind == StructureType::Road && wall[tiles::index(p.x, p.y)] > 0;
-            if !plan.items.iter().any(|i| i.kind == StructureType::Road && wall[i.tile] > 0) {
-                continue;
-            }
-            tunnelled += 1;
             let ring: Vec<Item> =
                 plan.ring.iter().filter(|i| i.kind == StructureType::Rampart).cloned().collect();
             plan.items.append(&mut plan.ring);
             for level in crate::RING_LEVEL..=engine::CONTROLLER_MAX_LEVEL {
-                let fits = rampart_fits(&plan, level);
                 loop {
-                    let census = census_of(&room, &[]);
-                    let placed = place(&rules, &census, level, &plan, i32::MAX);
+                    let placed = place(&rules, &census_of(&room, &[]), level, &plan, i32::MAX);
                     if placed.is_empty() {
                         break;
                     }
-                    let sited = |t: Tile| placed.iter().any(|p| tiles::index(p.x, p.y) == t);
-                    let open = (ring.iter())
-                        .filter(|i| placeable(i, level) && fits(&census, i.tile) && !sited(i.tile))
-                        .map(|i| i.tile)
-                        .next();
-                    let tunnels = placed.iter().any(tunnel);
-                    assert!(open.is_none() || !tunnels, "{} {level} {open:?}", real.name);
                     for p in placed {
                         let t = tiles::index(p.x, p.y);
                         let id = format!("s{t}.{}", p.kind as usize);
-                        room.structures.push(fx::structure(&id, p.kind, Owner::Ours, t));
+                        if p.kind == StructureType::Road {
+                            room.sites.push(fx::site(&id, p.kind, t));
+                        } else {
+                            room.structures.push(fx::structure(&id, p.kind, Owner::Ours, t));
+                        }
                     }
                 }
-            }
-            if tunnelled >= 6 {
-                break;
+                for i in ring.iter().filter(|i| placeable(i, level)) {
+                    assert!(
+                        (room.structures.iter())
+                            .any(|s| s.kind == StructureType::Rampart
+                                && tiles::of_pos(&s.pos) == i.tile),
+                        "{} {level} {}",
+                        real.name,
+                        i.tile
+                    );
+                }
             }
         }
-        assert!(tunnelled >= 6, "{tunnelled}");
     }
 
     #[test]

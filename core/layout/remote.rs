@@ -11,7 +11,10 @@ use fabot_base::{
     world::{Controller, Pos, Room, RoomName, StructureType, World, terrain},
 };
 
-use super::{shape::Plan, sites::SITES_IN_FLIGHT};
+use super::{
+    shape::Plan,
+    sites::{self, Census, SITES_IN_FLIGHT},
+};
 
 const HAULER: Mover = Mover {
     footprint: Footprint::One,
@@ -99,12 +102,12 @@ fn sink_for<'p>(
 
 /// v1's seat: the shortest walk out toward home. The owner's rule: the walk
 /// is paved once its container stands.
-pub fn sites<'p>(
+pub fn sites<'p, 'q>(
     atlas: &mut Atlas,
     world: &World,
     derived: &atlas::Derived,
     (planned, plan_of): (&[Action], &dyn Fn(RoomName) -> Option<&'p ColonyPlan>),
-    plans: impl IntoIterator<Item = &'p Plan>,
+    plans: impl IntoIterator<Item = (&'q Plan, &'q Census)>,
     mut budget: i32,
 ) -> Vec<Action> {
     let (colonies, outposts) = (&derived.colonies, &derived.worked);
@@ -124,7 +127,12 @@ pub fn sites<'p>(
 
     // A planned structure would bury the road.
     let mut held: BTreeMap<RoomName, TileSet> = BTreeMap::new();
-    for plan in plans {
+    for (plan, census) in plans {
+        if let Some(&room) = rooms.get(&plan.room) {
+            opened(&mut taken, &mut pending, planned, room);
+            let open = taken.entry(plan.room).or_default();
+            sites::unpaved(plan, census).for_each(|t| _ = open.insert(t));
+        }
         let solid = held.entry(plan.room).or_default();
         for t in plan.solid() {
             solid.insert(t);
@@ -231,14 +239,14 @@ mod tests {
     /// Each sampled real room planned as a colony, its neighbours its
     /// outposts, their sites built as placed until none is left to place.
     #[test]
-    fn no_outpost_road_lies_on_a_tile_its_homes_plan_holds_solid() {
+    fn no_outpost_road_lies_on_a_tile_its_homes_plan_holds_solid_or_owes_a_rampart() {
         let real: BTreeMap<RoomName, RealRoom> =
             testing::real_rooms().map(|r| (r.name, r)).collect();
         let fixture = "E25S8".parse::<RoomName>().expect("a room name");
         let mut paved = 0;
         for home in real.keys().copied().step_by(40).chain([fixture]) {
             let drawn = ground::of_room(&real[&home].room());
-            let Some(plan) = drawn.and_then(|g| plan::of_ground(&Rules::vanilla(), &g)) else {
+            let Some(mut plan) = drawn.and_then(|g| plan::of_ground(&Rules::vanilla(), &g)) else {
                 continue;
             };
             let Some(pile) = plan.pile() else {
@@ -283,7 +291,9 @@ mod tests {
                 muster: None,
             };
             let plan_of = |room: RoomName| (room == home).then_some(&colony);
-            let solid: BTreeSet<Tile> = plan.solid().collect();
+            let mut solid: BTreeSet<Tile> = plan.solid().collect();
+            solid.extend(plan.ring.iter().map(|i| i.tile));
+            plan.items.append(&mut plan.ring);
             for _ in 0..100 {
                 let mut atlas = Atlas::of_world(&world);
                 let mut derived = atlas::derive(&world, &mut atlas);
@@ -291,7 +301,9 @@ mod tests {
                     .filter(|o| derived.trees.iter().any(|(_, t)| t.contains(o.room)))
                     .cloned()
                     .collect();
-                let placed = sites(&mut atlas, &world, &derived, (&[], &plan_of), [&plan], 100);
+                let census = sites::census_of(world.room(home).expect("home"), &[]);
+                let plans = [(&plan, &census)];
+                let placed = sites(&mut atlas, &world, &derived, (&[], &plan_of), plans, 100);
                 if placed.is_empty() {
                     break;
                 }

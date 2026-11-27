@@ -376,13 +376,8 @@ impl Ground {
     /// A site that waits pays back nothing, so while one stands its builders
     /// draw the reserve.
     pub fn kept_from_builders(&self, reserve: i32) -> i32 {
-        if self.sites.iter().any(|s| drawn_for(s.kind)) { 0 } else { reserve }
+        if self.sites.iter().any(|s| s.kind.drawn_for()) { 0 } else { reserve }
     }
-}
-
-/// A rampart guards the reserve and costs one energy.
-pub fn drawn_for(kind: StructureType) -> bool {
-    kind.pays_back() || kind == StructureType::Rampart
 }
 
 /// The lab a waiting body walks to, and what the colony's stores owe it.

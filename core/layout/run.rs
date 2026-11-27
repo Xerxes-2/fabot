@@ -13,7 +13,7 @@ pub fn decide_over(rules: &Rules, colonies: &[derive::Colony], mut budget: i32) 
     for colony in colonies {
         if let Some(plan) = &colony.plan
             && budget > 0
-            && colony.census.paying < sites::SITES_IN_FLIGHT
+            && colony.census.drawn < sites::SITES_IN_FLIGHT
             && sites::may_place(rules, &colony.census, colony.target)
         {
             for p in sites::place(rules, &colony.census, colony.target, plan, budget) {
@@ -27,6 +27,9 @@ pub fn decide_over(rules: &Rules, colonies: &[derive::Colony], mut budget: i32) 
             (colony.buried.iter().chain(&colony.astray))
                 .filter(|_| colony.hostiles.is_empty())
                 .map(|id| Action::Room(colony.room, RoomAct::Destroy(*id))),
+        );
+        intents.extend(
+            colony.unpaved.iter().map(|id| Action::Room(colony.room, RoomAct::RemoveSite(*id))),
         );
         intents.extend(towers::fire(
             &colony.towers,
@@ -62,7 +65,7 @@ pub fn decide(ctx: &mut Context, standing: &mut LayoutState) -> ModuleOutput {
         world,
         ctx.derived,
         (&home, &planned),
-        colonies.iter().filter_map(|c| c.plan.as_ref()),
+        colonies.iter().filter_map(|c| Some((c.plan.as_ref()?, &c.census))),
         budget - placed,
     );
 

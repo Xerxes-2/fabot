@@ -16,13 +16,14 @@ use fabot_base::{
     },
     vocabulary::{Part, ResourceType::Energy},
     world::{
-        Controller, Creep, Id, Owner, Pos, Room, RoomName, Rules, StructureType, World, hostiles,
+        Built, Controller, Creep, Id, Owner, Pos, Room, RoomName, Rules, StructureType, World,
+        hostiles,
     },
 };
 use fabot_economy::{
     abandon,
     bodies::{self, Pattern},
-    derived::{drawn_for, stores_of},
+    derived::stores_of,
     task::{Assignment, Task},
 };
 use fabot_fight::shape::{Cast, Engagement, Phase};
@@ -494,6 +495,7 @@ pub fn verb(intent: &Action, gone: bool) -> Cow<'static, str> {
         Action::Creep(_, act) => act.into(),
         Action::Room(_, RoomAct::CreateSite(_, _, kind)) => return format!("site:{kind}").into(),
         Action::Room(_, RoomAct::Destroy(_)) => "destroy",
+        Action::Room(_, RoomAct::RemoveSite(_)) => "removeSite",
         Action::Tower(_, TowerAct::Attack(_)) => "attack",
         Action::Tower(_, TowerAct::Heal(_)) => "heal",
         Action::Tower(_, TowerAct::Repair(_)) => "repair",
@@ -1009,7 +1011,7 @@ impl Metrics {
             let Some(colony) = colony_of(r.name) else {
                 continue;
             };
-            for s in (r.sites.iter()).filter(|s| s.owner.is_ours() && drawn_for(s.kind)) {
+            for s in (r.sites.iter()).filter(|s| s.owner.is_ours() && s.kind.drawn_for()) {
                 let fresh = Stale { progress: s.progress, since: time, at: s.pos, kind: s.kind };
                 let stale = self.sites.entry(s.id).or_insert(fresh);
                 if stale.progress != s.progress || built.contains(&colony) {

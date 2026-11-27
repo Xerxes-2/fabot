@@ -3,7 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use fabot_base::{
     declarations::{ColonyPlan, Stage},
     tiles::{self, Tile, TileSet},
-    world::{Creep, Id, Pos, RoomName, Structure, StructureType, World},
+    vocabulary::ResourceType,
+    world::{Creep, Id, Pos, RoomName, Site, Structure, StructureType, World},
 };
 
 use super::{
@@ -25,6 +26,7 @@ pub struct Colony {
     pub ramparts: Vec<Structure>,
     pub buried: Vec<Id>,
     pub astray: Vec<Id>,
+    pub unpaved: Vec<Id>,
 }
 
 /// `ARCHITECTURE.md` §5: Hivemind's search spread over ticks.
@@ -94,7 +96,9 @@ pub fn colonies(
             .filter(|s| (s.owner.is_ours() || s.kind == StructureType::Wall) && !s.walkable)
             .map(|s| tiles::of_pos(&s.pos))
             .collect();
-        let census = sites::census_of(room, &ours);
+        let mut census = sites::census_of(room, &ours);
+        let stock = room.storage().map(|s| s.store.amount_of(ResourceType::Energy));
+        census.stocked = stock.is_some_and(|n| n >= colony.reserve);
         let astray: Vec<Tile> = match &plan {
             Some(plan) => (sites::astray(plan, &census).into_iter())
                 .filter(|(rock, _)| {
@@ -112,6 +116,8 @@ pub fn colonies(
             None => Vec::new(),
         };
 
+        let owed: TileSet = plan.iter().flat_map(|p| sites::unpaved(p, &census)).collect();
+        let road = |s: &&Site| s.kind == StructureType::Road && s.owner.is_ours();
         found.push(Colony {
             room: room.name,
             target: colony.target,
@@ -148,6 +154,9 @@ pub fn colonies(
                         && astray.contains(&tiles::of_pos(&c.pos))
                 })
                 .map(|c| c.id)
+                .collect(),
+            unpaved: (room.sites.iter().filter(road))
+                .filter_map(|s| owed.contains(tiles::of_pos(&s.pos)).then_some(s.id))
                 .collect(),
         });
     }
@@ -224,6 +233,55 @@ mod tests {
             buried += solid.len();
         }
         assert!(buried > 0);
+    }
+
+    /// A road site laid before the ring was declared holds its rampart off
+    /// below the reserve, where no builder takes it.
+    #[test]
+    fn every_road_site_on_an_unwalled_ring_tile_is_removed_and_no_other() {
+        let mut removed = 0;
+        for real in fabot_base::testing::real_rooms().step_by(200) {
+            let mut world = fabot_base::testing::world(r#"{"rooms":[]}"#);
+            world.rooms.push(real.room());
+            let terrain = world.rooms[0].terrain;
+            let open = |t: Tile| terrain.is_some_and(|g| g.get_bits()[t.index()] == 0);
+            let spawn =
+                tiles::all().find(|t| open(*t) && !tiles::on_edge(*t)).expect("open ground");
+            fabot_base::testing::colonize(&mut world, real.name, 8, spawn);
+            let standing = settled(&world, BTreeMap::new());
+            let Some(plan) = standing[&real.name].plan.clone() else {
+                continue;
+            };
+            let ring = plan.ring.iter().filter(|i| i.kind == StructureType::Rampart);
+            let mut owed = BTreeSet::new();
+            for (k, i) in ring.enumerate() {
+                let (t, pos) = (i.tile, tiles::to_pos(real.name, i.tile));
+                let id = format!("r{t}");
+                if k % 2 == 0 {
+                    let rampart = fabot_base::testing::built(&id, StructureType::Rampart, pos);
+                    world.rooms[0].structures.push(rampart);
+                } else {
+                    owed.insert(Id::from(id.as_str()));
+                }
+                let (kind, owner) = (StructureType::Road, Owner::Ours);
+                let site = fabot_base::world::Site {
+                    id: id.as_str().into(),
+                    kind,
+                    pos,
+                    owner,
+                    progress: 0,
+                    progress_total: 300,
+                };
+                world.rooms[0].sites.push(site);
+            }
+            let owned = BTreeSet::from([real.name]);
+            let mut plans = fx::exploited(&owned);
+            plans[0].ring = true;
+            let (found, _) = colonies(&world, &owned, &plans, standing);
+            assert_eq!(found[0].unpaved.iter().copied().collect::<BTreeSet<Id>>(), owed);
+            removed += owed.len();
+        }
+        assert!(removed > 0);
     }
 
     /// An older plan's walls stand where the plan now leaves an exit's gap

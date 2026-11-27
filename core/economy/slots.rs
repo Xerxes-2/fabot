@@ -13,12 +13,12 @@ use fabot_base::{
     tiles,
     tuning::Tuning,
     vocabulary::{Part, ResourceType, part_count_in},
-    world::{Controller, Id, Pos, RoomName, Rules, Spawn, StructureType},
+    world::{Built, Controller, Id, Pos, RoomName, Rules, Spawn, StructureType},
 };
 
 use super::{
     bodies::{self, Leg, Pattern},
-    derived::{Body, Derived, Ground, MineralFact, SiteFact, drawn_for},
+    derived::{Body, Derived, Ground, MineralFact, SiteFact},
     task::Assignment,
 };
 
@@ -455,7 +455,7 @@ impl Plan<'_> {
             if own || raised || away {
                 owed += g.sites.iter().map(|s| s.left).sum::<i32>();
                 payback +=
-                    (g.sites.iter()).filter(|s| drawn_for(s.kind)).map(|s| s.left).sum::<i32>();
+                    (g.sites.iter()).filter(|s| s.kind.drawn_for()).map(|s| s.left).sum::<i32>();
             }
             repairs |= !g.repairs.is_empty();
             let haul = derived.haul(owners, gi);

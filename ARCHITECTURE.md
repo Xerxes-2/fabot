@@ -425,9 +425,8 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   `❓` The planner ranks a tunnel at path cost (wall 30), not its upkeep
   (×150, ×750 on swamp+wall): Hivemind's matrix is kept whole, so a centre
   whose roads tunnel can win (E3S9, gen 1141).
-  `❓` Outpost road sites compete with the ring for `SITES_IN_FLIGHT` (gen 173:
-  a newly reached outpost's roads held the ring back to t34000); trial pending:
-  outpost roads yield slots to a declared ring.
+  A rampart's site waits only on drawn sites, and below reserve on the build-out;
+  no road takes a planned rampart's tile before it stands, and a road site there goes.
   A single-source room whose centre sits farther from its source ramps slower
   (E23S9 −3.6% to −4.9%): the owner accepted it as the port's cost, not a bug.
   `❓` The source container's seat (`build::harvest_spot`, Hivemind's most free
@@ -639,6 +638,9 @@ with one phase machine per kind under `core/fight/kinds/`.
   prey seen t20000-24000 while beta works the same rooms). Patrol preyed rooms to keep vision?
   `❓` A sweep's hunter still plinks a structure on some self-play seeds
   (sweep-hunts-creeps-before-containers: main seed 6, sweep 4 E9S8 t10712).
+  `❓` Is a sweep still worth sending at a rival whose ring stands? With our
+  ring built below reserve, beta rings too and alpha's kills fell (seeds 9-13:
+  18 23 16 22 23 before, 11 21 17 15 8 after).
 
 - **`Stronghold`** (`kinds/stronghold.rs`, L1–L3): not priced by
   `Exchange` (owner): a level's towers, ramparts, hits and garrison are the

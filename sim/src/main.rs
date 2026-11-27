@@ -229,7 +229,6 @@ fn main() {
     let mut k = map.stand(&seats, args.seed, args.ended, args.badge.clone());
     let mut watch = (args.watch).map(|(port, every)| watch::Watch::open(&k, &room, port, every));
     let terrains = map.terrains();
-
     let closed: BTreeSet<_> = map.closed.iter().filter_map(|r| r.parse().ok()).collect();
     let maps = || driver::Maps(terrains.clone(), closed.clone());
     let twin = || reset::Twin::new(args.reset_every, args.check);

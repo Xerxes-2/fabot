@@ -869,7 +869,7 @@ impl<'a> Jobs<'a> {
             Tower | Extension | Link => 1,
             Container if crowded(&s.pos) => 1,
             Container => 2,
-            _ if s.kind.pays_back() => 3,
+            _ if s.kind.drawn_for() => 3,
             _ => 4,
         };
         let sites = (grounds.iter()).flat_map(|g| g.sites.iter());

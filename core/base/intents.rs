@@ -82,11 +82,8 @@ pub fn performed(acts: &[CreepAct]) -> Vec<CreepAct> {
         let ((sa, ra), (sb, rb)) = (a.pipeline(), b.pipeline());
         sa & sb != 0 && (rb < ra || rb == ra && j > i)
     };
-    acts.iter()
-        .enumerate()
-        .filter(|a| !acts.iter().enumerate().any(|b| beats(*a, b)))
-        .map(|(_, a)| a.clone())
-        .collect()
+    let kept = |a: &(usize, &CreepAct)| !acts.iter().enumerate().any(|b| beats(*a, b));
+    acts.iter().enumerate().filter(kept).map(|(_, a)| a.clone()).collect()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -99,6 +96,7 @@ pub enum SpawnAct {
 pub enum RoomAct {
     CreateSite(i32, i32, StructureType),
     Destroy(Id),
+    RemoveSite(Id),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

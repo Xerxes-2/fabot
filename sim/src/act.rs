@@ -333,10 +333,11 @@ impl Run<'_> {
                 self.stored.push(r, "createConstructionSite", value);
                 Ok(())
             }
-            Action::Room(room, RoomAct::Destroy(id)) => {
-                let (r, _) = self.target(*id)?;
-                let value = json!({ "id": id, "roomName": room.to_string() });
-                self.stored.push(r, "destroyStructure", value);
+            Action::Room(room, RoomAct::Destroy(id) | RoomAct::RemoveSite(id)) => {
+                let (r, o) = self.target(*id)?;
+                let site = text(o, atom!("type")) == "constructionSite";
+                let name = if site { "removeConstructionSite" } else { "destroyStructure" };
+                self.stored.push(r, name, json!({ "id": id, "roomName": room.to_string() }));
                 Ok(())
             }
             Action::Tower(id, act) => {
