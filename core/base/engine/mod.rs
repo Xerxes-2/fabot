@@ -35,6 +35,9 @@ pub fn spawn_door(spawn: Tile, at: Tile) -> bool {
 pub fn carry_capacity(body: &[Part]) -> i32 {
     part_count_in(body, Part::Carry) * CARRY_PART_CAPACITY
 }
+pub fn part_capacity(boost: Option<ResourceType>) -> i32 {
+    multiple(Part::Carry, boost) * CARRY_PART_CAPACITY
+}
 pub fn carry_parts(amount: f64) -> f64 {
     amount / f64::from(CARRY_PART_CAPACITY)
 }
@@ -232,8 +235,7 @@ pub fn tower_attack_at(range: i32) -> i32 {
 /// The engine destroys parts from the head; a part with any hit left acts.
 pub fn live_parts(body: &[Part], hits: i32) -> &[Part] {
     let live = ((hits + PART_HITS - 1) / PART_HITS) as usize;
-    let skip = body.len().saturating_sub(live);
-    &body[skip..]
+    &body[body.len().saturating_sub(live)..]
 }
 
 pub fn strike_reach(live: impl Fn(Part) -> bool) -> i32 {
@@ -256,9 +258,7 @@ pub fn with_move_last(mut body: Vec<Part>) -> Vec<Part> {
 }
 
 pub fn part_hits_at(n: usize, hits: i32, i: usize) -> i32 {
-    let n = n as i32;
-    let i = i as i32;
-    PART_HITS.min(hits - PART_HITS * (n - 1 - i)).max(0)
+    PART_HITS.min(hits - PART_HITS * (n as i32 - 1 - i as i32)).max(0)
 }
 
 /// `calcBodyEffectiveness`. `boosts` is one a part, head first, or empty.

@@ -77,9 +77,9 @@ pub fn strength(part: Part, compound: ResourceType) -> i32 {
 
 fn strength_at(act: Act, part: Part, c: ResourceType) -> i32 {
     match (act, part, c.boost()) {
-        (Act::Fight, ..) => strength(part, c),
+        (Act::Fight, ..) if vocabulary::takes(part, c) => strength(part, c),
         (Act::Upgrade, Part::Work, Some(Boost::UpgradeController(m))) => (100.0 * m).round() as i32,
-        (Act::Upgrade, ..) => 100,
+        _ => 100,
     }
 }
 

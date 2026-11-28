@@ -25,15 +25,16 @@ pub const ALL_BODY_PARTS: [Part; 8] = [
     Part::Tough,
 ];
 
-/// A fight's `calcBodyEffectiveness`: a WORK boost counts for dismantle
-/// only; TOUGH's boost is in `damage_ratio`.
+/// A fight's `calcBodyEffectiveness` and CARRY's capacity: a WORK boost counts
+/// for dismantle only; TOUGH's boost is in `damage_ratio`.
 pub fn multiple(part: Part, compound: Option<ResourceType>) -> i32 {
     match (part, compound.and_then(ResourceType::boost)) {
         (Part::Attack, Some(Boost::Attack(n)))
         | (Part::RangedAttack, Some(Boost::RangedAttack(n)))
         | (Part::Heal, Some(Boost::Heal(n)))
         | (Part::Move, Some(Boost::Move(n)))
-        | (Part::Work, Some(Boost::Dismantle(n))) => n as i32,
+        | (Part::Work, Some(Boost::Dismantle(n)))
+        | (Part::Carry, Some(Boost::Carry(n))) => n as i32,
         _ => 1,
     }
 }
@@ -47,7 +48,8 @@ pub fn damage_ratio(part: Part, compound: Option<ResourceType>) -> f64 {
 }
 
 pub fn takes(part: Part, compound: ResourceType) -> bool {
-    multiple(part, Some(compound)) > 1 || damage_ratio(part, Some(compound)) < 1.0
+    part != Part::Carry
+        && (multiple(part, Some(compound)) > 1 || damage_ratio(part, Some(compound)) < 1.0)
 }
 
 pub const CLAIMER: [Part; 2] = [Part::Claim, Part::Move];

@@ -5,7 +5,7 @@ use std::num::NonZeroU8;
 use super::tiles::{self, Tile, TileSet};
 use crate::{
     engine,
-    vocabulary::{Boost, Part, ResourceType, multiple},
+    vocabulary::{Part, ResourceType, multiple},
     world::Creep,
 };
 
@@ -34,17 +34,13 @@ pub fn factor(
     parts: impl Iterator<Item = (Part, Option<ResourceType>, bool)>,
     mut load: i32,
 ) -> FatigueFactor {
-    let capacity = |boost: Option<ResourceType>| match boost.and_then(ResourceType::boost) {
-        Some(Boost::Carry(n)) => n as i32 * engine::CARRY_PART_CAPACITY,
-        _ => engine::CARRY_PART_CAPACITY,
-    };
     let (mut weight, mut moves) = (0, 0);
     for (kind, boost, live) in parts {
         match kind {
             Part::Move if live => moves += multiple(Part::Move, boost),
             Part::Carry if live => {
                 weight += i32::from(load > 0);
-                load -= capacity(boost);
+                load -= engine::part_capacity(boost);
             }
             Part::Move | Part::Carry => {}
             _ => weight += 1,
