@@ -170,6 +170,10 @@ pub fn builds_away(rules: &Rules, level: i32) -> bool {
     level >= rules.level_of(StructureType::Tower, 0)
 }
 
+pub fn paves(away: bool, reserved: bool) -> bool {
+    away && reserved
+}
+
 impl Home {
     pub fn banks(&self, plan: &ColonyPlan) -> bool {
         plan.target >= BANK_LEVEL && (self.stocked || plan.pile.is_some())

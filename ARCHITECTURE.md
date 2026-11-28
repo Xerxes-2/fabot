@@ -257,7 +257,9 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   since they refill the bank it waits on); mineral miner queues before outposts;
   while stock is past reserve (or a pile's draw beats decay), upgraders and
   pre-storage workers queue before outpost haul (the haul only adds to the stock
-  they draw down), and a home's at-risk mender before both, its reservers and
+  they draw down), and before a storage the upgraders the income pays for
+  always do (with a pile, a raised outpost share otherwise takes their
+  spawn), and a home's at-risk mender before both, its reservers and
   claims too (their recasts held a busy spawn past a road's last repair); the outposts' carriers take the spawn time the colony's other
   bodies leave over a life, so a far ring of outposts never casts nothing but
   haulers. While `ColonyPlan.owes` is true (a fight cast owed), no
@@ -831,8 +833,9 @@ expansion, and operation priorities.
   outposts): operator rows first, then highest net energy/spawn-tick within
   `cpu_limit / 2` and spawn `spare` of the colony that walks to it
   (`atlas::server`, Economy's choice too; its haul charged on the terrain path,
-  unroaded while young and paved once stocked, as Economy casts the carriers
-  that path needs only while spawn time is left and the rest of the dig
+  unroaded while young and paved once stocked and reserved (`atlas::paves`: a
+  bare source's plain road repays in 81k ticks, v1's arithmetic), as Economy
+  casts the carriers that path needs only while spawn time is left and the rest of the dig
   decays), a room without containers at all
   sources net of them over one creep life (its haul is priced unroaded, so a
   road repays itself), so a better room displaces a standing one only once it
@@ -840,8 +843,14 @@ expansion, and operation priorities.
   time, so busy never swaps which others are worked. Each outpost is priced with
   the spenders its dig casts (2 parts per energy/tick) because a fixed half
   leaves spawns idle at RCL3–6 and full life past RCL6 starves hauling; a young
-  home reserves half its spawns' life for workers so its pile does not decay
-  unspent. Stocked homes add one non-standing outpost at a time so
+  home keeps half its spawns' life for its workers while its dig is
+  drop-mined, so its pile does not decay unspent (`outpostSpawnShare` 0.5 to
+  outposts), and keeps 35% for its workers once its outposts can hold
+  containers (`outpostContainerShare` 0.65, owner): a third reserved outpost
+  then pays, where at RCL2 the extra rooms decay at the seat. Each pick ranks
+  the rest by net a spawn-tick at the spawn time left, so a raised share
+  admits the best remaining room, bare or reserved. Stocked homes add one
+  non-standing outpost at a time so
   spawns absorb
   one room's bodies at once; young homes open all paying ones because waiting on
   containers delays RCL3. An operation holds only the colonies it casts from

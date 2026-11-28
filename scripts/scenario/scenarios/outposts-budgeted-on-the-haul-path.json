@@ -1,11 +1,11 @@
 {
-  "why": "a stocked home budgets its outposts' haul on the path its carriers walk, not the straight line: on gen 5 E9S9 took E9S8 at a straight 58 ticks whose haul walks ~120 out its north gap, so Economy cast half the far carriers it needed and the outposts' dig decayed while upgraders drew the stock: before the haul fix (c45a8705) E9S8 let 16% of its dig decay over the run (31k from t18000 to t24000); after it every outpost lets at most 7% (seeds 1-5). An outpost is read once it has dug 10k, past its first container. A stall shows in a 1,000-tick window (`decayedShareMost`): on 3f0a7cd5 an invader on E9S9's pocket t8000-9200 held its carriers on loads they could not reach while E7S9 dug on, 134% of a window's dig decayed (22% over the run); main reads 21/26/16/5/21 on seeds 1-5, bound about 1.3x that, 34",
+  "why": "a stocked home budgets its outposts' haul on the path its carriers walk, not the straight line: on gen 5 E9S9 took E9S8 at a straight 58 ticks whose haul walks ~120 out its north gap, so Economy cast half the far carriers it needed and the outposts' dig decayed while upgraders drew the stock: before the haul fix (c45a8705) E9S8 let 16% of its dig decay over the run (31k from t18000 to t24000); after it every outpost lets at most 7% (seeds 1-5). An outpost is read once it has dug 10k, past its first container. A stall shows in a 1,000-tick window (`decayedShareMost`): on 3f0a7cd5 an invader on E9S9's pocket t8000-9200 held its carriers on loads they could not reach while E7S9 dug on, 134% of a window's dig decayed (22% over the run); main reads 21/26/16/5/21 on seeds 1-5, bound about 1.3x that, 34. Each outpost waived 12 -> 17 (2026-11-28, class b): with the container-phase share and a bare room priced with no mender, E8S8 is drop-mined at RCL2 (17-31% a window, as on main), dropped at t7000 (63% in that window) and reopened bare at t17000 with little dig, so its run share reads 17; main's 12 held only because main reopened E8S8 at t18000 and diluted the same RCL2 decay. decayedShareMost waived 34 -> 36 (2026-11-28, lead): bare->reserved churn, as at RCL3 entry the cheaper bare price admits bare E9S8/E8S8, dropped about t7000 once claimers make E8S9/E7S9 reserved, starving the spawn t7000-9000 (323 parts cast vs main 476); a raid on E8S9 at t9856 falls in the same t9000 window",
   "modules": ["strategy", "atlas", "economy"],
   "start": { "gen": 5, "seed": 1 },
   "ticks": 24000,
   "assert": [
-    { "each": "outpost", "where": { "dug": { "min": 10000 } }, "assert": { "decayedShare": { "max": 12 } } },
+    { "each": "outpost", "where": { "dug": { "min": 10000 } }, "assert": { "decayedShare": { "max": 17 } } },
     { "measure": "outpostDug", "from": 18000, "to": 24000, "min": 120000 },
-    { "measure": "decayedShareMost", "max": 34 }
+    { "measure": "decayedShareMost", "max": 36 }
   ]
 }

@@ -74,10 +74,11 @@ fn worked(c: &Candidate, capacity: i32, reserved: bool, spend: &dyn Fn(f64) -> f
     let rate =
         if reserved { engine::HELD_OUTPUT_PER_TICK } else { engine::NEUTRAL_OUTPUT_PER_TICK };
     let n = c.outpost.sources.len() as f64;
+    let paved = atlas::paves(c.paved, reserved);
     let dig = bodies::harvester((false, false), rate, capacity).map(|b| (b, n));
     let haul =
-        |walk| slots::haul(&[(n * f64::from(rate), bodies::Leg::bare(walk, c.paved))], capacity);
-    let mend = (c.paved).then(|| slots::mender(n as i32 * slots::mend_work(c.walked), capacity));
+        |walk| slots::haul(&[(n * f64::from(rate), bodies::Leg::bare(walk, paved))], capacity);
+    let mend = paved.then(|| slots::mender(n as i32 * slots::mend_work(c.walked), capacity));
     let claim = reserved.then(|| (CLAIMER.to_vec(), 1.0));
     let kept = [dig.clone(), haul(c.walk), mend.clone().flatten(), claim.clone()];
     let cast = [dig, haul(c.walked), mend.flatten(), claim];
@@ -160,7 +161,10 @@ pub fn chosen(
     let mut spawn_left: BTreeMap<RoomName, f64> = BTreeMap::new();
     for room in world.spawns.iter().map(|s| s.pos.room) {
         let spawns = world.working_spawns().filter(|s| s.pos.room == room).count() as f64;
-        let share = f64::from(engine::CREEP_LIFETIME) * spawns * tuning.outpost_spawn_share;
+        let controller = world.room(room).and_then(|r| r.controller.as_ref());
+        let away = controller.is_some_and(|c| atlas::builds_away(&world.rules, c.level));
+        let share = if away { tuning.outpost_container_share } else { tuning.outpost_spawn_share };
+        let share = f64::from(engine::CREEP_LIFETIME) * spawns * share;
         let dug = world.room(room).map_or(0, |r| r.sources.len() as i32);
         let left = match spare.get(&room) {
             Some(spare) if stocked(room) => {
@@ -174,18 +178,19 @@ pub fn chosen(
     let capacity = |home: RoomName| world.room(home).map_or(0, |r| r.energy_capacity);
     let priced_in =
         |c: &Candidate, left: f64| price(c, capacity(c.home), left, &|net| spend(c.home, net));
-    let mut priced: Vec<(Price, Candidate)> = (candidates.into_iter())
-        .map(|c| (priced_in(&c, spawn_left.get(&c.home).copied().unwrap_or(0.0)), c))
-        .collect();
     let value = |p: &Price| (p.net - p.unbuilt) / p.spawn.max(1.0);
-    priced.sort_by(|(pa, a), (pb, b)| {
-        (b.declared.cmp(&a.declared))
-            .then(value(pb).total_cmp(&value(pa)))
-            .then(a.outpost.room.cmp(&b.outpost.room))
-    });
     let mut out = Vec::new();
     let mut rising: BTreeSet<RoomName> = BTreeSet::new();
-    for (_, mut c) in priced {
+    let mut rest = candidates;
+    while !rest.is_empty() {
+        let left_of = |c: &Candidate| spawn_left.get(&c.home).copied().unwrap_or(0.0);
+        let ranked: Vec<f64> = rest.iter().map(|c| value(&priced_in(c, left_of(c)))).collect();
+        let best = (0..rest.len()).min_by(|&i, &j| {
+            (rest[j].declared.cmp(&rest[i].declared))
+                .then(ranked[j].total_cmp(&ranked[i]))
+                .then(rest[i].outpost.room.cmp(&rest[j].outpost.room))
+        });
+        let mut c = rest.swap_remove(best.unwrap_or(0));
         let left = spawn_left.entry(c.home).or_default();
         let p = priced_in(&c, *left);
         // A busy home holds back a new room, not the spawn time it ranks for;
@@ -410,9 +415,9 @@ mod tests {
     fn an_unbuilt_room_that_pays_more_displaces_worse_standing_ones() {
         let rooms = || {
             vec![
-                candidate("W9N7", 2, 70, true),
-                candidate("W8N8", 2, 50, false),
-                candidate("W9N9", 1, 70, true),
+                candidate("W9N7", 2, 95, true),
+                candidate("W8N8", 2, 70, false),
+                candidate("W9N9", 1, 95, true),
             ]
         };
         let young = worked_by(&home(1, 800, false), rooms(), 0.0);

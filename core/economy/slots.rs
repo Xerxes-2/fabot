@@ -746,7 +746,7 @@ impl Plan<'_> {
             for (k, &seat) in ground.buffer_seats.iter().enumerate().take(n as usize) {
                 let slot = self.push(ci, Job::Upgrade, seat, colony.room, k, body.clone());
                 slot.spends = true;
-                if banked > 0.0 {
+                if banked > 0.0 || storage.is_none() {
                     slot.rank = STOCKED;
                 }
             }

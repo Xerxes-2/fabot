@@ -1,0 +1,7 @@
+{
+  "why": "W7N3 (the RCL5 speedrun room) holds a third reserved outpost through RCL3-4: before storage its outposts take 0.65 of spawn life once containers can be built, and the upgraders the income pays for queue before their haul. Main 6da50250 reached RCL5 at 21785 on seed 1 (22042 on seed 2), this change at 20287 (20811); the bound sits between them, the owner's mark being under 20k",
+  "modules": ["strategy", "economy", "layout"],
+  "start": { "room": "W7N3", "seed": 1 },
+  "ticks": 21000,
+  "assert": [{ "measure": "homeLevel", "room": "W7N3", "to": 21000, "min": 5 }]
+}

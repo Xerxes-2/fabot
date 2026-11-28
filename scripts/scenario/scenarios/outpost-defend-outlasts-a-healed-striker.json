@@ -1,11 +1,12 @@
 {
-  "why": "Whether a raider swings into our ATTACK's strike-back is its pick, so a Defend is priced both ways and takes the worse: an Invader with WORK dismantles in place of its swing. A small melee with WORK and a small healer (60 heal) raid E4S7, once priced a win for one 3-ATTACK body that lost it and the outpost for 1500 ticks; priced both ways, two such bodies land together and win with none lost. Starts from a world captured at the incident tick so economy changes cannot move the raid",
+  "why": "Whether a raider swings into our ATTACK's strike-back is its pick, so a Defend is priced both ways and takes the worse: an Invader with WORK dismantles in place of its swing. A small melee with WORK and a small healer (60 heal) raid E4S7, once priced a win for one 3-ATTACK body that lost it and the outpost for 1500 ticks; priced both ways, two such bodies land together and win with none lost. Starts from a world captured at the incident tick so economy changes cannot move the raid. coldFloodsPerColony waived to 137 (owner, 2026-11-28; main 130): its cold tick admits E3S8 under the container-phase outpost share, 7 floods on that tick only, and at t1 the home's ColonyPlan.owes turns on for the Defend and holds E3S8 back (follow-up: the owes flip on a cold tick)",
   "modules": ["fight", "exchange"],
   "start": { "world": "scripts/scenario/worlds/outpost-defend-outlasts-a-healed-striker.json", "seed": 1 },
   "ticks": 1600,
   "assert": [
     { "measure": "hostileTicks", "room": "E4S7", "max": 400 },
     { "measure": "bodiesLost", "kind": "defend", "max": 0 },
-    { "measure": "predictedWinsLost", "room": "E4S7", "max": 0 }
+    { "measure": "predictedWinsLost", "room": "E4S7", "max": 0 },
+    { "measure": "coldFloodsPerColony", "max": 137 }
   ]
 }

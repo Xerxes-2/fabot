@@ -231,6 +231,8 @@ pub fn sites<'p, 'q>(
                             }
                         }
                     };
+                    let away = true; // `sink_for` holds the level gate.
+                    let road_to = road_to.filter(|_| atlas::paves(away, o.reserved));
                     for p in road_to.iter().flat_map(|post| {
                         atlas.walk(HAULER, &home, held.get(&home.room), post, LONGEST)
                     }) {
@@ -271,13 +273,14 @@ mod tests {
     use crate::{ground, plan};
 
     /// `home` planned as a colony, its neighbours its outposts, their sites
-    /// built as placed (roads only if `paved`) until none is left to place;
+    /// built as placed (roads only if `paved`) until none is left to place,
+    /// each worked `reserved` or bare;
     /// `on_site` sees each site with the tiles the home's plan holds solid or
     /// owes a rampart. The world, the home's pile, and its plan's solid tiles.
     fn built_out(
         real: &BTreeMap<RoomName, RealRoom>,
         home: RoomName,
-        paved: bool,
+        (paved, reserved): (bool, bool),
         mut on_site: impl FnMut(&BTreeSet<Tile>, RoomName, Tile, StructureType),
     ) -> Option<(World<'_>, Pos, BTreeSet<Tile>)> {
         let drawn = ground::of_room(&real[&home].room());
@@ -305,7 +308,7 @@ mod tests {
                     room: r.name,
                     controller: declared(c.id, c.pos),
                     sources: r.sources.iter().map(|s| declared(s.id, s.pos)).collect(),
-                    reserved: true,
+                    reserved,
                 })
             })
             .collect();
@@ -365,7 +368,7 @@ mod tests {
         let fixture = "E25S8".parse::<RoomName>().expect("a room name");
         let mut paved = 0;
         for home in real.keys().copied().step_by(40).chain([fixture]) {
-            built_out(&real, home, true, |solid, r, t, kind| {
+            built_out(&real, home, (true, true), |solid, r, t, kind| {
                 if r == home && kind == StructureType::Road {
                     let (x, y) = (tiles::x_of(t), tiles::y_of(t));
                     assert!(!solid.contains(&t), "{home}: a road on {x},{y}");
@@ -374,6 +377,20 @@ mod tests {
             });
         }
         assert!(paved > 0);
+    }
+
+    #[test]
+    fn an_outpost_worked_bare_gets_its_containers_and_no_road() {
+        let real: BTreeMap<RoomName, RealRoom> =
+            testing::real_rooms().map(|r| (r.name, r)).collect();
+        let mut containers = 0;
+        for home in real.keys().copied().step_by(40) {
+            built_out(&real, home, (true, false), |_, r, _, kind| {
+                assert_ne!(kind, StructureType::Road, "{home}: a road in {r}");
+                containers += i32::from(kind == StructureType::Container);
+            });
+        }
+        assert!(containers > 0);
     }
 
     /// An outpost's containers built and their harvesters at work: its
@@ -386,7 +403,7 @@ mod tests {
         let mut cut: BTreeMap<(End, fx::Cause), BTreeSet<RoomName>> = BTreeMap::new();
         let mut outposts = 0;
         for home in real.keys().copied().step_by(5) {
-            let Some((world, ..)) = built_out(&real, home, true, |_, _, _, _| {}) else {
+            let Some((world, ..)) = built_out(&real, home, (true, true), |_, _, _, _| {}) else {
                 continue;
             };
             for room in world.rooms.iter().filter(|r| r.name != home) {
@@ -541,7 +558,8 @@ mod tests {
             testing::real_rooms().map(|r| (r.name, r)).collect();
         let mut walks = 0;
         for home in real.keys().copied().step_by(40) {
-            let Some((world, pile, walls)) = built_out(&real, home, false, |_, _, _, _| {}) else {
+            let Some((world, pile, walls)) = built_out(&real, home, (false, true), |_, _, _, _| {})
+            else {
                 continue;
             };
             let outposts = world.rooms.iter().filter(|r| r.name != home);
@@ -560,7 +578,8 @@ mod tests {
             testing::real_rooms().map(|r| (r.name, r)).collect();
         let mut walks = 0;
         for home in real.keys().copied().step_by(40) {
-            let Some((mut world, pile, walls)) = built_out(&real, home, false, |_, _, _, _| {})
+            let Some((mut world, pile, walls)) =
+                built_out(&real, home, (false, true), |_, _, _, _| {})
             else {
                 continue;
             };

@@ -46,5 +46,6 @@ tuning! {
     outpost_spend_parts: f64 = 2.0, 0.0..=100.0;
     outpost_cpu_share: f64 = 0.5, 0.01..=1.0;
     outpost_spawn_share: f64 = 0.5, 0.01..=1.0;
+    outpost_container_share: f64 = 0.65, 0.01..=1.0;
     pioneers: usize = 4, 0..=10;
 }
