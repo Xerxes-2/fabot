@@ -417,3 +417,92 @@ pub fn tower(id: &str, tile: Tile, energy: i32) -> Structure {
         ..structure(id, StructureType::Tower, Owner::Ours, tile)
     }
 }
+
+/// A body that holds its tile while it works.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Holder {
+    Harvester,
+    Digger,
+    Upgrader,
+    Outpost,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum End {
+    Spawn,
+    Source,
+    Controller,
+    Exit,
+    Road,
+}
+
+/// An end is reached where a tile within its range of one of its tiles is.
+pub type Ends = Vec<(End, Vec<Tile>, i32)>;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Cause {
+    /// Apart on the bare ground: no plan joins them.
+    Terrain,
+    Structure,
+    Held(Holder),
+    /// Freed only with more than one kind of holder gone.
+    Holders,
+}
+
+/// The ends a walk from the first end misses over `open` with every holder's
+/// tile taken, each with what cuts it off; `ground` is `open` with nothing built.
+pub fn cut_off(
+    (ground, open): (&[bool], &[bool]),
+    ends: &Ends,
+    holders: &[(Holder, Tile)],
+) -> Vec<(End, Tile, Cause)> {
+    let missed = |open: &[bool], free: &dyn Fn(Holder) -> bool| {
+        let mut o = open.to_vec();
+        holders.iter().filter(|(h, _)| !free(*h)).for_each(|(_, t)| o[*t] = false);
+        let near = |(_, at, range): &(End, Vec<Tile>, i32)| {
+            at.iter().flat_map(|t| tiles::within(*range, *t)).collect::<Vec<_>>()
+        };
+        let steps = tiles::reach(near(&ends[0]).into_iter().filter(|t| o[*t]), |t| o[t]);
+        (ends.iter())
+            .filter(|e| near(e).iter().all(|n| !o[*n] || steps[*n] == tiles::UNREACHED))
+            .map(|(end, at, _)| (*end, at[0]))
+            .collect::<Vec<_>>()
+    };
+    let kinds = [Holder::Harvester, Holder::Digger, Holder::Upgrader, Holder::Outpost];
+    let (bare, all) = (missed(ground, &|_| true), missed(open, &|_| true));
+    let cause = |miss: &(End, Tile)| {
+        let one = kinds.into_iter().find(|h| !missed(open, &|k| k == *h).contains(miss));
+        match one {
+            _ if bare.contains(miss) => Cause::Terrain,
+            Some(h) => Cause::Held(h),
+            None if all.contains(miss) => Cause::Structure,
+            None => Cause::Holders,
+        }
+    };
+    (missed(open, &|_| false).iter()).map(|miss| (miss.0, miss.1, cause(miss))).collect()
+}
+
+/// Each side's runs of open border tiles.
+pub fn exit_groups(open: &[bool]) -> Vec<Vec<Tile>> {
+    let mut groups: Vec<Vec<Tile>> = Vec::new();
+    for side in [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT] {
+        let mut run = false;
+        for &t in tiles::exit_tiles(side) {
+            match (open[t], run) {
+                (false, _) => run = false,
+                (true, false) => {
+                    groups.push(vec![t]);
+                    run = true;
+                }
+                (true, true) => groups.last_mut().expect("a run").push(t),
+            }
+        }
+    }
+    groups
+}
+
+/// Road tiles with one road beside them or none.
+pub fn road_ends(roads: &[Tile]) -> Vec<Tile> {
+    let beside = |t: Tile| roads.iter().filter(|r| tiles::range(**r, t) == 1).count();
+    roads.iter().copied().filter(|t| beside(*t) <= 1).collect()
+}

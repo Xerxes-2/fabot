@@ -266,8 +266,86 @@ mod tests {
     use super::*;
     use crate::{ground, plan};
 
-    /// Each sampled real room planned as a colony, its neighbours its
-    /// outposts, their sites built as placed until none is left to place.
+    /// `home` planned as a colony, its neighbours its outposts, their sites
+    /// built as placed until none is left to place; `on_site` sees each site
+    /// with the tiles the home's plan holds solid or owes a rampart.
+    fn built_out(
+        real: &BTreeMap<RoomName, RealRoom>,
+        home: RoomName,
+        mut on_site: impl FnMut(&BTreeSet<Tile>, RoomName, Tile, StructureType),
+    ) -> Option<World<'_>> {
+        let drawn = ground::of_room(&real[&home].room());
+        let mut plan = drawn.and_then(|g| plan::of_ground(&Rules::vanilla(), &g))?;
+        let pile = plan.pile()?;
+        let near: Vec<RoomName> = [(0, -1), (1, 0), (0, 1), (-1, 0)]
+            .into_iter()
+            .filter_map(|(x, y)| home.offset(x, y))
+            .filter(|n| real.contains_key(n))
+            .collect();
+        let mut world = testing::world(r#"{"rooms":[]}"#);
+        world.rooms = [home].iter().chain(&near).map(|n| real[n].room()).collect();
+        world.closed = ((-4..=4).flat_map(|x| (-4..=4).map(move |y| (x, y))))
+            .filter_map(|(x, y)| home.offset(x, y))
+            .filter(|n| *n != home && !near.contains(n))
+            .collect();
+        let spawn = plan.items.iter().find(|i| i.kind == StructureType::Spawn);
+        testing::colonize(&mut world, home, 8, spawn.expect("a spawn").tile);
+        let declared = |id, pos| Declared { id, pos };
+        let outposts: Vec<Outpost> = (world.rooms.iter())
+            .filter(|r| r.name != home)
+            .filter_map(|r| {
+                let c = r.controller.as_ref()?;
+                Some(Outpost {
+                    room: r.name,
+                    controller: declared(c.id, c.pos),
+                    sources: r.sources.iter().map(|s| declared(s.id, s.pos)).collect(),
+                    reserved: true,
+                })
+            })
+            .collect();
+        let colony = ColonyPlan {
+            room: home,
+            stage: Stage::Exploit,
+            target: 8,
+            reserve: 0,
+            rampart_hits: 0,
+            ring: true,
+            owes: false,
+            fights: false,
+            pile: Some(pile),
+            muster: None,
+        };
+        let plan_of = |room: RoomName| (room == home).then_some(&colony);
+        let mut solid: BTreeSet<Tile> = plan.solid().collect();
+        solid.extend(plan.ring.iter().map(|i| i.tile));
+        plan.items.append(&mut plan.ring);
+        for _ in 0..100 {
+            let mut atlas = Atlas::of_world(&world);
+            let mut derived = atlas::derive(&world, &mut atlas);
+            derived.worked = (outposts.iter())
+                .filter(|o| derived.trees.iter().any(|(_, t)| t.contains(o.room)))
+                .cloned()
+                .collect();
+            let census = sites::census_of(world.room(home).expect("home"), &[]);
+            let plans = [(&plan, &census)];
+            let placed = sites(&mut atlas, &world, &derived, (&[], &plan_of), plans, 100);
+            if placed.is_empty() {
+                break;
+            }
+            for p in placed {
+                let Action::Room(r, RoomAct::CreateSite(x, y, kind)) = p else {
+                    continue;
+                };
+                let t = tiles::index(x, y);
+                on_site(&solid, r, t, kind);
+                let room = world.rooms.iter_mut().find(|o| o.name == r).expect("placed in");
+                let id = format!("{:.2}{r}{t}", format!("{kind:?}"));
+                room.structures.push(testing::built(&id, kind, Pos::new(r, x, y)));
+            }
+        }
+        Some(world)
+    }
+
     #[test]
     fn no_outpost_road_lies_on_a_tile_its_homes_plan_holds_solid_or_owes_a_rampart() {
         let real: BTreeMap<RoomName, RealRoom> =
@@ -275,83 +353,77 @@ mod tests {
         let fixture = "E25S8".parse::<RoomName>().expect("a room name");
         let mut paved = 0;
         for home in real.keys().copied().step_by(40).chain([fixture]) {
-            let drawn = ground::of_room(&real[&home].room());
-            let Some(mut plan) = drawn.and_then(|g| plan::of_ground(&Rules::vanilla(), &g)) else {
-                continue;
-            };
-            let Some(pile) = plan.pile() else {
-                continue;
-            };
-            let near: Vec<RoomName> = [(0, -1), (1, 0), (0, 1), (-1, 0)]
-                .into_iter()
-                .filter_map(|(x, y)| home.offset(x, y))
-                .filter(|n| real.contains_key(n))
-                .collect();
-            let mut world = testing::world(r#"{"rooms":[]}"#);
-            world.rooms = [home].iter().chain(&near).map(|n| real[n].room()).collect();
-            world.closed = ((-4..=4).flat_map(|x| (-4..=4).map(move |y| (x, y))))
-                .filter_map(|(x, y)| home.offset(x, y))
-                .filter(|n| *n != home && !near.contains(n))
-                .collect();
-            let spawn = plan.items.iter().find(|i| i.kind == StructureType::Spawn);
-            testing::colonize(&mut world, home, 8, spawn.expect("a spawn").tile);
-            let declared = |id, pos| Declared { id, pos };
-            let outposts: Vec<Outpost> = (world.rooms.iter())
-                .filter(|r| r.name != home)
-                .filter_map(|r| {
-                    let c = r.controller.as_ref()?;
-                    Some(Outpost {
-                        room: r.name,
-                        controller: declared(c.id, c.pos),
-                        sources: r.sources.iter().map(|s| declared(s.id, s.pos)).collect(),
-                        reserved: true,
-                    })
-                })
-                .collect();
-            let colony = ColonyPlan {
-                room: home,
-                stage: Stage::Exploit,
-                target: 8,
-                reserve: 0,
-                rampart_hits: 0,
-                ring: true,
-                owes: false,
-                fights: false,
-                pile: Some(pile),
-                muster: None,
-            };
-            let plan_of = |room: RoomName| (room == home).then_some(&colony);
-            let mut solid: BTreeSet<Tile> = plan.solid().collect();
-            solid.extend(plan.ring.iter().map(|i| i.tile));
-            plan.items.append(&mut plan.ring);
-            for _ in 0..100 {
-                let mut atlas = Atlas::of_world(&world);
-                let mut derived = atlas::derive(&world, &mut atlas);
-                derived.worked = (outposts.iter())
-                    .filter(|o| derived.trees.iter().any(|(_, t)| t.contains(o.room)))
-                    .cloned()
-                    .collect();
-                let census = sites::census_of(world.room(home).expect("home"), &[]);
-                let plans = [(&plan, &census)];
-                let placed = sites(&mut atlas, &world, &derived, (&[], &plan_of), plans, 100);
-                if placed.is_empty() {
-                    break;
+            built_out(&real, home, |solid, r, t, kind| {
+                if r == home && kind == StructureType::Road {
+                    let (x, y) = (tiles::x_of(t), tiles::y_of(t));
+                    assert!(!solid.contains(&t), "{home}: a road on {x},{y}");
+                    paved += 1;
                 }
-                for p in placed {
-                    let Action::Room(r, RoomAct::CreateSite(x, y, kind)) = p else {
-                        continue;
-                    };
-                    let t = tiles::index(x, y);
-                    if r == home && kind == StructureType::Road {
-                        assert!(!solid.contains(&t), "{home}: a road on {x},{y}");
-                        paved += 1;
-                    }
-                    let room = world.rooms.iter_mut().find(|o| o.name == r).expect("placed in");
-                    let id = format!("{:.2}{r}{t}", format!("{kind:?}"));
-                    room.structures.push(testing::built(&id, kind, Pos::new(r, x, y)));
+            });
+        }
+        assert!(paved > 0);
+    }
+
+    /// An outpost's containers built and their harvesters at work: its
+    /// sources, controller, exits and road ends still walk to each other.
+    #[test]
+    #[ignore = "a report of the rooms that break it, until the owner picks the fixes"]
+    fn every_outpost_end_is_walked_to_with_its_sites_built_and_its_harvesters_at_work() {
+        use crate::fixtures::{self as fx, End, Holder};
+        let real: BTreeMap<RoomName, RealRoom> =
+            testing::real_rooms().map(|r| (r.name, r)).collect();
+        let mut cut: BTreeMap<(End, fx::Cause), BTreeSet<RoomName>> = BTreeMap::new();
+        let mut outposts = 0;
+        for home in real.keys().copied() {
+            let Some(world) = built_out(&real, home, |_, _, _, _| {}) else {
+                continue;
+            };
+            for room in world.rooms.iter().filter(|r| r.name != home) {
+                let of = |k: StructureType| {
+                    (room.structures.iter())
+                        .filter(move |s| s.kind == k)
+                        .map(|s| tiles::of_pos(&s.pos))
+                };
+                if of(StructureType::Container).next().is_none() {
+                    continue;
+                }
+                outposts += 1;
+                let rocks: Vec<Tile> = (room.sources.iter().map(|s| tiles::of_pos(&s.pos)))
+                    .chain(room.controller.iter().map(|c| tiles::of_pos(&c.pos)))
+                    .chain(room.minerals.iter().map(|m| tiles::of_pos(&m.pos)))
+                    .collect();
+                let wall = |t: Tile| terrain::is_wall(room.terrain, tiles::x_of(t), tiles::y_of(t));
+                let roads: Vec<Tile> = of(StructureType::Road).collect();
+                let bare: Vec<bool> = (tiles::all())
+                    .map(|t| (!wall(t) || roads.contains(&t)) && !rocks.contains(&t))
+                    .collect();
+                let holders: Vec<(Holder, Tile)> =
+                    of(StructureType::Container).map(|t| (Holder::Outpost, t)).collect();
+                let mut ends: fx::Ends = Vec::new();
+                for s in &room.sources {
+                    let s = tiles::of_pos(&s.pos);
+                    let posts: Vec<Tile> = (holders.iter())
+                        .filter(|(_, p)| tiles::range(*p, s) == 1)
+                        .map(|h| h.1)
+                        .collect();
+                    ends.push((End::Source, if posts.is_empty() { vec![s] } else { posts }, 1));
+                }
+                let controller = room.controller.iter().map(|c| tiles::of_pos(&c.pos));
+                ends.extend(controller.map(|c| (End::Controller, vec![c], 1)));
+                ends.extend(fx::exit_groups(&bare).into_iter().map(|g| (End::Exit, g, 0)));
+                let held = |t: &Tile| holders.iter().any(|(_, h)| h == t);
+                let road_ends = fx::road_ends(&roads).into_iter().filter(|t| !held(t));
+                ends.extend(road_ends.map(|t| (End::Road, vec![t], 0)));
+                for (end, _, cause) in fx::cut_off((&bare, &bare), &ends, &holders) {
+                    cut.entry((end, cause)).or_default().insert(room.name);
                 }
             }
         }
-        assert!(paved > 0);
+        let rooms: BTreeSet<&RoomName> = cut.values().flatten().collect();
+        for ((end, cause), at) in &cut {
+            let some: Vec<String> = at.iter().take(10).map(RoomName::to_string).collect();
+            eprintln!("{end:?} cut by {cause:?}: {} rooms, {}", at.len(), some.join(" "));
+        }
+        assert!(rooms.is_empty(), "{} of {outposts} outposts cut", rooms.len());
     }
 }

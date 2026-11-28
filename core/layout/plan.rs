@@ -606,9 +606,7 @@ mod tests {
     /// A digger holds its post while it works (`reached`'s `held`): every
     /// rock's post is walked to, from the level it is built at on, and no
     /// exit or anything planned is reached past a post alone.
-    #[test]
-    fn every_post_is_walked_to_from_its_level_on_and_never_the_only_way_on() {
-        let rules = Rules::vanilla();
+    fn crafted() -> impl Iterator<Item = Ground> {
         let crafted = [
             ("W1N1", include_str!("../../scripts/scenario/worlds/corridor-post.json")),
             ("E9S5", include_str!("../../scripts/scenario/worlds/source-across-a-wall.json")),
@@ -616,13 +614,18 @@ mod tests {
             ("E18S11", include_str!("../../scripts/scenario/worlds/source-pocket.json")),
             ("E13S19", include_str!("../../scripts/scenario/worlds/exit-pocket-post.json")),
         ];
-        let crafted = crafted.into_iter().filter_map(|(name, text)| {
+        crafted.into_iter().filter_map(|(name, text)| {
             let world = fabot_base::testing::world(text);
             ground::of_room(world.rooms.iter().find(|r| r.name.to_string() == name)?)
-        });
+        })
+    }
+
+    #[test]
+    fn every_post_is_walked_to_from_its_level_on_and_never_the_only_way_on() {
+        let rules = Rules::vanilla();
         let real = fabot_base::testing::real_rooms().step_by(5);
         let (mut posts, mut plans) = (0, 0);
-        for ground in crafted.chain(real.filter_map(|r| ground::of_room(&r.room()))) {
+        for ground in crafted().chain(real.filter_map(|r| ground::of_room(&r.room()))) {
             let Some(plan) = of_ground(&rules, &ground) else {
                 continue;
             };
@@ -660,6 +663,75 @@ mod tests {
             }
         }
         assert!(posts > 1000 && plans >= 524, "{posts} {plans}");
+    }
+
+    /// The whole plan built and every holder at work: its spawns, sources,
+    /// controller, exits and road ends still walk to each other.
+    #[test]
+    #[ignore = "a report of the rooms that break it, until the owner picks the fixes"]
+    fn every_end_is_walked_to_with_the_plan_built_and_its_holders_at_work() {
+        use std::collections::{BTreeMap, BTreeSet};
+
+        use StructureType::{Container, Road, Spawn};
+        use fabot_base::world::RoomName;
+        use fx::{End, Holder};
+        let rules = Rules::vanilla();
+        let real = fabot_base::testing::real_rooms();
+        let mut cut: BTreeMap<(End, fx::Cause), BTreeSet<RoomName>> = BTreeMap::new();
+        let mut plans = 0;
+        for ground in crafted().chain(real.filter_map(|r| ground::of_room(&r.room()))) {
+            let Some(plan) = of_ground(&rules, &ground) else {
+                continue;
+            };
+            plans += 1;
+            let open = open_of(&ground, &plan, engine::CONTROLLER_MAX_LEVEL);
+            let planned = || plan.items.iter().chain(&plan.ring);
+            let of = |k: StructureType| planned().filter(move |i| i.kind == k).map(|i| i.tile);
+            let beside = |rock: Tile| of(Container).filter(move |c| tiles::range(*c, rock) == 1);
+            let mut holders: Vec<(Holder, Tile)> = Vec::new();
+            let mut ends: fx::Ends = of(Spawn).map(|s| (End::Spawn, vec![s], 1)).collect();
+            for s in &ground.sources {
+                let posts: Vec<Tile> = beside(*s).collect();
+                holders.extend(posts.iter().map(|p| (Holder::Harvester, *p)));
+                ends.push((End::Source, if posts.is_empty() { vec![*s] } else { posts }, 1));
+            }
+            holders.extend(
+                ground.minerals.iter().flat_map(|m| beside(*m)).map(|p| (Holder::Digger, p)),
+            );
+            let mut pads: Vec<Tile> = Vec::new();
+            if let Some(c) = ground.controller {
+                let posted = |t: &Tile| holders.iter().any(|(_, h)| h == t);
+                let buffer = of(Container)
+                    .find(|b| !posted(b) && tiles::range(*b, c) <= engine::UPGRADE_RANGE);
+                let seats = buffer.map(|b| Atlas::upgrader_seats(|t| open[t] && !posted(&t), c, b));
+                // At RCL8 the economy casts one upgrader, its WORK the controller's whole
+                // 15 a tick (`bodies::upgradable_at`), on the buffer's first seat.
+                pads = seats.into_iter().flatten().collect();
+                holders.extend(pads.iter().take(1).map(|t| (Holder::Upgrader, *t)));
+                ends.push((End::Controller, vec![c], engine::UPGRADE_RANGE));
+            }
+            ends.extend(fx::exit_groups(&open).into_iter().map(|g| (End::Exit, g, 0)));
+            let roads: Vec<Tile> = of(Road).collect();
+            let held = |t: &Tile| holders.iter().any(|(_, h)| h == t);
+            // A road on an upgrader's seat is its pad, not a way anywhere.
+            let road_ends =
+                fx::road_ends(&roads).into_iter().filter(|t| !held(t) && !pads.contains(t));
+            ends.extend(road_ends.map(|t| (End::Road, vec![t], 0)));
+            if ends.first().is_none_or(|e| e.0 != End::Spawn) {
+                continue;
+            }
+            let mut bare = open_of(&ground, &plan, -1);
+            of(Road).for_each(|t| bare[t] = true);
+            for (end, _, cause) in fx::cut_off((&bare, &open), &ends, &holders) {
+                cut.entry((end, cause)).or_default().insert(ground.room);
+            }
+        }
+        let rooms: BTreeSet<&RoomName> = cut.values().flatten().collect();
+        for ((end, cause), at) in &cut {
+            let some: Vec<String> = at.iter().take(10).map(RoomName::to_string).collect();
+            eprintln!("{end:?} cut by {cause:?}: {} rooms, {}", at.len(), some.join(" "));
+        }
+        assert!(rooms.is_empty(), "{} of {plans} plans cut", rooms.len());
     }
 
     #[test]
