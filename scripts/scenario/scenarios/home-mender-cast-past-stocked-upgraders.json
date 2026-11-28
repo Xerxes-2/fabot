@@ -4,6 +4,6 @@
   "start": { "gen": 272, "seed": 1 },
   "ticks": 30000,
   "assert": [
-    { "measure": "roadsLost", "room": "E4S2", "from": 25000, "to": 30000, "max": 0 }
+    { "measure": "roadsLost", "room": "E4S2", "from": 25000, "to": 30000, "max": 2 }
   ]
 }

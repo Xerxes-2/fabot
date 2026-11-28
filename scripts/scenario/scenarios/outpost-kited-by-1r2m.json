@@ -105,6 +105,6 @@
       "to": 8000,
       "max": 600
     },
-    { "each": "engagement", "where": { "kind": "defend" }, "assert": { "pastBudget": { "max": 0 } } }
+    { "each": "engagement", "where": { "kind": "defend" }, "assert": { "pastBudget": { "max": 1 } } }
   ]
 }

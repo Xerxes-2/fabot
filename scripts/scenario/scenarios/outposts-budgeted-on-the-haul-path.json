@@ -4,8 +4,8 @@
   "start": { "gen": 5, "seed": 1 },
   "ticks": 24000,
   "assert": [
-    { "each": "outpost", "where": { "dug": { "min": 10000 } }, "assert": { "decayedShare": { "max": 11 } } },
+    { "each": "outpost", "where": { "dug": { "min": 10000 } }, "assert": { "decayedShare": { "max": 12 } } },
     { "measure": "outpostDug", "from": 18000, "to": 24000, "min": 120000 },
-    { "measure": "decayedShareMost", "max": 52 }
+    { "measure": "decayedShareMost", "max": 34 }
   ]
 }

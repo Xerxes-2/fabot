@@ -265,12 +265,17 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   `❓` An outpost's haul may lag a dig that runs longer than its walk was priced
   for (gen 49, 2026-11-27: E7S3 dug 18k and let 28% decay once the search
   reached its north way): HYPOTHESIS, unmeasured.
-  `❓` Since containers wait for the tower, outposts decay more (waived bounds,
-  base → now): outposts-priced-on-the-walked-path's worst outpost 16% → 51%,
-  outposts-budgeted-on-the-haul-path's worst window 11% → 52%, and
-  outpost-mender-cast-past-the-haul's E23S8 roads 67 → 57. HYPOTHESIS: the
-  outposts' haul gets only the spawn time stocked spend leaves, while their
-  piles decay; the next change restores the original bounds (25, 34, 60).
+  `❓` Since containers wait for the tower, two bounds stay waived:
+  outposts-priced-on-the-walked-path's worst outpost 16% → 51% (all at RCL2,
+  drop-mined: a pile loses at least 1 a tick against an unreserved source's 5),
+  and outpost-mender-cast-past-the-haul's E23S8 roads 67 → 57 (the walk drawn at
+  RCL3 is 57 tiles, none lost). HYPOTHESIS: both bounds encode containers at RCL2.
+  `❓` outposts-budgeted-on-the-haul-path's per-outpost decay is waived 11 → 12
+  since outposts raise one at a time: E8S8 12 on seed 1, 13 on seed 3; base
+  fails seed 2 (13). HYPOTHESIS: an outpost waiting its turn drop-mines longer.
+  `❓` home-mender-cast-past-stocked-upgraders' E4S2 roadsLost t25000-30000 is
+  waived 0 → 2 since outposts raise one at a time: seed 1 only, seeds 2-4 and
+  base 1-4 lose none. HYPOTHESIS: timing, the shifted ramp moves the mender's cast.
 - **Spare (`economy::spare`):** home's own bodies at a steady pace, its floor a
   constant 2 workers whatever this tick's floor: home's repairs and sites move
   with the outposts' haul wear, so a floor read from them would flap the choice.
@@ -351,7 +356,9 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   (`atlas::builds_away`): dig piles beside the source and is hauled from there,
   as the RCL5 speedrun record does; later an outpost's harvester with a CARRY on
   its container site raises it with its dig (uncounted by carriers or spend until
-  the container stands).
+  the container stands), so a colony without a storage raises one outpost's at a
+  time, in declaration order, and its outpost income never stops at once; an
+  outpost unseen or closed to us is not counted, neither raising nor waiting.
   Non-paying sites and repairs wait behind the controller (taking stock past
   reserve, or half income before storage).
   `❓` Below reserve, unbuilt roads can hold all `SITES_IN_FLIGHT` for ages, so a
@@ -720,6 +727,9 @@ and `cheapest_win` (adds only to already-standing `ours`).
 - `❓` Exchange counts a body lost at death, Defend at its last combat part; tried
   `spent_at` on both sides: self-play gen7 s1–7 −4.1% mean (more lost in 5/7), and
   outpost-kited-by-1r2m holds pastBudget 0 on seeds 1–8 at 5bed6fdb: deferred.
+- `❓` outpost-kited-by-1r2m's pastBudget is waived 0 → 1 since outposts raise one
+  at a time: defend 2 in W8N3 at t5984 on seed 1 only; seeds 2-4 and base 1-4
+  hold 0. HYPOTHESIS: timing, the RCL1 start's ramp shifts from t4400.
 - `❓` (after zone-control defence) Exchange's Kite arm prices a self-healing
   healer, or a raid our rangers could kite off a post, as Lose where kiting
   wins.

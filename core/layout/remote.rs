@@ -66,34 +66,37 @@ fn place(
     intents: &mut Vec<Action>,
     pos: &Pos,
     kind: StructureType,
-) {
+) -> bool {
     let Some(&room) = rooms.get(&pos.room) else {
-        return;
+        return false;
     };
 
     if *budget <= 0 {
-        return;
+        return false;
     }
 
     opened(taken, pending, planned, room);
     let (Some(open), Some(now)) = (taken.get_mut(&room.name), pending.get_mut(&room.name)) else {
-        return;
+        return false;
     };
 
-    if *now < SITES_IN_FLIGHT && open.insert(tiles::of_pos(pos)) {
+    let placed = *now < SITES_IN_FLIGHT && open.insert(tiles::of_pos(pos));
+    if placed {
         *now += 1;
         *budget -= 1;
         intents.push(Action::Room(room.name, RoomAct::CreateSite(pos.x, pos.y, kind)));
     }
+    placed
 }
 
-/// The haul's end, at the colony Economy hauls to (`atlas::server`).
+/// The colony Economy hauls to (`atlas::server`), the haul's end there, and
+/// whether a storage banks its income.
 fn sink_for<'p>(
     atlas: &mut Atlas,
     (world, derived): (&World, &atlas::Derived),
     planned: &dyn Fn(RoomName) -> Option<&'p ColonyPlan>,
     room: &Room,
-) -> Option<Pos> {
+) -> Option<(RoomName, Pos, bool)> {
     let anchors = (room.controller.as_ref(), room.sources.first().map(|s| s.pos));
     let home = derived.colonies[atlas::server_of(atlas, derived, planned, anchors)?];
     let at = world.room(home)?;
@@ -101,7 +104,8 @@ fn sink_for<'p>(
         return None;
     }
 
-    at.storage().map(|s| s.pos).or_else(|| planned(home)?.pile)
+    let banked = at.storage().is_some();
+    Some((home, at.storage().map(|s| s.pos).or_else(|| planned(home)?.pile)?, banked))
 }
 
 /// v1's seat: the shortest walk out toward home. The owner's rule: the walk
@@ -143,6 +147,23 @@ pub fn sites<'p, 'q>(
         }
     }
 
+    // A harvester's dig raises the container under it, so a colony with no
+    // storage banking its income raises one outpost's at a time, not all at once.
+    let mut raising: BTreeMap<RoomName, RoomName> = BTreeMap::new();
+    let mut sinks = BTreeMap::new();
+    for o in outposts {
+        if let Some(&room) = rooms.get(&o.room)
+            && (room.sites.iter()).any(|s| s.kind == StructureType::Container && s.owner.is_ours())
+        {
+            let sink = *sinks
+                .entry(room.name)
+                .or_insert_with(|| sink_for(atlas, (world, derived), plan_of, room));
+            if let Some((home, ..)) = sink {
+                raising.entry(home).or_insert(room.name);
+            }
+        }
+    }
+
     for o in outposts {
         let Some(&room) = rooms.get(&o.room) else {
             continue;
@@ -152,9 +173,12 @@ pub fn sites<'p, 'q>(
         opened(&mut taken, &mut pending, planned, room);
 
         if budget > 0 && pending[&room.name] < SITES_IN_FLIGHT {
-            let sink = sink_for(atlas, (world, derived), plan_of, room);
+            let sink = *sinks
+                .entry(room.name)
+                .or_insert_with(|| sink_for(atlas, (world, derived), plan_of, room));
 
-            if let Some(sink) = sink {
+            if let Some((colony, sink, banked)) = sink {
+                let raises = banked || raising.get(&colony).is_none_or(|r| *r == room.name);
                 let home = atlas::target_at(&sink, 1);
 
                 // A reserver acts from beside the controller: a post there
@@ -188,8 +212,8 @@ pub fn sites<'p, 'q>(
                             }
 
                             match (seats.iter().min(), held) {
-                                (Some(&(on, _, t)), held) if !on || held.is_none() => {
-                                    place(
+                                (Some(&(on, _, t)), held) if raises && (!on || held.is_none()) => {
+                                    if place(
                                         &rooms,
                                         &mut taken,
                                         &mut pending,
@@ -198,7 +222,9 @@ pub fn sites<'p, 'q>(
                                         &mut intents,
                                         &tiles::to_pos(room.name, t),
                                         StructureType::Container,
-                                    );
+                                    ) {
+                                        raising.insert(colony, room.name);
+                                    }
                                     None
                                 }
                                 (_, held) => held.map(|(post, _)| post),
