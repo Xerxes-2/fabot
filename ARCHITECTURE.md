@@ -1139,20 +1139,3 @@ on a live-sized world.
   ceilings, §4 vs actual Memory/segments, per-module CPU shares,
   `engagements.log` error, and `Tuning` count.
 - The owner owns this document; agents propose changes via issues.
-
-## 13. Port manifest
-
-| Milestone | Scope | Exit | Status |
-|---|---|---|---|
-| M1 economy | core economy slots, logistics, layout | seat-extreme soak beats v1 across seeds | ✅ |
-| M1b outposts | remote harvest/haul/reserve; stand-down (§5) | E1 outposts net positive after Invaders | ✅ |
-| M2 structures | nodes N1–N7; links (controller's + longest-way source's first beat hub-first by +5–17k over 20k ticks on N4); labs & boosts; factory and RCL8 set wait for a sink (one room mines one ore, reactions need two, offline has no market) | links beat no-links; labs feed boosts | ✅ |
-| M3 defence | `Exchange`, `Defend`, tactics, casting, rival harness | fixed rivals & self-play held; error in bound | ✅ |
-| M4 live | v2 replaces v1 live | v2 runs live | ✅ |
-| M5 reach | multi-colony `Strategy`, `Sweep`, offensive kinds | endgame in §0 | ⏳ |
-
-**Remaining known gaps:**
-- `Atlas` room graph ignores `Footprint` (2×2 Quad routing through 1-wide gaps);
-  boosted `CARRY` priced unboosted.
-- Planned fight kinds (`KeeperDuty`, `PowerBank`, `Stronghold` L4–L5), deploy canary,
-  and remaining `sim/` features (§10.2).

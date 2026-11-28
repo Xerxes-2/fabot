@@ -295,7 +295,7 @@ fn held(guards: &[&Creep], foe: &Creep) -> bool {
     })
 }
 
-/// Whether a room in sight is raided (`ARCHITECTURE.md` §13, M1b): a colony
+/// Whether a room in sight is raided (`ARCHITECTURE.md` §5, outpost stand-down): a colony
 /// by any armed body; elsewhere a foe stands down the work it can reach and no more.
 fn raided(world: &World, owned: &BTreeSet<RoomName>, colony: bool, seen: &Room) -> bool {
     let guards = guards(world, seen.name);

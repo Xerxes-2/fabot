@@ -1,5 +1,5 @@
 {
-  "why": "Remote denial by a cheap kiter: one 1A1M player body, cast at its own spawn next door and recast as it dies, hovers within reach of W7N3's sources and keeps out of reach of any armed body of ours, over the border when that is the way out, so the M1b stand-down rule closes the outpost while it stands. W7N3 keeps working: it digs at least 80% of outpost-kited-baseline's dig. A scripted rival, since only the kiting and the stand-down it triggers are read. The window ends at t5800, before the engine's own Invaders, drawn by W7N3's dig, raid at t5857. Bounds by the owner",
+  "why": "Remote denial by a cheap kiter: one 1A1M player body, cast at its own spawn next door and recast as it dies, hovers within reach of W7N3's sources and keeps out of reach of any armed body of ours, over the border when that is the way out, so the outpost stand-down rule (ARCHITECTURE.md §5) closes the outpost while it stands. W7N3 keeps working: it digs at least 80% of outpost-kited-baseline's dig. A scripted rival, since only the kiting and the stand-down it triggers are read. The window ends at t5800, before the engine's own Invaders, drawn by W7N3's dig, raid at t5857. Bounds by the owner",
   "modules": [
     "atlas",
     "economy",
