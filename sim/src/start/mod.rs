@@ -158,7 +158,7 @@ fn rank(map: &Map, maps: &Maps, room: &str) -> Option<(f64, Vec<String>)> {
         facts.sources.to_string(),
         facts.free_near.to_string(),
         row.mineral.map_or("-".to_string(), |(m, ..)| m.to_string()),
-        format!("{:.1}", facts.mineral),
+        format!("{:.1}", facts.mineral[0]),
         format!("{:.1}", facts.worth),
         format!("{},{}", tiles::x_of(spawn), tiles::y_of(spawn)),
         (chosen.iter().map(|o| o.room.to_string())).collect::<Vec<_>>().join(" "),

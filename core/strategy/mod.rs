@@ -152,7 +152,7 @@ pub fn plan<'t>(
     (engagements, casts): (&[Engagement], &[Cast]),
     (layout, economy): (&BTreeMap<RoomName, Standing>, &mut EconomyState),
     (terrain, state): (&dyn Fn(RoomName) -> Option<&'t LocalRoomTerrain>, &mut StrategyState),
-) -> (Planned, Misfiled, Vec<outposts::Verdict>) {
+) -> (Planned, Misfiled, Vec<outposts::Verdict>, Vec<expand::Decision>) {
     let StrategyState { expansion, piles, .. } = state;
     let mut misfiled = Vec::new();
     let rivals = rivals(world, declarations, intel);
@@ -228,7 +228,7 @@ pub fn plan<'t>(
         let mut operations = operations(derived, declarations, (&[], None), &[]);
         let planned = (declarations, &plans[..]);
         operations.extend(crossed((atlas, derived), planned, (&[], None), &theirs));
-        return ((plans, Vec::new(), None, operations), misfiled, Vec::new());
+        return ((plans, Vec::new(), None, operations), misfiled, Vec::new(), Vec::new());
     }
     // An expansion declared this tick holds the outposts from the next.
     let claiming = expand::claim(intel, derived, expansion.in_flight.as_ref());
@@ -254,15 +254,8 @@ pub fn plan<'t>(
         fought: &fought,
         stocks: &stocks,
     };
-    expand::step(
-        (world, atlas),
-        derived,
-        (declarations, &plans),
-        &around,
-        intel,
-        terrain,
-        expansion,
-    );
+    let (planned, mut why) = ((declarations, &plans[..]), Vec::new());
+    expand::step((world, atlas), derived, planned, &around, intel, terrain, (expansion, &mut why));
     let may_start = expand::may_start(derived, declarations, expansion);
     let margin = declarations.tuning.sponsor_margin;
     expand::book(world, derived, &mut plans, (&around, margin), may_start);
@@ -273,7 +266,8 @@ pub fn plan<'t>(
     let fights = (engagements, casts);
     let held = (derived, &declarations.avoid);
     operations.extend(stronghold::rows(world, intel, held, fights, atlas));
-    ((plans, chosen, claim, operations), misfiled, verdicts)
+    verdicts.retain(|_| sampled);
+    ((plans, chosen, claim, operations), misfiled, verdicts, why)
 }
 
 /// A home's raid is answered before an outpost's; a sweep takes

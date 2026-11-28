@@ -304,7 +304,7 @@ pub fn decide<'t>(
         fabot_fight::boosted(&state.fight.engagements).map(|b| (b.colony, &*b.name)).collect();
     fabot_economy::derived::boosts(world, &declarations, &fight, &mut derived);
     let sampled = world.time % fabot_observe::metrics::WINDOW == 0;
-    let (plans, misfiled, verdicts) = strategy::plan(
+    let (plans, misfiled, verdicts, claims) = strategy::plan(
         (!state.off.contains(STRATEGY), sampled, world, &mut atlas),
         &derived,
         &declarations,
@@ -326,15 +326,13 @@ pub fn decide<'t>(
         trace,
     };
     let mut result = run(clock, &MODULES, &mut context, state);
-    if sampled {
-        let line = |(room, home, why, net, spawn, left): strategy::outposts::Verdict| {
-            let f = |v: f64| format!("{v:.2}");
-            let (room, home, why) = (room.to_string(), home.to_string(), why.into());
-            let named = [("room", room), ("home", home), ("why", why), ("net", f(net))];
-            ("outpost", named.into_iter().chain([("spawn", f(spawn)), ("left", f(left))]).collect())
-        };
-        result.telemetry.decisions.extend(verdicts.into_iter().map(line));
-    }
+    let line = |(room, home, why, net, spawn, left): strategy::outposts::Verdict| {
+        let f = |v: f64| format!("{v:.2}");
+        let (room, home, why) = (room.to_string(), home.to_string(), why.into());
+        let named = [("room", room), ("home", home), ("why", why), ("net", f(net))];
+        ("outpost", named.into_iter().chain([("spawn", f(spawn)), ("left", f(left))]).collect())
+    };
+    result.telemetry.decisions.extend(verdicts.into_iter().map(line).chain(claims));
     for report in &result.reports {
         phases.push((report.module.to_string(), report.cpu));
     }

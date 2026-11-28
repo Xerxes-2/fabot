@@ -3,7 +3,9 @@
 // are screeps-api.mjs's.
 //
 // Usage: run with no args.
-import { readFileSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { createInterface } from "node:readline";
 import { gunzipSync } from "node:zlib";
 import { connect, fail } from "./screeps-api.mjs";
 import { METRICS, windows } from "./metrics.mjs";
@@ -41,6 +43,8 @@ const USAGE = `usage: npm run observe -- <command>
   room <room>        controller, structures, creeps, tombstones, sites, as the server holds them
   creep <name>       one of our creeps and its assignment
   regions <room>     walkable regions past rival ramparts: exits per side, owned structures beside
+  claims <run dir>   a soak's \`claim\` decisions off its cpu.jsonl (a later seat's: its subdirectory), on each due tick
+                     the top candidate changed or a claim or give-up was decided: each room's score term by term
   replay <capture.jsonl> [--trace <creep>]
                      dist/main.js run on the captured ticks, offline: intents, refusals, tile scores`;
 const LIVE = ["metrics", "health", "cpu", "faults", "switches", "switch", "declare", "tuning", "capture", "tap", "battle", "wait", "engagements", "exchange", "grudges", "room", "creep", "regions"];
@@ -78,7 +82,32 @@ function grudges(text) {
   for (const row of table) console.log(row.map((v, i) => String(v)[i < 2 ? "padEnd" : "padStart"](widths[i])).join("  "));
 }
 
+// A claim is decided on a tick with a `best` and no colony `held` against it, a give-up on one with a `swap`.
+async function claims(dir) {
+  const COLUMNS = ["room", "why", "ore", "total", "source", "near", "crossing", "worth", "failure", "mineral", "now", "option", "rarity", "margin"];
+  let top;
+  if (!existsSync(join(dir, "cpu.jsonl"))) fail(`no cpu.jsonl in ${dir}`);
+  for await (const line of createInterface({ input: createReadStream(join(dir, "cpu.jsonl")) })) {
+    if (!line.includes('"claim"')) continue;
+    const { t, decisions } = JSON.parse(line);
+    const rows = decisions.filter(([kind]) => kind === "claim").map(([, fields]) => Object.fromEntries(fields));
+    const why = (w) => rows.some((r) => r.why === w);
+    const decided = why("swap") || (why("best") && !why("held"));
+    if (rows[0]?.room === top && !decided) continue;
+    top = rows[0]?.room;
+    const table = [COLUMNS, ...rows.map((r) => COLUMNS.map((c) => r[c] ?? ""))];
+    const widths = COLUMNS.map((_, i) => Math.max(...table.map((row) => String(row[i]).length)));
+    console.log(`t${t}${decided ? " decided" : ""}`);
+    for (const row of table) console.log(row.map((v, i) => String(v)[i < 3 ? "padEnd" : "padStart"](widths[i])).join("  "));
+  }
+}
+
 const [cmd, ...args] = process.argv.slice(2);
+if (cmd === "claims") {
+  if (!args[0]) fail("usage: observe claims <run dir>");
+  await claims(args[0]);
+  process.exit(0);
+}
 if (cmd === "replay") {
   const traced = args.includes("--trace") ? args[args.indexOf("--trace") + 1] : undefined;
   if (!args[0] || (args.includes("--trace") && !traced)) fail("usage: observe replay <capture.jsonl> [--trace <creep>]");
