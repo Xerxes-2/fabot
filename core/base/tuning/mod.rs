@@ -16,14 +16,9 @@ macro_rules! tuning {
         }
 
         impl Tuning {
-            /// The first field outside its range.
             pub fn outside(&self) -> Option<&'static str> {
-                $(
-                    if !($valid).contains(&self.$field) {
-                        return Some(stringify!($field));
-                    }
-                )*
-                None
+                [$((stringify!($field), ($valid).contains(&self.$field)),)*]
+                    .into_iter().find(|(_, ok)| !ok).map(|(field, _)| field)
             }
         }
     };
@@ -45,6 +40,9 @@ tuning! {
     expand_failure: f64 = 6.0, 0.0..=100.0;
     expand_mineral: f64 = 1.0, 0.0..=10.0;
     expand_swap: f64 = 1.0, 0.0..=10.0;
+    expand_scarcity: f64 = 1.0, 0.0..=1.0;
+    expand_future_ore: f64 = 0.25, 0.0..=1.0;
+    expand_rival_ore: f64 = 0.25, 0.0..=1.0;
     outpost_spend_parts: f64 = 2.0, 0.0..=100.0;
     outpost_cpu_share: f64 = 0.5, 0.01..=1.0;
     outpost_spawn_share: f64 = 0.5, 0.01..=1.0;

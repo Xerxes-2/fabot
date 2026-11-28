@@ -82,20 +82,70 @@ pub fn score(f: &Facts, t: &Tuning) -> f64 {
         + t.expand_mineral * f.mineral
 }
 
-fn demand(ore: usize) -> i32 {
-    BOOSTS.iter().map(|(boost, rank)| rank * ores_in(*boost)[ore]).sum()
+fn tier_of(c: ResourceType) -> usize {
+    lower(c).map_or(1, |l| 1 + tier_of(l))
 }
 
-/// The most demanded mineral's first copy is a source's dig, the flat bonus
-/// it replaced; copies fall off as Hivemind's 1/(held + 1).
-pub fn mineral_worth(mineral: ResourceType, held: usize) -> f64 {
-    let Some(ore) = ORES.iter().position(|o| *o == mineral) else {
-        return 0.0;
-    };
-    let most = (0..ORES.len()).map(demand).max().unwrap_or(1);
-    f64::from(engine::HELD_OUTPUT_PER_TICK) * f64::from(demand(ore))
-        / f64::from(most)
-        / (held + 1) as f64
+fn top_tier() -> usize {
+    BOOSTS.iter().map(|(b, _)| tier_of(*b)).max().unwrap_or(1)
+}
+
+fn lower(c: ResourceType) -> Option<ResourceType> {
+    c.reaction_components()?.into_iter().find(|r| r.boost().is_some())
+}
+
+fn demand(ore: usize, tier: usize) -> i32 {
+    let within = |b| std::iter::successors(Some(b), |c| lower(*c)).find(|c| tier_of(*c) <= tier);
+    BOOSTS.iter().filter_map(|(b, rank)| Some(rank * ores_in(within(*b)?)[ore])).sum()
+}
+
+pub struct Ores {
+    pub tier: usize,
+}
+
+impl Ores {
+    pub fn of(world: &World, derived: &Derived) -> Ores {
+        let level = |c: &RoomName| world.room(*c)?.controller.as_ref().map(|c| c.level);
+        let labs = derived.colonies.iter().any(|c| level(c).is_some_and(engine::topped_out));
+        Ores { tier: if labs { top_tier() } else { 1 } }
+    }
+}
+
+fn seen(intel: &Intel, near: impl Fn(RoomName) -> bool) -> [usize; ORES.len()] {
+    let of = |o, w: &Row| w.mineral.is_some_and(|(m, _)| m == o);
+    ORES.map(|o| intel.iter().filter(|(r, w)| near(**r) && of(o, w)).count())
+}
+
+pub fn mineral_worth(
+    (mineral, held): (ResourceType, usize),
+    (tier, rival): (usize, bool),
+    seen: &[usize; ORES.len()],
+    t: &Tuning,
+) -> f64 {
+    let most = (0..ORES.len()).map(|o| demand(o, top_tier())).max().unwrap_or(1);
+    let mean = seen.iter().sum::<usize>() as f64 / ORES.len() as f64;
+    ORES.iter().position(|o| *o == mineral).map_or(0.0, |ore| {
+        let (now, all) = (f64::from(demand(ore, tier)), f64::from(demand(ore, top_tier())));
+        let near = if rival { 1.0 + t.expand_rival_ore } else { 1.0 };
+        let need = now + (t.expand_future_ore * near).min(1.0) * (all - now);
+        let known = seen.iter().sum::<usize>() >= ORES.len();
+        let rarity = if known { (mean + 1.0) / (seen[ore] + 1) as f64 } else { 1.0 };
+        f64::from(engine::HELD_OUTPUT_PER_TICK) * need / f64::from(most) / (held + 1) as f64
+            * rarity.powf(t.expand_scarcity)
+    })
+}
+
+/// `but`, a colony of ours weighed as if it were not.
+fn ore(
+    (world, ores): (&World, &Ores),
+    (owned, rivals): Ours,
+    intel: &Intel,
+    (room, m, but): (RoomName, ResourceType, Option<RoomName>),
+    t: &Tuning,
+) -> f64 {
+    let near = |r: RoomName| tiles::rooms_apart(r, room) <= REACH_HOPS;
+    let rival = rivals.iter().any(|(r, _)| near(*r));
+    mineral_worth((m, copies(world, owned, m, but)), (ores.tier, rival), &seen(intel, near), t)
 }
 
 fn free(world: &World, row: &Row) -> bool {
@@ -118,9 +168,11 @@ fn copies(
         .count()
 }
 
+pub type Ours<'a> = (&'a BTreeSet<RoomName>, &'a [(RoomName, i32)]);
+
 pub fn claimable(
     world: &World,
-    (owned, rivals): (&BTreeSet<RoomName>, &[(RoomName, i32)]),
+    (owned, rivals): Ours,
     declarations: &Declarations,
     (name, row): (RoomName, &Row),
 ) -> bool {
@@ -137,16 +189,15 @@ pub fn claimable(
 
 pub fn facts(
     world: &World,
-    (owned, worked): (&BTreeSet<RoomName>, &dyn Fn(RoomName) -> bool),
+    (ours, worked): (Ours, &dyn Fn(RoomName) -> bool),
     intel: &Intel,
     (name, row): (RoomName, &Row),
     (crossings, failed): (i32, f64),
+    (ores, t): (&Ores, &Tuning),
 ) -> Facts {
-    let mut free_near = 0;
-    for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
-        let Some(next) = name.offset(dx, dy) else {
-            continue;
-        };
+    let (mut free_near, owned) = (0, ours.0);
+    let beside = [(-1, 0), (1, 0), (0, -1), (0, 1)].into_iter();
+    for next in beside.filter_map(|(dx, dy)| name.offset(dx, dy)) {
         if let Some(r) = (intel.get(&next)).filter(|r| r.controller.is_some() && free(world, r))
             && apart(owned, next)
             && !worked(next)
@@ -161,7 +212,7 @@ pub fn facts(
         worth: season::worth(name),
         failed,
         mineral: (row.mineral)
-            .map_or(0.0, |(m, _)| mineral_worth(m, copies(world, owned, m, None))),
+            .map_or(0.0, |(m, _)| ore((world, ores), ours, intel, (name, m, None), t)),
     }
 }
 
@@ -330,38 +381,37 @@ pub fn step<'t>(
     let sponsors = sponsors(world, plans, around, tuning.sponsor_margin);
     let worked =
         |room: RoomName| (declarations.outposts.iter().chain(outposts)).any(|o| o.room == room);
+    let ores = Ores::of(world, derived);
     let mut scored: Vec<(f64, Outpost)> = Vec::new();
     for (home, tree) in derived.trees.iter().filter(|(h, _)| sponsors.contains(h)) {
-        for dx in -REACH_HOPS..=REACH_HOPS {
-            for dy in -REACH_HOPS..=REACH_HOPS {
-                let Some(name) = home.offset(dx, dy) else {
-                    continue;
-                };
-                let (Some(crossings), Some(row)) = (tree.crossings(name, *home), intel.get(&name))
-                else {
-                    continue;
-                };
-                let (Some(controller), Some(sources)) = (&row.controller, &row.sources) else {
-                    continue;
-                };
-                if !claimable(world, (&derived.owned, rivals), declarations, (name, row))
-                    || scored.iter().any(|(_, o)| o.room == name)
-                {
-                    continue;
-                }
-                let ours = (&derived.owned, &worked as &dyn Fn(RoomName) -> bool);
-                let facts = facts(world, ours, intel, (name, row), (crossings, failed(name)));
-                let outpost = Outpost {
-                    reserved: true,
-                    room: name,
-                    controller: controller.clone(),
-                    sources: sources.clone(),
-                };
-                // A room that does not pay is never declared (§7.2).
-                let score = score(&facts, tuning);
-                if score > 0.0 {
-                    scored.push((score, outpost));
-                }
+        let reach = -REACH_HOPS..=REACH_HOPS;
+        let around = reach.clone().flat_map(|x| reach.clone().map(move |y| (x, y)));
+        for name in around.filter_map(|(dx, dy)| home.offset(dx, dy)) {
+            let (Some(crossings), Some(row)) = (tree.crossings(name, *home), intel.get(&name))
+            else {
+                continue;
+            };
+            let (Some(controller), Some(sources)) = (&row.controller, &row.sources) else {
+                continue;
+            };
+            if !claimable(world, (&derived.owned, rivals), declarations, (name, row))
+                || scored.iter().any(|(_, o)| o.room == name)
+            {
+                continue;
+            }
+            let ours = ((&derived.owned, rivals), &worked as &dyn Fn(RoomName) -> bool);
+            let facts =
+                facts(world, ours, intel, (name, row), (crossings, failed(name)), (&ores, tuning));
+            let outpost = Outpost {
+                reserved: true,
+                room: name,
+                controller: controller.clone(),
+                sources: sources.clone(),
+            };
+            // A room that does not pay is never declared (§7.2).
+            let score = score(&facts, tuning);
+            if score > 0.0 {
+                scored.push((score, outpost));
             }
         }
     }
@@ -383,7 +433,8 @@ pub fn step<'t>(
             worth: season::worth(room.name),
             failed: 0.0,
             mineral: (room.minerals.first().and_then(|m| m.resource)).map_or(0.0, |m| {
-                mineral_worth(m, copies(world, &derived.owned, m, Some(room.name)))
+                let held = (room.name, m, Some(room.name));
+                ore((world, &ores), (&derived.owned, rivals), intel, held, tuning)
             }),
         };
         score(&facts, tuning)
@@ -395,9 +446,8 @@ pub fn step<'t>(
         .filter(|r| !busy.contains(&r.name) && may_give_up(r.name, expansion))
         .map(|r| (held_score(r), r.name))
         .min_by(|(a, x), (b, y)| a.total_cmp(b).then(x.cmp(y)));
-    let held = f64::from(engine::HELD_OUTPUT_PER_TICK);
     if let (Some((beat, _)), Some((kept, room))) = (best, worst)
-        && beat > kept + held * tuning.expand_swap
+        && beat > kept + f64::from(engine::HELD_OUTPUT_PER_TICK) * tuning.expand_swap
     {
         give_up(room, expansion);
     }
@@ -421,7 +471,7 @@ mod tests {
     /// S11's E24S11 fits only without its mineral, E26S7 only with it.
     #[test]
     fn the_fit_check_plans_the_ground_layout_plans_once_ours() {
-        let text = include_str!("../../scripts/scenario/worlds/season-outpost-ring.json");
+        let text = include_str!("../../../scripts/scenario/worlds/season-outpost-ring.json");
         let world = fabot_base::testing::world(text);
         let mut intel = Intel::default();
         crate::intel::step(&world, &fabot_atlas::Atlas::default(), &mut intel);
@@ -454,7 +504,8 @@ mod tests {
 
     #[test]
     fn a_scarce_mineral_outbids_another_copy_of_one_we_hold() {
-        let worth = |o: ResourceType, held: usize| mineral_worth(o, held);
+        let t = Tuning::default();
+        let worth = |o, held| mineral_worth((o, held), (top_tier(), false), &[0; ORES.len()], &t);
         assert!(worth(ResourceType::Oxygen, 0) > worth(ResourceType::Hydrogen, 0));
         assert!(worth(ResourceType::Lemergium, 0) > worth(ResourceType::Utrium, 0));
         assert!(worth(ResourceType::Utrium, 1) < worth(ResourceType::Lemergium, 0));
@@ -468,9 +519,67 @@ mod tests {
             failed: 0.0,
             mineral: worth(ResourceType::Utrium, 1),
         };
-        let t = Tuning::default();
         let lack = Facts { mineral: worth(ResourceType::Lemergium, 0), ..have };
         assert!(score(&lack, &t) > score(&have, &t));
+    }
+
+    #[test]
+    fn a_mineral_rarer_in_reach_weighs_more() {
+        let seen = [5, 1, 3, 4, 3, 0, 2];
+        let flat = Tuning { expand_scarcity: 0.0, ..Tuning::default() };
+        let weight = |o| {
+            mineral_worth((o, 0), (top_tier(), false), &seen, &Tuning::default())
+                / mineral_worth((o, 0), (top_tier(), false), &seen, &flat)
+        };
+        let mut ores: Vec<_> = ORES.iter().zip(seen).map(|(o, n)| (n, weight(*o))).collect();
+        ores.sort_by_key(|o| o.0);
+        assert!(ores.windows(2).all(|w| w[0].0 == w[1].0 || w[0].1 > w[1].1), "{ores:?}");
+    }
+
+    #[test]
+    fn too_few_mineral_rooms_in_reach_weigh_every_ore_alike() {
+        let (t, flat) = (Tuning::default(), Tuning { expand_scarcity: 0.0, ..Tuning::default() });
+        let thin = [0, 1, 0, 0, 3, 0, 2];
+        for o in ORES {
+            let worth = |t| mineral_worth((o, 0), (top_tier(), false), &thin, t);
+            assert_eq!(worth(&t), worth(&flat), "{o:?}");
+        }
+    }
+
+    #[test]
+    fn catalyst_is_an_option_until_t2_then_a_need() {
+        use ResourceType::{Catalyst, CatalyzedGhodiumAlkalide, GhodiumAlkalide, GhodiumOxide};
+        assert_eq!(
+            [CatalyzedGhodiumAlkalide, GhodiumAlkalide, GhodiumOxide].map(tier_of),
+            [3, 2, 1]
+        );
+        let seen = [1; ORES.len()];
+        let none = Tuning { expand_future_ore: 0.0, ..Tuning::default() };
+        let worth = |tier, rival, t: &Tuning| mineral_worth((Catalyst, 0), (tier, rival), &seen, t);
+        assert_eq!(worth(1, false, &none), 0.0);
+        assert!(worth(top_tier(), false, &none) > 0.0);
+        let t = Tuning::default();
+        assert!(0.0 < worth(1, false, &t) && worth(1, false, &t) < worth(1, true, &t));
+        assert!(worth(1, true, &t) < worth(top_tier(), false, &t));
+    }
+
+    #[test]
+    fn a_sole_ore_at_any_tier_stays_within_four_digs_at_every_range_max() {
+        let t = Tuning {
+            expand_scarcity: 1.0,
+            expand_future_ore: 1.0,
+            expand_rival_ore: 1.0,
+            ..Tuning::default()
+        };
+        let dig = f64::from(engine::HELD_OUTPUT_PER_TICK);
+        for (i, ore) in ORES.iter().enumerate() {
+            let mut seen = [6; ORES.len()];
+            seen[i] = 1;
+            for tier in [1, top_tier()] {
+                let worth = mineral_worth((*ore, 0), (tier, true), &seen, &t);
+                assert!(worth < 4.0 * dig, "{ore:?} at T{tier}: {worth}");
+            }
+        }
     }
 
     #[test]

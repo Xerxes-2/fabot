@@ -11,7 +11,8 @@
     "core/exchange": 1620,
     "core/economy": 7305,
     "core/layout": 4539,
-    "core/strategy": 1412,
+    "core/strategy": 993,
+    "core/strategy/expand": 466,
     "core/mv": 2479,
     "core/atlas": 3204,
     "core/observe": 1302,
@@ -52,7 +53,7 @@
     "core/fight/kinds": 7.9,
     "core/fight/price": 7.5,
     "core/fight/scene": 7.9,
-    "core/strategy": 7.5,
+    "core/strategy/expand": 7.5,
     "core/tactics": 8
   },
   "counts": {

@@ -97,10 +97,9 @@ fn worked(c: &Candidate, capacity: i32, reserved: bool, spend: &dyn Fn(f64) -> f
     }
 }
 
-/// An operation holds only the colonies it casts from: a claim its sponsor; a
-/// stronghold while answered, the colonies Fight casts it from at rest, since
-/// between waves none is owed; a sweep
-/// none (a harasser spawns in a few ticks a life); a Defend its owed casts
+/// An operation holds only the colonies it casts from: a claim its sponsor; a stronghold
+/// while answered, the colonies Fight casts it from at rest, since between waves none is
+/// owed; a sweep none (a harasser spawns in a few ticks a life); a Defend its owed casts
 /// (`ColonyPlan.owes`).
 pub fn busy(
     atlas: &mut Atlas,

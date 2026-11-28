@@ -91,7 +91,11 @@ fn rank(map: &Map, maps: &Maps, room: &str) -> Option<(f64, Vec<String>)> {
     let row = Row { owner: None, level: 0, ..intel.get(&name)?.clone() };
     let none = BTreeSet::new();
     let rivals = fabot_strategy::rivals(&world, &declarations, &intel);
-    let facts = expand::facts(&world, (&none, &|_| false), &intel, (name, &row), (0, 0.0));
+    let worked: &dyn Fn(RoomName) -> bool = &|_| false;
+    let ours = ((&none, rivals.as_slice()), worked);
+    let ores = expand::Ores::of(&world, &derived);
+    let tuned = (&ores, &declarations.tuning);
+    let facts = expand::facts(&world, ours, &intel, (name, &row), (0, 0.0), tuned);
     let outpost = Outpost {
         reserved: true,
         room: name,
