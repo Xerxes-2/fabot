@@ -118,6 +118,25 @@ impl Spec {
     }
 }
 
+/// `sim gen-rooms --gen <seed> [--sectors WxH]`: the rooms `npm run plan:quality` reads.
+pub fn rooms() {
+    let args: Vec<String> = std::env::args().skip(2).collect();
+    let flags: BTreeMap<_, _> = args.chunks(2).map(|f| (f[0].clone(), f[1].clone())).collect();
+    let map = Spec::of(&flags).expect("usage: sim gen-rooms --gen <seed> [--sectors WxH]").world();
+    for (name, terrain) in &map.rooms {
+        let of = |kind: &'static str| {
+            (map.objects.iter()).filter(move |o| o["room"] == name.as_str() && o["type"] == kind)
+        };
+        let xy = |o: &Value| format!("{},{}", o["x"], o["y"]);
+        let sources: Vec<String> = of("source").map(xy).collect();
+        let Some(controller) = of("controller").next().filter(|_| !sources.is_empty()) else {
+            continue;
+        };
+        let (sources, mineral) = (sources.join("|"), of("mineral").next().map_or("-".into(), xy));
+        println!("{}:{name};{sources};{};{mineral};{terrain}", flags["--gen"], xy(controller));
+    }
+}
+
 /// A `rooms` doc as an old official world has it: a highway a bus with its sector's deposit
 /// type and, in a generated world (`banks`: its seed and tick), a power bank due.
 pub fn room_doc(name: &str, closed: bool, banks: Option<(u64, i64)>) -> Value {

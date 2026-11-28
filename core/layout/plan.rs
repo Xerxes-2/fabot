@@ -150,7 +150,7 @@ fn priority(kind: StructureType, level: i32, mined: bool, crowded: bool) -> i32 
     }
 }
 
-fn to_plan(rules: &Rules, ground: &Ground, built: &Built) -> Plan {
+pub fn to_plan(rules: &Rules, ground: &Ground, built: &Built) -> Plan {
     drawn(rules, ground, built).0
 }
 
@@ -300,7 +300,7 @@ fn reached<'a>(
 
 /// As many centres as Hivemind's planner tries: its weighted one and one per
 /// ninth of the room.
-const TRIES: usize = 10;
+pub const TRIES: usize = 10;
 
 /// The search, a few centres a tick as Hivemind's planner spreads them.
 #[derive(Clone, Debug, PartialEq)]
@@ -337,7 +337,7 @@ impl Drawing {
             self.next += 1;
             if let Some(b) = build::build(rules, ground, dist, *center) {
                 let plan = to_plan(rules, ground, &b);
-                if plan.unfit.is_empty() && plan.pile().is_some() {
+                if fits(&plan) {
                     return Drawn::Done(Some(plan));
                 }
                 self.held.get_or_insert(plan);
@@ -345,6 +345,11 @@ impl Drawing {
         }
         Drawn::Done(self.held.take())
     }
+}
+
+/// A whole plan, its centre left to the pile a colony banks on before storage.
+pub fn fits(plan: &Plan) -> bool {
+    plan.unfit.is_empty() && plan.pile().is_some()
 }
 
 pub fn of_ground(rules: &Rules, ground: &Ground) -> Option<Plan> {

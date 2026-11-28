@@ -211,6 +211,7 @@ fn main() {
     match std::env::args().nth(1).as_deref() {
         Some("duel") => return duel::main(),
         Some("start-rooms") => return start::main(),
+        Some("gen-rooms") => return generated::rooms(),
         Some("constants") => return println!("{}", krebs::constants::constants_json()),
         _ => {}
     }
@@ -265,10 +266,8 @@ fn main() {
                     let seen = intel.iter().map(|(r, w)| (r.to_string(), w.seen));
                     row["seen"] = json!(seen.collect::<BTreeMap<_, _>>());
                     let _ = writeln!(p.samples, "{row}");
-                    eprintln!(
-                        "{} t{t} rcl{rcl} {} creeps {}",
-                        p.seat.name, row["progress"], row["creeps"]
-                    );
+                    let name = &p.seat.name;
+                    eprintln!("{name} t{t} rcl{rcl} {} creeps {}", row["progress"], row["creeps"]);
                 }
             }
             v.us = &uids[0];

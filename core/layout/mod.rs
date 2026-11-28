@@ -2,6 +2,7 @@ pub mod build;
 pub mod cut;
 pub mod derive;
 pub mod ground;
+pub mod haul;
 pub mod path;
 pub mod place;
 pub mod plan;

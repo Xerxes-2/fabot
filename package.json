@@ -6,6 +6,7 @@
     "format": "RUSTFMT=${RUSTFMT:-$(rustup which --toolchain nightly-2026-11-17 rustfmt)} cargo fmt --all",
     "format:check": "npm run format --silent -- --check",
     "ceiling": "node scripts/ceiling.mjs",
+    "plan:quality": "node scripts/plan-quality.mjs",
     "test": "npm run format:check --silent && npm run ceiling --silent && cargo clippy --workspace --all-targets --features fabot/tools -- -D warnings && cargo clippy --workspace --exclude sim --target wasm32-unknown-unknown -- -D warnings && cargo test --workspace",
     "smoke": "node scripts/smoke.mjs",
     "smoke:real": "node scripts/official/smoke.mjs",
