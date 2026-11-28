@@ -125,7 +125,9 @@ fn rank(map: &Map, maps: &Maps, room: &str) -> Option<(f64, Vec<String>)> {
         outposts::chosen(&world, candidates, spare, (&declarations.tuning, &[]), &mut vec![]);
     let net: f64 = chosen.iter().map(|o| nets[&o.room]).sum();
     // The claim rule's own price of a home source.
-    let home = f64::from(engine::HELD_OUTPUT_PER_TICK) * facts.sources as f64;
+    let home = f64::from(engine::HELD_OUTPUT_PER_TICK)
+        * declarations.tuning.expand_source
+        * facts.sources as f64;
 
     let wall = |t: &Tile| terrain::is_wall(maps.terrain(name), tiles::x_of(*t), tiles::y_of(*t));
     let swamp =
@@ -148,7 +150,7 @@ fn rank(map: &Map, maps: &Maps, room: &str) -> Option<(f64, Vec<String>)> {
         room.to_string(),
         format!("{:.1}", home + net),
         claim.to_string(),
-        format!("{:.1}", expand::score(&facts)),
+        format!("{:.1}", expand::score(&facts, &declarations.tuning)),
         facts.sources.to_string(),
         facts.free_near.to_string(),
         row.mineral.map_or("-".to_string(), |(m, _)| m.to_string()),

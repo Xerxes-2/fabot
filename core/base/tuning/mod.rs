@@ -38,6 +38,13 @@ tuning! {
     expand_bucket: i32 = 9_000, 0..=10_000;
     expand_threat_rooms: i32 = 2, 0..=10;
     prune_level: i32 = 5, 0..=8;
+    expand_source: f64 = 1.0, 0.0..=10.0;
+    expand_near_source: f64 = 0.5, 0.0..=10.0;
+    expand_crossing: f64 = 1.0, 0.0..=50.0;
+    expand_worth: f64 = 1.0, 0.0..=10.0;
+    expand_failure: f64 = 6.0, 0.0..=100.0;
+    expand_mineral: f64 = 1.0, 0.0..=10.0;
+    expand_swap: f64 = 1.0, 0.0..=10.0;
     outpost_spend_parts: f64 = 2.0, 0.0..=100.0;
     outpost_cpu_share: f64 = 0.5, 0.01..=1.0;
     outpost_spawn_share: f64 = 0.5, 0.01..=1.0;

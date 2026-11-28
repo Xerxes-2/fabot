@@ -7,6 +7,7 @@ use fabot_base::{
     engine,
     intel::{self, Intel, Row},
     tiles,
+    tuning::Tuning,
     vocabulary::ResourceType,
     world::{Id, Mineral, Room, RoomName, World},
 };
@@ -56,8 +57,8 @@ const SPONSOR_LEVEL: i32 = 4;
 const CLAIM_DEADLINE: i32 = 5 * engine::CREEP_LIFETIME;
 /// About twice the claim to storage measured two crossings off (21k ticks).
 const RAISE_DEADLINE: i32 = 40_000;
-/// A fresh failure near a room outweighs the most a room scores (its dig and
-/// four neighbours'), fading over this (Hivemind's).
+/// At default weights a fresh failure near a room outweighs the most a room scores (its
+/// dig and four neighbours'), fading over this (Hivemind's).
 const FORGET: i32 = 100_000;
 
 /// What a room is worth holding, in energy a tick.
@@ -72,11 +73,13 @@ pub struct Facts {
 }
 
 /// A simple rule shaped as its priced replacement (`AGENTS.md`).
-pub fn score(f: &Facts) -> f64 {
+pub fn score(f: &Facts, t: &Tuning) -> f64 {
     let held = f64::from(engine::HELD_OUTPUT_PER_TICK);
-    held * f.sources as f64 + held / 2.0 * f.free_near as f64 - f64::from(f.crossings) + f.worth
-        - 6.0 * held * f.failed
-        + f.mineral
+    held * t.expand_source * f.sources as f64 + held * t.expand_near_source * f.free_near as f64
+        - t.expand_crossing * f64::from(f.crossings)
+        + t.expand_worth * f.worth
+        - t.expand_failure * held * f.failed
+        + t.expand_mineral * f.mineral
 }
 
 fn demand(ore: usize) -> i32 {
@@ -355,7 +358,7 @@ pub fn step<'t>(
                     sources: sources.clone(),
                 };
                 // A room that does not pay is never declared (§7.2).
-                let score = score(&facts);
+                let score = score(&facts, tuning);
                 if score > 0.0 {
                     scored.push((score, outpost));
                 }
@@ -373,7 +376,7 @@ pub fn step<'t>(
     let held_score = |room: &Room| {
         let worked = |o: &&Outpost| tiles::rooms_apart(o.room, room.name) == 1;
         let near = (declarations.outposts.iter().chain(outposts)).filter(worked);
-        score(&Facts {
+        let facts = Facts {
             sources: room.sources.len(),
             free_near: near.map(|o| o.sources.len()).sum(),
             crossings: 0,
@@ -382,7 +385,8 @@ pub fn step<'t>(
             mineral: (room.minerals.first().and_then(|m| m.resource)).map_or(0.0, |m| {
                 mineral_worth(m, copies(world, &derived.owned, m, Some(room.name)))
             }),
-        })
+        };
+        score(&facts, tuning)
     };
     // Before RCL6's extractor and terminal a colony is cheap to give up for a
     // better room; past them it holds what a new one would take a long climb to.
@@ -393,7 +397,7 @@ pub fn step<'t>(
         .min_by(|(a, x), (b, y)| a.total_cmp(b).then(x.cmp(y)));
     let held = f64::from(engine::HELD_OUTPUT_PER_TICK);
     if let (Some((beat, _)), Some((kept, room))) = (best, worst)
-        && beat > kept + held
+        && beat > kept + held * tuning.expand_swap
     {
         give_up(room, expansion);
     }
@@ -464,8 +468,9 @@ mod tests {
             failed: 0.0,
             mineral: worth(ResourceType::Utrium, 1),
         };
+        let t = Tuning::default();
         let lack = Facts { mineral: worth(ResourceType::Lemergium, 0), ..have };
-        assert!(score(&lack) > score(&have));
+        assert!(score(&lack, &t) > score(&have, &t));
     }
 
     #[test]
@@ -473,7 +478,8 @@ mod tests {
         let near =
             Facts { sources: 2, free_near: 4, crossings: 2, worth: 0.0, failed: 0.0, mineral: 0.0 };
         let scoring = Facts { free_near: 0, crossings: 3, worth: 25.0, ..near };
-        assert!(score(&near) > score(&Facts { worth: 0.0, ..scoring }));
-        assert!(score(&scoring) > score(&near));
+        let t = Tuning::default();
+        assert!(score(&near, &t) > score(&Facts { worth: 0.0, ..scoring }, &t));
+        assert!(score(&scoring, &t) > score(&near, &t));
     }
 }
