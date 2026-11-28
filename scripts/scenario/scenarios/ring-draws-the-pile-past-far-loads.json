@@ -1,0 +1,9 @@
+{
+  "why": "the ring takes from the hub pile while its booked loads walk from farther than the pile: soak:gen seed 1702 (E1S5, home sources ~30 swamp tiles from the pile) held a 9k pile beside a ring at 1-67 of 550, as loads 60 tiles out zeroed the pile's take; the spawn waited on the bank, home carriers took its time and no worker was cast, so E1S5 never left RCL2 in 25k ticks (138k decayed on the pile). Drawing past them it reaches RCL3 at t17131",
+  "modules": ["economy"],
+  "start": { "gen": 1702, "seed": 1 },
+  "ticks": 20000,
+  "assert": [
+    { "measure": "homeLevel", "room": "E1S5", "to": 20000, "min": 3 }
+  ]
+}

@@ -342,9 +342,12 @@ impl<'a> Jobs<'a> {
             let (s, home) = (&slots[*si], derived.colonies[slots[*si].colony].room);
             let g = &derived.grounds[s.colony];
             let bank = |id: &Target| g.stores.iter().any(|b| g.banks(b) && b.id == *id);
+            // A load from farther than the pile lands after one taken from it, as the pile decays.
+            let pile = g.bank().filter(|b| b.kind.is_pile());
+            let sooner = |at: &Pos| pile.is_none_or(|b| body.pos.range(at) <= b.pos.range(at));
             let bound = task.as_ref().is_some_and(|t| match t {
                 Task::Withdraw(id, r) => *r == Energy && bank(id),
-                t => sinks[s.colony].iter().any(|x| &x.task == t && wants(x)),
+                t => sinks[s.colony].iter().any(|x| &x.task == t && wants(x) && sooner(&x.pos)),
             });
             if s.job == Job::Fill && body.pos.room == home && bound {
                 short[s.colony] -= body.energy;
