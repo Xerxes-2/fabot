@@ -12,7 +12,7 @@ use fabot_base::{
 
 use super::{
     build::{self, Built},
-    ground::Ground,
+    ground::{Ground, cut_exits},
     path::Search,
     place::{self, Labels, SWAMP},
     shape::{self, Item, Plan},
@@ -233,7 +233,7 @@ fn drawn(rules: &Rules, ground: &Ground, built: &Built) -> (Plan, Vec<Item>) {
             .filter(|i| !matches!(i.kind, Road | Rampart) && !beside(i.tile))
             .map(|i| i.tile)
             .chain(tiles::all().filter(|t| through[*t] && !seen[*t]))
-            .chain(tiles::all().filter(|t| free[*t] && tiles::on_edge(*t) && !seen[*t]));
+            .chain(cut_exits(|t| free[t], |t| seen[t]));
         let wall = |t: Tile| ring.iter().any(|r| r.tile == t && r.kind == Wall);
         let inside =
             tiles::reach(pocket, |n| !seen[n] && ground.terrain[n] != place::WALL && !wall(n));

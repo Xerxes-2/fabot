@@ -7,7 +7,7 @@ use fabot_base::{
 
 use super::{
     cut::{self, Rect},
-    ground::Ground,
+    ground::{Ground, cut_exits},
     place::{BLOCKED, Labels, Manager, ROAD, SWAMP, WALL, area, xy},
 };
 
@@ -765,6 +765,8 @@ impl Builder<'_> {
             self.m.plan.of("rampart").into_iter().map(|t| (t, 1.0)).collect();
         let mut count = 0;
         let total = allowed(self.rules, "tower");
+        // No tower cuts the core off an exit, so the exits walked to stay these.
+        let exits = std::cell::OnceCell::new();
         while self.more("tower") {
             let mut fresh: Vec<Tile> = Vec::new();
             let remaining = total - self.m.plan.count("tower");
@@ -781,7 +783,15 @@ impl Builder<'_> {
                 };
                 positions[b].1 = -1.0;
                 let pos = positions[b].0;
-                if !self.m.accessible(pos) {
+                // Only a tile that parts the tiles beside it can cut a walk.
+                let cuts = fabot_atlas::parts(pos, |n| self.walked_on(n)) && {
+                    let (was, now) =
+                        (exits.get_or_init(|| self.walk_out(None)), self.walk_out(Some(pos)));
+                    cut_exits(|t| was[t] != tiles::UNREACHED, |t| now[t] != tiles::UNREACHED)
+                        .next()
+                        .is_some()
+                };
+                if !self.m.accessible(pos) || cuts {
                     continue;
                 }
                 fresh.push(pos);
@@ -805,6 +815,17 @@ impl Builder<'_> {
             }
             self.m.plan.remove_all("tower_placeholder");
         }
+    }
+
+    /// `seal` blocks the unsafe ground too, which only the ring stands on.
+    fn walked_on(&self, n: Tile) -> bool {
+        let (x, y) = xy(n);
+        let sealed = self.safety[n.index()] != SAFE || tiles::on_edge(n);
+        !self.m.wall(x, y) && (sealed || !self.m.blocked(x, y))
+    }
+
+    fn walk_out(&self, shut: Option<Tile>) -> tiles::Table<u16> {
+        tiles::reach(self.entrances.iter().copied(), |n| Some(n) != shut && self.walked_on(n))
     }
 
     fn rescore(&self, ramparts: &mut [(Tile, f64)], positions: &mut [(Tile, f64)]) {

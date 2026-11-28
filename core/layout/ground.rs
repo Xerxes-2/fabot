@@ -25,6 +25,14 @@ impl Ground {
     }
 }
 
+/// The exit tiles a walk from the core reached `before` a change and misses `after` it.
+pub fn cut_exits(
+    before: impl Fn(Tile) -> bool,
+    after: impl Fn(Tile) -> bool,
+) -> impl Iterator<Item = Tile> {
+    tiles::all().filter(move |t| tiles::on_edge(*t) && before(*t) && !after(*t))
+}
+
 /// The only part of a room's ground that can change.
 pub fn obstacles(room: &Room) -> Vec<Tile> {
     let mut found: Vec<Tile> = room
