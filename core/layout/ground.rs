@@ -1,6 +1,7 @@
 //! Built from the room alone, so a plan drawn on it moves only when the
 //! ground does.
 use fabot_base::{
+    engine,
     tiles::{self, Tile},
     world::{Room, RoomName, StructureType, terrain},
 };
@@ -22,6 +23,12 @@ pub struct Ground {
 impl Ground {
     pub fn rocks(&self) -> impl Iterator<Item = Tile> + '_ {
         (self.sources.iter().chain(&self.minerals)).chain(&self.controller).copied()
+    }
+
+    /// The controller's buffer: a container there is in upgrade reach and no source's post.
+    pub fn buffers(&self, t: Tile) -> bool {
+        let reach = |c: &Tile| tiles::range(*c, t) <= engine::UPGRADE_RANGE;
+        self.controller.iter().any(reach) && !self.sources.iter().any(|s| tiles::range(*s, t) == 1)
     }
 }
 

@@ -269,9 +269,9 @@ fn drawn(rules: &Rules, ground: &Ground, built: &Built) -> (Plan, Vec<Item>) {
 
 /// The tiles a body reaches from the core, or in by an exit too; one beside
 /// a structure serves it (a link, a lab, a spawn's door) as well as builds it.
-/// `held`: an ore's post (any container beside an ore, a shared source post
-/// too) is reached but never walked through: its digger yields only to a
-/// chain two weights heavier.
+/// `held`: an ore's post (any container beside an ore) and the controller's
+/// buffer are reached but never walked through: the digger and the upgrader
+/// yield only to a chain two weights heavier.
 fn reached<'a>(
     ground: &Ground,
     core: Tile,
@@ -282,9 +282,9 @@ fn reached<'a>(
     ground.rocks().for_each(|t| blocked[t] = true);
     let mut post = vec![false; tiles::COUNT];
     for i in planned {
-        post[i.tile] |= held
-            && i.kind == StructureType::Container
-            && (ground.minerals.iter()).any(|m| tiles::range(*m, i.tile) == 1);
+        let ore = (ground.minerals.iter()).any(|m| tiles::range(*m, i.tile) == 1);
+        post[i.tile] |=
+            held && i.kind == StructureType::Container && (ore || ground.buffers(i.tile));
         blocked[i.tile] = !i.kind.walkable() || (blocked[i.tile] && i.kind != StructureType::Road);
     }
     let seeds =
@@ -701,8 +701,7 @@ mod tests {
             let mut pads: Vec<Tile> = Vec::new();
             if let Some(c) = ground.controller {
                 let posted = |t: &Tile| holders.iter().any(|(_, h)| h == t);
-                let buffer = of(Container)
-                    .find(|b| !posted(b) && tiles::range(*b, c) <= engine::UPGRADE_RANGE);
+                let buffer = of(Container).find(|b| !posted(b) && ground.buffers(*b));
                 let seats = buffer.map(|b| Atlas::upgrader_seats(|t| open[t] && !posted(&t), c, b));
                 // At RCL8 the economy casts one upgrader, its WORK the controller's whole
                 // 15 a tick (`bodies::upgradable_at`), on the buffer's first seat.

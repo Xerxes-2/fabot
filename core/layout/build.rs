@@ -304,6 +304,10 @@ impl Builder<'_> {
         self.m.plan_at(roads[0], "upgrader.0", Some(ROAD));
         self.protect(roads[0], 1);
         let container = self.container(&roads, "controller")?;
+        // Its upgrader holds the buffer: no later road walks through it.
+        if self.ground.buffers(container) {
+            self.m.block(container);
+        }
         self.m.plan_at(container, "road", None);
         self.m.plan_at(container, "road.controller", None);
 
