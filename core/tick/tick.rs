@@ -1,7 +1,7 @@
 /// The clock is passed in to keep `decide` deterministic.
 use std::collections::BTreeSet;
 
-use fabot_atlas::{Atlas, Context, Derived, Mover, derive, target_at, worked};
+use fabot_atlas::{Atlas, Context, Derived, Leave, Mover, Target, derive, target_at, worked};
 use fabot_base::{
     HashMap, boost,
     declarations::{Declarations, Refused},
@@ -203,7 +203,7 @@ fn boost_stop(
         // it shoves through, or a carrier parked on the lab's one free side
         // holds it off until its wait runs out and it leaves short.
         let weight = if creep.pos.within(1, at) { 1 } else { tactics::WEIGHT };
-        let goal = target_at(&seat, i32::from(seat == *at));
+        let goal = Target { leave: Leave::Nearest, ..target_at(&seat, i32::from(seat == *at)) };
         let wish = mv::plan::toward(context.atlas, creep, mover, &goal, weight);
         walks.push((creep.pos.room, wish));
     }

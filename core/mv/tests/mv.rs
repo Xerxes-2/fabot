@@ -3,7 +3,7 @@
 //! wishes `plan` builds over generated rooms.
 use std::collections::{BTreeMap, BTreeSet};
 
-use fabot_atlas::{Atlas, Mover, Target};
+use fabot_atlas::{Atlas, Leave, Mover, Target};
 use fabot_base::{
     grid::{Footprint, factor_of},
     tiles::{self, Tile, TileSet},
@@ -171,6 +171,7 @@ fn errand() -> impl Strategy<Value = Errand> {
                 range,
                 avoid: BTreeSet::new(),
                 max_hops: 4,
+                leave: Leave::Cheapest,
             },
         })
 }

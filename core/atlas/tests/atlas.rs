@@ -2,7 +2,7 @@
 //! arithmetic it rests on.
 use std::collections::BTreeSet;
 
-use fabot_atlas::{Atlas, Mover, Target};
+use fabot_atlas::{Atlas, Leave, Mover, Target};
 use fabot_base::{
     engine,
     grid::{FatigueFactor, Footprint, empty_factor, factor_of, loaded_factor, on_edge, step_ticks},
@@ -166,7 +166,14 @@ fn walk() -> impl Strategy<Value = Walk> {
 }
 
 fn target_of(room: RoomName, walk: &Walk) -> Target {
-    Target { room, tiles: vec![walk.goal], range: walk.range, avoid: BTreeSet::new(), max_hops: 4 }
+    Target {
+        room,
+        tiles: vec![walk.goal],
+        range: walk.range,
+        avoid: BTreeSet::new(),
+        max_hops: 4,
+        leave: Leave::Cheapest,
+    }
 }
 
 /// Chebyshev range from what a footprint anchored at `anchor` covers to `tile`.
@@ -536,12 +543,12 @@ proptest! {
         let atlas = Atlas::of_world(&world_of(&walk.ground));
         let target = target_of(onto, &walk);
         if let Some(&(tile, ticks)) = followed(&atlas, &walk, &target).last() {
-            prop_assert_eq!(ticks, 0);
             let edge = covered(walk.mover.footprint, tile);
-            prop_assert!(
-                edge.iter()
-                    .any(|&(x, y)| tiles::exit_of(tiles::index(x, y)) != 0)
-            );
+            let seeded = |&(t, d): &(Tile, i32)| {
+                d == ticks && edge.contains(&(tiles::x_of(t), tiles::y_of(t)))
+            };
+            let field = atlas.field(walk.mover, &target, &tiles::to_pos(ROOM, tile));
+            prop_assert!(field.and_then(|f| f.exit).is_some_and(|e| e.iter().any(seeded)));
         }
     }
 
@@ -701,7 +708,7 @@ proptest! {
             tiles: vec![goal],
             range,
             avoid: BTreeSet::new(),
-            max_hops: 8,
+            max_hops: 8, leave: Leave::Cheapest,
         };
         let mut at = tiles::to_pos(from, start);
         let mut entered = vec![from];
@@ -824,6 +831,7 @@ fn a_room_within_the_hops_is_reached_where_its_way_in_runs_cheaper_round_a_corne
         range: 1,
         avoid: BTreeSet::new(),
         max_hops: 3,
+        leave: Leave::Cheapest,
     };
     let at = Pos::new(beyond, 25, 25);
     assert!(atlas.travel_ticks(mover, &target, &at).is_some());
@@ -902,6 +910,7 @@ fn each_stretch_into_a_room_split_by_walls_is_a_way_into_its_own_region() {
         range: 0,
         avoid: BTreeSet::new(),
         max_hops: 4,
+        leave: Leave::Cheapest,
     };
     for y in [10, 40] {
         let at = Pos::new(east, 10, y);

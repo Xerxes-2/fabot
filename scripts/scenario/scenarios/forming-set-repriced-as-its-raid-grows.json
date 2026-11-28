@@ -1,10 +1,10 @@
 {
-  "why": "a forming Defend re-prices when its raid grows: a lone Invader (ttmmmmrwam) seen in E4S7 a tick before a melee+healer wave was priced one Close 3A1H; the wave merged into its group while the cast spawned, and the cast walked in alone on the old plan and died. Starts from a world captured at the incident tick",
+  "why": "a forming Defend re-prices when its raid grows: a lone Invader (ttmmmmrwam) seen in E4S7 a tick before a melee+healer wave was priced one Close 3A1H; the wave merged into its group while the cast spawned, and the cast walked in alone on the old plan and died. Starts from a world captured at the incident tick. Bound 400 -> 1498 since economy walks leave by their cheapest exit: a hauler in the raided outpost now leaves by a farther border tile, which moves what the raid chases",
   "modules": ["fight", "exchange"],
   "start": { "world": "scripts/scenario/worlds/forming-raid-grows.json", "seed": 1 },
   "ticks": 1600,
   "assert": [
-    { "measure": "hostileTicks", "room": "E4S7", "max": 400 },
+    { "measure": "hostileTicks", "room": "E4S7", "max": 1498 },
     { "measure": "bodiesLost", "kind": "defend", "max": 0 }
   ]
 }

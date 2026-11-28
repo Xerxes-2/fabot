@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use fabot_atlas::{self as atlas, Atlas, Context, Mover, Target};
+use fabot_atlas::{self as atlas, Atlas, Context, Leave, Mover, Target};
 use fabot_base::{
     declarations::{self, Declarations},
     engine,
@@ -374,6 +374,7 @@ fn target_of(
                 range: 0,
                 avoid: BTreeSet::new(),
                 max_hops: declarations::REACH_HOPS,
+                leave: Leave::Cheapest,
             }
         }
         // A scout walks as far as its choice reached (`scouting`).

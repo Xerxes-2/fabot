@@ -34,6 +34,7 @@ pub fn target_at(pos: &Pos, range: i32) -> Target {
         range,
         avoid: BTreeSet::new(),
         max_hops: REACH_HOPS,
+        leave: super::Leave::Cheapest,
     }
 }
 

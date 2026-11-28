@@ -23,7 +23,7 @@ use fabot_base::{
     world::{Built, Id, Owner, Pos, Room, RoomName, StructureType, World},
 };
 
-use self::graph::Way;
+use self::graph::{Way, Ways};
 pub use self::{
     derived::{
         BANK_LEVEL, Context, Derived, Home, builds_away, derive, nearest, plan_of, server,
@@ -56,6 +56,16 @@ pub struct Target {
     pub range: i32,
     pub avoid: BTreeSet<RoomName>,
     pub max_hops: i32,
+    pub leave: Leave,
+}
+
+/// The border tile a walk leaves a room not its target's by.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Leave {
+    /// The one its whole walk on is cheapest from: a haul prices travel.
+    Cheapest,
+    /// The nearest: a fight prices exposure, not travel (owner).
+    Nearest,
 }
 
 pub fn middle_in(reached: &TileSet, room: RoomName) -> Pos {
@@ -135,6 +145,7 @@ enum Goal<'a> {
         tiles: &'a [Tile],
     },
     Exit(&'a [(Tile, Tile)]),
+    Seeded(&'a [(Tile, i32)]),
     /// Off the border band, since a body left on it is carried across.
     Clear,
 }
@@ -154,6 +165,7 @@ pub struct FloodKey {
 enum KeptGoal {
     Seats { range: i32, tiles: Vec<Tile> },
     Exit(Vec<(Tile, Tile)>),
+    Seeded(Vec<(Tile, i32)>),
     Clear,
 }
 
@@ -178,6 +190,7 @@ impl FloodOf<'_> {
         let goal = match self.goal {
             Goal::Seats { range, tiles } => KeptGoal::Seats { range, tiles: tiles.to_vec() },
             Goal::Exit(exit) => KeptGoal::Exit(exit.to_vec()),
+            Goal::Seeded(seeds) => KeptGoal::Seeded(seeds.to_vec()),
             Goal::Clear => KeptGoal::Clear,
         };
         FloodKey {
@@ -205,6 +218,7 @@ impl Keyed for FloodKey {
         let goal = match &self.goal {
             KeptGoal::Seats { range, tiles } => Goal::Seats { range: *range, tiles },
             KeptGoal::Exit(exit) => Goal::Exit(exit),
+            KeptGoal::Seeded(seeds) => Goal::Seeded(seeds),
             KeptGoal::Clear => Goal::Clear,
         };
         FloodOf {
@@ -323,11 +337,10 @@ impl RoomGrid {
         });
         let repaired = carried.is_some();
         let (mut seeds, dist) = carried.unwrap_or_else(|| (Vec::new(), tiles::table(UNREACHED)));
-        let goals = RoomGrid::goals(footprint, key, &now).into_iter();
-        seeds.extend(goals.map(|g| (g, 0)));
+        seeds.extend(RoomGrid::goals(footprint, key, &now));
         seeds.sort_by_key(|&(_, d)| d);
         let steps = step_table(mover.factor);
-        let (dist, relaxed) = flood(footprint, &now, &steps, dist, seeds.into_iter());
+        let (dist, relaxed) = flood(footprint, &now, &steps, dist, &seeds);
         (dist, relaxed, repaired)
     }
 
@@ -344,8 +357,8 @@ impl RoomGrid {
         }
     }
 
-    fn goals(footprint: Footprint, key: FloodOf, weights: &Table<Weight>) -> Vec<Tile> {
-        match key.goal {
+    fn goals(footprint: Footprint, key: FloodOf, weights: &Table<Weight>) -> Vec<(Tile, i32)> {
+        let goals = match key.goal {
             Goal::Seats { range, tiles: targets } => {
                 let mut goals = Vec::new();
                 for &tile in targets {
@@ -355,9 +368,16 @@ impl RoomGrid {
                 }
                 goals
             }
-            Goal::Exit(exit) => (exit.iter())
-                .flat_map(|(a, b)| Atlas::exit_goals(footprint, weights, Atlas::stretch(*a, *b)))
+            Goal::Exit(exit) => (exit.iter().flat_map(|(a, b)| Atlas::stretch(*a, *b)))
+                .map(|t| Atlas::anchor(footprint, *t))
+                .filter(|t| weight_of(footprint, weights, *t).is_some())
                 .collect(),
+            Goal::Seeded(seeds) => {
+                let goals = seeds.iter().map(|&(t, d)| (Atlas::anchor(footprint, t), d));
+                return goals
+                    .filter(|(t, _)| weight_of(footprint, weights, *t).is_some())
+                    .collect();
+            }
             Goal::Clear => tiles::all()
                 .filter(|t| {
                     weight_of(footprint, weights, *t).is_some()
@@ -365,7 +385,8 @@ impl RoomGrid {
                         && !key.danger.is_some_and(|d| d.contains(*t))
                 })
                 .collect(),
-        }
+        };
+        goals.into_iter().map(|t| (t, 0)).collect()
     }
 }
 
@@ -380,6 +401,7 @@ pub struct Field {
     pub struck: Option<Rc<TileSet>>,
     /// The ticks on from where the room is left to the target.
     pub onward: i32,
+    pub exit: Option<graph::Seeds>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -437,10 +459,9 @@ impl Walked {
         let plain = || Atlas::ground(&[0; tiles::COUNT]);
         let weights = self.weights.as_deref().map_or_else(plain, Clone::clone);
         let steps = step_table(Atlas::PACE.factor);
-        let seeds = self.seeds.iter().copied();
         let unreached = tiles::table(UNREACHED);
         let dist = (!self.seeds.is_empty())
-            .then(|| Rc::new(flood(Footprint::One, &weights, &steps, unreached, seeds).0));
+            .then(|| Rc::new(flood(Footprint::One, &weights, &steps, unreached, &self.seeds).0));
         Walked { dist, ..self }
     }
 }
@@ -467,12 +488,18 @@ struct Kept<T, R = Reads> {
 }
 
 impl Field {
+    fn ends(&self, tile: Tile) -> bool {
+        let d = self.dist[tile];
+        let goal = |&(t, s): &(Tile, i32)| s == d && Atlas::anchor(self.footprint, t) == tile;
+        d == 0 || self.exit.as_ref().is_some_and(|e| e.iter().any(goal))
+    }
+
     fn via(&self, next: Tile) -> i32 {
         let Some(weight) = grid::value(weight_of(self.footprint, &self.weights, next)) else {
             return UNREACHED;
         };
         let d = self.dist[next];
-        if d == UNREACHED || (d > 0 && on_edge(self.footprint, next)) {
+        if d == UNREACHED || (on_edge(self.footprint, next) && !self.ends(next)) {
             UNREACHED
         } else {
             step_ticks(self.factor, weight).map_or(UNREACHED, |step| d + step)
@@ -548,7 +575,7 @@ impl Field {
             return self.escape(tile);
         }
         match self.ticks(tile) {
-            Some(d) if d > 0 => self.best(tile).map(|next| tiles::direction(tile, next)),
+            Some(_) if !self.ends(tile) => self.best(tile).map(|next| tiles::direction(tile, next)),
             _ => None,
         }
     }
@@ -1227,10 +1254,8 @@ impl Atlas {
         longest: usize,
     ) -> Vec<Pos> {
         let key = (mover, target.clone(), round.cloned(), *from, longest);
-        let field_at = |at: &Pos| {
-            let round = round.filter(|_| at.room == target.room);
-            self.field_in(mover, target, at, round.map_or(Ground::Kept, Ground::Round))
-        };
+        let field_at =
+            |at: &Pos| self.field_in(mover, target, at, round.map_or(Ground::Kept, Ground::Round));
         // A stop's region is resolved against the rooms beside it.
         let reach = (key, target.room.coords(), target.max_hops + 1);
         self.carried(&self.walks, reach, || {
@@ -1281,15 +1306,6 @@ impl Atlas {
             Footprint::One => t,
             Footprint::Quad => tiles::index(tiles::x_of(t).min(inner), tiles::y_of(t).min(inner)),
         }
-    }
-
-    fn exit_goals(
-        footprint: Footprint,
-        weights: &[Weight; tiles::COUNT],
-        edge: &[Tile],
-    ) -> Vec<Tile> {
-        let goals = edge.iter().map(|t| Atlas::anchor(footprint, *t));
-        goals.filter(|t| weight_of(footprint, weights, *t).is_some()).collect()
     }
 
     fn stretch(first: Tile, last: Tile) -> &'static [Tile] {
@@ -1371,42 +1387,50 @@ impl Atlas {
         let tile = tiles::of_pos(at);
         let danger = ground.walls();
         let inside = danger.is_some_and(|d| d.contains(tile));
-        let field = |dist, onward| Atlas::field_of(grid, mover, dist, onward, ground);
+        let field = |dist, onward, exit| Atlas::field_of(grid, mover, dist, (onward, exit), ground);
         if at.room == target.room && inside {
             let clear = self.flood_in(grid, mover, Goal::Clear, ground);
-            return Some(field(clear, 0));
+            return Some(field(clear, 0, None));
         }
         if at.room == target.room {
             let seats = self.flood_seats(grid, mover, target, ground);
-            return Some(field(seats, 0));
+            return Some(field(seats, 0, None));
         }
         let (avoid, hops) = (&target.avoid, target.max_hops);
         let stop = [(at.room.coords(), Some(tile))];
-        let ways = graph::search(self, mover, target.room, Some(target), avoid, hops, &stop);
-        let (dist, onward, exit) = ways.out_of(self, mover, at.room, tile)?;
+        let root = if let Ground::Round(_) = ground { ground } else { Ground::Kept };
+        let ways =
+            graph::search(self, mover, target.room, Some((target, root)), avoid, hops, &stop);
+        let way = match target.leave {
+            Leave::Cheapest => Ways::out_of,
+            Leave::Nearest => Ways::nearest,
+        };
+        let (dist, onward, seeds, exit) = way(&ways, self, mover, at.room, tile)?;
         // Reached on its way through, a body leaves by the graph's way: a
         // hostile hunting it follows it anywhere in the room, never across.
         let danger = danger.filter(|_| !inside);
         let live = matches!(ground, Ground::Live(_));
         if !live || (danger.is_none() && grid.held.is_none()) {
-            return Some(field(dist, onward));
+            return Some(field(dist, onward, seeds));
         }
-        let walled = self.flood_in(grid, mover, Goal::Exit(exit), Ground::Live(danger));
+        let goal = seeds.as_deref().map_or(Goal::Exit(exit), Goal::Seeded);
+        let walled = self.flood_in(grid, mover, goal, Ground::Live(danger));
         if walled[tile] != UNREACHED {
-            return Some(field(walled, onward));
+            return Some(field(walled, onward, seeds));
         }
         // The graph's way out is walled: any other way on the whole tree knows.
-        let all = graph::search(self, mover, target.room, Some(target), avoid, hops, &[]);
-        let (dist, onward) =
-            all.round(self, mover, at.room, tile, danger).unwrap_or((walled, onward));
-        Some(field(dist, onward))
+        let all =
+            graph::search(self, mover, target.room, Some((target, Ground::Kept)), avoid, hops, &[]);
+        let round = all.round(self, mover, at.room, tile, danger);
+        let (dist, onward, seeds) = round.map_or((walled, onward, seeds), |(d, o)| (d, o, None));
+        Some(field(dist, onward, seeds))
     }
 
     fn field_of(
         grid: &RoomGrid,
         mover: Mover,
         dist: Rc<Table<i32>>,
-        onward: i32,
+        (onward, exit): (i32, Option<graph::Seeds>),
         ground: Ground,
     ) -> Field {
         let live = matches!(ground, Ground::Live(_));
@@ -1417,6 +1441,7 @@ impl Atlas {
             dist,
             struck: grid.struck.clone(),
             onward,
+            exit,
         }
     }
 
@@ -1444,7 +1469,8 @@ impl Atlas {
         let by = |out: &Way| -> Option<i32> {
             let grid = self.rooms.get(&start)?;
             let out_by = flood(start, &out.exit)?;
-            let mut ticks = Atlas::field_of(grid, mover, out_by, 0, Ground::Kept).ticks(at)?;
+            let mut ticks =
+                Atlas::field_of(grid, mover, out_by, (0, None), Ground::Kept).ticks(at)?;
             let mut own = mirror.filter(|_| ticks == 0);
             let mut last = out;
             while last.next != root {

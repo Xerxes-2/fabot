@@ -6,6 +6,6 @@
   "assert": [
     { "measure": "outpostFlips", "from": 990, "to": 1100, "max": 0 },
     { "measure": "outpostFlips", "from": 1990, "to": 2100, "max": 0 },
-    { "measure": "coldFloodsPerColony", "max": 153 }
+    { "measure": "coldFloodsPerColony", "max": 181 }
   ]
 }

@@ -2,7 +2,7 @@
 //! keeps its own representation private.
 use std::num::NonZeroU8;
 
-use super::tiles::{self, Tile};
+use super::tiles::{self, Tile, TileSet};
 use crate::{
     engine,
     vocabulary::{Boost, Part, ResourceType, multiple},
@@ -194,7 +194,7 @@ pub fn flood(
     weights: &[Weight; tiles::COUNT],
     steps: &[Option<u16>],
     mut dist: tiles::Table<i32>,
-    seeds: impl Iterator<Item = (Tile, i32)>,
+    seeds: &[(Tile, i32)],
 ) -> (tiles::Table<i32>, i32) {
     // The step off a tile; None where no walk leaves it.
     let mut price: [Option<u16>; tiles::COUNT] = [None; tiles::COUNT];
@@ -203,7 +203,10 @@ pub fn flood(
 
     let step_on = |weight: NonZeroU8| steps.get(weight.get() as usize).copied().flatten();
 
-    // A border tile no seed leaves leads nowhere: a body stepping onto it leaves.
+    // A border tile leads nowhere, a body stepping onto it leaves: a seeded one keeps its seed.
+    let edge = |t: &Tile| on_edge(footprint, *t);
+    let fixed = (seeds.iter().any(|(t, d)| *d > 0 && edge(t)))
+        .then(|| seeds.iter().map(|s| s.0).filter(edge).collect::<TileSet>());
     for t in tiles::all() {
         match weight_of(footprint, weights, t) {
             None => dist[t] = WALL,
@@ -212,9 +215,8 @@ pub fn flood(
         }
     }
 
-    let mut seeds = seeds.peekable();
-    let mut d = 0i32;
-    let mut b = 0usize;
+    let mut seeds = seeds.iter().copied().peekable();
+    let (mut d, mut b) = (0i32, 0usize);
     loop {
         while let Some((seed, at)) = seeds.next_if(|(_, at)| *at <= d) {
             let old = dist[seed];
@@ -256,7 +258,7 @@ pub fn flood(
             };
             for &n in ns {
                 let old = dist[n];
-                if candidate < old {
+                if candidate < old && !fixed.as_ref().is_some_and(|f| f.contains(n)) {
                     if old != UNREACHED {
                         dial.unlink(n, &*dist);
                     }

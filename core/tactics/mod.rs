@@ -1,7 +1,7 @@
 /// What a fight body does this tick (`ARCHITECTURE.md` §6.4) and which tactic a kind picks (§6.3).
 use std::collections::{BTreeMap, BTreeSet};
 
-use fabot_atlas::{Atlas, Mover, Target};
+use fabot_atlas::{Atlas, Leave, Mover, Target};
 use fabot_base::{
     declarations::{self, TacticRule},
     engine,
@@ -204,6 +204,7 @@ fn target_at(sight: &Sight, at: &Pos, range: i32) -> Target {
         range,
         avoid: sight.avoid.clone(),
         max_hops: declarations::FAR_HOPS,
+        leave: Leave::Nearest,
     }
 }
 

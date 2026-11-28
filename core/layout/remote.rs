@@ -255,10 +255,14 @@ pub fn sites<'p, 'q>(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
+    use std::{
+        cmp::Reverse,
+        collections::{BTreeSet, BinaryHeap},
+    };
 
     use fabot_base::{
         declarations::{Declared, Outpost, Stage},
+        grid,
         testing::{self, RealRoom},
         world::Rules,
     };
@@ -267,13 +271,15 @@ mod tests {
     use crate::{ground, plan};
 
     /// `home` planned as a colony, its neighbours its outposts, their sites
-    /// built as placed until none is left to place; `on_site` sees each site
-    /// with the tiles the home's plan holds solid or owes a rampart.
+    /// built as placed (roads only if `paved`) until none is left to place;
+    /// `on_site` sees each site with the tiles the home's plan holds solid or
+    /// owes a rampart. The world, the home's pile, and its plan's solid tiles.
     fn built_out(
         real: &BTreeMap<RoomName, RealRoom>,
         home: RoomName,
+        paved: bool,
         mut on_site: impl FnMut(&BTreeSet<Tile>, RoomName, Tile, StructureType),
-    ) -> Option<World<'_>> {
+    ) -> Option<(World<'_>, Pos, BTreeSet<Tile>)> {
         let drawn = ground::of_room(&real[&home].room());
         let mut plan = drawn.and_then(|g| plan::of_ground(&Rules::vanilla(), &g))?;
         let pile = plan.pile()?;
@@ -316,7 +322,8 @@ mod tests {
             muster: None,
         };
         let plan_of = |room: RoomName| (room == home).then_some(&colony);
-        let mut solid: BTreeSet<Tile> = plan.solid().collect();
+        let walls: BTreeSet<Tile> = plan.solid().collect();
+        let mut solid = walls.clone();
         solid.extend(plan.ring.iter().map(|i| i.tile));
         plan.items.append(&mut plan.ring);
         for _ in 0..100 {
@@ -329,21 +336,26 @@ mod tests {
             let census = sites::census_of(world.room(home).expect("home"), &[]);
             let plans = [(&plan, &census)];
             let placed = sites(&mut atlas, &world, &derived, (&[], &plan_of), plans, 100);
-            if placed.is_empty() {
-                break;
-            }
+            let mut built = false;
             for p in placed {
                 let Action::Room(r, RoomAct::CreateSite(x, y, kind)) = p else {
                     continue;
                 };
                 let t = tiles::index(x, y);
                 on_site(&solid, r, t, kind);
+                if kind == StructureType::Road && !paved {
+                    continue;
+                }
+                built = true;
                 let room = world.rooms.iter_mut().find(|o| o.name == r).expect("placed in");
                 let id = format!("{:.2}{r}{t}", format!("{kind:?}"));
                 room.structures.push(testing::built(&id, kind, Pos::new(r, x, y)));
             }
+            if !built {
+                break;
+            }
         }
-        Some(world)
+        Some((world, pile, walls))
     }
 
     #[test]
@@ -353,7 +365,7 @@ mod tests {
         let fixture = "E25S8".parse::<RoomName>().expect("a room name");
         let mut paved = 0;
         for home in real.keys().copied().step_by(40).chain([fixture]) {
-            built_out(&real, home, |solid, r, t, kind| {
+            built_out(&real, home, true, |solid, r, t, kind| {
                 if r == home && kind == StructureType::Road {
                     let (x, y) = (tiles::x_of(t), tiles::y_of(t));
                     assert!(!solid.contains(&t), "{home}: a road on {x},{y}");
@@ -374,7 +386,7 @@ mod tests {
         let mut cut: BTreeMap<(End, fx::Cause), BTreeSet<RoomName>> = BTreeMap::new();
         let mut outposts = 0;
         for home in real.keys().copied().step_by(5) {
-            let Some(world) = built_out(&real, home, |_, _, _, _| {}) else {
+            let Some((world, ..)) = built_out(&real, home, true, |_, _, _, _| {}) else {
                 continue;
             };
             for room in world.rooms.iter().filter(|r| r.name != home) {
@@ -424,5 +436,157 @@ mod tests {
             eprintln!("{end:?} cut by {cause:?}: {} rooms, {}", at.len(), some.join(" "));
         }
         assert!(rooms.is_empty(), "{} of {outposts} outposts cut", rooms.len());
+    }
+
+    /// The hauler's ticks to step onto `tile`; None where `walls` (the home's
+    /// plan) holds it solid.
+    fn step(
+        atlas: &Atlas,
+        walls: &(RoomName, BTreeSet<Tile>),
+        room: RoomName,
+        t: Tile,
+    ) -> Option<i32> {
+        if room == walls.0 && walls.1.contains(&t) {
+            return None;
+        }
+        grid::step_ticks(HAULER.factor, grid::value(atlas.held_weights(room)?[t])?)
+    }
+
+    /// The fewest ticks from `from` to beside `pile`, crossing from each of
+    /// `chain`'s rooms into the next only, as the room graph's way does.
+    fn shortest(
+        atlas: &Atlas,
+        walls: &(RoomName, BTreeSet<Tile>),
+        chain: &[RoomName],
+        from: &Pos,
+        pile: &Pos,
+    ) -> Option<i32> {
+        let mut done = BTreeSet::new();
+        let mut heap = BinaryHeap::from([Reverse((0, 0, tiles::of_pos(from)))]);
+        while let Some(Reverse((d, i, at))) = heap.pop() {
+            if !done.insert((i, at)) {
+                continue;
+            }
+            if chain[i] == pile.room && tiles::range(at, tiles::of_pos(pile)) <= 1 {
+                return Some(d);
+            }
+            for &n in tiles::around(at) {
+                let Some(step) = step(atlas, walls, chain[i], n) else { continue };
+                let onto = match (tiles::on_edge(at), tiles::on_edge(n)) {
+                    (_, false) => Some((i, n)),
+                    (true, true) => None,
+                    (false, true) => (tiles::room_toward(chain[i], tiles::exit_of(n)))
+                        .filter(|r| chain.get(i + 1) == Some(r))
+                        .zip(tiles::landing(n))
+                        .map(|(_, l)| (i + 1, l)),
+                };
+                if let Some((i, t)) = onto {
+                    heap.push(Reverse((d + step, i, t)));
+                }
+            }
+        }
+        None
+    }
+
+    /// A walk's ticks: each tile's step, and across a border the cheapest
+    /// border tile between the tiles either side.
+    fn ticks_of(
+        atlas: &Atlas,
+        walls: &(RoomName, BTreeSet<Tile>),
+        from: &Pos,
+        walk: &[Pos],
+    ) -> Option<i32> {
+        let mut ticks = 0;
+        for (a, b) in [*from].iter().chain(walk).zip(walk) {
+            if a.room != b.room {
+                let lands = |e: &Tile| {
+                    tiles::room_toward(a.room, tiles::exit_of(*e)) == Some(b.room)
+                        && tiles::landing(*e)
+                            .is_some_and(|l| tiles::range(l, tiles::of_pos(b)) <= 1)
+                };
+                let crossings = tiles::around(tiles::of_pos(a)).iter().filter(|e| lands(e));
+                ticks += crossings.filter_map(|e| step(atlas, walls, a.room, *e)).min()?;
+            }
+            ticks += step(atlas, walls, b.room, tiles::of_pos(b))?;
+        }
+        Some(ticks)
+    }
+
+    /// Each walk from `starts` home is no dearer than the shortest through
+    /// the rooms it crosses; the walks measured.
+    fn walks_cheapest(world: &World, home: (RoomName, Pos, BTreeSet<Tile>), starts: &[Pos]) -> i32 {
+        let (room, pile, walls) = home;
+        let atlas = Atlas::of_world(world);
+        let target = atlas::target_at(&pile, 1);
+        let round: TileSet = walls.iter().copied().collect();
+        let walls = (room, walls);
+        let mut walks = 0;
+        for from in starts {
+            let walk = atlas.walk(HAULER, &target, Some(&round), from, LONGEST);
+            let mut chain: Vec<RoomName> = [*from].iter().chain(&walk).map(|p| p.room).collect();
+            chain.dedup();
+            let Some(least) = shortest(&atlas, &walls, &chain, from, &pile) else {
+                continue;
+            };
+            let laid = ticks_of(&atlas, &walls, from, &walk).expect("a walk home");
+            assert!(laid <= least, "{room} from {from:?}: {laid} ticks, {least} shortest");
+            walks += 1;
+        }
+        walks
+    }
+
+    #[test]
+    fn no_outpost_road_is_dearer_than_the_shortest_walk_through_its_room_and_home() {
+        let real: BTreeMap<RoomName, RealRoom> =
+            testing::real_rooms().map(|r| (r.name, r)).collect();
+        let mut walks = 0;
+        for home in real.keys().copied().step_by(40) {
+            let Some((world, pile, walls)) = built_out(&real, home, false, |_, _, _, _| {}) else {
+                continue;
+            };
+            let outposts = world.rooms.iter().filter(|r| r.name != home);
+            let posts =
+                outposts.flat_map(|r| r.sources.iter().filter_map(|s| Atlas::post_of(r, &s.pos)));
+            let posts: Vec<Pos> = posts.map(|(p, _)| p).collect();
+            walks += walks_cheapest(&world, (home, pile, walls), &posts);
+        }
+        assert!(walks > 0);
+    }
+
+    /// From beside each source two rooms off, through the room between.
+    #[test]
+    fn a_walk_across_two_rooms_into_home_is_no_dearer_than_the_shortest_through_them() {
+        let real: BTreeMap<RoomName, RealRoom> =
+            testing::real_rooms().map(|r| (r.name, r)).collect();
+        let mut walks = 0;
+        for home in real.keys().copied().step_by(40) {
+            let Some((mut world, pile, walls)) = built_out(&real, home, false, |_, _, _, _| {})
+            else {
+                continue;
+            };
+            let far: Vec<RoomName> = [(1, 1), (1, -1), (-1, 1), (-1, -1)]
+                .into_iter()
+                .filter_map(|(x, y)| home.offset(x, y))
+                .filter(|n| real.contains_key(n))
+                .collect();
+            world.closed.retain(|n| !far.contains(n));
+            world.rooms.extend(far.iter().map(|n| real[n].room()));
+            let beside = |r: &Room<'_>| -> Vec<Pos> {
+                let open = |t: &Tile| {
+                    !tiles::on_edge(*t)
+                        && !terrain::is_wall(r.terrain, tiles::x_of(*t), tiles::y_of(*t))
+                };
+                let at = |s: &Pos| tiles::around(tiles::of_pos(s)).iter().copied().find(open);
+                r.sources
+                    .iter()
+                    .filter_map(|s| at(&s.pos))
+                    .map(|t| tiles::to_pos(r.name, t))
+                    .collect()
+            };
+            let starts: Vec<Pos> =
+                world.rooms.iter().filter(|r| far.contains(&r.name)).flat_map(beside).collect();
+            walks += walks_cheapest(&world, (home, pile, walls), &starts);
+        }
+        assert!(walks > 0);
     }
 }

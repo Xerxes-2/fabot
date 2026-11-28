@@ -20,6 +20,12 @@ use super::{Atlas, Coords, Goal, Ground, Mover, RoomGrid, Target};
 /// Each stretch's first and last tile on its band.
 pub type Exit = Rc<[(Tile, Tile)]>;
 
+/// Less the cheapest, so walks whose walks on differ by a constant share a flood.
+pub type Seeds = Rc<[(Tile, i32)]>;
+
+/// A flood out of a region, the ticks on from its exit, its seeds if seeded.
+pub type Out<'a> = (Rc<Table<i32>>, i32, Option<Seeds>, &'a Exit);
+
 /// A region settled on the way to the root, left by `exit` into `next`,
 /// `value` ticks on from there.
 struct Node {
@@ -90,20 +96,63 @@ impl Ways {
         Tree { root: self.root, next: Rc::new(next) }
     }
 
-    /// The flood out of the region of `room` that holds `at`, and the ticks
-    /// on from its exit.
-    pub fn out_of(
+    /// `nearest`, but each room's exit from the root out seeded with the walk
+    /// on from each of its tiles, not the nearest one.
+    pub fn out_of(&self, atlas: &Atlas, mover: Mover, room: RoomName, at: Tile) -> Option<Out<'_>> {
+        let n = self.region(atlas, mover, room, at)?;
+        let mut seeds = Vec::new();
+        let (dist, onward) = self.seeded(atlas, mover, n, &mut seeds)?;
+        Some((dist?, onward, Some(seeds.as_slice().into()), &self.nodes[n].exit))
+    }
+
+    fn seeded(
+        &self,
+        atlas: &Atlas,
+        mover: Mover,
+        n: usize,
+        seeds: &mut Vec<(Tile, i32)>,
+    ) -> Option<(Option<Rc<Table<i32>>>, i32)> {
+        let node = &self.nodes[n];
+        let next = &self.nodes[node.next?];
+        let (on, onward) = match next.next {
+            None => (next.dist.clone(), 0),
+            Some(_) => self.seeded(atlas, mover, node.next?, seeds)?,
+        };
+        let land = |l: Tile| match &on {
+            Some(d) => match d[Atlas::anchor(mover.footprint, l)] {
+                UNREACHED => UNREACHED,
+                d => onward + d,
+            },
+            None if next.next.is_none() => 0,
+            None => onward + Atlas::CROSSING_TICKS,
+        };
+        let band = node.exit.iter().flat_map(|(a, b)| Atlas::stretch(*a, *b));
+        seeds.clear();
+        seeds.extend(band.filter_map(|t| Some((*t, land(tiles::landing(*t)?)))));
+        seeds.retain(|(_, d)| *d != UNREACHED);
+        let least = seeds.iter().map(|(_, d)| *d).min()?;
+        seeds.iter_mut().for_each(|(_, d)| *d -= least);
+        let dist = (atlas.rooms.get(&node.room))
+            .map(|g| atlas.flood_in(g, mover, Goal::Seeded(seeds), Ground::Kept));
+        Some((dist, least))
+    }
+
+    pub fn nearest(
         &self,
         atlas: &Atlas,
         mover: Mover,
         room: RoomName,
         at: Tile,
-    ) -> Option<(Rc<Table<i32>>, i32, &Exit)> {
+    ) -> Option<Out<'_>> {
+        let node = &self.nodes[self.region(atlas, mover, room, at)?];
+        Some((node.dist.clone()?, node.value, None, &node.exit))
+    }
+
+    fn region(&self, atlas: &Atlas, mover: Mover, room: RoomName, at: Tile) -> Option<usize> {
         let c = room.coords();
         let grid = atlas.rooms.get(&c)?;
-        let held = |n: &&Node| n.dist.as_ref().is_some_and(|d| holds(mover, d, grid, at));
-        let node = self.regions(c).map(|n| &self.nodes[n]).find(held)?;
-        Some((node.dist.clone()?, node.value, &node.exit))
+        self.regions(c)
+            .find(|n| self.nodes[*n].dist.as_ref().is_some_and(|d| holds(mover, d, grid, at)))
     }
 }
 
@@ -268,7 +317,7 @@ pub fn search(
     atlas: &Atlas,
     mover: Mover,
     root: RoomName,
-    target: Option<&Target>,
+    target: Option<(&Target, Ground)>,
     avoid: &BTreeSet<RoomName>,
     max_hops: i32,
     stops: &[Stop],
@@ -287,7 +336,7 @@ pub fn search(
     let avoid: Vec<Coords> = avoid.iter().map(|r| r.coords()).collect();
     let grid_of = |c: Coords| atlas.rooms.get(&c);
     let seats =
-        target.and_then(|t| Some(atlas.flood_seats(grid_of(start)?, mover, t, Ground::Kept)));
+        target.and_then(|(t, ground)| Some(atlas.flood_seats(grid_of(start)?, mover, t, ground)));
     let on = |d: &Table<i32>, t: Tile| d[Atlas::anchor(mover.footprint, t)];
     ways.nodes.push(Node {
         room: start,

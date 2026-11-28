@@ -2,7 +2,7 @@
 //! other, so each one's HEAL reaches whichever the towers strike.
 use std::collections::BTreeSet;
 
-use fabot_atlas::{Atlas, Field, Mover, Target};
+use fabot_atlas::{Atlas, Field, Leave, Mover, Target};
 use fabot_base::{
     engine,
     grid::{self, Footprint},
@@ -61,7 +61,8 @@ fn walk(set: &[&Creep], room: RoomName, tiles: Vec<tiles::Tile>, range: i32) -> 
         footprint: Footprint::One,
         factor: factor.unwrap_or(grid::FatigueFactor { weight: 1, moves: 1 }),
     };
-    let target = Target { room, tiles, range, avoid: BTreeSet::new(), max_hops: 0 };
+    let target =
+        Target { room, tiles, range, avoid: BTreeSet::new(), max_hops: 0, leave: Leave::Nearest };
     (mover, target)
 }
 
