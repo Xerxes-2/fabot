@@ -117,7 +117,7 @@ World ──▶ Derived ──▶ decisions (read Derived & Atlas, never World) 
 
 **Cold start:** after a heap reset or deploy, caches rebuild from Memory and
 segments over multiple ticks (economy first); a cold tick never spends more than
-`❓ 60%` of the CPU limit.
+60% of the CPU limit, a cap that waits for live data.
 
 ## 2. Units
 
@@ -262,20 +262,6 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   bodies leave over a life, so a far ring of outposts never casts nothing but
   haulers. While `ColonyPlan.owes` is true (a fight cast owed), no
   surplus-spending body is spawned so spawns stay free.
-  `❓` An outpost's haul may lag a dig that runs longer than its walk was priced
-  for (gen 49, 2026-11-27: E7S3 dug 18k and let 28% decay once the search
-  reached its north way): HYPOTHESIS, unmeasured.
-  `❓` Since containers wait for the tower, two bounds stay waived:
-  outposts-priced-on-the-walked-path's worst outpost 16% → 51% (all at RCL2,
-  drop-mined: a pile loses at least 1 a tick against an unreserved source's 5),
-  and outpost-mender-cast-past-the-haul's E23S8 roads 67 → 57 (the walk drawn at
-  RCL3 is 57 tiles, none lost). HYPOTHESIS: both bounds encode containers at RCL2.
-  `❓` outposts-budgeted-on-the-haul-path's per-outpost decay is waived 11 → 12
-  since outposts raise one at a time: E8S8 12 on seed 1, 13 on seed 3; base
-  fails seed 2 (13). HYPOTHESIS: an outpost waiting its turn drop-mines longer.
-  `❓` home-mender-cast-past-stocked-upgraders' E4S2 roadsLost t25000-30000 is
-  waived 0 → 2 since outposts raise one at a time: seed 1 only, seeds 2-4 and
-  base 1-4 lose none. HYPOTHESIS: timing, the shifted ramp moves the mender's cast.
 - **Spare (`economy::spare`):** home's own bodies at a steady pace, its floor a
   constant 2 workers whatever this tick's floor: home's repairs and sites move
   with the outposts' haul wear, so a floor read from them would flap the choice.
@@ -309,8 +295,6 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   Hivemind paths on terrain alone and skips loads in its danger matrix: our
   danger leaves owned rooms out (their towers fire), and a foe parked on a
   pocket's one way in walls a load past its reach.
-  `❓` After a wipe the floors cast a harvester and worker at the bank held; a
-  200-energy worker's 50 a trip can lag their own recasts, so no full cast pays.
 - **Hub pile (`ColonyPlan.pile`):** from RCL2 until storage stands, remotes
   deliver to the planned storage tile (a paved tile blocking no site). Keeps no
   reserve because ground energy decays every tick. While banking on a pile,
@@ -320,11 +304,6 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   and spawns draw bay extensions first (`drawn`) so that energy is never hauled.
   A bay or link's harvester carries, its CARRY outranking the spare WORK, as
   Hivemind's 5-WORK harvester does (`bodies::harvester`).
-  `❓` E23S9 soak:many 1+7 fell 729 → 639 (base spread 657–729, mean −12 over 8
-  starts, home dig 277k vs 275k): HYPOTHESIS, divergent outpost timing or the
-  lost WORK; the alternative is a priced CARRY-vs-WORK crossover.
-  `❓` Home carrier pools (rank 1) on long legs take a single spawn's time ahead
-  of the spend (soak:gen 1702 at RCL2): HYPOTHESIS, unfixed.
   Links run Hivemind's single send/tick network (fullest source link → emptiest
   controller link, with hub fallback); carriers bring a controller link by hand
   only while upgraders drink more than links send, and while they do **only
@@ -361,8 +340,6 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   outpost unseen or closed to us is not counted, neither raising nor waiting.
   Non-paying sites and repairs wait behind the controller (taking stock past
   reserve, or half income before storage).
-  `❓` Below reserve, unbuilt roads can hold all `SITES_IN_FLIGHT` for ages, so a
-  lost road gets no site (gen 258): needs a placement tick (§4) or reserve in Layout.
 - **RCL8 cap & terminal aid:** at RCL8, controllers upgrade only inside the
   downgrade deadline; surplus goes to sites, ramparts, labs, and terminal aid
   (`derived::give_aid`): stock past reserve, a 20k margin, and its sites' cost
@@ -437,21 +414,18 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   multi-seat source container before extensions; no labs below RCL8 (worth
   little early, owner) but the one boost lab the colony `labs::upgrade_boosted`
   names places (a former receiver keeps it); nuker last; unreachable cut pockets kept unroaded;
-  source links never split a 1-wide post; a quad or decorative wall closing a
-  structure in gives way, as does one closing in what only an ore's post
-  leads to (its digger yields only to a chain two weights heavier) or cuts the
+  a source's post (`build::harvest_spot`) parts the tiles beside it only where
+  every seat does, as `Atlas::bare_post`, and its link never splits a 1-wide
+  post; a quad or decorative wall closing a structure in gives way, as does
+  one closing in what only an ore's post leads to (its digger yields only to a chain two weights heavier) or cuts the
   core off an exit (its outposts may lie only that way), and a pocket of roads and ramparts no walk reaches
   is dropped (Hivemind checks neither, and our kept cut pockets get sealed).
-  `❓` The planner ranks a tunnel at path cost (wall 30), not its upkeep
-  (×150, ×750 on swamp+wall): Hivemind's matrix is kept whole, so a centre
-  whose roads tunnel can win (E3S9, gen 1141).
+  A tunnel is priced at path cost (wall 30), not its upkeep (×150, ×750 on
+  swamp+wall), as in Hivemind, whose matrix is kept whole (owner).
   A rampart's site waits only on drawn sites, and below reserve on the build-out;
   no road takes a planned rampart's tile before it stands, and a road site there goes.
   A single-source room whose centre sits farther from its source ramps slower
   (E23S9 −3.6% to −4.9%): the owner accepted it as the port's cost, not a bug.
-  `❓` The source container's seat (`build::harvest_spot`, Hivemind's most free
-  neighbours) is not checked for being the only way between two parts of the
-  room; the seat a source is dug from before it (`Atlas::bare_post`) is.
 - **Ramparts (`strategy::wall`, `ColonyPlan.rampart_hits`):** kept at `ticks
   held × dismantler damage/tick`, where dismantler damage is the largest rival
   dismantler up to our RCL (capped at our level because a taller wall outbids
@@ -466,8 +440,7 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   on-ramps, quad-breakers, and decorative walls sealing every tile in ranged
   reach from exits. Built from RCL4, or earlier while a nearby rival quad
   out-heals our towers (`ColonyPlan.ring`); once built, a ring stays and is
-  repaired even if the rival leaves. `❓` No scenario yet seats a rival whose
-  quad out-heals our towers, so the ring itself is unproven.
+  repaired even if the rival leaves.
 
 ### Served declarations, labs & abandon
 
@@ -534,10 +507,9 @@ pricer would cost ~2× CPU and 580 lines for no gain).
   overlap. Splits keep the id on the largest fragment; merges keep the older id.
   Emits `Split`, `Merged`, `Left`, `Newcomer`. New ids strictly exceed `held`
   (highest id in groups or engagements).
-  `❓` A healer pacing 4 and 5 tiles from its striker splits and merges their
-  group every other tick, so its centre flaps and each split re-prices its
-  Defend (soak:many W8N3 1+7, W7N3 t10487–10521); damping it is hysteresis
-  (owner's call). Reach reads the room's armed meanwhile (`Scene::raid`).
+  A healer pacing 4 and 5 tiles from its striker splits and merges their
+  group every other tick, each split re-pricing its Defend; the owner takes no
+  hysteresis for it, as reach reads the room's armed meanwhile (`Scene::raid`).
 - **Vision grace:** invisible groups turn `Lost` and expire after
   `LOST_GROUP_TICKS = 30` — the sole vision grace in Fight.
 
@@ -596,20 +568,16 @@ with one phase machine per kind under `core/fight/kinds/`.
   the raid `sightings.last` remembers after each loss or age-out while it has lost
   fewer than two, until the sighting expires, and casts and seeks it as a
   seen one; with none remembered, or a re-price casting nothing,
-  it disengages and keeps its budget the same way (`❓` a raider that steps
-  from a room in sight into one out of sight leaves no sighting, so its room
-  going dark next tick closes its Defend blind: keeping it needs the
-  glimpse's tick, a §4 change). A home is the owner's exception: it quits at lost >
-  budget (no margin) and, given up, answers its raid anew with a fresh budget. `❓` A fight against a core alone
-  never sets `predicted`, so each re-answer after a starved one re-prices its
-  budget. A body with nothing alive but MOVE,
+  it disengages and keeps its budget the same way (a raider that steps
+  from a room in sight into one out of sight leaves no sighting, so its Defend
+  closes blind: a glimpse tick, a §4 row, is added only if live shows it). A home is the owner's exception: it quits at lost >
+  budget (no margin) and, given up, answers its raid anew with a fresh budget. A body with nothing alive but MOVE,
   TOUGH and CARRY counts as lost to an outpost (nothing there heals it; it can
   end no raid) and no engagement drafts it until healed. A fight body no
   engagement holds rests in any outpost or claim it stands in (one walked
   through on its way home included: where it was freed is no state kept),
   on a tile blocking no walk or work, else at its muster: a raid recast next
-  door meets it there (v1's guard). `❓` Absorbing a raid (stand down) vs
-  answering it is no explicit Exchange price yet (owner). Home `Defend` never
+  door meets it there (v1's guard). Home `Defend` never
   disengages (falls back to `unanswered` on towers/ramparts until the group
   is gone). Past its first win's priced ticks from opening, a raid out of
   reach of the ramparts over our structures and struck by nothing of ours
@@ -654,16 +622,9 @@ with one phase machine per kind under `core/fight/kinds/`.
   deadline a home's `Defend` keeps, a forming set drops its unbegun casts and
   goes on only if its standing bodies hold its room, else closes (its bodies
   stood at home till they aged out).
-  `❓` A sweep's candidates need stirred prey (a group newly seen there),
-  which needs live vision: once the sweeps stop, nothing is stirred and none
-  reopens, so a dry spell of thousands of ticks follows
-  (sweep-hunts-creeps-before-containers seed 1 on the centre-first planner: no
-  prey seen t20000-24000 while beta works the same rooms). Patrol preyed rooms to keep vision?
-  `❓` A sweep's hunter still plinks a structure on some self-play seeds
-  (sweep-hunts-creeps-before-containers: main seed 6, sweep 4 E9S8 t10712).
-  `❓` Is a sweep still worth sending at a rival whose ring stands? With our
-  ring built below reserve, beta rings too and alpha's kills fell (seeds 9-13:
-  18 23 16 22 23 before, 11 21 17 15 8 after).
+  No sweep goes at a rival whose ring stands (owner; not yet in `kinds/sweep.rs`,
+  which skips only towers): with ours built below reserve, beta rings too and
+  alpha's kills fell.
 
 - **`Stronghold`** (`kinds/stronghold.rs`, L1–L3): not priced by
   `Exchange` (owner): a level's towers, ramparts, hits and garrison are the
@@ -716,29 +677,6 @@ and `cheapest_win` (adds only to already-standing `ours`).
   strikers and outlasting towers price as `Standoff`. A home with ramparts
   prices `Standoff` beside `Hold`, and a `Hold` that loses is worth nothing:
   a post is kept only where it is the cheaper consequence.
-- `❓` (after zone-control defence) Exchange does not price a ranged rival
-  shooting off our kiter's MOVE so a full-speed melee catches it.
-- `❓` Exchange pools every mate's heal onto the focus whatever the ground, but
-  a body pinned by terrain gets only its adjacent mates' heal; a geometry-aware
-  heal model or a tactic that avoids pinning fixes it.
-- `❓` Our set's hit-back on the raid scales with the swing all its living
-  bodies keep, whatever their range, and a body worn down off the focus ends
-  no pricing window.
-- `❓` Exchange counts a body lost at death, Defend at its last combat part; tried
-  `spent_at` on both sides: self-play gen7 s1–7 −4.1% mean (more lost in 5/7), and
-  outpost-kited-by-1r2m holds pastBudget 0 on seeds 1–8 at 5bed6fdb: deferred.
-- `❓` outpost-kited-by-1r2m's pastBudget is waived 0 → 1 since outposts raise one
-  at a time: defend 2 in W8N3 at t5984 on seed 1 only; seeds 2-4 and base 1-4
-  hold 0. HYPOTHESIS: timing, the RCL1 start's ramp shifts from t4400.
-- `❓` (after zone-control defence) Exchange's Kite arm prices a self-healing
-  healer, or a raid our rangers could kite off a post, as Lose where kiting
-  wins.
-- `❓` The together arm prices a gathering set from where its bodies stand,
-  not from the muster they withdraw to; stepping out of reach in place
-  instead lost more bodies (defend-outpost-feeds-no-camped-exit seeds 1-4:
-  6/12/6/7 against the muster's 2/3/6/1).
-- `❓` A home's Defend prices its wait at no cost (`tick_worth` 0), so a home
-  gathers whenever gathering saves bodies, however long its raid stands.
 - **Arrival:** a body counts from the tick it lands (a cast's spawn time and
   walk included), so a set fed in one at a time prices worse than one walked
   in `together`, which pays the wait in ticks instead (a body already in the
@@ -768,22 +706,14 @@ and `cheapest_win` (adds only to already-standing `ours`).
   the rest close on the lead short of a swing's reach, each kiting while a
   swing strikes it; the lead waits for neither one struck nor one stopped
   short; a body still walking in closes alone, and pursuit is each body's
-  (§6.4). `❓` Rangers in a mixed `BlobClose`
-  still walk into melee reach; to be solved with the outpost-defence duo
-  redesign.
-  `❓` A blob's lead flips between two bodies when their lags cross near a
-  raid's swings (each tick an A-B-A swap); both raid-measured fixes regressed main.
+  (§6.4).
   Defence outcomes move with any plan change that moves no rule (a reversed
   builder scan let a raid stand 1580 ticks): the owner waives such shifts, as
   main fails the same scenarios under harmless planner changes.
   A `Close` set priced landing together reaches the raid apart where the
   raid walks onto its nearer body (a pair 1 tick apart at landing met it 6
   apart): the owner accepts it as rival behaviour, as pricing the raid onto
-  the nearest body did worse. `❓` Nor does a `Close` set walk as one: a body
-  held back by home traffic reaches the raid after its partner (12 ticks,
-  healed-striker seed 1).
-  `❓` A raid spawned beside a forming blob scatters it
-  (blob-defend-fights-within-its-heal seed 26: strayTicks 264).
+  the nearest body did worse.
 - **Focus:** the Exchange prices the kill our bodies strike: both rank the
   raid by `fighter::kill_rank`.
 - **Parts:** our bodies strike, heal and hit back only with the parts their
@@ -844,20 +774,6 @@ conflicts never silently cancel an act.
   Defend → Fight → Economy` (owner, 2026-11-24); an affordable Defend ask
   waiting on energy holds the asks behind it. An unanswered home Defend is
   priced each tick, as its raid changes under the towers.
-  `❓` safe-mode-holds-towerless-home's Defend drafts at t1025, not t1008, once
-  containers wait for the tower, and gives up (predictedWinsLost 0 → 1, waived);
-  none of ours dies. HYPOTHESIS: the spawn is busy with the larger RCL2 economy.
-  `❓` defend-outpost-feeds-no-camped-exit's beta loses 9 bodies, not 8 (waived),
-  once a source post never parts its tiles; no Defend runs past its budget.
-  HYPOTHESIS: the moved posts shift the self-play's timeline.
-  `❓` A cast waits behind a body its spawn already began, which the engine
-  cannot cancel: a home raided on the tick an outpost's cast begins is drafted
-  after it (defend-prioritises-home-over-outpost seed 1: 65 ticks), and a raid
-  that appears unseen waits behind economy bodies already spawning
-  (boost-labs-fed-while-the-ring-casts: two haulers, 89 ticks). The home
-  Defend's raid is unpriced t1001-1003 (no winning price before t1004), so a
-  spawn free on the raid's tick begins an outpost's body first (seed 6: its
-  W7N3 body fight-1001-2-0 began t1002, the home's t1050).
 - **Colony choice (`fight/price/casting.rs`):** picks the colony landing the body
   soonest (hops + spawn queue + energy refill time); home `Defend` casts at
   home. Bodies end with one `MOVE` (`with_move_last`) and carry `HEAL` when
@@ -883,7 +799,6 @@ conflicts never silently cancel an act.
   waits only while its age is within the `lab_wait` of its compounds; past
   that it leaves with what it has. `Tick` holds a body at its lab while the
   lab has room and a carrier exists.
-  `❓` A body leaving at that bound unboosted fights in a set priced boosted.
 
 ## 7. Strategy
 
@@ -926,11 +841,7 @@ expansion, and operation priorities.
   the spenders its dig casts (2 parts per energy/tick) because a fixed half
   leaves spawns idle at RCL3–6 and full life past RCL6 starves hauling; a young
   home reserves half its spawns' life for workers so its pile does not decay
-  unspent. `❓` `outpost_spend_parts` stands in for a margin: a steady-state
-  charge with none lets a backlog (a full container doubling its source's
-  rate) outgrow the spawn-time cap and never drain, so deriving it needs a
-  derived margin (e.g. the backlog rate charged while a container is full) or a
-  capped backlog ask. Stocked homes add one non-standing outpost at a time so
+  unspent. Stocked homes add one non-standing outpost at a time so
   spawns absorb
   one room's bodies at once; young homes open all paying ones because waiting on
   containers delays RCL3. An operation holds only the colonies it casts from
@@ -1015,7 +926,7 @@ No performance change ships without the representative benchmark:
    separately.
 3. **Live calibration:** `app` logs per-phase `Game.cpu.getUsed()` deltas to
    `observe.phases` (`observe cpu`). The benchmark is representative once each
-   module's share is within `❓ 15%` of live (`❓` calibration waits for live
+   module's share is within 15% of live (calibration waits for live
    capture).
 
 Noise floor: `npm run bench` reads within `±0.4%` per module on an unchanged
@@ -1052,9 +963,6 @@ one and the three after it, whose plans move the weights it flooded on, Atlas
 miss rate, Hunt threat lookups) are
 reported to segment 1 and enforced against ceilings in `scripts/ceilings.json`
 on every `npm run scenario` run.
-`❓` reset-keeps-outposts' cold reset at t2000 floods 153 per colony (ceiling
-130, waived), with 31 creeps where its base had 10 once containers waited for
-the tower. HYPOTHESIS: cold floods grow with the bodies walking.
 
 ## 10. Verification
 
@@ -1161,14 +1069,13 @@ and dropped live, so it needs no state, Memory or segment.
 | S4 low CPU | N6 at CPU limit 20 | degradation, bucket | bucket curve, income lost |
 
 `N1`–`N7`, `E0`–`E2` and `S3` (`P7`, `Q7`, `V7` beside `stronghold-*`'s strongholds)
-are built; `❓` remaining nodes (`E3`, `S1`, `S2`, `S4`).
+are built.
 
 **Adversaries:** scripted rivals (`sim/src/rival/`) verify plan mechanics. No
 test seats an open-source bot (owner): a bot tuned against one says little
 about the players a season meets. Self-play: `sim --players` (`sim/src/seat/`)
 seats our bot several times in one world, each seat its own `Driver`, Memory
-and declarations, each sampled apart. `❓` A scenario that scores one seat
-against another.
+and declarations, each sampled apart.
 
 ### 10.3 Unit tests, where the engine would obscure
 
@@ -1218,7 +1125,7 @@ on a live-sized world.
   running abandon pauses; bot-chosen outposts and an in-flight claim drop on
   the next tick, operator-declared ones stay.
 - A panic costs the whole tick, never one module (§2).
-- **Deploy canary** (not built yet): keep previous bundle, compare `❓ N = 200`
+- **Deploy canary** (not built yet): keep previous bundle, compare `N = 200`
   ticks of income, idle spawns, deaths, faults, and bucket, auto-revert on
   regression.
 - `observe` reads live segments directly; nothing is logged twice.
@@ -1228,7 +1135,7 @@ on a live-sized world.
 - **Stop-and-ask fallback:** when an architectural change requires owner
   approval (`AGENTS.md` §Boundaries) and the owner is away, label `needs-owner`
   and park it; never work around it.
-- **Shape audit** (`❓` every 30 issues or monthly): report line counts vs
+- **Shape audit** (monthly): report line counts vs
   ceilings, §4 vs actual Memory/segments, per-module CPU shares,
   `engagements.log` error, and `Tuning` count.
 - The owner owns this document; agents propose changes via issues.
@@ -1240,7 +1147,7 @@ on a live-sized world.
 | M1 economy | core economy slots, logistics, layout | seat-extreme soak beats v1 across seeds | ✅ |
 | M1b outposts | remote harvest/haul/reserve; stand-down (§5) | E1 outposts net positive after Invaders | ✅ |
 | M2 structures | nodes N1–N7; links (controller's + longest-way source's first beat hub-first by +5–17k over 20k ticks on N4); labs & boosts; factory and RCL8 set wait for a sink (one room mines one ore, reactions need two, offline has no market) | links beat no-links; labs feed boosts | ✅ |
-| M3 defence | `Exchange`, `Defend`, tactics, casting, rival harness | fixed rivals & self-play held; error in bound | ✅ (self-play `❓`) |
+| M3 defence | `Exchange`, `Defend`, tactics, casting, rival harness | fixed rivals & self-play held; error in bound | ✅ |
 | M4 live | v2 replaces v1 live | v2 runs live | ✅ |
 | M5 reach | multi-colony `Strategy`, `Sweep`, offensive kinds | endgame in §0 | ⏳ |
 
