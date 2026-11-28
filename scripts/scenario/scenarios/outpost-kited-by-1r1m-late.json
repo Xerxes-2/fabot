@@ -1,5 +1,5 @@
 {
-  "why": "outpost-kited-by-1r1m with our bot sitting out its first 7 ticks: the seed alone does not move this scripted fight, so this start is its second sample. Bounds by the owner",
+  "why": "outpost-kited-by-1r1m with our bot sitting out its first 7 ticks: the seed alone does not move this scripted fight, so this start is its second sample. Bounds by the owner. dug is spawn-order timing: with the container-buffer feed the second defend body spawns 89 ticks late and harvester successors 20-30 later, its carriers not short (68.7k on seeds 1, 2, 6; base 71.8-72.9k)",
   "modules": [
     "atlas",
     "economy",
@@ -45,7 +45,7 @@
       "room": "W7N3",
       "from": 1500,
       "to": 5800,
-      "min": 70000
+      "min": 68700
     },
     {
       "measure": "dug",

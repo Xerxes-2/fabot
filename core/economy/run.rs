@@ -411,10 +411,12 @@ fn work(
     if !members.is_empty() {
         target.tiles = members.iter().map(|f| tiles::of_pos(&f.pos)).collect();
     }
-    let buffer = (derived.grounds.iter())
-        .filter(|g| g.room == creep.pos.room)
-        .find_map(|g| g.buffer.as_ref());
-    let beside = buffer.filter(|b| b.energy > 0 && creep.pos.within(1, &b.pos));
+    // Hivemind's: the controller's link first, refilled without a carrier.
+    let ground = derived.grounds.iter().find(|g| g.room == creep.pos.room);
+    let receiver = ground.and_then(|g| g.receiver.as_ref());
+    let beside = (ground.iter().flat_map(|g| g.stores.iter()))
+        .filter(|b| b.kind.is_buffer() && b.energy > 0 && creep.pos.within(1, &b.pos))
+        .max_by_key(|b| receiver.is_some_and(|r| b.id == r.id.into()));
     // The engine withdraws before it upgrades, so the draw tops up the spend.
     if let Some(b) = beside
         && let Some(id) = b.id.object()

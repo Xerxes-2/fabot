@@ -126,6 +126,7 @@ fn upgrade_draw(derived: &Derived, g: &Ground) -> i32 {
         .map(|b| b.work * engine::UPGRADE_DRAIN_PER_WORK)
         .sum::<i32>()
         .min(super::bodies::upgradable_at(level))
+        - inflow(g)
 }
 
 fn hub_fed(g: &Ground) -> bool {
@@ -141,10 +142,7 @@ fn hand_fed(derived: &Derived, g: &Ground) -> bool {
         let net = g.link_net();
         return net.energy < net.least;
     }
-    g.feed.as_ref().is_some_and(|f| {
-        let linked = g.receiver.as_ref().is_some_and(|r| f.id == r.id.into());
-        upgrade_draw(derived, g) > if linked { inflow(g) } else { 0 }
-    })
+    g.feed.is_some() && upgrade_draw(derived, g) > 0
 }
 
 fn sinks_of(derived: &Derived, ci: usize) -> Vec<Spot> {

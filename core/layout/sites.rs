@@ -213,8 +213,9 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
         served,
         rocked,
         posts,
-        buffer: buffer
-            .filter(|(_, b)| b.kind == StructureType::Container)
+        // A standing link is never sited again.
+        buffer: (buffer.filter(|(_, b)| b.kind == StructureType::Container))
+            .filter(|_| Atlas::controller_link(room).is_none())
             .map(|(c, b)| (c, tiles::of_pos(&b.pos))),
         seat,
         held,

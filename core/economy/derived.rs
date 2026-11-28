@@ -627,20 +627,17 @@ fn strikes_of(world: &World) -> BTreeMap<Id, i32> {
 
 /// The engine gates a link's send, never what it is sent: the controller's
 /// link stays a receiver past the allowance.
-fn links_of(
-    room: &Room,
-    working: &[&Structure],
-    is_buffer: &dyn Fn(Id) -> bool,
-    storage: Option<&Structure>,
-) -> Vec<LinkFact> {
+fn links_of(room: &Room, working: &[&Structure]) -> Vec<LinkFact> {
+    let controller = Atlas::controller_link(room).map(|l| l.id);
+    let hub = Atlas::hub_link(room).map(|l| l.id);
     let role_of = |s: &Structure| {
         if s.kind != StructureType::Link || !s.owner.is_ours() {
             None
         } else if Atlas::is_source_link(room, &s.pos) {
             Some(LinkRole::Source)
-        } else if is_buffer(s.id) {
+        } else if controller == Some(s.id) {
             Some(LinkRole::Controller)
-        } else if storage.is_some_and(|st| st.pos.within(1, &s.pos)) {
+        } else if hub == Some(s.id) {
             Some(LinkRole::Hub)
         } else {
             None
@@ -779,15 +776,19 @@ fn ores_of(room: &Room) -> Vec<(Id, Pos, ResourceType, i32)> {
         .collect()
 }
 
-/// The tiles an upgrader drinks from the buffer and reaches the controller.
+/// The tiles an upgrader drinks from the buffer and reaches the controller, the link's first.
 fn buffer_seats_of(atlas: &Atlas, room: &Room, buffer: Option<&StoreFact>) -> Vec<Pos> {
     match (buffer, &room.controller) {
         (Some(b), Some(c)) if atlas.sees(room.name) => {
             let walkable = |t: Tile| atlas.standable(room.name, t);
-            Atlas::upgrader_seats(walkable, tiles::of_pos(&c.pos), tiles::of_pos(&b.pos))
-                .into_iter()
-                .map(|t| tiles::to_pos(room.name, t))
-                .collect()
+            let link = Atlas::controller_link(room).map(|l| l.pos);
+            let mut seats: Vec<Pos> =
+                Atlas::upgrader_seats(walkable, tiles::of_pos(&c.pos), tiles::of_pos(&b.pos))
+                    .into_iter()
+                    .map(|t| tiles::to_pos(room.name, t))
+                    .collect();
+            seats.sort_by_key(|p| !link.is_some_and(|l| l.within(1, p)));
+            seats
         }
         _ => Vec::new(),
     }
@@ -804,10 +805,7 @@ fn ground_of(
     let owned_room = room.controller.as_ref().is_some_and(|c| c.owner.is_ours());
     let built = Atlas::buffer(room);
     let is_buffer = |id: Id| built.is_some_and(|b| b.id == id);
-    let storage = room.storage();
-
-    let links = links_of(room, &working, &is_buffer, storage);
-
+    let links = links_of(room, &working);
     let controller_link = links.iter().find(|l| l.role.is_controller()).cloned();
     let hub_link = links.iter().find(|l| l.role.is_hub()).cloned();
 
@@ -885,7 +883,7 @@ fn ground_of(
         (None, None) => None,
     };
 
-    let buffer = stores.iter().find(|s| s.kind.is_buffer()).cloned();
+    let buffer = stores.iter().find(|s| built.is_some_and(|b| s.id == b.id.into())).cloned();
 
     Ground {
         room: room.name,

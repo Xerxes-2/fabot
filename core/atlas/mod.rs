@@ -617,12 +617,24 @@ impl Atlas {
             .min_by_key(|s| (c.pos.range(&s.pos), tiles::of_pos(&s.pos)))
     }
 
-    pub fn buffer<'a>(room: &'a Room) -> Option<&'a fabot_base::world::Structure> {
-        Atlas::controller_link(room).or_else(|| {
-            room.structures
-                .iter()
-                .find(|s| s.kind == StructureType::Container && Atlas::is_buffer(room, &s.pos))
+    pub fn hub_link<'a>(room: &'a Room) -> Option<&'a fabot_base::world::Structure> {
+        let storage = room.storage()?;
+        let controller = Atlas::controller_link(room).map(|l| l.id);
+        (room.structures.iter()).find(|s| {
+            s.kind == StructureType::Link
+                && s.owner.is_ours()
+                && s.pos.within(1, &storage.pos)
+                && !Atlas::is_source_link(room, &s.pos)
+                && controller != Some(s.id)
         })
+    }
+
+    /// Hivemind's and v1's: the container is carried to until a hub feeds the link.
+    pub fn buffer<'a>(room: &'a Room) -> Option<&'a fabot_base::world::Structure> {
+        let container = (room.structures.iter())
+            .find(|s| s.kind == StructureType::Container && Atlas::is_buffer(room, &s.pos));
+        let link = Atlas::controller_link(room);
+        if Atlas::hub_link(room).is_some() { link.or(container) } else { container.or(link) }
     }
 
     /// No site is built under a creep, so these are kept clear of solid ones.
