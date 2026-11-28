@@ -430,6 +430,7 @@ pub struct Mineral {
     pub pos: Pos,
     pub resource: Option<ResourceType>,
     pub amount: i32,
+    pub density: i32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -937,8 +938,7 @@ pub mod sightings {
     fn glimpsed(seen: &BTreeMap<Id, Seen>, time: i32) -> Vec<Creep> {
         (seen.iter().filter(|(_, s)| s.armed && s.gone > time))
             .filter_map(|(&id, s)| {
-                let g = s.last.clone()?;
-                Some(Creep {
+                s.last.clone().map(|g| Creep {
                     id,
                     name: String::new(),
                     owner: if g.invader { Owner::Invader } else { Owner::Nobody },

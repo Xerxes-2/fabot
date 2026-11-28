@@ -148,7 +148,7 @@ globalThis.__fabotRead = (() => {
   const found = [];
   let next = 0;
   const KINDS = [
-    (r) => list(r.find(105), (x) => (s(x.id), pos(x.pos), n(x.energy), n(x.energyCapacity), n(x.ticksToRegeneration))) + list(r.find(116), (x) => (s(x.id), pos(x.pos), w(x.mineralType), n(x.mineralAmount))),
+    (r) => list(r.find(105), (x) => (s(x.id), pos(x.pos), n(x.energy), n(x.energyCapacity), n(x.ticksToRegeneration))) + list(r.find(116), (x) => (s(x.id), pos(x.pos), w(x.mineralType), n(x.mineralAmount), n(x.density))),
     (r) => {
       const xs = r.find(107);
       found.push(xs);
@@ -235,7 +235,7 @@ globalThis.__fabotRead = (() => {
     const kinds = [
       (r) => {
         r.find[105] = find((o) => (pos(o), Object.assign(o, { energy: n(), energyCapacity: n(), ticksToRegeneration: n() })).id);
-        r.find[116] = find((o) => (pos(o), Object.assign(o, { mineralType: w(), mineralAmount: n() })).id);
+        r.find[116] = find((o) => (pos(o), Object.assign(o, { mineralType: w(), mineralAmount: n(), density: n() })).id);
       },
       (r) => (r.find[107] = list(() => structure(r.name))),
       (r) =>

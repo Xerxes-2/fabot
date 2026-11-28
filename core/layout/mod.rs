@@ -65,6 +65,7 @@ pub fn bare(
                 pos: *pos,
                 resource: None,
                 amount: 0,
+                density: 0,
             })
             .collect(),
         ..Room::empty(name)

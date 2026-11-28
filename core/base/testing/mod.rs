@@ -193,7 +193,7 @@ fn room<'a>(
             })
             .collect(),
         minerals: (mineral.into_iter())
-            .map(|(pos, resource)| Mineral { id: id("m", 0), pos, resource, amount: 0 })
+            .map(|(pos, resource)| Mineral { id: id("m", 0), pos, resource, amount: 0, density: 0 })
             .collect(),
         ..Room::empty(name)
     }

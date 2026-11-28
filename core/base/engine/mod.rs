@@ -1,4 +1,4 @@
-use screeps::{StructureType, Terrain};
+use screeps::{Density, StructureType, Terrain};
 
 use super::{
     tiles::Tile,
@@ -11,6 +11,10 @@ pub const CARRY_PART_CAPACITY: i32 = screeps::CARRY_CAPACITY as i32;
 pub const MINERAL_HARVEST_PER_WORK: i32 = screeps::HARVEST_MINERAL_POWER as i32;
 /// The intent pass runs before the object pass, so digs land one tick later.
 pub const MINERAL_HARVEST_CYCLE: i32 = screeps::EXTRACTOR_COOLDOWN as i32 + 1;
+pub const MINERAL_HIGH_AMOUNT: i32 = Density::High.amount() as i32;
+pub fn mineral_full(density: i32) -> Option<i32> {
+    enum_iterator::all::<Density>().find(|d| *d as i32 == density).map(|d| d.amount() as i32)
+}
 pub const CREEP_LIFETIME: i32 = screeps::CREEP_LIFE_TIME as i32;
 pub const CLAIM_LIFETIME: i32 = screeps::CREEP_CLAIM_LIFE_TIME as i32;
 /// ×1.1: the longest a deployed core stands.

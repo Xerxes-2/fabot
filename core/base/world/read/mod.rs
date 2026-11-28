@@ -87,9 +87,7 @@ impl<'a> Reader<'a> {
 
     fn pos(&mut self) -> Pos {
         let room = self.room_name();
-        let x = self.n();
-        let y = self.n();
-        Pos::new(room, x, y)
+        self.pos_in(room)
     }
 
     fn pos_in(&mut self, room: RoomName) -> Pos {
@@ -252,6 +250,7 @@ impl<'a> Reader<'a> {
                 pos: r.pos(),
                 resource: r.word().parse().ok(),
                 amount: r.n(),
+                density: r.n(),
             });
         }
         for room in rooms.iter_mut() {

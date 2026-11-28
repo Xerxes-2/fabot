@@ -66,7 +66,7 @@ const creep = {
 };
 const found = {
   105: [{ id: "a4", pos: at(5, 5), energy: 3000, energyCapacity: 3000, ticksToRegeneration: undefined }],
-  116: [{ id: "a5", pos: at(40, 40), mineralType: "H", mineralAmount: 70000 }],
+  116: [{ id: "a5", pos: at(40, 40), mineralType: "H", mineralAmount: 70000, density: 3 }],
   107: [spawn, road],
   111: [{ id: "a6", structureType: "extension", my: true, owner: { username: "me" }, pos: at(27, 27), progress: 0, progressTotal: 3000 }],
   106: [{ id: "a7", resourceType: "energy", pos: at(11, 11), amount: 50 }],

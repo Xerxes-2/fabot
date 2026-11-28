@@ -157,7 +157,7 @@ fn rank(map: &Map, maps: &Maps, room: &str) -> Option<(f64, Vec<String>)> {
         format!("{:.1}", expand::score(&facts, &declarations.tuning)),
         facts.sources.to_string(),
         facts.free_near.to_string(),
-        row.mineral.map_or("-".to_string(), |(m, _)| m.to_string()),
+        row.mineral.map_or("-".to_string(), |(m, ..)| m.to_string()),
         format!("{:.1}", facts.mineral),
         format!("{:.1}", facts.worth),
         format!("{},{}", tiles::x_of(spawn), tiles::y_of(spawn)),

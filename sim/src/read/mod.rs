@@ -250,6 +250,7 @@ pub fn world(v: &View, declarations: &Declarations) -> World<'static> {
                     pos: r.pos(name, o),
                     resource: text(o, atom!("mineralType")).parse().ok(),
                     amount: num(o, atom!("mineralAmount")) as i32,
+                    density: num(o, atom!("density")) as i32,
                 }),
                 "constructionSite" => {
                     room.sites.extend(text(o, atom!("structureType")).parse().map(|kind| Site {

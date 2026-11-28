@@ -38,7 +38,7 @@ pub fn step(world: &World, atlas: &Atlas, intel: &mut Intel) {
                     .any(|c| c.kind == StructureType::Container && c.pos.within(1, &s.pos))
             }),
             mineral: (room.minerals.first())
-                .and_then(|m| Some((m.resource?, Some(tiles::of_pos(&m.pos))))),
+                .and_then(|m| Some((m.resource?, Some(tiles::of_pos(&m.pos)), m.density))),
             stronghold: room.invader_core().map(|s| Stronghold {
                 level: s.level,
                 deploys_at: world.time + s.deploy,

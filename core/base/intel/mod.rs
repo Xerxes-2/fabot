@@ -28,8 +28,8 @@ pub struct Row {
     pub sources: Option<Vec<Declared>>,
     pub contained: bool,
     /// None on a row written before minerals were read, or a room without one;
-    /// its tile none on a row written before tiles were.
-    pub mineral: Option<(ResourceType, Option<Tile>)>,
+    /// its tile none on a row written before tiles were, its density 0 before densities.
+    pub mineral: Option<(ResourceType, Option<Tile>, i32)>,
     pub stronghold: Option<Stronghold>,
     pub towered: bool,
     pub loot: Option<Loot>,
@@ -75,7 +75,6 @@ pub fn blind(
     world: &World,
     declarations: &Declarations,
 ) -> Room<'static> {
-    let time = world.time;
     let row = intel.get(&outpost.room);
     let owner = |user: &String| Owner::of_user(user.clone(), &world.me, declarations);
     Room {
@@ -87,19 +86,16 @@ pub fn blind(
             progress: 0,
             progress_total: 0,
             ticks_to_downgrade: 0,
-            reservation: row
-                .and_then(|r| r.reservation.as_ref())
-                .filter(|(_, lapse)| *lapse > time)
-                .map(|(user, lapse)| (owner(user), lapse - time)),
+            reservation: (row.and_then(|r| r.reservation.as_ref()))
+                .filter(|(_, lapse)| *lapse > world.time)
+                .map(|(user, lapse)| (owner(user), lapse - world.time)),
             sign: None,
             safe_mode: 0,
             safe_mode_available: 0,
             safe_mode_cooldown: 0,
             upgrade_blocked: 0,
         }),
-        sources: outpost
-            .sources
-            .iter()
+        sources: (outpost.sources.iter())
             .map(|s| Source {
                 id: s.id,
                 pos: s.pos,
@@ -177,12 +173,13 @@ pub fn to_text(intel: &Intel) -> String {
         }
         out.push_str(if r.contained { " 1" } else { " 0" });
         match r.mineral {
-            Some((m, at)) => {
+            Some((m, at, density)) => {
                 let _ = write!(out, " {m}");
                 if let Some(at) = at {
                     out.push('@');
                     push_int(&mut out, at.index() as i32);
                 }
+                let _ = write!(out, "/{density}");
             }
             None => out.extend([" ", NONE]),
         }
@@ -223,10 +220,11 @@ fn site_of(room: RoomName, text: &str) -> Option<Declared> {
     Some(Declared { id: Id::parse(id)?, pos: Pos::new(room, at % 50, at / 50) })
 }
 
-fn mineral_of(text: &str) -> Option<(ResourceType, Option<Tile>)> {
+fn mineral_of(text: &str) -> Option<(ResourceType, Option<Tile>, i32)> {
+    let (text, density) = text.split_once('/').unwrap_or((text, "0"));
     let (m, at) = text.split_once('@').map_or((text, None), |(m, at)| (m, Some(at)));
     let tile = |at: &str| at.parse().ok().filter(|i| *i < tiles::COUNT);
-    Some((m.parse().ok()?, at.and_then(tile).map(Tile::of_index)))
+    Some((m.parse().ok()?, at.and_then(tile).map(Tile::of_index), density.parse().ok()?))
 }
 
 fn loot_of(room: RoomName, text: &str) -> Option<Loot> {
@@ -309,7 +307,7 @@ mod tests {
             option::of(site.clone()),
             option::of(vec(site, 0..3)),
             any::<bool>(),
-            option::of((select(crate::boost::ORES.to_vec()), option::of(tile.clone()))),
+            option::of((select(crate::boost::ORES.to_vec()), option::of(tile.clone()), 0..=4)),
             option::of((1..=5, 0..=9_999_999, 0..=9_999_999, 0..=9_999_999)),
             any::<bool>(),
         );

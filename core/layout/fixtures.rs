@@ -193,7 +193,13 @@ fn colony_of(rng: &mut Rng, blobs: i32) -> Option<Colony> {
                 ticks_to_regeneration: 0,
             })
             .collect(),
-        minerals: vec![Mineral { id: "m".into(), pos: at(mineral), resource: None, amount: 0 }],
+        minerals: vec![Mineral {
+            id: "m".into(),
+            pos: at(mineral),
+            resource: None,
+            amount: 0,
+            density: 0,
+        }],
         structures,
         ..Room::empty(ROOM)
     };

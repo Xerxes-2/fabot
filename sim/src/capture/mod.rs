@@ -207,7 +207,7 @@ impl Game<'_> {
                 m.id,
                 m.pos,
                 None,
-                json!({ "mineralType": m.resource, "mineralAmount": m.amount }),
+                json!({ "mineralType": m.resource, "mineralAmount": m.amount, "density": m.density }),
             )
         });
         find.insert(MINERALS.into(), json!(minerals.collect::<Vec<_>>()));

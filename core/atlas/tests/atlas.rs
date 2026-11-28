@@ -483,6 +483,7 @@ proptest! {
             pos: across,
             resource: None,
             amount: 0,
+            density: 0,
         }];
         let atlas = Atlas::of_world(&world);
         for obstacle in [at, across] {
