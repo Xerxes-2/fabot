@@ -121,3 +121,28 @@ fn a_volley_counts_a_creeps_whole_share_and_a_structures_hits_alone() {
     assert_eq!(pays(true), Some(21), "a creep's heal nets at the tick's end");
     assert_eq!(pays(false), None, "a structure of 2 hits takes 2 of a 10 share");
 }
+
+#[test]
+fn a_room_sinks_its_climb_and_each_build_of_ours_read_off_the_engine() {
+    use screeps::StructureType::{Extension, Spawn};
+
+    use crate::{
+        testing,
+        world::{Owner, Pos, RoomName, terrain},
+    };
+    let plain = terrain::leak(vec![0; 2500]).unwrap();
+    let room = |level, progress| {
+        let mut r = testing::ours(RoomName::W1N1, level, plain);
+        r.controller.as_mut().unwrap().progress = progress;
+        r
+    };
+    let at = Pos::new(RoomName::W1N1, 10, 10);
+    let theirs = testing::built("t", Spawn, at);
+    let theirs = crate::world::Structure { owner: Owner::Enemy("x".into()), ..theirs };
+    let built = [testing::built("s", Spawn, at), testing::built("e", Extension, at), theirs];
+    let sunk =
+        |level, progress, b: &[_]| engine::invested(room(level, progress).controller.as_ref(), b);
+    assert_eq!(sunk(1, 150, &[]), 150);
+    assert_eq!(sunk(3, 0, &built), 200 + 45_000 + 15_000 + 3_000);
+    assert!(sunk(5, 0, &[]) > sunk(4, 134_999, &[]));
+}

@@ -58,7 +58,8 @@ const CLAIM_DEADLINE: i32 = 5 * engine::CREEP_LIFETIME;
 /// About twice the claim to storage measured two crossings off (21k ticks).
 const RAISE_DEADLINE: i32 = 40_000;
 /// At default weights a fresh failure near a room outweighs the most a room scores (its
-/// dig and four neighbours'), fading over this (Hivemind's).
+/// dig and four neighbours'), fading over this (Hivemind's); a held room's sunk energy
+/// pays back over it.
 const FORGET: i32 = 100_000;
 const SHOWN: usize = 5;
 
@@ -73,6 +74,7 @@ pub struct Facts {
     pub ore: Option<ResourceType>,
     /// Its worth, then what its unlocks at our tier and its option above it add before rarity.
     pub mineral: [f64; 3],
+    pub sunk: f64,
 }
 
 /// A simple rule shaped as its priced replacement (`AGENTS.md`).
@@ -80,14 +82,14 @@ pub fn score(f: &Facts, t: &Tuning) -> f64 {
     terms(f, t).iter().sum()
 }
 
-const TERMS: [&str; 6] = ["source", "near", "crossing", "worth", "failure", "mineral"];
+const TERMS: [&str; 7] = ["source", "near", "crossing", "worth", "failure", "mineral", "sunk"];
 
-fn terms(f: &Facts, t: &Tuning) -> [f64; 6] {
+fn terms(f: &Facts, t: &Tuning) -> [f64; 7] {
     let held = f64::from(engine::HELD_OUTPUT_PER_TICK);
     let (dig, near) = (held * t.expand_source, held * t.expand_near_source * f.free_near as f64);
     let (crossings, failed) = (-t.expand_crossing * f64::from(f.crossings), -t.expand_failure);
     let (worth, mineral) = (t.expand_worth * f.worth, t.expand_mineral * f.mineral[0]);
-    [dig * f.sources as f64, near, crossings, worth, failed * held * f.failed, mineral]
+    [dig * f.sources as f64, near, crossings, worth, failed * held * f.failed, mineral, f.sunk]
 }
 
 pub type Decision = (&'static str, Vec<(&'static str, String)>);
@@ -234,6 +236,7 @@ pub fn facts(
         failed,
         ore: row.mineral.map(|(m, ..)| m),
         mineral: ore((ores, ours.1), intel, (name, row.mineral.map(|(m, _, d)| (m, d)), None), t),
+        sunk: 0.0,
     }
 }
 
@@ -247,10 +250,8 @@ fn spare(world: &World, p: &ColonyPlan, around: &Around) -> Option<i32> {
 
 /// `margin`: the stock past its reserve a sponsor carries a young room on.
 fn sponsors(world: &World, plans: &[ColonyPlan], around: &Around, margin: i32) -> Vec<RoomName> {
-    (plans.iter())
-        .filter(|p| spare(world, p, around).is_some_and(|s| s >= margin))
-        .map(|p| p.room)
-        .collect()
+    let rich = |p: &&ColonyPlan| spare(world, p, around).is_some_and(|s| s >= margin);
+    plans.iter().filter(rich).map(|p| p.room).collect()
 }
 
 /// The claims not yet a colony: the operator's and `claim`, an expansion's.
@@ -275,13 +276,10 @@ pub fn book(
     (around, margin): (&Around, i32),
     may_start: bool,
 ) {
-    if derived.capped || !may_start {
-        return;
-    }
     let richest = (plans.iter_mut())
         .filter_map(|p| Some((spare(world, p, around)?, std::cmp::Reverse(p.room), p)))
         .max_by_key(|(s, room, _)| (*s, *room));
-    if let Some((_, _, p)) = richest {
+    if let Some((_, _, p)) = richest.filter(|_| !derived.capped && may_start) {
         p.reserve += margin + world.room(p.room).map_or(0, |r| r.energy_capacity);
     }
 }
@@ -464,6 +462,8 @@ pub fn step<'t>(
             failed: 0.0,
             ore: rock.map(|(m, _)| m),
             mineral: ore((&ores, rivals), intel, (room.name, rock, Some(room.name)), tuning),
+            sunk: f64::from(engine::invested(room.controller.as_ref(), &room.structures))
+                / f64::from(FORGET),
         };
         (score(&facts, tuning), room.name, facts)
     };
@@ -568,6 +568,7 @@ mod tests {
             failed: 0.0,
             ore: None,
             mineral: [worth(ResourceType::Utrium, [true; ORES.len()]), 0.0, 0.0],
+            sunk: 0.0,
         };
         let lack = Facts {
             mineral: [
@@ -678,6 +679,7 @@ mod tests {
             failed: 0.0,
             ore: None,
             mineral: [0.0; 3],
+            sunk: 0.0,
         };
         let scoring = Facts { free_near: 0, crossings: 3, worth: 25.0, ..near };
         let t = Tuning::default();
@@ -698,6 +700,7 @@ mod tests {
             failed: 0.5,
             ore: None,
             mineral,
+            sunk: 0.0,
         };
         let (_, fields) = line("best", RoomName::new(1, 1), &f, &t);
         let v = |k: &str| fields.iter().find(|(n, _)| *n == k).unwrap().1.parse::<f64>().unwrap();

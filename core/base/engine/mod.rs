@@ -3,6 +3,7 @@ use screeps::{Density, StructureType, Terrain};
 use super::{
     tiles::Tile,
     vocabulary::{Part, ResourceType, damage_ratio, multiple, part_count_in},
+    world::{Controller, Owner, Structure},
 };
 
 pub const MAX_BODY_PARTS: usize = screeps::MAX_CREEP_SIZE as usize;
@@ -24,9 +25,8 @@ pub const STRONGHOLD_LONGEST_COLLAPSE: i32 = screeps::STRONGHOLD_DECAY_TICKS as 
 pub fn core_clock(collapse: Option<i32>, deploy: i32) -> (i32, i32) {
     collapse.map_or((deploy + STRONGHOLD_LONGEST_COLLAPSE, deploy), |c| (c, 0))
 }
-pub const SPAWN_TICKS_PER_PART: i32 = screeps::CREEP_SPAWN_TIME as i32;
 pub const fn spawn_ticks(parts: usize) -> i32 {
-    SPAWN_TICKS_PER_PART * parts as i32
+    screeps::CREEP_SPAWN_TIME as i32 * parts as i32
 }
 /// A spawn bears its body onto a tile around it, so a body held there bars it.
 pub fn spawn_door(spawn: Tile, at: Tile) -> bool {
@@ -47,7 +47,6 @@ pub fn dig_rate(work: i32) -> i32 {
 pub fn dug(work: i32, rate: i32) -> i32 {
     dig_rate(work).min(rate)
 }
-
 /// The fewest WORK that dig `rate` a tick.
 pub fn work_to_dig(rate: i32) -> i32 {
     (rate + HARVEST_PER_WORK - 1) / HARVEST_PER_WORK
@@ -62,7 +61,6 @@ pub const CONTAINER_CAPACITY: i32 = screeps::CONTAINER_CAPACITY as i32;
 pub const STORAGE_CAPACITY: i32 = screeps::STORAGE_CAPACITY as i32;
 /// A dropped pile loses ceil(amount / this) a tick.
 pub const ENERGY_DECAY: i32 = screeps::ENERGY_DECAY as i32;
-
 pub fn send_cost(amount: i32, distance: i32) -> i32 {
     (f64::from(amount)
         * (1.0 - (-f64::from(distance) / f64::from(screeps::TERMINAL_SEND_COST_SCALE)).exp()))
@@ -79,7 +77,6 @@ pub const RANGED_RANGE: i32 = screeps::CREEP_RANGED_ACTION_RANGE as i32;
 pub const UPGRADE_RANGE: i32 = 3;
 /// A keeper guards the first source, else mineral, this near its lair.
 pub const KEEPER_GUARD_RANGE: i32 = 5;
-
 pub fn keeper_body() -> Vec<Part> {
     let fight = [Part::Attack, Part::RangedAttack].repeat(10);
     [&[Part::Tough; 17][..], &[Part::Move; 13], &fight].concat()
@@ -95,11 +92,9 @@ pub const TOWER_POWER_ATTACK: i32 = screeps::TOWER_POWER_ATTACK as i32;
 pub const TOWER_CAPACITY: i32 = screeps::TOWER_CAPACITY as i32;
 /// A tower holding less does nothing.
 pub const TOWER_ENERGY_COST: i32 = screeps::TOWER_ENERGY_COST as i32;
-
 pub fn tower_shots(energy: i32) -> i32 {
     energy / TOWER_ENERGY_COST
 }
-
 pub fn tower_spend(shots: i32) -> i32 {
     shots * TOWER_ENERGY_COST
 }
@@ -115,9 +110,14 @@ pub const UPGRADE_DRAIN_PER_WORK: i32 = screeps::UPGRADE_CONTROLLER_POWER as i32
 /// the tally upgrades and spends nothing.
 pub const MAX_UPGRADE_PER_TICK: i32 = screeps::CONTROLLER_MAX_UPGRADE_PER_TICK as i32;
 pub const CONTROLLER_MAX_LEVEL: i32 = 8;
-
 pub fn topped_out(level: i32) -> bool {
     level >= CONTROLLER_MAX_LEVEL
+}
+pub fn invested(controller: Option<&Controller>, built: &[Structure]) -> i32 {
+    let (level, progress) = controller.map_or((0, 0), |c| (c.level, c.progress));
+    let climb: u32 = (1..level.max(1) as u32).filter_map(screeps::controller_levels).sum();
+    let ours = built.iter().filter(|s| matches!(s.owner, Owner::Ours | Owner::Nobody));
+    (climb + ours.filter_map(|s| s.kind.construction_cost()).sum::<u32>()) as i32 + progress
 }
 
 pub const ROAD_WEIGHT: i32 = screeps::MOVE_COST_ROAD as i32;

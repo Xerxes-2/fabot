@@ -84,7 +84,7 @@ function grudges(text) {
 
 // A claim is decided on a tick with a `best` and no colony `held` against it, a give-up on one with a `swap`.
 async function claims(dir) {
-  const COLUMNS = ["room", "why", "ore", "total", "source", "near", "crossing", "worth", "failure", "mineral", "now", "option", "rarity", "margin"];
+  const COLUMNS = ["room", "why", "ore", "total", "source", "near", "crossing", "worth", "failure", "mineral", "now", "option", "rarity", "margin", "sunk"];
   let top;
   if (!existsSync(join(dir, "cpu.jsonl"))) fail(`no cpu.jsonl in ${dir}`);
   for await (const line of createInterface({ input: createReadStream(join(dir, "cpu.jsonl")) })) {
