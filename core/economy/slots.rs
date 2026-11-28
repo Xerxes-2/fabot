@@ -441,13 +441,21 @@ impl Plan<'_> {
             .sum::<i32>()
             .min(bodies::upgradable_at(colony.controller.level));
 
+        let raised = |gi, g: &Ground| gi != ci && g.controller.iter().any(|c| c.owner.is_ours());
         for (gi, g) in derived.grounds.iter().enumerate() {
             if owners[gi] != Some(ci) {
                 continue;
             }
-            let own = gi == ci;
-            let raised = !own && g.controller.as_ref().is_some_and(|c| c.owner.is_ours());
-            if own || raised || away {
+            let (own, raised) = (gi == ci, raised(gi, g));
+            if raised {
+                // A claim without its spawn is raised by workers sent from here alone.
+                for k in 0..self.tuning.pioneers {
+                    let cost = self.worker(ci, g.room, k, (true, false), PIONEER, MOST);
+                    fixed.add(cost, cost);
+                }
+                continue;
+            }
+            if own || away {
                 owed += g.sites.iter().map(|s| s.left).sum::<i32>();
                 payback +=
                     (g.sites.iter()).filter(|s| s.kind.drawn_for()).map(|s| s.left).sum::<i32>();
@@ -456,14 +464,6 @@ impl Plan<'_> {
             let haul = derived.haul(owners, gi);
             let at_risk = g.repairs.iter().any(|r| r.rebuild > 0 && r.at_risk(haul));
             mends |= own && at_risk;
-            if raised {
-                // A claim without its spawn is raised by workers sent from here.
-                for k in 0..self.tuning.pioneers {
-                    let cost = self.worker(ci, g.room, k, (true, false), PIONEER, MOST);
-                    fixed.add(cost, cost);
-                }
-                continue;
-            }
             let mut upkeep_work = 0;
             for s in &g.sources {
                 let body = bodies::harvester((own, s.fills()), s.rate, capacity);
@@ -713,7 +713,7 @@ impl Plan<'_> {
         };
         let build = works.min(f64::from(owed) / life);
         let mended: f64 = (derived.grounds.iter().enumerate())
-            .filter(|(gi, _)| owners[*gi] == Some(ci))
+            .filter(|&(gi, g)| owners[gi] == Some(ci) && !raised(gi, g))
             .flat_map(|(gi, g)| {
                 let haul = if gi == ci { derived.haul(owners, gi) } else { 0 };
                 (g.repairs.iter())

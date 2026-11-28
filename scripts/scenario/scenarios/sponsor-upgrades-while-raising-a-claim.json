@@ -1,0 +1,11 @@
+{
+  "why": "a claim's sites are built by the pioneers it is sent alone, so its sponsor's spend never prices them for home workers who cannot reach it: the sponsor upgrades its surplus while the claim's first spawn is raised (main 54k from t1000 until the spawn stands at t3900, as builds the home workers never made)",
+  "modules": ["economy"],
+  "start": { "room": "W8N3", "seed": 1, "node": "X2" },
+  "ticks": 4000,
+  "assert": [
+    { "measure": "claimsOwned", "min": 1 },
+    { "measure": "claimSpawned", "min": 1 },
+    { "measure": "upgrade", "room": "W8N3", "from": 1000, "to": 4000, "min": 56000 }
+  ]
+}
