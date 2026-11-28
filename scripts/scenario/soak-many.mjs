@@ -15,8 +15,8 @@
 //            seats, both sources with one seat (a small harvester cannot fill
 //            a source) and both with four or more (bodies can crowd in
 //            instead), one source (E23S9 on Season 11's map) and the late
-//            game. A start is [<world>:]<room>[@<node>], <world> one of
-//            worlds/ with no home of ours (soak.mjs --world, --node). On a
+//            game. A start is [<world>:]<room>[@<node>], <world> one of worlds/ or
+//            a .json path, with no home of ours (soak.mjs --world, --node). On a
 //            world from one spawn, as the library's scenarios there, our safe
 //            mode is kept to activate (--ended)
 //
@@ -80,9 +80,9 @@ const parseSeeds = (text) =>
     return { seed: whole(seed, "--seed", 0), late: whole(late, "--seed", 0), label: spec };
   });
 const allStarts = (flags["--room"] ?? "W9N8,W8N3,season-outpost-ring:E23S9,season-late-seat:W12S28@N7").split(",").map((spec) => {
-  const m = /^(?:([\w-]+):)?([WE]\d+[NS]\d+)(?:@([A-Za-z0-9]+))?$/.exec(spec);
+  const m = /^(?:([\w./-]+):)?([WE]\d+[NS]\d+)(?:@([A-Za-z0-9]+))?$/.exec(spec);
   if (!m) fail(`--room: "${spec}" is not [world:]room[@node]`);
-  const world = m[1] && join(HERE, "worlds", `${m[1]}.json`);
+  const world = m[1] && (m[1].endsWith(".json") ? resolve(m[1]) : join(HERE, "worlds", `${m[1]}.json`));
   if (world && !existsSync(world)) fail(`--room: no world ${world}`);
   const at = m[3] ?? node;
   return { label: spec, room: m[2], world, node: at, ended: Boolean(world && !at), seeds: parseSeeds(flags["--seed"] ?? "1,2,1+7"), ticks: whole(flags["--ticks"] ?? (at ? 10000 : 30000), "--ticks", 1) };
@@ -136,7 +136,7 @@ const runs = bots.flatMap((bot) =>
       bot,
       seed,
       start,
-      name: `${tag}-${bot.name}-s${seed.seed}${seed.late ? `l${seed.late}` : ""}-${start.label.replace(/[:@]/g, "-")}`,
+      name: `${tag}-${bot.name}-s${seed.seed}${seed.late ? `l${seed.late}` : ""}-${basename(start.label).replace(/[:@]/g, "-")}`,
       key: hash(bot.code, start.room, planHash + start.node, readFileSync(start.world ?? SIM_TEMPLATE), String(seed.seed), String(seed.late), String(start.ticks), scriptsHash, String(bot.resetEvery), bot.tuning ?? ""),
     })),
   ),

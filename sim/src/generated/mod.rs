@@ -118,11 +118,22 @@ impl Spec {
     }
 }
 
-/// `sim gen-rooms --gen <seed> [--sectors WxH]`: the rooms `npm run plan:quality` reads.
+/// `sim gen-rooms --gen <seed> [--sectors WxH] [--out <world.json>]`: the rooms `npm run
+/// plan:quality` reads, or the world as `--world` reads it.
 pub fn rooms() {
     let args: Vec<String> = std::env::args().skip(2).collect();
     let flags: BTreeMap<_, _> = args.chunks(2).map(|f| (f[0].clone(), f[1].clone())).collect();
-    let map = Spec::of(&flags).expect("usage: sim gen-rooms --gen <seed> [--sectors WxH]").world();
+    let spec = Spec::of(&flags).expect("usage: sim gen-rooms --gen <seed> [--sectors WxH]");
+    let map = spec.world();
+    if let Some(out) = flags.get("--out") {
+        let objects = |n: &str| map.objects.iter().filter(|o| o["room"] == n).collect::<Vec<_>>();
+        let rooms = map
+            .rooms
+            .iter()
+            .map(|(n, t)| json!({ "name": n, "terrain": t, "objects": objects(n) }));
+        let world = json!({ "banks": spec.seed, "rooms": rooms.collect::<Vec<_>>() });
+        return std::fs::write(out, world.to_string()).unwrap_or_else(|e| panic!("{out}: {e}"));
+    }
     for (name, terrain) in &map.rooms {
         let of = |kind: &'static str| {
             (map.objects.iter()).filter(move |o| o["room"] == name.as_str() && o["type"] == kind)

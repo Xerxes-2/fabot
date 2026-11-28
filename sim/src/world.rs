@@ -57,6 +57,7 @@ pub fn read(path: &str) -> Map {
         closed: (world["closed"].as_array().into_iter().flatten())
             .filter_map(|r| r.as_str().map(str::to_string))
             .collect(),
+        banks: world["banks"].as_u64(),
         ..Map::default()
     };
     for room in world["rooms"].as_array().expect("rooms") {
