@@ -1396,7 +1396,7 @@ fn recipient(giver: &Taker, takers: &[Taker]) -> Option<usize> {
 /// At the rate the reserver holds, not this tick's: a body lives longer
 /// than a lapse lasts. The engine refuses a harvest on another's hold.
 fn remote_of(
-    atlas: &mut Atlas,
+    atlas: &Atlas,
     (world, ours): (&World, &atlas::Derived),
     intel: &Intel,
     declarations: &Declarations,

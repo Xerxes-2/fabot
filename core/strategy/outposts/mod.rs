@@ -8,7 +8,7 @@ use fabot_base::{
     tiles,
     tuning::Tuning,
     vocabulary::CLAIMER,
-    world::{Owner, Pos, RoomName, World},
+    world::{Owner, Pos, RoomName, StructureType, World},
 };
 use fabot_economy::{bodies, slots};
 use fabot_fight::{
@@ -22,6 +22,8 @@ use crate::expand;
 const INTENT_CPU: f64 = 0.2;
 /// An outpost's containers serve its tenure: in soaks the mean outpost held 11-14k ticks.
 const TENURE: f64 = 9_000.0;
+
+pub type Served = (RoomName, Option<RoomName>);
 
 /// A room surveyed or priced: room, home, `worked` or the first rule keeping
 /// it out, its priced net and spawn, and the spawn left before it.
@@ -63,11 +65,6 @@ fn price(c: &Candidate, capacity: i32, left: f64, spend: &dyn Fn(f64) -> f64) ->
         }
         _ => bare,
     }
-}
-
-pub fn net(world: &World, c: &Candidate) -> f64 {
-    let capacity = world.room(c.home).map_or(0, |r| r.energy_capacity);
-    price(c, capacity, f64::INFINITY, &|_| 0.0).net
 }
 
 fn worked(c: &Candidate, capacity: i32, reserved: bool, spend: &dyn Fn(f64) -> f64) -> Price {
@@ -144,14 +141,14 @@ pub fn casters(
 }
 
 pub fn chosen(
-    world: &World,
+    (world, derived): (&World, &Derived),
     candidates: Vec<Candidate>,
     (busy, spare): (&BTreeSet<RoomName>, &BTreeMap<RoomName, f64>),
     (tuning, engagements): (&Tuning, &[Engagement]),
     verdicts: &mut Vec<Verdict>,
 ) -> Vec<Outpost> {
     // A young home opens every room that pays at once, as The International does.
-    let stocked = |home: RoomName| world.room(home).is_some_and(|r| r.storage().is_some());
+    let stocked = |home: RoomName| derived.home(home).is_some_and(|h| h.stocked);
     // Before a storage the spawns' share the outposts leave is the spend's;
     // spend parts (spenders' and their carriers', an energy a tick) measured at RCL5.
     let spend = |home: RoomName, net: f64| {
@@ -159,23 +156,21 @@ pub fn chosen(
         if stocked(home) { ticks } else { 0.0 }
     };
     let mut spawn_left: BTreeMap<RoomName, f64> = BTreeMap::new();
-    for room in world.spawns.iter().map(|s| s.pos.room) {
-        let spawns = world.working_spawns().filter(|s| s.pos.room == room).count() as f64;
-        let controller = world.room(room).and_then(|r| r.controller.as_ref());
-        let away = controller.is_some_and(|c| atlas::builds_away(&world.rules, c.level));
+    for (room, h) in derived.colonies.iter().zip(&derived.homes) {
+        let away = atlas::builds_away(&world.rules, h.level);
         let share = if away { tuning.outpost_container_share } else { tuning.outpost_spawn_share };
-        let share = f64::from(engine::CREEP_LIFETIME) * spawns * share;
-        let dug = world.room(room).map_or(0, |r| r.sources.len() as i32);
-        let left = match spare.get(&room) {
-            Some(spare) if stocked(room) => {
-                spare - spend(room, f64::from(dug * engine::HELD_OUTPUT_PER_TICK))
+        let share = f64::from(engine::CREEP_LIFETIME * h.spawns) * share;
+        let dug = world.room(*room).map_or(0, |r| r.sources.len() as i32);
+        let left = match spare.get(room) {
+            Some(spare) if h.stocked => {
+                spare - spend(*room, f64::from(dug * engine::HELD_OUTPUT_PER_TICK))
             }
             _ => share,
         };
-        spawn_left.insert(room, left);
+        spawn_left.insert(*room, left);
     }
     let mut cpu_left = world.cpu_limit * tuning.outpost_cpu_share;
-    let capacity = |home: RoomName| world.room(home).map_or(0, |r| r.energy_capacity);
+    let capacity = |home: RoomName| derived.home(home).map_or(0, |h| h.capacity);
     let priced_in =
         |c: &Candidate, left: f64| price(c, capacity(c.home), left, &|net| spend(c.home, net));
     let value = |p: &Price| (p.net - p.unbuilt) / p.spawn.max(1.0);
@@ -225,7 +220,7 @@ pub fn chosen(
 }
 
 pub fn survey(
-    (world, atlas): (&World, &mut Atlas),
+    (world, atlas): (&World, &Atlas),
     derived: &Derived,
     (declarations, plans, claimed): (&Declarations, &[ColonyPlan], Option<RoomName>),
     intel: &Intel,
@@ -243,9 +238,9 @@ pub fn survey(
             continue;
         };
         // `ARCHITECTURE.md` §7.2.
-        let banks = plans.iter().any(|p| p.room == *home && h.banks(p));
-        let level = world.room(*home).and_then(|r| r.controller.as_ref()).map_or(0, |c| c.level);
-        let paved = atlas::builds_away(&world.rules, level);
+        let plan = plans.iter().find(|p| p.room == *home);
+        let banks = plan.is_some_and(|p| h.banks(p));
+        let paved = atlas::builds_away(&world.rules, plan.map_or(0, |p| p.target));
         let mean_of = |hops: i32, outpost: &Outpost, along: &dyn Fn(&Pos) -> Option<i32>| {
             let ranges: Vec<i32> = (outpost.sources.iter()).filter_map(|s| along(&s.pos)).collect();
             let mean = ranges.iter().sum::<i32>() / (ranges.len() as i32).max(1);
@@ -325,6 +320,7 @@ pub fn survey(
     // Charged to the colony Economy hauls it home to; one no colony walks to
     // is no outpost unless the operator declared it.
     let planned = |room| atlas::plan_of(declarations, plans, room);
+    let capacity = |home| derived.home(home).map_or(0, |h| h.capacity);
     (by_room.into_values())
         .filter_map(|homes| {
             let at = homes[0].outpost.controller.pos;
@@ -333,11 +329,42 @@ pub fn survey(
             let c = (homes.into_iter()).min_by_key(|c| (Some(c.home) != server, c.walk))?;
             let kept = Some(c.home) == server || c.declared;
             if let Some(v) = verdicts.as_mut().filter(|_| !kept) {
-                v.push((c.outpost.room, c.home, "unserved", net(world, &c), 0.0, 0.0));
+                let net = price(&c, capacity(c.home), f64::INFINITY, &|_| 0.0).net;
+                v.push((c.outpost.room, c.home, "unserved", net, 0.0, 0.0));
             }
             kept.then_some(c)
         })
         .collect()
+}
+
+/// What the outposts a colony in `home` would work net a tick once its terminal stands (`expand`).
+pub fn near(
+    (world, atlas): (&World, &Atlas),
+    (derived, intel): (&Derived, &Intel),
+    (declarations, plans): (&Declarations, &[ColonyPlan]),
+    (worked, rivals): (&[Served], &[(RoomName, i32)]),
+    (home, spawn): (RoomName, Pos),
+) -> f64 {
+    let Some(first) = plans.first() else { return 0.0 };
+    let (rules, target) = (&world.rules, world.rules.level_of(StructureType::Terminal, 0));
+    let reached =
+        |r: &&RoomName| rivals.iter().any(|(t, _)| tiles::rooms_apart(*t, **r) <= REACH_HOPS);
+    let mut avoid = declarations.avoid.clone();
+    avoid.extend(worked.iter().filter(|(_, s)| *s != Some(home)).map(|(r, _)| *r));
+    avoid.extend(intel.keys().filter(reached));
+    let free = Declarations { outposts: Vec::new(), avoid, ..declarations.clone() };
+    let (capacity, spawns) =
+        (rules.energy_capacity(target), rules.allowed(StructureType::Spawn, target));
+    let one = derived.alone(
+        atlas,
+        (home, Home { spawn, stocked: true, young: false, capacity, spawns, level: target }),
+    );
+    let plan = ColonyPlan { room: home, stage: Stage::Exploit, target, ..first.clone() };
+    let mut candidates = survey((world, atlas), &one, (&free, &[plan], None), intel, None);
+    candidates.iter_mut().for_each(|c| c.stands = true);
+    let (mut verdicts, none) = (Vec::new(), (&BTreeSet::new(), &BTreeMap::new()));
+    self::chosen((world, &one), candidates, none, (&free.tuning, &[]), &mut verdicts);
+    verdicts.iter().filter(|v| v.2 == "worked").map(|v| v.3).sum()
 }
 
 #[cfg(test)]
@@ -398,8 +425,9 @@ mod tests {
 
     fn worked_by(world: &World, candidates: Vec<Candidate>, spare: f64) -> Vec<String> {
         let spare = BTreeMap::from([(home_room(), spare)]);
+        let derived = fabot_atlas::derive(world, &mut Atlas::of_world(world));
         let chosen = chosen(
-            world,
+            (world, &derived),
             candidates,
             (&BTreeSet::new(), &spare),
             (&Tuning::default(), &[]),

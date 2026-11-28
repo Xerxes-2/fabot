@@ -245,7 +245,8 @@ pub fn plan<'t>(
         (declarations.clone()).planned((plans.clone(), Vec::new(), claiming.clone(), Vec::new()));
     let (spare, stocks) = fabot_economy::spare((world, atlas), (derived, &homes), intel, economy);
     let ranked = (&declarations.tuning, engagements);
-    let chosen = outposts::chosen(world, candidates, (&busy, &spare), ranked, &mut verdicts);
+    let chosen =
+        outposts::chosen((world, derived), candidates, (&busy, &spare), ranked, &mut verdicts);
     let fought: BTreeSet<RoomName> = engagements.iter().map(|e| e.room).collect();
     let around = expand::Around {
         rivals: &rivals,

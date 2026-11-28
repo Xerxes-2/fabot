@@ -1073,7 +1073,7 @@ fn a_controller_is_sponsored_and_served_only_where_a_body_walks_to_it_within_the
             let seats = tiles::within(1, tiles::of_pos(&c.pos)).into_iter();
             let walks = seats.map(|t| walked[r][t]).min().expect("seats") <= REACH_HOPS;
             let sponsored = sponsor(&atlas, &derived, &|_| false, &c.pos).is_some();
-            let served = server(&mut atlas, &derived, &planned, (&c.pos, false)).is_some();
+            let served = server(&atlas, &derived, &planned, (&c.pos, false)).is_some();
             assert_eq!((sponsored, served), (walks, walks), "{} from {}", room.name, home.name);
             checked += usize::from(walks);
         }

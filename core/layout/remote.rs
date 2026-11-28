@@ -92,7 +92,7 @@ fn place(
 /// The colony Economy hauls to (`atlas::server`), the haul's end there, and
 /// whether a storage banks its income.
 fn sink_for<'p>(
-    atlas: &mut Atlas,
+    atlas: &Atlas,
     (world, derived): (&World, &atlas::Derived),
     planned: &dyn Fn(RoomName) -> Option<&'p ColonyPlan>,
     room: &Room,

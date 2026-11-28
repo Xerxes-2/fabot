@@ -14,7 +14,7 @@ use fabot_base::{
 use fabot_layout::{ground, plan};
 use screeps::LocalRoomTerrain;
 
-use crate::season;
+use crate::{outposts, season};
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Expansion {
@@ -57,16 +57,16 @@ const SPONSOR_LEVEL: i32 = 4;
 const CLAIM_DEADLINE: i32 = 5 * engine::CREEP_LIFETIME;
 /// About twice the claim to storage measured two crossings off (21k ticks).
 const RAISE_DEADLINE: i32 = 40_000;
-/// At default weights a fresh failure near a room outweighs the most a room scores (its
-/// dig and four neighbours'), fading over this (Hivemind's); a held room's sunk energy
-/// pays back over it.
+/// At default weights a fresh failure near a room outweighs most a room scores, fading over
+/// this (Hivemind's); a held room's sunk energy pays back over it.
 const FORGET: i32 = 100_000;
 const SHOWN: usize = 5;
 
 /// What a room is worth holding, in energy a tick.
 pub struct Facts {
     pub sources: usize,
-    pub free_near: usize,
+    /// `outposts::near`.
+    pub near: f64,
     pub crossings: i32,
     pub worth: f64,
     /// Failures in or beside it, each fading as it ages.
@@ -86,7 +86,7 @@ const TERMS: [&str; 7] = ["source", "near", "crossing", "worth", "failure", "min
 
 fn terms(f: &Facts, t: &Tuning) -> [f64; 7] {
     let held = f64::from(engine::HELD_OUTPUT_PER_TICK);
-    let (dig, near) = (held * t.expand_source, held * t.expand_near_source * f.free_near as f64);
+    let (dig, near) = (held * t.expand_source, t.expand_near_source * f.near);
     let (crossings, failed) = (-t.expand_crossing * f64::from(f.crossings), -t.expand_failure);
     let (worth, mineral) = (t.expand_worth * f.worth, t.expand_mineral * f.mineral[0]);
     [dig * f.sources as f64, near, crossings, worth, failed * held * f.failed, mineral, f.sunk]
@@ -215,22 +215,15 @@ pub fn claimable(
 }
 
 pub fn facts(
-    world: &World,
-    (ours, worked): (Ours, &dyn Fn(RoomName) -> bool),
+    ours: Ours,
     intel: &Intel,
     (name, row): (RoomName, &Row),
-    (crossings, failed): (i32, f64),
+    (crossings, failed, near): (i32, f64, f64),
     (ores, t): (&Ores, &Tuning),
 ) -> Facts {
-    let beside = [(-1, 0), (1, 0), (0, -1), (0, 1)].into_iter();
-    let free_near = (beside.filter_map(|(dx, dy)| name.offset(dx, dy)))
-        .filter(|next| apart(ours.0, *next) && !worked(*next))
-        .filter_map(|next| intel.get(&next).filter(|r| r.controller.is_some() && free(world, r)))
-        .map(|r| r.sources.as_ref().map_or(0, Vec::len))
-        .sum();
     Facts {
         sources: row.sources.as_ref().map_or(0, Vec::len),
-        free_near,
+        near,
         crossings,
         worth: season::worth(name),
         failed,
@@ -329,7 +322,7 @@ pub fn step<'t>(
     terrain: &dyn Fn(RoomName) -> Option<&'t LocalRoomTerrain>,
     (expansion, decisions): (&mut Expansions, &mut Vec<Decision>),
 ) {
-    let Around { rivals, outposts, busy, fought, .. } = *around;
+    let Around { rivals, busy, fought, .. } = *around;
     let raising = raising(derived, declarations, None).next().is_some();
     let tuning = &declarations.tuning;
     (expansion.failed).retain(|f| world.time - f.since < FORGET);
@@ -398,14 +391,22 @@ pub fn step<'t>(
             .sum()
     };
     let sponsors = sponsors(world, plans, around, tuning.sponsor_margin);
-    let worked =
-        |room: RoomName| (declarations.outposts.iter().chain(outposts)).any(|o| o.room == room);
+    let planned = |room| atlas::plan_of(declarations, plans, room);
+    let served = |o: &Outpost| atlas::server(atlas, derived, &planned, (&o.controller.pos, false));
+    let worked: Vec<outposts::Served> = (declarations.outposts.iter())
+        .chain(around.outposts)
+        .map(|o| (o.room, served(o).map(|i| derived.colonies[i])))
+        .collect();
+    let near = |room, at| {
+        let ours = (derived, intel);
+        outposts::near((world, atlas), ours, (declarations, plans), (&worked, rivals), (room, at))
+    };
     let ores = Ores::of(world, derived);
     let mut scored: Vec<(f64, Outpost, Facts)> = Vec::new();
     for (home, tree) in derived.trees.iter().filter(|(h, _)| sponsors.contains(h)) {
         let reach = -REACH_HOPS..=REACH_HOPS;
-        let around = reach.clone().flat_map(|x| reach.clone().map(move |y| (x, y)));
-        for name in around.filter_map(|(dx, dy)| home.offset(dx, dy)) {
+        let boxed = reach.clone().flat_map(|x| reach.clone().map(move |y| (x, y)));
+        for name in boxed.filter_map(|(dx, dy)| home.offset(dx, dy)) {
             let (Some(crossings), Some(row)) = (tree.crossings(name, *home), intel.get(&name))
             else {
                 continue;
@@ -418,9 +419,8 @@ pub fn step<'t>(
             {
                 continue;
             }
-            let ours = ((&derived.owned, rivals), &worked as &dyn Fn(RoomName) -> bool);
-            let facts =
-                facts(world, ours, intel, (name, row), (crossings, failed(name)), (&ores, tuning));
+            let at = (crossings, failed(name), near(name, controller.pos));
+            let facts = facts((&derived.owned, rivals), intel, (name, row), at, (&ores, tuning));
             let outpost = Outpost {
                 reserved: true,
                 room: name,
@@ -452,11 +452,9 @@ pub fn step<'t>(
     }
     let holding = |room: &Room| {
         let rock = room.minerals.first().and_then(|m| Some((m.resource?, m.density)));
-        let worked = |o: &&Outpost| tiles::rooms_apart(o.room, room.name) == 1;
-        let near = (declarations.outposts.iter().chain(outposts)).filter(worked);
         let facts = Facts {
             sources: room.sources.len(),
-            free_near: near.map(|o| o.sources.len()).sum(),
+            near: room.controller.as_ref().map_or(0.0, |c| near(room.name, c.pos)),
             crossings: 0,
             worth: season::worth(room.name),
             failed: 0.0,
@@ -562,7 +560,7 @@ mod tests {
         }
         let have = Facts {
             sources: 2,
-            free_near: 3,
+            near: 15.0,
             crossings: 2,
             worth: 0.0,
             failed: 0.0,
@@ -673,7 +671,7 @@ mod tests {
     fn season_worth_outbids_dig() {
         let near = Facts {
             sources: 2,
-            free_near: 4,
+            near: 20.0,
             crossings: 2,
             worth: 0.0,
             failed: 0.0,
@@ -681,7 +679,7 @@ mod tests {
             mineral: [0.0; 3],
             sunk: 0.0,
         };
-        let scoring = Facts { free_near: 0, crossings: 3, worth: 25.0, ..near };
+        let scoring = Facts { near: 0.0, crossings: 3, worth: 25.0, ..near };
         let t = Tuning::default();
         assert!(score(&near, &t) > score(&Facts { worth: 0.0, ..scoring }, &t));
         assert!(score(&scoring, &t) > score(&near, &t));
@@ -694,7 +692,7 @@ mod tests {
         let mineral = super::mineral_worth(rock, (1, true), &[2, 1, 3, 4, 3, 1, 2], &t);
         let f = Facts {
             sources: 2,
-            free_near: 3,
+            near: 15.0,
             crossings: 4,
             worth: 0.0,
             failed: 0.5,

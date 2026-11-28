@@ -953,7 +953,7 @@ fn errand(derived: &Derived, ci: usize, job: Job, seat: Pos, key: &str) -> Optio
     Some(Slot::new(ci, false, job, seat, key, 0, body))
 }
 
-fn scouter(atlas: &mut Atlas, derived: &Derived, at: &Pos) -> Option<usize> {
+fn scouter(atlas: &Atlas, derived: &Derived, at: &Pos) -> Option<usize> {
     let homes: Vec<Pos> = derived.colonies.iter().map(|c| c.spawns[0].pos).collect();
     let block = engine::body_cost(bodies::block_of(Pattern::Scout));
     let can =

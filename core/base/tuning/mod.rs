@@ -34,7 +34,7 @@ tuning! {
     expand_threat_rooms: i32 = 2, 0..=10;
     prune_level: i32 = 5, 0..=8;
     expand_source: f64 = 1.0, 0.0..=10.0;
-    expand_near_source: f64 = 0.5, 0.0..=10.0;
+    expand_near_source: f64 = 1.0, 0.0..=10.0;
     expand_crossing: f64 = 1.0, 0.0..=50.0;
     expand_worth: f64 = 1.0, 0.0..=10.0;
     expand_failure: f64 = 6.0, 0.0..=100.0;

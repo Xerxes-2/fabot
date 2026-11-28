@@ -91,11 +91,6 @@ fn rank(map: &Map, maps: &Maps, room: &str) -> Option<(f64, Vec<String>)> {
     let row = Row { owner: None, level: 0, ..intel.get(&name)?.clone() };
     let none = BTreeSet::new();
     let rivals = fabot_strategy::rivals(&world, &declarations, &intel);
-    let worked: &dyn Fn(RoomName) -> bool = &|_| false;
-    let ours = ((&none, rivals.as_slice()), worked);
-    let ores = expand::Ores::of(&world, &derived);
-    let tuned = (&ores, &declarations.tuning);
-    let facts = expand::facts(&world, ours, &intel, (name, &row), (0, 0.0), tuned);
     let outpost = Outpost {
         reserved: true,
         room: name,
@@ -120,14 +115,24 @@ fn rank(map: &Map, maps: &Maps, room: &str) -> Option<(f64, Vec<String>)> {
         pile: plan.pile(),
         muster: None,
     };
-    let survey = (&declarations, &[colony][..], None);
-    let candidates = outposts::survey((&world, &mut atlas), &derived, survey, &intel, None);
-    let nets: BTreeMap<RoomName, f64> =
-        (candidates.iter()).map(|c| (c.outpost.room, outposts::net(&world, c))).collect();
-    let spare = (&none, &BTreeMap::new());
-    let chosen =
-        outposts::chosen(&world, candidates, spare, (&declarations.tuning, &[]), &mut vec![]);
-    let net: f64 = chosen.iter().map(|o| nets[&o.room]).sum();
+    let plans = [colony];
+    let ores = expand::Ores::of(&world, &derived);
+    let (at, planned) = ((&world, &atlas), (&declarations, &plans[..]));
+    let home = (name, row.controller.as_ref()?.pos);
+    let near = outposts::near(at, (&derived, &intel), planned, (&[], &rivals), home);
+    let facts = expand::facts(
+        (&none, &rivals),
+        &intel,
+        (name, &row),
+        (0, 0.0, near),
+        (&ores, &declarations.tuning),
+    );
+    let survey = (&declarations, &plans[..], None);
+    let candidates = outposts::survey((&world, &atlas), &derived, survey, &intel, None);
+    let (spare, mut verdicts) = ((&none, &BTreeMap::new()), Vec::new());
+    let tuned = (&declarations.tuning, &[][..]);
+    let chosen = outposts::chosen((&world, &derived), candidates, spare, tuned, &mut verdicts);
+    let net: f64 = verdicts.iter().filter(|v| v.2 == "worked").map(|v| v.3).sum();
     // The claim rule's own price of a home source.
     let home = f64::from(engine::HELD_OUTPUT_PER_TICK)
         * declarations.tuning.expand_source
@@ -156,7 +161,7 @@ fn rank(map: &Map, maps: &Maps, room: &str) -> Option<(f64, Vec<String>)> {
         claim.to_string(),
         format!("{:.1}", expand::score(&facts, &declarations.tuning)),
         facts.sources.to_string(),
-        facts.free_near.to_string(),
+        format!("{:.1}", facts.near),
         row.mineral.map_or("-".to_string(), |(m, ..)| m.to_string()),
         format!("{:.1}", facts.mineral[0]),
         format!("{:.1}", facts.worth),

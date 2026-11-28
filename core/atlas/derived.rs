@@ -39,7 +39,7 @@ pub fn target_at(pos: &Pos, range: i32) -> Target {
 }
 
 pub fn nearest<'t>(
-    atlas: &mut Atlas,
+    atlas: &Atlas,
     trees: &dyn Fn(RoomName) -> Option<&'t Tree>,
     homes: &[Pos],
     can: impl Fn(usize) -> bool,
@@ -47,15 +47,14 @@ pub fn nearest<'t>(
 ) -> Option<usize> {
     let walker = Mover::one(grid::loaded_factor(&[Part::Move]));
 
-    let least =
-        |atlas: &mut Atlas, measure: &dyn Fn(&mut Atlas, &Pos) -> Option<i32>| -> Option<usize> {
-            (homes.iter().enumerate())
-                .filter(|(i, _)| can(*i))
-                .filter_map(|(i, home)| Some((measure(atlas, home)?, i)))
-                .filter(|(d, _)| *d < i32::MAX)
-                .min_by_key(|(d, _)| *d)
-                .map(|(_, i)| i)
-        };
+    let least = |atlas: &Atlas, measure: &dyn Fn(&Atlas, &Pos) -> Option<i32>| -> Option<usize> {
+        (homes.iter().enumerate())
+            .filter(|(i, _)| can(*i))
+            .filter_map(|(i, home)| Some((measure(atlas, home)?, i)))
+            .filter(|(d, _)| *d < i32::MAX)
+            .min_by_key(|(d, _)| *d)
+            .map(|(_, i)| i)
+    };
 
     least(atlas, &|atlas, home| {
         let t = target_at(home, 1);
@@ -100,7 +99,7 @@ pub fn sponsor(
 /// defence alike (§5): a claim its sponsor, an outpost the nearest on foot
 /// that banks the haul. `planned`: a colony's merged plan.
 pub fn server<'p>(
-    atlas: &mut Atlas,
+    atlas: &Atlas,
     derived: &Derived,
     planned: &dyn Fn(RoomName) -> Option<&'p ColonyPlan>,
     (at, claim): (&Pos, bool),
@@ -119,7 +118,7 @@ pub fn server<'p>(
 
 /// A seen room's server, anchored on its controller, else its first source.
 pub fn server_of<'p>(
-    atlas: &mut Atlas,
+    atlas: &Atlas,
     derived: &Derived,
     planned: &dyn Fn(RoomName) -> Option<&'p ColonyPlan>,
     (controller, source): (Option<&Controller>, Option<Pos>),
@@ -137,9 +136,11 @@ pub struct Home {
     /// Its sponsor carries it (§5): no storage yet, and not past the level allowing one.
     pub young: bool,
     pub capacity: i32,
+    pub spawns: i32,
+    pub level: i32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Derived {
     pub owned: BTreeSet<RoomName>,
     /// Every room GCL allows is owned.
@@ -184,6 +185,13 @@ impl Derived {
     pub fn danger(&self, room: RoomName, seated: bool) -> Option<&TileSet> {
         let sets = if seated { &self.exposed } else { &self.danger };
         (sets.iter()).find_map(|(r, d)| (*r == room).then_some(d))
+    }
+
+    /// `room` its one colony, at `home`, beside the rooms ours: what it would work alone.
+    pub fn alone(&self, atlas: &Atlas, (room, home): (RoomName, Home)) -> Derived {
+        let trees = vec![(room, atlas.tree(&BTreeSet::new(), REACH_HOPS, room))];
+        let (owned, colonies, homes) = (self.owned.clone(), vec![room], vec![home]);
+        Derived { owned, colonies, trees, homes, ..Derived::default() }
     }
 
     pub fn home(&self, room: RoomName) -> Option<&Home> {
@@ -243,6 +251,8 @@ pub fn derive(world: &World, atlas: &mut Atlas) -> Derived {
                 stocked,
                 young: !stocked && world.rules.allowed(StructureType::Storage, level - 1) == 0,
                 capacity: room.energy_capacity,
+                spawns: world.working_spawns().filter(|s| s.pos.room == *home).count() as i32,
+                level,
             })
         })
         .collect();
